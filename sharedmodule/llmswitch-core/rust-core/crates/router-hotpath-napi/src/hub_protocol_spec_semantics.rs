@@ -373,7 +373,38 @@ fn assert_no_namespace_tool_aggregate(value: &Value, path: &str) -> Result<(), S
     Ok(())
 }
 
-fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
+fn build_provider_outbound_function_tool(
+    protocol: &str,
+    name: &str,
+    description: Option<Value>,
+    parameters: Option<Value>,
+    strict: Option<Value>,
+) -> Value {
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(name.to_string()));
+    if let Some(description) = description {
+        function.insert("description".to_string(), description);
+    }
+    if let Some(parameters) = parameters {
+        function.insert("parameters".to_string(), parameters);
+    }
+    if let Some(strict) = strict {
+        function.insert("strict".to_string(), strict);
+    }
+
+    let mut out = Map::new();
+    out.insert("type".to_string(), Value::String("function".to_string()));
+    if protocol == "openai-responses" {
+        for (key, value) in function {
+            out.insert(key, value);
+        }
+    } else {
+        out.insert("function".to_string(), Value::Object(function));
+    }
+    Value::Object(out)
+}
+
+fn normalize_provider_outbound_tool(protocol: &str, tool: &Value) -> Vec<Value> {
     let Some(row) = tool.as_object() else {
         return vec![tool.clone()];
     };
@@ -389,22 +420,13 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         if matches!(name, Some("apply_patch")) {
-            let mut function = Map::new();
-            function.insert("name".to_string(), Value::String("apply_patch".to_string()));
-            if let Some(description) = row
+            let description = row
                 .get("description")
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-            {
-                function.insert(
-                    "description".to_string(),
-                    Value::String(description.to_string()),
-                );
-            }
-            function.insert(
-                "parameters".to_string(),
-                serde_json::json!({
+                .map(|value| Value::String(value.to_string()));
+            let parameters = serde_json::json!({
                     "type": "object",
                     "properties": {
                         "patch": {
@@ -414,14 +436,14 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
                     },
                     "required": ["patch"],
                     "additionalProperties": true
-                }),
-            );
-            function.insert("strict".to_string(), Value::Bool(false));
-
-            let mut out = Map::new();
-            out.insert("type".to_string(), Value::String("function".to_string()));
-            out.insert("function".to_string(), Value::Object(function));
-            return vec![Value::Object(out)];
+                });
+            return vec![build_provider_outbound_function_tool(
+                protocol,
+                "apply_patch",
+                description,
+                Some(parameters),
+                Some(Value::Bool(false)),
+            )];
         }
     }
     if tool_type.eq_ignore_ascii_case("function") {
@@ -440,39 +462,29 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
             return vec![tool.clone()];
         };
 
-        let mut function = Map::new();
-        function.insert("name".to_string(), Value::String(name.to_string()));
-        if let Some(description) = row
+        let description = row
             .get("description")
             .and_then(Value::as_str)
             .or_else(|| function_row.get("description").and_then(Value::as_str))
             .map(str::trim)
             .filter(|value| !value.is_empty())
-        {
-            function.insert(
-                "description".to_string(),
-                Value::String(description.to_string()),
-            );
-        }
-        if let Some(parameters) = row
+            .map(|value| Value::String(value.to_string()));
+        let parameters = row
             .get("parameters")
             .or_else(|| function_row.get("parameters"))
-            .cloned()
-        {
-            function.insert("parameters".to_string(), parameters);
-        }
-        if let Some(strict) = row
+            .cloned();
+        let strict = row
             .get("strict")
             .or_else(|| function_row.get("strict"))
-            .cloned()
-        {
-            function.insert("strict".to_string(), strict);
-        }
+            .cloned();
 
-        let mut out = Map::new();
-        out.insert("type".to_string(), Value::String("function".to_string()));
-        out.insert("function".to_string(), Value::Object(function));
-        return vec![Value::Object(out)];
+        return vec![build_provider_outbound_function_tool(
+            protocol,
+            name,
+            description,
+            parameters,
+            strict,
+        )];
     }
     if !tool_type.eq_ignore_ascii_case("namespace") {
         return vec![tool.clone()];
@@ -494,34 +506,26 @@ fn normalize_provider_outbound_tool(tool: &Value) -> Vec<Value> {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())?;
 
-            let mut function = Map::new();
-            function.insert("name".to_string(), Value::String(name.to_string()));
-            if let Some(description) = child_function
+            let description = child_function
                 .and_then(|function| function.get("description"))
                 .or_else(|| child_row.get("description"))
-                .cloned()
-            {
-                function.insert("description".to_string(), description);
-            }
-            if let Some(parameters) = child_function
+                .cloned();
+            let parameters = child_function
                 .and_then(|function| function.get("parameters"))
                 .or_else(|| child_row.get("parameters"))
-                .cloned()
-            {
-                function.insert("parameters".to_string(), parameters);
-            }
-            if let Some(strict) = child_function
+                .cloned();
+            let strict = child_function
                 .and_then(|function| function.get("strict"))
                 .or_else(|| child_row.get("strict"))
-                .cloned()
-            {
-                function.insert("strict".to_string(), strict);
-            }
+                .cloned();
 
-            let mut out = Map::new();
-            out.insert("type".to_string(), Value::String("function".to_string()));
-            out.insert("function".to_string(), Value::Object(function));
-            Some(Value::Object(out))
+            Some(build_provider_outbound_function_tool(
+                protocol,
+                name,
+                description,
+                parameters,
+                strict,
+            ))
         })
         .collect()
 }
@@ -535,7 +539,7 @@ fn normalize_provider_outbound_tools(protocol: &str, payload: &mut Map<String, V
     };
     let normalized = tools
         .iter()
-        .flat_map(normalize_provider_outbound_tool)
+        .flat_map(|tool| normalize_provider_outbound_tool(protocol, tool))
         .collect::<Vec<Value>>();
     *tools = normalized;
 }
@@ -972,22 +976,20 @@ mod tests {
         let tools = output["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["name"], serde_json::json!("spawn_agent"));
         assert_eq!(
-            tools[0]["function"]["name"],
-            serde_json::json!("spawn_agent")
-        );
-        assert_eq!(
-            tools[0]["function"]["description"],
+            tools[0]["description"],
             serde_json::json!("spawn")
         );
         assert_eq!(
-            tools[0]["function"]["parameters"],
+            tools[0]["parameters"],
             serde_json::json!({"type":"object"})
         );
+        assert!(tools[0].get("function").is_none());
     }
 
     #[test]
-    fn sanitize_provider_outbound_payload_flattens_chat_style_function_tools_for_responses() {
+    fn sanitize_provider_outbound_payload_keeps_responses_function_tools_flat() {
         let input = serde_json::json!({
             "protocol": "openai-responses",
             "payload": {
@@ -1012,19 +1014,17 @@ mod tests {
         let tools = output["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["name"], serde_json::json!("apply_patch"));
         assert_eq!(
-            tools[0]["function"]["name"],
-            serde_json::json!("apply_patch")
-        );
-        assert_eq!(
-            tools[0]["function"]["description"],
+            tools[0]["description"],
             serde_json::json!("Edit files through apply_patch")
         );
         assert_eq!(
-            tools[0]["function"]["parameters"],
+            tools[0]["parameters"],
             serde_json::json!({ "type": "object", "properties": { "patch": { "type": "string" } } })
         );
-        assert_eq!(tools[0]["function"]["strict"], serde_json::json!(false));
+        assert_eq!(tools[0]["strict"], serde_json::json!(false));
+        assert!(tools[0].get("function").is_none());
     }
 
     #[test]

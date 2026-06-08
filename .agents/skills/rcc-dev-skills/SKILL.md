@@ -2005,6 +2005,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ## 2026-06-06 调试精华（10000 loopback shadow / stopless metadata）
 
 - 10000 若 `LAN /health` 正常但 `127.0.0.1 /health` empty reply，优先查 loopback-only shadow listener；macOS 可同时存在 `127.0.0.1:PORT` 与 `*.PORT`，必须启动前 fail-fast，禁止按 IP 做端口特例或把它误判为 RouteCodex block IP。
+- 用户已明确要求运行中服务验证只走 `routecodex restart` / health / status；未经授权禁止用 `routecodex stop`、`routecodex start` 或冷启动替代 restart 验证。
 - stopless/session metadata owner 只解析并绑定 scope：header/body/user metadata 的 tmux/session/workdir 是请求事实，不能在 metadata builder 阶段因 tmux liveness 抹掉；tmux alive 检查属于后续注入/cleanup owner。
 
 ## 2026-06-07 servertool CLI / stopless closeout 精华

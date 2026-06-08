@@ -77,14 +77,18 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('throw error;');
   });
 
-  it('router-direct live path delegates provider errors to the unified ErrorErr05 execution plan', () => {
+  it('router-direct live path reports provider errors without standard executor retry bridge', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('router-direct.send.error');
-    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
-    expect(source).toContain('providerFailurePlan.retryExecutionPlan');
-    expect(source).toContain("reason: 'router-direct-provider-failure-standard-retry'");
-    expect(source).toContain('__routecodexProviderFailureAttemptOffset');
+    expect(source).toContain('reportRequestExecutorProviderError');
+    expect(source).toContain("source: 'router-direct'");
+    expect(source).toContain('router-direct.failed_no_relay');
+    expect(source).not.toContain('router-direct.retry.standard_pipeline');
+    expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).not.toContain('providerFailurePlan.retryExecutionPlan');
+    expect(source).not.toContain("reason: 'router-direct-provider-failure-standard-retry'");
+    expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
     expect(source).not.toContain('__routerDirectRecoverable');
   });

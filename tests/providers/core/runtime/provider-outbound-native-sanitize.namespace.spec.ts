@@ -18,12 +18,37 @@ describe('provider outbound native sanitize namespace guard', () => {
 
     expect(output.tools).toEqual([{
       type: 'function',
-      function: {
-        name: 'spawn_agent',
-        description: 'spawn',
-        parameters: { type: 'object' }
-      }
+      name: 'spawn_agent',
+      description: 'spawn',
+      parameters: { type: 'object' }
     }]);
+    expect(output.tools[0]).not.toHaveProperty('function');
+  });
+
+  test('keeps OpenAI Responses function tools in flat Responses wire shape', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        tools: [{
+          type: 'function',
+          name: 'exec_command',
+          description: 'Run a command',
+          parameters: { type: 'object', properties: { cmd: { type: 'string' } } },
+          strict: false
+        }]
+      }
+    });
+
+    expect(output.tools).toEqual([{
+      type: 'function',
+      name: 'exec_command',
+      description: 'Run a command',
+      parameters: { type: 'object', properties: { cmd: { type: 'string' } } },
+      strict: false
+    }]);
+    expect(output.tools[0]).not.toHaveProperty('function');
   });
 
   test('converts custom apply_patch into provider function tool for openai-chat transport', () => {
@@ -48,16 +73,12 @@ describe('provider outbound native sanitize namespace guard', () => {
         parameters: {
           type: 'object',
           properties: {
-            filePath: {
-              type: 'string',
-              description: 'Workspace-relative target path.'
-            },
             patch: {
               type: 'string',
-              description: 'Patch payload. Supports line-edit patch, unified diff, or fenced diff block.'
+              description: 'Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths.'
             }
           },
-          required: ['filePath', 'patch'],
+          required: ['patch'],
           additionalProperties: true
         },
         strict: false
