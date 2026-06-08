@@ -1,8 +1,12 @@
 use serde_json::Value;
 
 use super::super::features::RoutingFeatures;
+use super::super::forwarder::ForwarderRegistry;
 use super::super::provider_registry::ProviderRegistry;
-use super::config::{filter_pools_by_capability, filter_pools_by_visual_capability, RoutingPools};
+use super::config::{
+    filter_pools_by_capability_with_forwarders, filter_pools_by_visual_capability_with_forwarders,
+    RoutingPools,
+};
 
 pub(crate) fn parse_direct_provider_model(
     model_value: Option<&Value>,
@@ -50,6 +54,7 @@ pub(crate) fn should_fallback_direct_model_for_media(
     features: &RoutingFeatures,
     routing: &RoutingPools,
     provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
 ) -> bool {
     if !features.has_image_attachment && !features.has_video_attachment {
         return false;
@@ -78,21 +83,28 @@ pub(crate) fn should_fallback_direct_model_for_media(
         return false;
     }
     if features.has_image_attachment && !requires_video_capability {
-        return routing_has_visual_targets(routing, provider_registry);
+        return routing_has_visual_targets(routing, provider_registry, forwarder_registry);
     }
-    routing_has_capability_targets(routing, provider_registry, "multimodal")
+    routing_has_capability_targets(routing, provider_registry, forwarder_registry, "multimodal")
 }
 
 fn routing_has_visual_targets(
     routing: &RoutingPools,
     provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
 ) -> bool {
     for route in matching_route_keys(routing, "multimodal")
         .into_iter()
         .chain(matching_route_keys(routing, "vision"))
     {
         let pools = routing.get(&route);
-        if !filter_pools_by_visual_capability(&pools, provider_registry).is_empty() {
+        if !filter_pools_by_visual_capability_with_forwarders(
+            &pools,
+            provider_registry,
+            forwarder_registry,
+        )
+        .is_empty()
+        {
             return true;
         }
     }
@@ -102,11 +114,19 @@ fn routing_has_visual_targets(
 fn routing_has_capability_targets(
     routing: &RoutingPools,
     provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
     capability: &str,
 ) -> bool {
     for route in matching_route_keys(routing, capability) {
         let pools = routing.get(&route);
-        if !filter_pools_by_capability(&pools, provider_registry, capability).is_empty() {
+        if !filter_pools_by_capability_with_forwarders(
+            &pools,
+            provider_registry,
+            forwarder_registry,
+            capability,
+        )
+        .is_empty()
+        {
             return true;
         }
     }
@@ -126,6 +146,7 @@ fn matching_route_keys(routing: &RoutingPools, route: &str) -> Vec<String> {
 mod tests {
     use super::super::config::parse_routing;
     use super::*;
+    use crate::virtual_router_engine::forwarder::ForwarderRegistry;
     use serde_json::{json, Map, Value};
 
     fn registry_with_text_and_vision_models() -> ProviderRegistry {
@@ -178,7 +199,8 @@ mod tests {
             "text-model",
             &features,
             &routing,
-            &registry
+            &registry,
+            None
         ));
     }
 
@@ -203,7 +225,8 @@ mod tests {
             "vision-model",
             &features,
             &routing,
-            &registry
+            &registry,
+            None
         ));
     }
 
@@ -229,10 +252,58 @@ mod tests {
             "vision-model",
             &features,
             &routing,
-            &registry
+            &registry,
+            None
         ));
         assert!(!should_fallback_direct_model_for_media(
-            "media", "mm-model", &features, &routing, &registry
+            "media", "mm-model", &features, &routing, &registry, None
+        ));
+    }
+
+    #[test]
+    fn image_direct_model_falls_back_when_visual_target_is_forwarder() {
+        let registry = registry_with_text_and_vision_models();
+        let mut forwarders = ForwarderRegistry::new();
+        forwarders
+            .load(
+                json!({
+                    "fwd.media.vision": {
+                        "forwarderId": "fwd.media.vision",
+                        "protocol": "openai",
+                        "modelId": "vision-model",
+                        "resolutionMode": "model-first",
+                        "strategy": "priority",
+                        "targets": [
+                            { "providerKey": "media.key1.vision-model", "priority": 100, "disabled": false }
+                        ],
+                        "stickyKey": "none"
+                    }
+                })
+                .as_object()
+                .expect("forwarders"),
+                &registry.list_keys().into_iter().collect(),
+            )
+            .expect("load forwarder");
+        let routing = parse_routing(&Map::from_iter([(
+            "multimodal".to_string(),
+            Value::Array(vec![json!({
+                "id": "multimodal",
+                "priority": 100,
+                "targets": ["fwd.media.vision"]
+            })]),
+        )]));
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+
+        assert!(should_fallback_direct_model_for_media(
+            "text",
+            "text-model",
+            &features,
+            &routing,
+            &registry,
+            Some(&forwarders)
         ));
     }
 }

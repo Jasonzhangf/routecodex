@@ -480,6 +480,7 @@ impl VirtualRouterEngineCore {
                 &features,
                 &self.routing,
                 &self.provider_registry,
+                Some(&self.forwarder_registry),
             ) {
                 let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
                 let mut eligible: Vec<String> = Vec::new();

@@ -245,7 +245,7 @@ impl VirtualRouterEngineCore {
             if self.is_provider_available(env, key)
                 || self
                     .health_manager
-                    .consume_persisted_503_reprobe_if_available(key, now)
+                    .has_persisted_503_reprobe_available(key, now)
             {
                 available.push(key.clone());
             }
@@ -255,12 +255,18 @@ impl VirtualRouterEngineCore {
             if self.is_singleton_provider_soft_available_from_rust_quota(env, provider_key)
                 || self
                     .health_manager
-                    .consume_persisted_503_reprobe_if_available(provider_key, now)
+                    .has_persisted_503_reprobe_available(provider_key, now)
             {
                 available.push(provider_key.clone());
             }
         }
         available
+    }
+
+    fn consume_persisted_503_reprobe_for_selected_provider(&mut self, provider_key: &str) {
+        let _ = self
+            .health_manager
+            .consume_persisted_503_reprobe_if_available(provider_key, now_ms());
     }
 
     pub(crate) fn select_provider(
@@ -289,6 +295,7 @@ impl VirtualRouterEngineCore {
                     server_tool_required,
                 );
                 if let Some(forced_key) = available.into_iter().next() {
+                    self.consume_persisted_503_reprobe_for_selected_provider(&forced_key);
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
                         requested_route.to_string(),
@@ -351,6 +358,7 @@ impl VirtualRouterEngineCore {
                         |_| true,
                         Some("round-robin"),
                     ) {
+                        self.consume_persisted_503_reprobe_for_selected_provider(&preferred_key);
                         return Ok(SelectionResult::new(
                             preferred_key,
                             "prefer".to_string(),
@@ -437,12 +445,22 @@ impl VirtualRouterEngineCore {
             if multimodal_route_requested
                 && (route_name == "multimodal" || route_name == DEFAULT_ROUTE)
             {
-                let capability_filtered = filter_pools_by_capability_with_forwarders(
-                    &pools,
-                    &self.provider_registry,
-                    Some(&self.forwarder_registry),
-                    "multimodal",
-                );
+                let capability_filtered = if features.has_image_attachment
+                    && !features.has_remote_video_attachment
+                {
+                    filter_pools_by_visual_capability_with_forwarders(
+                        &pools,
+                        &self.provider_registry,
+                        Some(&self.forwarder_registry),
+                    )
+                } else {
+                    filter_pools_by_capability_with_forwarders(
+                        &pools,
+                        &self.provider_registry,
+                        Some(&self.forwarder_registry),
+                        "multimodal",
+                    )
+                };
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else if select_default_pool_for_multimodal && route_name == "multimodal" {
@@ -632,6 +650,7 @@ impl VirtualRouterEngineCore {
                 };
 
                 for key in dedupe_candidate_order(selected_candidates) {
+                    self.consume_persisted_503_reprobe_for_selected_provider(&key);
                     return Ok(SelectionResult::new(
                         key,
                         route_name.to_string(),
@@ -648,6 +667,7 @@ impl VirtualRouterEngineCore {
         }
 
         if let Some(selection) = default_floor_selection {
+            self.consume_persisted_503_reprobe_for_selected_provider(&selection.provider_key);
             return Ok(selection.with_unavailable_providers(
                 (!unavailable_route_pools.is_empty())
                     .then_some(Value::Array(unavailable_route_pools)),
@@ -725,9 +745,7 @@ impl VirtualRouterEngineCore {
             forwarder_sticky_session_id,
         );
         if let Ok(real) = &selected {
-            let _ = self
-                .health_manager
-                .consume_persisted_503_reprobe_if_available(real, now);
+            self.consume_persisted_503_reprobe_for_selected_provider(real);
         }
         match selected {
             Ok(real) => Some(real),
@@ -1406,6 +1424,83 @@ mod tests {
             .expect("image request should select media target");
 
         assert_eq!(selected.provider_key, "media.mm");
+        assert_eq!(selected.route_used, "multimodal");
+    }
+
+    #[test]
+    fn image_request_keeps_vision_only_target_in_multimodal_route() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "text.search".to_string(),
+            json!({
+                "providerKey": "text.search",
+                "providerType": "openai",
+                "modelId": "search-text",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "media.vision".to_string(),
+            json!({
+                "providerKey": "media.vision",
+                "providerType": "openai",
+                "modelId": "media-vision",
+                "enabled": true,
+                "modelCapabilities": {
+                    "media-vision": ["vision"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "search".to_string(),
+                Value::Array(vec![json!({
+                    "id": "search",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search"]
+                })]),
+            ),
+            (
+                "multimodal".to_string(),
+                Value::Array(vec![json!({
+                    "id": "multimodal",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["text.search", "media.vision"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "search".to_string(),
+            confidence: 1.0,
+            reasoning: "search:last-tool-search".to_string(),
+            candidates: vec!["search".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "search",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should select vision-only target from multimodal route");
+
+        assert_eq!(selected.provider_key, "media.vision");
         assert_eq!(selected.route_used, "multimodal");
     }
 
@@ -2741,6 +2836,12 @@ mod tests {
             assert_eq!(
                 selected.provider_key, provider_key,
                 "persisted cooldown provider should be allowed on startup first request"
+            );
+            assert!(
+                !core
+                    .health_manager
+                    .has_persisted_503_reprobe_available(provider_key, now_ms()),
+                "selected persisted cooldown provider must consume its one-shot reprobe"
             );
         });
 
