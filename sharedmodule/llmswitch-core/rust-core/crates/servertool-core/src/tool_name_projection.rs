@@ -116,13 +116,12 @@ pub fn project_exec_command_result_to_model_tool_result(
 
 /// Validate that an exec_command result is from a known servertool
 /// and not a fake_exec or old restoration marker.
-pub fn validate_exec_command_result_for_projection(
-    raw_output: &str,
-) -> Result<(), String> {
+pub fn validate_exec_command_result_for_projection(raw_output: &str) -> Result<(), String> {
     let value: Value = serde_json::from_str(raw_output)
         .map_err(|_| "exec_command_output_not_valid_json".to_string())?;
 
-    let tool_name = value.get("toolName")
+    let tool_name = value
+        .get("toolName")
         .and_then(|v| v.as_str())
         .ok_or("exec_command_output_missing_tool_name")?;
 
@@ -132,7 +131,10 @@ pub fn validate_exec_command_result_for_projection(
     }
 
     // Check for denied CLI markers in the output
-    if raw_output.contains("--ticket") || raw_output.contains("stcli_") || raw_output.contains("rcc_cli_") {
+    if raw_output.contains("--ticket")
+        || raw_output.contains("stcli_")
+        || raw_output.contains("rcc_cli_")
+    {
         return Err("exec_command_output_contains_denied_marker".to_string());
     }
 
@@ -186,7 +188,11 @@ mod tests {
         });
         let result = project_exec_command_result_to_model_tool_result(&cli_output.to_string());
         assert!(!result.projected);
-        assert!(result.error.as_ref().unwrap().contains("not_client_exec_cli_projection"));
+        assert!(result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("not_client_exec_cli_projection"));
     }
 
     #[test]

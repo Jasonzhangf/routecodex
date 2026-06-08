@@ -5,8 +5,8 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-compaction-false-positive');
 

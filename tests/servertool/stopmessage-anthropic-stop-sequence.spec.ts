@@ -5,9 +5,9 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { buildOpenAIChatFromAnthropicMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-anthropic-stop-sequence');
 

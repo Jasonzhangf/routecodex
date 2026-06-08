@@ -12,7 +12,7 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
 
 const {
   getRoutingInstructionState
-} = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/store.js');
+} = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
 
 describe('routing state store observability', () => {
   beforeEach(() => {

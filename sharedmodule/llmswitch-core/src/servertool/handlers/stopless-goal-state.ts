@@ -1,11 +1,11 @@
 import type {
   RoutingInstructionState,
   StoplessGoalStateSnapshot
-} from '../../router/virtual-router/routing-instructions.js';
+} from '../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../router/virtual-router/routing-state-store.js';
+} from '../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   applyStoplessGoalDirectiveWithNative,
   parseRccFenceDocumentWithNative,

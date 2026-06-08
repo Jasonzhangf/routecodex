@@ -42,6 +42,8 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
     const fwds = (input as unknown as { forwarders?: Record<string, unknown> }).forwarders;
     expect(fwds).toBeDefined();
     expect(Object.keys(fwds ?? {}).sort()).toEqual([
+      'fwd.gpt.gpt-5.4-mini',
+      'fwd.gpt.gpt-5.5',
       'fwd.minimax.MiniMax-M2.7',
       'fwd.minimax.MiniMax-M3',
     ]);
@@ -73,7 +75,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
     expect(all.filter((t) => t.startsWith('fwd.'))).toEqual([]);
   });
 
-  it('live config.toml 5555 group must NOT require forwarder (5555 禁用 forwarder)', async () => {
+  it('live config.toml 5555 group must use GPT forwarder for GPT routes', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
     const input = await buildVirtualRouterInputV2(
       cfg as Record<string, unknown>,
@@ -91,7 +93,11 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
         }
       }
     }
-    expect(all.filter((t) => t.startsWith('fwd.'))).toEqual([]);
+    expect(all.filter((t) => t === 'fwd.gpt.gpt-5.5')).toHaveLength(4);
+    expect(routeTargets(input.routing, 'coding')).toEqual(['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5']);
+    expect(routeTargets(input.routing, 'thinking')).toEqual(['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5']);
+    expect(routeTargets(input.routing, 'longcontext')).toEqual(['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5']);
+    expect(routeTargets(input.routing, 'default')).toEqual(['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5']);
   });
 
   it('drift guard: 10000 routes M3 and M2.7 pools without qwen leakage', async () => {
@@ -105,7 +111,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
       expect(routeTargets(input.routing, routeName)).toEqual(['fwd.minimax.MiniMax-M2.7']);
     }
     for (const routeName of ['coding', 'thinking', 'longcontext']) {
-      expect(routeTargets(input.routing, routeName)).toEqual(['minimax.MiniMax-M3', 'opencode-zen-free.minimax-m3-free']);
+      expect(routeTargets(input.routing, routeName)).toEqual(['minimax.MiniMax-M3', 'opencode-zen-free.minimax-m3-free', 'mimo.mimo-v2.5']);
     }
     expect(JSON.stringify(input.routing)).not.toMatch(/qwen/i);
   });

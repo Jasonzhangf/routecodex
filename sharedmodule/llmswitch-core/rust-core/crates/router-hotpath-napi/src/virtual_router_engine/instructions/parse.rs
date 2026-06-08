@@ -2,6 +2,7 @@ mod parse_instructions;
 mod parse_messages;
 mod parse_targets;
 
+pub(crate) use parse_instructions::parse_single_instruction;
 pub(super) use parse_targets::parse_target;
 
 pub(crate) use parse_messages::{

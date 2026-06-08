@@ -80,7 +80,7 @@ export type VirtualRouterRuntime = {
   unregisterProviderRuntimeIngress(): void;
 };
 
-class NativeVirtualRouterRuntime implements VirtualRouterRuntime {
+export class VirtualRouterEngine implements VirtualRouterRuntime {
   private readonly nativeProxy: NativeVirtualRouterEngineProxy;
 
   constructor(deps?: VirtualRouterRuntimeDeps) {
@@ -91,7 +91,7 @@ class NativeVirtualRouterRuntime implements VirtualRouterRuntime {
   }
 
   initialize(config: VirtualRouterConfig): void {
-    this.nativeProxy.initialize(JSON.stringify(config));
+    assertNativeVoidResult(this.nativeProxy.initialize(JSON.stringify(config)));
   }
 
   updateDeps(deps: {
@@ -103,12 +103,12 @@ class NativeVirtualRouterRuntime implements VirtualRouterRuntime {
   }
 
   updateVirtualRouterConfig(config: VirtualRouterConfig): void {
-    this.nativeProxy.updateVirtualRouterConfig(JSON.stringify(config));
+    assertNativeVoidResult(this.nativeProxy.updateVirtualRouterConfig(JSON.stringify(config)));
   }
 
   route(
     request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
-    metadata: RouterMetadataInput | Record<string, unknown>
+    metadata: RouterMetadataInput | Record<string, unknown> = {}
   ): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics } {
     const routeHostEffects = createVirtualRouterRouteHostEffects({ request, metadata });
     const nativeMetadata = injectVirtualRouterRuntimeMetadata(metadata);
@@ -216,7 +216,7 @@ class NativeVirtualRouterRuntime implements VirtualRouterRuntime {
 }
 
 export function createVirtualRouterRuntime(deps?: VirtualRouterRuntimeDeps): VirtualRouterRuntime {
-  return new NativeVirtualRouterRuntime(deps);
+  return new VirtualRouterEngine(deps);
 }
 
 function readNativeFunction(name: string): (inputJson: string) => unknown {
@@ -278,6 +278,13 @@ function normalizeNativeVirtualRouterError(error: unknown): Error {
     );
   }
   return error instanceof Error ? error : new Error(message || 'Virtual router error');
+}
+
+function assertNativeVoidResult(result: unknown): void {
+  if (result === undefined || result === null) {
+    return;
+  }
+  throw normalizeNativeVirtualRouterError(result);
 }
 
 function isVirtualRouterErrorCode(value: string): value is VirtualRouterErrorCode {

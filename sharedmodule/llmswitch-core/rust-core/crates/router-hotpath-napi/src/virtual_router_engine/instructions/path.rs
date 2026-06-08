@@ -2,7 +2,7 @@ use regex::Regex;
 use std::cell::RefCell;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use super::types::{DEFAULT_PRECOMMAND_SCRIPT, DEFAULT_PRECOMMAND_SCRIPT_CONTENT};
 
@@ -84,6 +84,22 @@ fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
 
 fn resolve_precommand_base_dir() -> Result<PathBuf, String> {
     resolve_rcc_user_dir().map(|base| base.join("precommand"))
+}
+
+fn normalize_path_for_containment(raw: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in raw.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, String> {
@@ -190,6 +206,23 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
         return Err(format!("precommand: not a file: {}", abs.display()));
     }
     Ok(abs.to_string_lossy().to_string())
+}
+
+pub(crate) fn is_precommand_script_path_allowed(raw_path: &str) -> Result<bool, String> {
+    let script_path = raw_path.trim();
+    if script_path.is_empty() {
+        return Ok(false);
+    }
+    let base = normalize_path_for_containment(&resolve_precommand_base_dir()?);
+    let abs = normalize_path_for_containment(&PathBuf::from(script_path));
+    if abs != base && !abs.starts_with(&base) {
+        return Ok(false);
+    }
+    let stat = match fs::metadata(&abs) {
+        Ok(meta) => meta,
+        Err(_) => return Ok(false),
+    };
+    Ok(stat.is_file())
 }
 
 pub(super) fn is_stop_message_file_reference(raw: &str) -> bool {
@@ -344,6 +377,34 @@ mod isolation_tests {
 
         let _ = fs::remove_dir_all(dir_a);
         let _ = fs::remove_dir_all(dir_b);
+    }
+
+    #[test]
+    fn precommand_script_allowed_accepts_only_files_under_precommand_dir() {
+        let dir = unique_temp();
+        let precommand_dir = dir.join("precommand");
+        let script_path = precommand_dir.join("allowed.sh");
+        let outside_path = dir.join("outside.sh");
+        fs::create_dir_all(&precommand_dir).unwrap();
+        fs::write(&script_path, "#!/bin/sh\necho allowed").unwrap();
+        fs::write(&outside_path, "#!/bin/sh\necho outside").unwrap();
+
+        with_rcc_user_dir_override(dir.to_str(), || {
+            assert_eq!(
+                is_precommand_script_path_allowed(script_path.to_str().unwrap()).unwrap(),
+                true
+            );
+            assert_eq!(
+                is_precommand_script_path_allowed(outside_path.to_str().unwrap()).unwrap(),
+                false
+            );
+            assert_eq!(
+                is_precommand_script_path_allowed(precommand_dir.to_str().unwrap()).unwrap(),
+                false
+            );
+        });
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     // T2c: nested override clears correctly (RAII guard restores previous)

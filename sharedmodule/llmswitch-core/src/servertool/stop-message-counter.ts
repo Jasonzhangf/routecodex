@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../router/virtual-router/routing-state-store.js';
+import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   resolveStopMessageDefaultEnabled,
   resolveStopMessageDefaultMaxRepeats,

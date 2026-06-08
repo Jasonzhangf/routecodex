@@ -16,8 +16,8 @@ import { runServertoolResponseStageOrchestrationShell } from "../../sharedmodule
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync,
-} from "../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js";
-import type { RoutingInstructionState } from "../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js";
+} from "../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js";
+import type { RoutingInstructionState } from "../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js";
 import { resetStopMessageRuntimeConfigCacheForTests } from "../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js";
 
 const SESSION_DIR = path.join(

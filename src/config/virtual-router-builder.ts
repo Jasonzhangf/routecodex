@@ -295,7 +295,7 @@ function normalizeForwardersForNative(source: Record<string, UnknownRecord>): Re
       entry.targets = entry.targets
         .filter((target): target is UnknownRecord => isRecord(target))
         .map((target) => {
-          const providerKey = pickString(target.providerKey) ?? pickString(target.providerId);
+          const providerKey = pickString(target.providerKey);
           return {
             ...target,
             ...(providerKey ? { providerKey } : {})

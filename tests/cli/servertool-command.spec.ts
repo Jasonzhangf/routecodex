@@ -1,7 +1,25 @@
 import { Command } from 'commander';
+import path from 'node:path';
 import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
 
 describe('servertool CLI command', () => {
+  const originalServertoolBin = process.env.ROUTECODEX_SERVERTOOL_BIN;
+
+  beforeEach(() => {
+    process.env.ROUTECODEX_SERVERTOOL_BIN = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/target/debug/routecodex-servertool'
+    );
+  });
+
+  afterEach(() => {
+    if (originalServertoolBin === undefined) {
+      delete process.env.ROUTECODEX_SERVERTOOL_BIN;
+    } else {
+      process.env.ROUTECODEX_SERVERTOOL_BIN = originalServertoolBin;
+    }
+  });
+
   it('runs stopless through the standalone Rust binary', async () => {
     const output: string[] = [];
     const errors: string[] = [];
@@ -61,6 +79,72 @@ describe('servertool CLI command', () => {
 
     expect(output).toEqual([]);
     expect(errors[0]).toContain('SERVERTOOL_UNSUPPORTED_TOOL: web_search');
+    expect(exits).toEqual([1]);
+  });
+
+  it('runs servertool_fixture through the standalone Rust binary', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'servertool_fixture',
+      '--input-json',
+      '{"value":1}'
+    ]);
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
+      ok: true,
+      kind: 'servertool_fixture',
+      tool: 'servertool_fixture',
+      toolName: 'servertool_fixture',
+      flowId: 'servertool_cli_projection',
+      input: { value: 1 }
+    });
+  });
+
+  it('fails fast when CLI input contains old restoration markers', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        exits.push(code);
+        throw new Error(`exit ${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync([
+        'node',
+        'routecodex',
+        'servertool',
+        'run',
+        'servertool_fixture',
+        '--input-json',
+        '{"value":"old_cli_result_123"}'
+      ])
+    ).rejects.toThrow('exit 1');
+
+    expect(output).toEqual([]);
+    expect(errors[0]).toContain('SERVERTOOL_DENIED_CLI_MARKER: old_cli_');
     expect(exits).toEqual([1]);
   });
 });

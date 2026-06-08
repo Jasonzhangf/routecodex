@@ -14,13 +14,14 @@ import './handlers/stop-message-auto.js';
 import './handlers/vision.js';
 import './handlers/fixture.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { loadRoutingInstructionStateSync } from '../router/virtual-router/routing-state-store.js';
+import { loadRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   detectEmptyAssistantPayloadContractSignalWithNative,
   planServertoolToolCallDispatchWithNative,
   runServertoolResponseStageWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
+  applyPreCommandHooksToToolCalls,
   buildServertoolDispatchPlanInput,
   resolveToolCallExecutionOutcome,
   runAutoHookExecutionQueue,
@@ -130,6 +131,14 @@ export async function runServerSideToolEngine(
       throw wrapped;
     }
   })();
+
+  applyPreCommandHooksToToolCalls({
+    options,
+    toolCalls,
+    runtimePreCommandState,
+    bases: [base, baseForExecution],
+    patchToolCallArgumentsById
+  });
 
   const dispatchPlan = planServertoolToolCallDispatchWithNative(
     buildServertoolDispatchPlanInput({

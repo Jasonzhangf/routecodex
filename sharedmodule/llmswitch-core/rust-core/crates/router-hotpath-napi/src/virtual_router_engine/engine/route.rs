@@ -29,6 +29,7 @@ use crate::virtual_router_engine::routing::{
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
+use crate::virtual_router_engine::time_utils::now_ms;
 
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
@@ -180,6 +181,33 @@ fn has_only_routing_state_mutation_instructions(instructions: &[RoutingInstructi
             .all(|inst| matches!(inst.kind.as_str(), "allow" | "disable" | "enable" | "clear"))
 }
 
+fn stop_message_event_ts(state: &RoutingInstructionState) -> Option<i64> {
+    let stop = &state.stop_message_state;
+    match (stop.stop_message_updated_at, stop.stop_message_last_used_at) {
+        (Some(updated), Some(last_used)) => Some(updated.max(last_used)),
+        (Some(updated), None) => Some(updated),
+        (None, Some(last_used)) => Some(last_used),
+        (None, None) => None,
+    }
+}
+
+fn has_stop_message_text(state: &RoutingInstructionState) -> bool {
+    state
+        .stop_message_state
+        .stop_message_text
+        .as_deref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn is_cleared_stop_message_tombstone(state: &RoutingInstructionState) -> bool {
+    let stop = &state.stop_message_state;
+    stop.stop_message_updated_at.is_some()
+        && stop.stop_message_text.is_none()
+        && stop.stop_message_max_repeats.is_none()
+        && stop.stop_message_used.is_none()
+}
+
 impl VirtualRouterEngineCore {
     fn should_reload_persisted_routing_state(
         existing: &RoutingInstructionState,
@@ -189,27 +217,53 @@ impl VirtualRouterEngineCore {
         if is_state_empty(existing) {
             return true;
         }
-        if !(key.starts_with("session:") || key.starts_with("conversation:")) {
+        if !(key.starts_with("session:")
+            || key.starts_with("conversation:")
+            || key.starts_with("tmux:"))
+        {
             return false;
         }
-        match (&existing.stopless_goal_state, &loaded.stopless_goal_state) {
+        let goal_state_is_newer = match (&existing.stopless_goal_state, &loaded.stopless_goal_state)
+        {
             (None, Some(_)) => true,
             (Some(existing_goal), Some(loaded_goal)) => {
                 loaded_goal.updated_at > existing_goal.updated_at
             }
             _ => false,
-        }
+        };
+        let stop_message_state_is_newer = {
+            let existing_ts = stop_message_event_ts(existing);
+            let loaded_ts = stop_message_event_ts(loaded);
+            match (existing_ts, loaded_ts) {
+                (_, Some(loaded_at)) if existing_ts.map(|v| loaded_at > v).unwrap_or(true) => true,
+                (Some(existing_at), Some(loaded_at))
+                    if loaded_at == existing_at
+                        && is_cleared_stop_message_tombstone(loaded)
+                        && has_stop_message_text(existing) =>
+                {
+                    true
+                }
+                _ => false,
+            }
+        };
+        goal_state_is_newer || stop_message_state_is_newer
     }
 
     fn load_routing_state_for_scope(&mut self, key: &str) -> RoutingInstructionState {
         if let Some(existing) = self.routing_instruction_state.get(key) {
-            if key.starts_with("session:") || key.starts_with("conversation:") {
-                if let Some(loaded) = load_routing_instruction_state(key) {
-                    if Self::should_reload_persisted_routing_state(existing, &loaded, key) {
-                        self.routing_instruction_state
-                            .insert(key.to_string(), loaded.clone());
-                        return loaded;
+            if key.starts_with("session:")
+                || key.starts_with("conversation:")
+                || key.starts_with("tmux:")
+            {
+                match load_routing_instruction_state(key) {
+                    Some(loaded) => {
+                        if Self::should_reload_persisted_routing_state(existing, &loaded, key) {
+                            self.routing_instruction_state
+                                .insert(key.to_string(), loaded.clone());
+                            return loaded;
+                        }
                     }
+                    None => {}
                 }
             }
             if is_state_empty(existing) {
@@ -368,9 +422,11 @@ impl VirtualRouterEngineCore {
         } else {
             persisted_routing_state.clone()
         };
-        self.routing_instruction_state
-            .insert(routing_state_key.clone(), persisted_state.clone());
-        persist_routing_instruction_state(&routing_state_key, Some(&persisted_state));
+        if !core_instructions.is_empty() || !is_state_empty(&persisted_state) {
+            self.routing_instruction_state
+                .insert(routing_state_key.clone(), persisted_state.clone());
+            persist_routing_instruction_state(&routing_state_key, Some(&persisted_state));
+        }
         let routing_state_for_selection = if stop_message_scope.is_some() {
             strip_client_inject_fields(&selection_routing_state)
         } else {
@@ -381,9 +437,15 @@ impl VirtualRouterEngineCore {
             if !stop_instructions.is_empty() {
                 let session_state = self.load_routing_state_for_scope(scope);
                 let mut next_state = session_state;
+                let has_global_clear = stop_instructions.iter().any(|inst| inst.kind == "clear");
                 apply_routing_instructions(&stop_instructions, &mut next_state)?;
+                if has_global_clear {
+                    let timestamp = now_ms();
+                    next_state.stop_message_state.stop_message_updated_at = Some(timestamp);
+                    next_state.stop_message_state.stop_message_last_used_at = Some(timestamp);
+                }
                 self.routing_instruction_state
-                    .insert(scope.clone(), next_state);
+                    .insert(scope.clone(), next_state.clone());
                 if let Some(state) = self.routing_instruction_state.get(scope) {
                     persist_routing_instruction_state(scope, Some(state));
                 }

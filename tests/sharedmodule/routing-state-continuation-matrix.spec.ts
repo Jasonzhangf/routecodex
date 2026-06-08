@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
+import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('routing-state continuation matrix', () => {
   it('uses continuation request_chain across non-responses protocols', () => {

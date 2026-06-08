@@ -1,5 +1,5 @@
-import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
-import { DEFAULT_STOP_MESSAGE_MAX_REPEATS } from '../../../router/virtual-router/routing-stop-message-state-codec.js';
+import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
+import { DEFAULT_STOP_MESSAGE_MAX_REPEATS } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 
 export function hasArmedStopMessageState(state: RoutingInstructionState): boolean {
   const text = typeof state.stopMessageText === 'string' ? state.stopMessageText.trim() : '';
@@ -176,7 +176,7 @@ export function clearStopMessageState(state: RoutingInstructionState, _now: numb
   state.stopMessageStageMode = undefined;
   state.stopMessageAiMode = undefined;
   state.stopMessageUpdatedAt = now;
-  state.stopMessageLastUsedAt = undefined;
+  state.stopMessageLastUsedAt = now;
   state.stopMessageAiSeedPrompt = undefined;
   state.stopMessageAiHistory = undefined;
 }

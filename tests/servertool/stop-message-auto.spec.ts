@@ -8,7 +8,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import {
   serializeRoutingInstructionState,
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import {
   extractBlockedReportFromMessagesForTests,

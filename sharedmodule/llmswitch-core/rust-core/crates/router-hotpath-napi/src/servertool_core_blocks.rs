@@ -1,5 +1,9 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
+use servertool_core::backend_route_contract::{
+    plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
+    ServertoolBackendRoutePolicyInput,
+};
 use servertool_core::cli_contract;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_counter;
@@ -103,10 +107,55 @@ pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<Stri
     serde_json::to_string(&output).map_err(|e| format!("serialize command result: {e}"))
 }
 
+pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolBackendRoutePolicyInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize backend route input: {e}"))?;
+    let output = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(input)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize backend route plan: {e}"))
+}
+
 /// Resolve default max repeats.
 pub fn resolve_default_max_repeats(
     configured: Option<u32>,
     is_non_active_managed_goal: bool,
 ) -> u32 {
     stop_message_counter::resolve_default_max_repeats(configured, is_non_active_managed_goal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn plans_backend_route_policy_via_servertool_core_bridge() {
+        let raw = plan_servertool_backend_route_policy_json(
+            &json!({
+                "toolName": "web_search",
+                "input": { "query": "routecodex" }
+            })
+            .to_string(),
+        )
+        .expect("backend route policy");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["toolName"], "web_search");
+        assert_eq!(parsed["flowId"], "web_search_flow");
+        assert_eq!(parsed["routeHint"], "servertool_backend_route:web_search");
+        assert_eq!(parsed["executionMode"], "reenter");
+        assert_eq!(parsed["shapeGuard"]["failOnMissingPayload"], true);
+    }
+
+    #[test]
+    fn backend_route_policy_bridge_rejects_client_exec_tool() {
+        let err = plan_servertool_backend_route_policy_json(
+            &json!({
+                "toolName": "stop_message_auto",
+                "input": {}
+            })
+            .to_string(),
+        )
+        .expect_err("stop_message_auto is not backend route");
+        assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
+    }
 }

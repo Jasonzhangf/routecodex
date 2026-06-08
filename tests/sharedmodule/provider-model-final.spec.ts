@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 describe('provider.model with initialize call', () => {
@@ -41,7 +41,7 @@ describe('provider.model with initialize call', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(config.config);
 
-    const providerKeys = engine['providerRegistry'].listProviderKeys('glm');
+    const providerKeys = Object.keys(config.config.providers).filter((key) => key.startsWith('glm.'));
     expect(providerKeys.length).toBeGreaterThan(0);
 
    const result = await engine.route({
@@ -79,7 +79,7 @@ describe('provider.model with initialize call', () => {
               id: 'default-primary',
               priority: 200,
               mode: 'round-robin',
-              targets: ['glm.kimi-kimi-k2.5']
+              targets: ['glm.kimi-k2.5']
             }
           ]
         }
@@ -90,10 +90,10 @@ describe('provider.model with initialize call', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(config.config);
 
-    await expect(engine.route({
+    expect(() => engine.route({
       model: 'glm.kimi-k2.5',
       messages: [{ role: 'user', content: 'Hello' }]
-    })).rejects.toThrow(/PROVIDER_NOT_AVAILABLE/);
+    })).toThrow(/All providers unavailable for model glm\.kimi-k2\.5/);
   });
 
   it('should work with empty routing but provider.model exists', async () => {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
-import { isPreCommandScriptPathAllowed } from '../router/virtual-router/pre-command-file-resolver.js';
+import { isPreCommandScriptPathAllowedWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 interface PreCommandHookRule {
@@ -185,7 +185,7 @@ function resolveRuntimePreCommandRule(rawState: unknown): PreCommandHookRule | n
   if (!scriptPath) {
     return null;
   }
-  if (!isPreCommandScriptPathAllowed(scriptPath)) {
+  if (!isPreCommandScriptPathAllowedWithNative(scriptPath)) {
     return null;
   }
 

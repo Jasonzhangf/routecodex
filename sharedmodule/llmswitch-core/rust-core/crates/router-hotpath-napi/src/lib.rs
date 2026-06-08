@@ -115,6 +115,7 @@ mod vr_route_04_selection_boundary;
 mod web_search_mode;
 mod windsurf_tool_history_projection;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
+use crate::virtual_router_engine::routing::resolve_stop_message_scope as resolve_virtual_router_stop_message_scope;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {
@@ -163,6 +164,21 @@ struct ContinueExecutionInjectionOutput {
 struct RoutingInstructionParseOptions {
     #[serde(default)]
     rcc_user_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreCommandScriptAllowedInput {
+    path: String,
+    #[serde(default)]
+    rcc_user_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyRoutingInstructionsInput {
+    instructions: Vec<Value>,
+    state: Value,
 }
 
 fn parse_routing_instruction_parse_options(
@@ -255,6 +271,14 @@ pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> N
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_virtual_router_routing_state_key(&metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> NapiResult<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_virtual_router_stop_message_scope(&metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -901,6 +925,12 @@ fn serialize_routing_instruction_for_napi(
                 Value::Number(value.into()),
             );
         }
+        if let Some(value) = &stop.stage_mode {
+            out.insert(
+                "stopMessageStageMode".to_string(),
+                Value::String(value.clone()),
+            );
+        }
         if let Some(value) = &stop.ai_mode {
             out.insert(
                 "stopMessageAiMode".to_string(),
@@ -928,6 +958,108 @@ fn serialize_routing_instruction_for_napi(
     Value::Object(out)
 }
 
+fn deserialize_instruction_target_for_napi(
+    raw: Option<&Value>,
+) -> Option<crate::virtual_router_engine::instructions::InstructionTarget> {
+    let obj = raw?.as_object()?;
+    Some(
+        crate::virtual_router_engine::instructions::InstructionTarget {
+            provider: obj
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+            key_alias: obj
+                .get("keyAlias")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+            key_index: obj.get("keyIndex").and_then(|v| v.as_i64()),
+            model: obj
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+            path_length: obj.get("pathLength").and_then(|v| v.as_i64()),
+            process_mode: obj
+                .get("processMode")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+        },
+    )
+}
+
+fn deserialize_routing_instruction_for_napi(
+    raw: &Value,
+) -> Option<crate::virtual_router_engine::instructions::RoutingInstruction> {
+    let obj = raw.as_object()?;
+    let kind = obj
+        .get("type")
+        .or_else(|| obj.get("kind"))?
+        .as_str()?
+        .to_string();
+    let stop_message = match kind.as_str() {
+        "stopMessageSet" | "stopMessageMode" | "stopMessageClear" => Some(
+            crate::virtual_router_engine::instructions::StopMessageInstruction {
+                kind: match kind.as_str() {
+                    "stopMessageClear" => "clear".to_string(),
+                    "stopMessageMode" => "mode".to_string(),
+                    _ => "set".to_string(),
+                },
+                text: obj
+                    .get("stopMessageText")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                max_repeats: obj.get("stopMessageMaxRepeats").and_then(|v| v.as_i64()),
+                stage_mode: obj
+                    .get("stopMessageStageMode")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                ai_mode: obj
+                    .get("stopMessageAiMode")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                source: obj
+                    .get("stopMessageSource")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+                    .or_else(|| Some("explicit".to_string())),
+                from_historical: obj
+                    .get("fromHistorical")
+                    .or_else(|| obj.get("fromHistoricalUserMessage"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            },
+        ),
+        _ => None,
+    };
+    let pre_command = match kind.as_str() {
+        "preCommandSet" | "preCommandClear" => Some(
+            crate::virtual_router_engine::instructions::PreCommandInstruction {
+                kind: if kind == "preCommandClear" {
+                    "clear".to_string()
+                } else {
+                    "set".to_string()
+                },
+                script_path: obj
+                    .get("preCommandScriptPath")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+            },
+        ),
+        _ => None,
+    };
+    Some(
+        crate::virtual_router_engine::instructions::RoutingInstruction {
+            kind,
+            target: deserialize_instruction_target_for_napi(Some(raw)),
+            provider: obj
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+            stop_message,
+            pre_command,
+        },
+    )
+}
+
 #[napi]
 pub fn parse_routing_instructions_json(
     messages_json: String,
@@ -946,6 +1078,134 @@ pub fn parse_routing_instructions_json(
         .map(serialize_routing_instruction_for_napi)
         .collect();
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "applyRoutingInstructionsJson")]
+pub fn apply_routing_instructions_json(input_json: String) -> NapiResult<String> {
+    let input: ApplyRoutingInstructionsInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut state =
+        virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+            &input.state,
+        )
+        .unwrap_or_default();
+    let mut instructions = Vec::with_capacity(input.instructions.len());
+    for instruction in &input.instructions {
+        let parsed = deserialize_routing_instruction_for_napi(instruction)
+            .ok_or_else(|| napi::Error::from_reason("invalid routing instruction payload"))?;
+        instructions.push(parsed);
+    }
+    virtual_router_engine::instructions::apply_routing_instructions(&instructions, &mut state)
+        .map_err(napi::Error::from_reason)?;
+    let out =
+        virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&state);
+    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn serialize_routing_instruction_state_json(state_json: String) -> NapiResult<String> {
+    let state_value: Value =
+        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let state = virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+        &state_value,
+    )
+    .unwrap_or_default();
+    let out =
+        virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&state);
+    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn deserialize_routing_instruction_state_json(state_json: String) -> NapiResult<String> {
+    let state_value: Value =
+        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let state = virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+        &state_value,
+    )
+    .ok_or_else(|| napi::Error::from_reason("invalid routing instruction state payload"))?;
+    let out =
+        virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&state);
+    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn load_routing_instruction_state_json(
+    key: String,
+    session_dir: Option<String>,
+) -> NapiResult<String> {
+    let state = virtual_router_engine::routing_state_store::with_session_dir_override(
+        session_dir.as_deref(),
+        || virtual_router_engine::routing_state_store::load_routing_instruction_state(&key),
+    );
+    let out = state
+        .as_ref()
+        .map(virtual_router_engine::routing_state_store::serialize_routing_instruction_state);
+    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn save_routing_instruction_state_json(
+    key: String,
+    state_json: String,
+    session_dir: Option<String>,
+) -> NapiResult<String> {
+    let state_value: Value =
+        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    if state_value.is_null() {
+        virtual_router_engine::routing_state_store::with_session_dir_override(
+            session_dir.as_deref(),
+            || {
+                virtual_router_engine::routing_state_store::persist_routing_instruction_state(
+                    &key, None,
+                )
+            },
+        );
+        return Ok("true".to_string());
+    }
+    let state = virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+        &state_value,
+    )
+    .ok_or_else(|| napi::Error::from_reason("invalid routing instruction state payload"))?;
+    virtual_router_engine::routing_state_store::with_session_dir_override(
+        session_dir.as_deref(),
+        || {
+            virtual_router_engine::routing_state_store::persist_routing_instruction_state(
+                &key,
+                Some(&state),
+            )
+        },
+    );
+    Ok("true".to_string())
+}
+
+#[napi]
+pub fn merge_stop_message_from_persisted_json(
+    existing_json: String,
+    persisted_json: String,
+) -> NapiResult<String> {
+    let existing_value: Value = serde_json::from_str(&existing_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let persisted_value: Value = serde_json::from_str(&persisted_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let existing =
+        virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+            &existing_value,
+        )
+        .unwrap_or_default();
+    let persisted = if persisted_value.is_null() {
+        None
+    } else {
+        virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+            &persisted_value,
+        )
+    };
+    let merged = virtual_router_engine::routing_state_store::merge_stop_message_from_persisted(
+        &existing,
+        persisted.as_ref(),
+    );
+    let out =
+        virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&merged);
+    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
@@ -970,6 +1230,26 @@ pub fn parse_rcc_fence_document_json(text: String) -> NapiResult<String> {
     let parsed = virtual_router_engine::rcc_fence::parse_rcc_fence_document(&text)
         .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&parsed).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "parseResolvedStopMessageInstructionJson")]
+pub fn parse_resolved_stop_message_instruction_json(
+    instruction: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    let options = parse_routing_instruction_parse_options(options_json)?;
+    let parsed = virtual_router_engine::instructions::with_rcc_user_dir_override(
+        options.rcc_user_dir.as_deref(),
+        || virtual_router_engine::instructions::parse_single_instruction(&instruction),
+    )
+    .map_err(napi::Error::from_reason)?;
+    match parsed {
+        Some(instruction) if instruction.stop_message.is_some() => {
+            serde_json::to_string(&serialize_routing_instruction_for_napi(&instruction))
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
+        }
+        _ => Ok("null".to_string()),
+    }
 }
 
 #[napi]
@@ -1069,6 +1349,12 @@ pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiR
 #[napi]
 pub fn validate_client_exec_command_result_json(raw_output: String) -> NapiResult<String> {
     servertool_core_blocks::validate_client_exec_command_result_json(&raw_output)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_backend_route_policy_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_backend_route_policy_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1509,6 +1795,19 @@ pub fn estimate_virtual_router_request_tokens_json_bridge(
     input_json: String,
 ) -> NapiResult<String> {
     virtual_router_engine::features::estimate_request_tokens_payload_json(input_json)
+}
+
+#[napi(js_name = "isPreCommandScriptPathAllowedJson")]
+pub fn is_pre_command_script_path_allowed_json_bridge(input_json: String) -> NapiResult<String> {
+    let input: PreCommandScriptAllowedInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let allowed = virtual_router_engine::instructions::with_rcc_user_dir_override(
+        input.rcc_user_dir.as_deref(),
+        || virtual_router_engine::instructions::is_precommand_script_path_allowed(&input.path),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&serde_json::json!({ "allowed": allowed }))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi(js_name = "reportProviderErrorToRouterPolicyJson")]

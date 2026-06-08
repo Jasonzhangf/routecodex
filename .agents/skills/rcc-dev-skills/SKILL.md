@@ -2030,3 +2030,4 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - VR token estimate 只能影响路由估算，不得裁剪/改写真实 payload。Rust owner 是 `virtual_router_engine::features`; stringified structured `message.content` 必须先解析，image/video/base64 payload 在 message content 估算中应忽略，避免图片请求被错误推入 longcontext 或非多模态路线。
 - priority longcontext 的上下文安全分类只能过滤不可用/硬溢出目标，不能重排原始 priority target 顺序；若日志显示 priority 路由命中后置大窗口 provider，先查 `maxContextTokens` 与 selection context classification，不要改配置当作唯一修复。
+- 端口级 forwarder 排查先看 sample `client-request.json` 的 `metadata.allowedProviders`：若 routing target 是 `fwd.*` 但 allowlist 只有 `fwd` 而没有 forwarder 内真实 provider（如 `sdfv/llmgate/asxs/cc`），根因在 HTTP router port allowlist 构造，不在 Rust priority selection。修点是 `extractProviderKeysForRoutingGroup()` 展开 `virtualrouter.forwarders.*.targets`。

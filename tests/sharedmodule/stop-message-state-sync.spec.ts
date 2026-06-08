@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { mergeStopMessageFromPersisted } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-state-sync.js';
+import { mergeStopMessageFromPersisted } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('mergeStopMessageFromPersisted stoplessGoalState coverage', () => {
   test('keeps newer in-memory stopless goal state when persisted snapshot is older', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { resolveStopMessageScope } from '../../src/router/virtual-router/engine/routing-state/store.js';
+import { resolveStopMessageScope } from '../../src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('stop message scope resolution', () => {
   test('uses explicit tmux scope when present', () => {

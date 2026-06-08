@@ -1,4 +1,4 @@
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('virtual-router quotaView availability', () => {
   it('does not block in-pool targets due to stale health when quotaView is present', () => {

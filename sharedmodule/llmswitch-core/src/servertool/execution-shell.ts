@@ -178,6 +178,59 @@ export function resolveServertoolHandlerExecutionSpec(toolCall: ToolCall): {
   };
 }
 
+export function applyPreCommandHooksToToolCall(args: {
+  options: ServerSideToolEngineOptions;
+  toolCall: ToolCall;
+  runtimePreCommandState?: JsonObject;
+  bases?: JsonObject[];
+  patchToolCallArgumentsById?: (chatResponse: JsonObject, toolCallId: string, argumentsText: string) => void;
+}): void {
+  const preHookResult = runPreCommandHooks({
+    requestId: args.options.requestId,
+    entryEndpoint: args.options.entryEndpoint,
+    providerProtocol: args.options.providerProtocol,
+    toolName: args.toolCall.name,
+    toolCallId: args.toolCall.id,
+    toolArguments: args.toolCall.arguments,
+    preCommandState: args.runtimePreCommandState
+  });
+  for (const trace of preHookResult.traces) {
+    try {
+      args.options.onAutoHookTrace?.(trace);
+    } catch {
+      // best-effort
+    }
+  }
+  if (!preHookResult.changed || preHookResult.toolArguments === args.toolCall.arguments) {
+    return;
+  }
+  args.toolCall.arguments = preHookResult.toolArguments;
+  if (!args.bases?.length || !args.patchToolCallArgumentsById) {
+    return;
+  }
+  for (const base of args.bases) {
+    args.patchToolCallArgumentsById(base, args.toolCall.id, preHookResult.toolArguments);
+  }
+}
+
+export function applyPreCommandHooksToToolCalls(args: {
+  options: ServerSideToolEngineOptions;
+  toolCalls: ToolCall[];
+  runtimePreCommandState?: JsonObject;
+  bases: JsonObject[];
+  patchToolCallArgumentsById: (chatResponse: JsonObject, toolCallId: string, argumentsText: string) => void;
+}): void {
+  for (const toolCall of args.toolCalls) {
+    applyPreCommandHooksToToolCall({
+      options: args.options,
+      toolCall,
+      runtimePreCommandState: args.runtimePreCommandState,
+      bases: args.bases,
+      patchToolCallArgumentsById: args.patchToolCallArgumentsById
+    });
+  }
+}
+
 export function applyServertoolExecutionResult(
   baseForExecution: JsonObject,
   nextChatResponse: JsonObject
@@ -354,28 +407,6 @@ export async function runToolCallExecutionLoop(args: {
   const executionState = createServertoolExecutionLoopState();
 
   for (const toolCall of args.dispatchPlan.executableToolCalls) {
-    const preHookResult = runPreCommandHooks({
-      requestId: args.options.requestId,
-      entryEndpoint: args.options.entryEndpoint,
-      providerProtocol: args.options.providerProtocol,
-      toolName: toolCall.name,
-      toolCallId: toolCall.id,
-      toolArguments: toolCall.arguments,
-      preCommandState: args.runtimePreCommandState
-    });
-    for (const trace of preHookResult.traces) {
-      try {
-        args.options.onAutoHookTrace?.(trace);
-      } catch {
-        // best-effort
-      }
-    }
-    if (preHookResult.changed && preHookResult.toolArguments !== toolCall.arguments) {
-      toolCall.arguments = preHookResult.toolArguments;
-      args.patchToolCallArgumentsById(args.base, toolCall.id, preHookResult.toolArguments);
-      args.patchToolCallArgumentsById(args.baseForExecution, toolCall.id, preHookResult.toolArguments);
-    }
-
     const entry = getServerToolHandler(toolCall.name);
     if (!entry || entry.trigger !== 'tool_call') {
       continue;
@@ -421,23 +452,6 @@ export async function runToolCallExecutionLoop(args: {
   // Process noop tool calls — acknowledged and auto-continued without handler execution.
   // Rust produces the standard delta: tool_outputs entry + clientInjectOnly followup.
   for (const toolCall of args.dispatchPlan.noopToolCalls ?? []) {
-    const preHookResult = runPreCommandHooks({
-      requestId: args.options.requestId,
-      entryEndpoint: args.options.entryEndpoint,
-      providerProtocol: args.options.providerProtocol,
-      toolName: toolCall.name,
-      toolCallId: toolCall.id,
-      toolArguments: toolCall.arguments,
-      preCommandState: args.runtimePreCommandState
-    });
-    for (const trace of preHookResult.traces) {
-      try {
-        args.options.onAutoHookTrace?.(trace);
-      } catch {
-        // best-effort
-      }
-    }
-
     const noopResult = planServertoolNoopOutcomeWithNative({
       toolCallId: toolCall.id,
       toolName: toolCall.name,

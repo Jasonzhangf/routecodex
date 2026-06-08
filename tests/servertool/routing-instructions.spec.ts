@@ -3,12 +3,14 @@ import * as fs from 'node:fs';
 import os from 'node:os';
 import * as path from 'node:path';
 import {
-  parseRoutingInstructions,
-  applyRoutingInstructions,
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState,
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import {
+  applyRoutingInstructionsWithNative,
+  parseRoutingInstructions
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 function buildMessages(content: string): StandardizedMessage[] {
   return [
@@ -32,6 +34,18 @@ function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstr
     stopMessageUsed: undefined,
     ...(overrides ?? {})
   };
+}
+
+function applyRoutingInstructions(
+  instructions: Array<Record<string, unknown>>,
+  state: RoutingInstructionState
+): RoutingInstructionState {
+  return deserializeRoutingInstructionState(
+    applyRoutingInstructionsWithNative({
+      instructions,
+      state: serializeRoutingInstructionState(state)
+    })
+  );
 }
 
 const MODE_SHORTHAND_PROBE = parseRoutingInstructions(buildMessages('<**sm:on**>继续'))[0] as any;
@@ -113,7 +127,7 @@ describe('Routing instruction parsing and application', () => {
     expect(Array.from(nextState.disabledProviders)).toEqual(['glm']);
     const openaiKeys = nextState.disabledKeys.get('openai');
     expect(openaiKeys).toBeDefined();
-    expect(Array.from(openaiKeys ?? []).sort()).toEqual([1]);
+    expect(Array.from(openaiKeys ?? []).sort()).toEqual(['1']);
   });
 
   test('disable instructions can target provider models', () => {
@@ -448,14 +462,14 @@ describe('Routing instruction parsing and application', () => {
     expect(nextState.stopMessageMaxRepeats).toBe(3);
   });
 
-  test('mode-only instruction creates stage-mode stopMessage state when text is absent', () => {
+  test('mode-only instruction is no-op when text and legacy state are absent', () => {
     const nextState = applyRoutingInstructions(
       [{ type: 'stopMessageMode', stopMessageStageMode: 'on' }],
       createState()
     );
     expect(nextState.stopMessageText).toBeUndefined();
-    expect(nextState.stopMessageStageMode).toBe('on');
-    expect(nextState.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
+    expect(nextState.stopMessageStageMode).toBeUndefined();
+    expect(nextState.stopMessageMaxRepeats).toBeUndefined();
     expect(nextState.stopMessageUsed).toBeUndefined();
   });
 

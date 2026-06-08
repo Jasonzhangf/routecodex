@@ -6,6 +6,60 @@
 - Fix: removed the duplicated `= 10`, leaving a valid weighted map entry.
 - Verification: `python3 - <<'PY' ... tomllib.loads(...)` returned `TOML_OK`; `timeout 20 routecodex start --snap` loaded `/Users/fanzhang/.rcc/config.toml`, started ports `5520/5555/10000`, then exited only because the timeout sent `SIGTERM`.
 
+## 2026-06-08 VR precommand resolver native closeout
+
+- Removed obsolete VR TS resolver: `sharedmodule/llmswitch-core/src/router/virtual-router/pre-command-file-resolver.ts`.
+- Removed ignored dist shadows after `.gitignore dist/` evidence: `dist/router/virtual-router/pre-command-file-resolver.{js,d.ts}` and stale `routing-pre-command-parser.{js,d.ts}` that still imported the deleted resolver.
+- Rust owner is now `virtual_router_engine/instructions/path.rs`: added `is_precommand_script_path_allowed` plus test locking actual-file-only containment under `~/.rcc/precommand`.
+- NAPI bridge added `isPreCommandScriptPathAllowedJson`; `pre-command-hooks.ts` now calls `isPreCommandScriptPathAllowedWithNative` from the existing native routing-instructions bridge, with no fallback.
+- Verification evidence:
+  - PASS `cargo test -p router-hotpath-napi precommand --lib -- --nocapture` (new allow-check test passed).
+  - PASS `node scripts/build-native-hotpath.mjs`.
+  - PASS `npm run build -- --pretty false` in `sharedmodule/llmswitch-core`.
+  - PASS root `npx tsc --noEmit --pretty false`.
+  - PASS direct runtime hook check: `runPreCommandHooks` changed arguments via runtime script and emitted `runtime_precommand:rewrite.sh` match trace.
+  - PASS `npm run verify:architecture-ci`.
+  - PASS `git diff --check`.
+  - RED expected `npm run verify:vr-no-ts-runtime`: remaining VR TS files reduced to 16; `pre-command-file-resolver.ts` no longer listed.
+  - RED existing `npm run verify:llmswitch-rustification-audit`: only `runtime/virtual-router-hit-log.ts` / runtime topDir growth remains; native topDir increase was eliminated.
+  - RED observed `tests/servertool/pre-command-hooks.spec.ts`: current dispatch plan skips `exec_command` as `no_registered_tool_call_handler`, so pre-command hook loop is not entered; direct hook verification proves this slice's native allow-check path works.
+
+## 2026-06-08 VR stopMessage file resolver native closeout
+
+- Removed obsolete VR TS resolver: `sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-file-resolver.ts`.
+- Removed ignored dist shadows after `.gitignore dist/` evidence: `dist/router/virtual-router/stop-message-file-resolver.{js,d.ts}` and stale `stop-message-stage-template-files.{js,d.ts}` that still imported the deleted resolver.
+- Rust owner is now `virtual_router_engine/instructions/parse/parse_instructions.rs` + `instructions/path.rs`: single stopMessage parsing resolves `file://...` under `~/.rcc`, returns resolved text and explicit source.
+- NAPI bridge added `parseResolvedStopMessageInstructionJson`; `stop-message-markers.ts` was deleted and its remaining public marker/log helpers moved to `runtime/virtual-router-host-effects.ts`, which now calls `parseResolvedStopMessageInstructionWithNative` and no longer reads files in TS.
+- Verification evidence:
+  - PASS `cargo test -p router-hotpath-napi stop_message --lib -- --nocapture` (18 tests).
+  - PASS `node scripts/build-native-hotpath.mjs`.
+  - PASS `npm run build -- --pretty false` in `sharedmodule/llmswitch-core`.
+  - PASS root `npx tsc --noEmit --pretty false`.
+  - PASS `npm run jest:run -- --runTestsByPath tests/servertool/stopmessage-marker-module.spec.ts --runInBand --forceExit`.
+  - PASS `npm run verify:architecture-ci`.
+  - PASS `git diff --check`.
+  - PASS residue search for deleted precommand/stopMessage resolver paths and stale dist parser/template imports.
+  - RED expected `npm run verify:vr-no-ts-runtime`: remaining VR TS files reduced to 15; `stop-message-file-resolver.ts` no longer listed.
+  - RED existing `npm run verify:llmswitch-rustification-audit`: only `runtime/virtual-router-hit-log.ts` / runtime topDir growth remains after native topDir increase was eliminated.
+
+## 2026-06-08 VR/servertool staged review checkpoint
+
+- Current review scope: native VR runtime shrink, Rust routing instruction/precommand/stopMessage parsing, forwarder selection-before-filter fix, servertool CLI/outcome contracts, and version `0.90.2993`.
+- Verified after latest native rebuild:
+  - PASS `npm run jest:run -- --runTestsByPath tests/servertool/stopmessage-marker-module.spec.ts tests/servertool/routing-instructions.spec.ts tests/servertool/pre-command-hooks.spec.ts tests/servertool/virtual-router-routing-instructions.spec.ts tests/servertool/stop-message-sample-replay.spec.ts --runInBand --forceExit`.
+  - PASS `npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts tests/config/virtual-router-builder.forwarder-10000.spec.ts tests/red-tests/forwarder_bootstrap_must_surface.test.ts tests/servertool/stopmessage-marker-module.spec.ts tests/servertool/routing-instructions.spec.ts tests/servertool/pre-command-hooks.spec.ts tests/servertool/virtual-router-routing-instructions.spec.ts tests/servertool/stop-message-sample-replay.spec.ts --runInBand --forceExit`.
+  - PASS `cargo test -p router-hotpath-napi image_request --lib -- --nocapture` (3 image/multimodal/vision selection tests).
+  - PASS `cargo test -p router-hotpath-napi priority_pool_expands_forwarder_before_provider_filters --lib -- --nocapture`.
+  - PASS `cargo test -p router-hotpath-napi virtual_router_stop_message_instruction::tests --lib -- --nocapture`.
+  - PASS `cargo test -p router-hotpath-napi precommand_script_allowed --lib -- --nocapture`.
+  - PASS `cargo test -p servertool-core --lib -- --nocapture` (70 tests).
+  - PASS `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` (6 tests).
+  - PASS `npx tsc --noEmit --pretty false`.
+  - PASS `git diff --check`.
+- Review correction: deleted TS media-route tests are covered by Rust/native VR tests in `selection.rs` and `routing/config.rs` for image route queue/order, multimodal-first, vision fallback, and visual-capability filtering. Keep future image/multimodal fixes in Rust VR selection/features, not TS VR runtime.
+- Boundary note: `servertool-core` now has Rust outcome/CLI projection contracts and tests, but live stopless projection still uses the existing TS CLI projection bridge. Do not claim full servertool outcome migration until the Rust outcome builders are live-wired.
+- Test correction: `responses-handler.servertool-cli-projection.blackbox` now asserts current contract: model stop text remains the Responses reasoning truth, while CLI `--input-json` carries continuation prompt; tests must not force continuationPrompt to overwrite reasoning.
+
 ## 2026-06-08 note.md consolidation index
 - Scope: this pass adds a safe topic map and promotes only facts re-verified against current code/tests. Raw history remains below for evidence; no broad deletion.
 - `~/.rcc` / root generated cleanup: promoted to `MEMORY.md` top entries `cleanup` / `root-layout`; raw note retained as evidence.
@@ -16423,3 +16477,41 @@ Phase E: TS fallback 物理删除
 - Moved host-only hit-log projection from `sharedmodule/llmswitch-core/src/router/virtual-router/engine-logging.ts` to `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`, then physically deleted the old VR runtime path file.
 - This slice only changes ownership/path for log formatting and telemetry projection; it does not change VR selection, state persistence, provider payload, or routing semantics.
 - Verification PASS: `npx tsc --noEmit --pretty false`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/virtual-router-hit-log.spec.ts --runInBand --forceExit`; `git diff --check`. Expected RED retained: `npm run verify:vr-no-ts-runtime` now reports 17 remaining production VR TS files, down from 18, and no longer lists `engine-logging.ts`.
+
+## 2026-06-08 servertool Rustification implementation plan
+- User requested only a servertool Rustification implementation plan plus `/goal`; VR and Hub Pipeline workers are active, so this plan must not require touching their dirty files in the first slice.
+- Evidence read: `docs/agent-routing/30-servertool-lifecycle-routing.md`, `docs/design/servertool-cli-projection-migration.md`, `docs/design/servertool-cli-lifecycle.md`, `docs/goals/servertool-cli-projection-phase1-plan.md`, `docs/goals/servertool-rust-binary-phase-execution.md`, `docs/goals/servertool-rust-only-fallback-ssot-audit-plan.md`, and Rust `servertool-core` / `servertool-cli` files.
+- Current picture: Rust already owns partial outcome classification and CLI stopless output; TS still owns broad runtime behavior in `sharedmodule/llmswitch-core/src/servertool/**`.
+- Added plan doc: `docs/goals/servertool-rustification-implementation-plan.md`. It resolves migrated-path truth in favor of CLI projection lifecycle docs over older private followup topology wording, and sequences low-conflict `servertool-core/servertool-cli` closeout before NAPI/Hub bridge wiring.
+
+## 2026-06-08 VR no-TS runtime engine/provider-registry closeout
+- Removed stale ignored dist residue `routing-stop-message-parser.{js,d.ts}` after `.gitignore dist/` evidence; residue search for deleted marker/message-utils/resolver names now has no VR source hits.
+- Deleted old `src/router/virtual-router/engine.ts` facade and ignored `dist/router/virtual-router/engine.{js,d.ts}`. Tests now import `VirtualRouterEngine` from `src/native/router-hotpath/native-virtual-router-runtime.ts`; this class still delegates to Rust `VirtualRouterEngineProxy`.
+- Deleted old `src/router/virtual-router/provider-registry.ts` and ignored `dist/router/virtual-router/provider-registry.{js,d.ts}`. Production hit-log no longer depends on ProviderRegistry; it reads max context from the bootstrapped provider map.
+- Deleted obsolete whitebox tests that imported removed TS internals: `tests/sharedmodule/provider-registry-observability.spec.ts`, `tests/servertool/virtual-router-search-route-alias.spec.ts`, `tests/servertool/virtual-router-retry-excluded-candidate.spec.ts`, and sharedmodule router internals specs for old route-utils/provider-registry. Native route behavior remains covered by focused runtime tests.
+- Verification PASS: `npx tsc --noEmit --pretty false`; focused Jest for `virtual-router-routing-instructions`, `virtual-router-hit-log`, provider-model debug/final, and error-pipeline contract; `git diff --check`.
+- Current expected RED: `npm run verify:vr-no-ts-runtime` now fails on 11 remaining VR TS files, down from 13 after engine deletion and then 12 after provider-registry deletion. Remaining cluster is routing state/instructions: `engine/routing-state/{keys,store}.ts`, `routing-instructions*`, state codecs, `routing-state-store.ts`, and `stop-message-state-sync.ts`.
+
+## 2026-06-08 servertool Rustification Phase 1/2 closeout slice
+- Scope kept low-conflict: changed only `servertool-core`, `servertool-cli` tests, CLI wrapper test, and servertool CLI blackbox script; did not edit active VR/Hub Pipeline worker files.
+- Rust outcome contract now has typed Phase 1 builders/blocks: `ServertoolHubRespChatProcess03Input`, `ServertoolClientExecCliProjection01Planned`, `ServertoolBackendRouteHint01Planned`, `ServertoolServerIoInternal01Observed`, plus the three `build_servertool_*_from_hub_resp_chatprocess_03` builders.
+- Outcome guard evidence: `web_search` / `vision_auto` fail if asked to build client exec projection and instead build backend-route hints; `memory_cache_auto` builds only server IO internal; `fake_exec` and old markers are fail-fast denied.
+- CLI contract now executes `servertool_fixture` in Rust, rejects non-object `--input-json`, rejects old `old_cli_` / `old_cli_result_` markers, and emits ordinary exec_command stdout JSON with `ok/kind/tool/summary`.
+- Verification PASS: `cargo test -p servertool-core` (70 tests); `cargo test -p servertool-cli` (6 blackbox tests); `node scripts/build-native-hotpath.mjs` refreshed `dist/bin/routecodex-servertool`; direct dist binary fixture and old-marker checks; `npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts --runInBand --forceExit` (4 tests); `npm run jest:run -- --runTestsByPath tests/servertool/servertool-cli-projection.spec.ts tests/servertool/servertool-cli-result-restore.spec.ts tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts --runInBand --forceExit` (6 tests); `npm run verify:servertool-rust-only`; `npx tsc --noEmit --pretty false`; `node scripts/tests/servertool-cli-binary-blackbox.mjs --bin ...target/debug/routecodex-servertool`; same blackbox with `dist/bin/routecodex-servertool`.
+- Remaining goal gap: stopless persisted lookup policy and backend-route full TS semantic shrink/deletion are not complete; next slice should move `planStopMessagePersistedLookupJson` / TS bridge replacement when native bridge conflicts with VR/Hub workers are clear.
+
+## 2026-06-08 servertool Rustification plan handoff correction
+- User asked for a servertool Rustification implementation plan plus `/goal` prompt while VR and Hub Pipeline workers are active.
+- Confirmed existing plan doc `docs/goals/servertool-rustification-implementation-plan.md` is the right implementation document and should be referenced by the `/goal` prompt instead of repeating all details in chat.
+- Corrected the current execution handoff: clear must persist a non-rearming tombstone (`stopMessageUpdatedAt` + `stopMessageLastUsedAt`) so historical stopMessage markers cannot re-arm; `stopMessageUpdatedAt` alone remains empty state and must not keep stale state alive.
+
+## 2026-06-08 5555 GPT forwarder priority leak investigation
+- Evidence so far: live 5555 route selected mimo because `fwd.gpt.gpt-5.5` / `fwd.minimax.MiniMax-M3` were not installed in native forwarder registry; native NAPI `initialize()` returned an Error object for invalid forwarder config and TS wrapper ignored the non-void return.
+- Code fix in progress: TS native VR wrapper must throw on any non-null initialize/update return; no silent keep-old/empty registry.
+- Config fix in progress: live MiniMax forwarders must specify real providerKey values (`minimax.key1.MiniMax-*`, `mini27.key1.MiniMax-M2.7`, `minimonth.key1.MiniMax-M2.7`); bare providerId is not a providerKey and native fail-fast correctly rejects it.
+## 2026-06-08 5555 GPT forwarder priority leak
+
+- Live sample `~/.rcc/codex-samples/openai-chat/port-unknown/req_1780881806721_e15cf40b/client-request.json` shows `__routecodexPreselectedRoute` selected `minimax.key1.MiniMax-M3` from pool `["fwd.gpt.gpt-5.5","fwd.minimax.MiniMax-M3","mimo.key2.mimo-v2.5"]`.
+- Same sample metadata had `allowedProviders=["fwd","mimo","minimax","opencode-zen-free","mini27","minimonth"]`; GPT forwarder real targets `sdfv/llmgate/asxs/cc` were outside port scope.
+- Root cause confirmed with red test: `extractProviderKeysForRoutingGroup()` treated `fwd.gpt.gpt-5.5` as provider id `fwd` and did not expand `virtualrouter.forwarders.*.targets`.
+- Fix point: `src/server/runtime/http-server/http-server-bootstrap.ts` now expands forwarder targets into real provider ids for router-port `allowedProviders`.

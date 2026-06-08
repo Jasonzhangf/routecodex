@@ -1,4 +1,4 @@
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
   const providers = Object.fromEntries(

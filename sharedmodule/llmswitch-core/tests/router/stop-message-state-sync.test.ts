@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { mergeStopMessageFromPersisted } from '../../src/router/virtual-router/stop-message-state-sync.js';
+import { mergeStopMessageFromPersisted } from '../../src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('mergeStopMessageFromPersisted', () => {
   test('prefers persisted usage progress for the same stopMessage config', () => {

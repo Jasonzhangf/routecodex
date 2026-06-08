@@ -12,6 +12,7 @@ struct StopMessageInstructionParseOutput {
     kind: String,
     text: Option<String>,
     max_repeats: Option<i64>,
+    stage_mode: Option<String>,
     ai_mode: Option<String>,
 }
 
@@ -24,7 +25,7 @@ enum StopMessagePrefix {
 fn starts_with_command_prefix(instruction: &str, prefix: &str) -> Option<usize> {
     let text = instruction;
     let head = text.get(..prefix.len())?;
-    if !head.eq_ignore_ascii_case(prefix) {
+    if head != prefix {
         return None;
     }
     let mut idx = prefix.len();
@@ -46,7 +47,7 @@ fn starts_with_stop_message(instruction: &str) -> Option<(usize, StopMessagePref
     if let Some(idx) = starts_with_command_prefix(instruction, "sm") {
         return Some((idx, StopMessagePrefix::Sm));
     }
-    if let Some(idx) = starts_with_command_prefix(instruction, "stopmessage") {
+    if let Some(idx) = starts_with_command_prefix(instruction, "stopMessage") {
         return Some((idx, StopMessagePrefix::StopMessage));
     }
     None
@@ -246,6 +247,32 @@ fn parse_sm_mode_expression(body: &str) -> Option<(bool, Option<i64>)> {
     None
 }
 
+fn parse_stop_message_mode_expression(body: &str) -> Option<(bool, Option<i64>)> {
+    let normalized = body.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized == "clear" || normalized == "off" {
+        return Some((false, None));
+    }
+    if normalized == "on" {
+        return Some((true, None));
+    }
+    if normalized.contains('/') || normalized.contains(',') {
+        let parts: Vec<&str> = normalized
+            .split(|ch| ch == '/' || ch == ',')
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .collect();
+        if parts.len() == 2 && parts[0] == "on" {
+            if let Some(count) = parse_positive_int_strict(parts[1]) {
+                return Some((true, Some(count)));
+            }
+        }
+    }
+    None
+}
+
 fn make_set_output(
     text: String,
     max_repeats: i64,
@@ -258,6 +285,7 @@ fn make_set_output(
         kind: "set".to_string(),
         text: Some(text),
         max_repeats: Some(max_repeats),
+        stage_mode: None,
         ai_mode,
     })
 }
@@ -277,6 +305,7 @@ fn parse_stop_message_instruction(
             kind: "clear".to_string(),
             text: None,
             max_repeats: None,
+            stage_mode: None,
             ai_mode: None,
         });
     }
@@ -287,6 +316,7 @@ fn parse_stop_message_instruction(
                     kind: "clear".to_string(),
                     text: None,
                     max_repeats: None,
+                    stage_mode: None,
                     ai_mode: None,
                 });
             }
@@ -295,6 +325,26 @@ fn parse_stop_message_instruction(
                 count.unwrap_or(SM_UNBOUNDED_MAX_REPEATS),
                 Some("on".to_string()),
             );
+        }
+    }
+    if prefix == StopMessagePrefix::StopMessage {
+        if let Some((enabled, count)) = parse_stop_message_mode_expression(body) {
+            if !enabled {
+                return Some(StopMessageInstructionParseOutput {
+                    kind: "clear".to_string(),
+                    text: None,
+                    max_repeats: None,
+                    stage_mode: None,
+                    ai_mode: None,
+                });
+            }
+            return Some(StopMessageInstructionParseOutput {
+                kind: "mode".to_string(),
+                text: None,
+                max_repeats: Some(count.unwrap_or(STOP_MESSAGE_DEFAULT_MAX_REPEATS)),
+                stage_mode: Some("on".to_string()),
+                ai_mode: Some("on".to_string()),
+            });
         }
     }
     let (text, tail_tokens) = if body.starts_with('"') {
@@ -333,4 +383,30 @@ fn parse_stop_message_instruction(
 pub fn parse_stop_message_instruction_json(instruction: String) -> NapiResult<String> {
     let output = parse_stop_message_instruction(instruction);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopmessage_long_prefix_mode_supports_comma_repeat() {
+        let parsed = parse_stop_message_instruction("stopMessage:on,3".to_string())
+            .expect("mode instruction");
+        assert_eq!(parsed.kind, "mode");
+        assert_eq!(parsed.text, None);
+        assert_eq!(parsed.max_repeats, Some(3));
+        assert_eq!(parsed.stage_mode.as_deref(), Some("on"));
+        assert_eq!(parsed.ai_mode.as_deref(), Some("on"));
+    }
+
+    #[test]
+    fn lowercase_stopmessage_prefix_is_ignored() {
+        assert!(parse_stop_message_instruction("stopmessage:on,3".to_string()).is_none());
+    }
+
+    #[test]
+    fn sm_prefix_rejects_comma_mode_repeat() {
+        assert!(parse_stop_message_instruction("sm:on,3".to_string()).is_none());
+    }
 }

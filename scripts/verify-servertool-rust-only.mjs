@@ -36,6 +36,12 @@ const CLI_PROJECTION = `${SERVERTOOL_TS_DIR}/cli-projection.ts`;
 const CLI_RESULT_GUARD = `${SERVERTOOL_TS_DIR}/cli-result-guard.ts`;
 const TS_CLI_EXECUTOR = `${SERVERTOOL_TS_DIR}/cli-executor.ts`;
 const RUST_SERVERTOOL_CLI = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs`;
+const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
+const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
+const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
+const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
+const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
+const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
 const NATIVE_BUILD_SCRIPT = `${ROOT}/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`;
 const ACTIVE_RUNTIME_SCAN_PATHS = [
   `${ROOT}/src`,
@@ -379,6 +385,124 @@ function checkStoplessNoReenterContract() {
   pass('stopless-no-reenter-contract', `scanned ${files.length} files for stopless reenter expectations`);
 }
 
+// ── Check 11: persisted lookup policy is Rust-owned ───────────
+function checkStopMessagePersistedLookupRustOwner() {
+  const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
+  const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
+  const runtimeUtils = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
+  const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
+
+  assertContains(
+    'stop-message-persisted-lookup-rust-owner',
+    RUST_SERVERTOOL_CORE_LOOKUP,
+    rustLookup,
+    'pub fn plan_stop_message_persisted_lookup'
+  );
+  assertContains(
+    'stop-message-persisted-lookup-rust-owner',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'servertool_core::persisted_lookup'
+  );
+  assertContains(
+    'stop-message-persisted-lookup-bridge',
+    STOP_MESSAGE_RUNTIME_UTILS,
+    runtimeUtils,
+    'planStopMessagePersistedLookupWithNative'
+  );
+
+  const forbiddenTsLookupOwners = [
+    'fallbackStickyKey',
+    'collectPersistedStopMessageCandidateKeys',
+  ];
+  const tsFiles = listFiles(SERVERTOOL_TS_DIR);
+  for (const file of tsFiles) {
+    const content = readFileSync(file, 'utf8');
+    for (const keyword of forbiddenTsLookupOwners) {
+      if (content.includes(keyword)) {
+        fail(
+          'stop-message-persisted-lookup-no-ts-owner',
+          `Forbidden TS persisted lookup owner "${keyword}" found in ${file.replace(`${ROOT}/`, '')}`
+        );
+      }
+    }
+  }
+
+  if (/\nfn\s+collect_stop_message_persisted_candidate_keys\b/.test(orchestration)) {
+    fail(
+      'stop-message-persisted-lookup-no-hotpath-duplicate',
+      'chat_servertool_orchestration.rs must not keep local collect_stop_message_persisted_candidate_keys; use servertool-core'
+    );
+  }
+  if (/\nfn\s+plan_stop_message_persisted_lookup\b/.test(orchestration)) {
+    fail(
+      'stop-message-persisted-lookup-no-hotpath-duplicate',
+      'chat_servertool_orchestration.rs must not keep local plan_stop_message_persisted_lookup; use servertool-core'
+    );
+  }
+  if (!stopMessageAuto.includes('persistedLookupPlan.candidateKeys')) {
+    fail(
+      'stop-message-persisted-lookup-ts-consumes-native-plan',
+      'stop-message-auto.ts must consume persistedLookupPlan.candidateKeys from native plan'
+    );
+  }
+  pass('stop-message-persisted-lookup-no-ts-owner', `scanned ${tsFiles.length} servertool TS files`);
+}
+
+// ── Check 12: backend-route policy has Rust owner ─────────────
+function checkBackendRoutePolicyRustOwner() {
+  const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  assertContains(
+    'backend-route-policy-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03'
+  );
+  assertContains(
+    'backend-route-policy-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod backend_route_contract'
+  );
+  assertContains(
+    'backend-route-outcome-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    outcomeContract,
+    '"web_search" | "vision_auto" => Some(ServertoolOutcome::BackendRouteReenter)'
+  );
+  assertContains(
+    'backend-route-policy-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planServertoolBackendRoutePolicyWithNative'
+  );
+  assertContains(
+    'backend-route-policy-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolBackendRoutePolicyJson'
+  );
+  for (const [toolName, forbiddenProjection] of [
+    ['web_search', 'ClientExecCliProjection'],
+    ['vision_auto', 'ClientExecCliProjection'],
+    ['memory_cache_auto', 'BackendRouteReenter'],
+  ]) {
+    const pattern = new RegExp(`"${toolName}"[^\\n]+${forbiddenProjection}`);
+    if (pattern.test(rustBackendRoute)) {
+      fail(
+        'backend-route-policy-rust-owner',
+        `${toolName} has forbidden ${forbiddenProjection} mapping in backend_route_contract.rs`
+      );
+    }
+  }
+  pass('backend-route-policy-rust-owner', 'servertool-core owns backend-route policy contract');
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -392,6 +516,8 @@ checkMigratedProjectionDoesNotReenter();
 checkApplyPatchNotCliProjected();
 checkStandaloneServertoolBinary();
 checkStoplessNoReenterContract();
+checkStopMessagePersistedLookupRustOwner();
+checkBackendRoutePolicyRustOwner();
 
 console.log();
 

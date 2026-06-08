@@ -1,6 +1,8 @@
+use crate::outcome_contract::{
+    is_client_exec_cli_projection, is_denied_cli_projection, DENIED_CLI_MARKERS,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::outcome_contract::is_client_exec_cli_projection;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -15,12 +17,20 @@ pub struct ServertoolCliRunInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolCliRunOutput {
+    pub ok: bool,
+    pub kind: String,
+    pub tool: String,
+    pub summary: String,
     pub tool_name: String,
     pub flow_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub continuation_prompt: String,
     pub repeat_count: u32,
     pub max_repeats: u32,
-    pub schema_guidance: StoplessSchemaGuidance,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_guidance: Option<StoplessSchemaGuidance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub injected_prompt_preview: Option<String>,
     pub input: Value,
 }
 
@@ -42,6 +52,8 @@ pub struct StopreasonValues {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServertoolCliError {
     UnsupportedTool(String),
+    DeniedTool(String),
+    DeniedMarker(&'static str),
     MissingField(&'static str),
     InvalidField(&'static str),
 }
@@ -51,6 +63,12 @@ impl std::fmt::Display for ServertoolCliError {
         match self {
             ServertoolCliError::UnsupportedTool(tool) => {
                 write!(f, "SERVERTOOL_UNSUPPORTED_TOOL: {tool}")
+            }
+            ServertoolCliError::DeniedTool(tool) => {
+                write!(f, "SERVERTOOL_DENIED_TOOL: {tool}")
+            }
+            ServertoolCliError::DeniedMarker(marker) => {
+                write!(f, "SERVERTOOL_DENIED_CLI_MARKER: {marker}")
             }
             ServertoolCliError::MissingField(field) => {
                 write!(f, "SERVERTOOL_CLI_MISSING_FIELD: {field}")
@@ -67,10 +85,29 @@ impl std::error::Error for ServertoolCliError {}
 pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
+    validate_cli_run_input(&input)?;
     match input.tool_name.as_str() {
         "stop_message_auto" => build_stop_message_auto_run_output(input),
+        "servertool_fixture" => build_servertool_fixture_run_output(input),
         other => Err(ServertoolCliError::UnsupportedTool(other.to_string())),
     }
+}
+
+fn validate_cli_run_input(input: &ServertoolCliRunInput) -> Result<(), ServertoolCliError> {
+    if !is_safe_tool_name(&input.tool_name) {
+        return Err(ServertoolCliError::InvalidField("toolName"));
+    }
+    if is_denied_cli_projection(&input.tool_name) {
+        return Err(ServertoolCliError::DeniedTool(input.tool_name.clone()));
+    }
+    if !input.input.is_object() {
+        return Err(ServertoolCliError::InvalidField("inputJson"));
+    }
+    validate_no_denied_cli_marker(
+        &serde_json::to_string(&input.input)
+            .map_err(|_| ServertoolCliError::InvalidField("inputJson"))?,
+    )?;
+    Ok(())
 }
 
 fn build_stop_message_auto_run_output(
@@ -98,13 +135,52 @@ fn build_stop_message_auto_run_output(
     if max_repeats == 0 || repeat_count > max_repeats {
         return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
     }
+    let injected_prompt_preview = read_optional_non_empty_string(&input.input, "stdoutPreview")
+        .unwrap_or_else(|| truncate_preview(&continuation_prompt, 160));
     Ok(ServertoolCliRunOutput {
+        ok: true,
+        kind: "stop_message_auto".to_string(),
+        tool: "stop_message_auto".to_string(),
+        summary: "stopless continuation ready".to_string(),
         tool_name: input.tool_name,
         flow_id,
-        continuation_prompt,
+        continuation_prompt: continuation_prompt.clone(),
         repeat_count,
         max_repeats,
-        schema_guidance: stopless_schema_guidance(),
+        schema_guidance: Some(stopless_schema_guidance()),
+        injected_prompt_preview: Some(injected_prompt_preview),
+        input: input.input,
+    })
+}
+
+fn build_servertool_fixture_run_output(
+    input: ServertoolCliRunInput,
+) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
+    let flow_id = input
+        .flow_id
+        .as_deref()
+        .map(|value| non_empty(Some(value), "flowId"))
+        .transpose()?
+        .or_else(|| read_non_empty_string(&input.input, "flowId").ok())
+        .unwrap_or_else(|| "servertool_cli_projection".to_string());
+    Ok(ServertoolCliRunOutput {
+        ok: true,
+        kind: "servertool_fixture".to_string(),
+        tool: "servertool_fixture".to_string(),
+        summary: "servertool fixture result".to_string(),
+        tool_name: input.tool_name,
+        flow_id,
+        continuation_prompt: String::new(),
+        repeat_count: input
+            .repeat_count
+            .or_else(|| read_u32(&input.input, "repeatCount"))
+            .unwrap_or(0),
+        max_repeats: input
+            .max_repeats
+            .or_else(|| read_u32(&input.input, "maxRepeats"))
+            .unwrap_or(0),
+        schema_guidance: None,
+        injected_prompt_preview: None,
         input: input.input,
     })
 }
@@ -148,6 +224,15 @@ fn read_non_empty_string(value: &Value, field: &'static str) -> Result<String, S
     non_empty(Some(raw), field)
 }
 
+fn read_optional_non_empty_string(value: &Value, field: &'static str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn read_u32(value: &Value, field: &'static str) -> Option<u32> {
     value
         .get(field)
@@ -155,6 +240,25 @@ fn read_u32(value: &Value, field: &'static str) -> Option<u32> {
         .and_then(|n| u32::try_from(n).ok())
 }
 
+fn is_safe_tool_name(tool_name: &str) -> bool {
+    !tool_name.is_empty()
+        && tool_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn validate_no_denied_cli_marker(raw: &str) -> Result<(), ServertoolCliError> {
+    for marker in DENIED_CLI_MARKERS {
+        if raw.contains(marker) {
+            return Err(ServertoolCliError::DeniedMarker(marker));
+        }
+    }
+    Ok(())
+}
+
+fn truncate_preview(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
 
 pub fn build_client_exec_cli_projection_output(
     tool_name: &str,
@@ -163,6 +267,18 @@ pub fn build_client_exec_cli_projection_output(
     repeat_count: u32,
     max_repeats: u32,
 ) -> Result<Value, ServertoolCliError> {
+    if !is_safe_tool_name(tool_name) {
+        return Err(ServertoolCliError::InvalidField("toolName"));
+    }
+    if is_denied_cli_projection(tool_name) {
+        return Err(ServertoolCliError::DeniedTool(tool_name.to_string()));
+    }
+    if !input.is_object() {
+        return Err(ServertoolCliError::InvalidField("input"));
+    }
+    validate_no_denied_cli_marker(
+        &serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("input"))?,
+    )?;
     if !is_client_exec_cli_projection(tool_name) {
         return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
     }
@@ -179,8 +295,10 @@ pub fn build_client_exec_cli_projection_output(
                 "continuationPrompt": continuation_prompt,
                 "repeatCount": repeat_count,
                 "maxRepeats": max_repeats
-            })).map_err(|_| ServertoolCliError::InvalidField("json"))?
+            }))
+            .map_err(|_| ServertoolCliError::InvalidField("json"))?
         );
+        validate_no_denied_cli_marker(&cmd)?;
         return Ok(serde_json::json!({
             "toolName": tool_name,
             "flowId": flow_id,
@@ -197,6 +315,7 @@ pub fn build_client_exec_cli_projection_output(
         tool_name,
         serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("json"))?
     );
+    validate_no_denied_cli_marker(&cmd)?;
     Ok(serde_json::json!({
         "toolName": tool_name,
         "flowId": flow_id,
@@ -207,17 +326,23 @@ pub fn build_client_exec_cli_projection_output(
 }
 
 pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, ServertoolCliError> {
+    validate_no_denied_cli_marker(raw_output)?;
     let value: Value = serde_json::from_str(raw_output)
         .map_err(|_| ServertoolCliError::InvalidField("exec_command_output"))?;
     if !value.is_object() {
         return Err(ServertoolCliError::InvalidField("exec_command_output"));
     }
-    let tool_name = value.get("toolName")
+    let tool_name = value
+        .get("toolName")
         .and_then(|v| v.as_str())
         .ok_or(ServertoolCliError::MissingField("toolName"))?;
-    let flow_id = value.get("flowId")
+    let flow_id = value
+        .get("flowId")
         .and_then(|v| v.as_str())
         .ok_or(ServertoolCliError::MissingField("flowId"))?;
+    if is_denied_cli_projection(tool_name) {
+        return Err(ServertoolCliError::DeniedTool(tool_name.to_string()));
+    }
     if !is_client_exec_cli_projection(tool_name) {
         return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
     }
@@ -254,8 +379,16 @@ mod tests {
         assert_eq!(output.repeat_count, 1);
         assert!(output
             .schema_guidance
+            .as_ref()
+            .expect("schema guidance")
             .required_fields
             .contains(&"stopreason".to_string()));
+        assert_eq!(output.ok, true);
+        assert_eq!(output.kind, "stop_message_auto");
+        assert_eq!(
+            output.injected_prompt_preview.as_deref(),
+            Some("continue with schema")
+        );
     }
 
     #[test]
@@ -285,7 +418,60 @@ mod tests {
             },
         )
         .expect_err("web_search must not be CLI projection");
-        assert_eq!(err, ServertoolCliError::UnsupportedTool("web_search".to_string()));
+        assert_eq!(
+            err,
+            ServertoolCliError::UnsupportedTool("web_search".to_string())
+        );
+    }
+
+    #[test]
+    fn servertool_fixture_cli_output_is_executable() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "servertool_fixture".to_string(),
+                input: json!({"value":1}),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect("fixture output");
+        assert_eq!(output.ok, true);
+        assert_eq!(output.kind, "servertool_fixture");
+        assert_eq!(output.tool_name, "servertool_fixture");
+        assert_eq!(output.flow_id, "servertool_cli_projection");
+        assert!(output.schema_guidance.is_none());
+        assert_eq!(output.input, json!({"value":1}));
+    }
+
+    #[test]
+    fn cli_rejects_non_object_input_json() {
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!(["not", "object"]),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("non-object input must fail");
+        assert_eq!(err, ServertoolCliError::InvalidField("inputJson"));
+    }
+
+    #[test]
+    fn cli_rejects_old_restoration_markers_in_input() {
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "servertool_fixture".to_string(),
+                input: json!({"value":"old_cli_result_123"}),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("old marker must fail");
+        assert_eq!(err, ServertoolCliError::DeniedMarker("old_cli_"));
     }
 
     #[test]
@@ -313,12 +499,40 @@ mod tests {
     #[test]
     fn projection_rejects_fake_exec_and_web_search() {
         assert_eq!(
-            build_client_exec_cli_projection_output("web_search", "stop_message_flow", json!({}), 1, 3),
-            Err(ServertoolCliError::UnsupportedTool("web_search".to_string()))
+            build_client_exec_cli_projection_output(
+                "web_search",
+                "stop_message_flow",
+                json!({}),
+                1,
+                3
+            ),
+            Err(ServertoolCliError::UnsupportedTool(
+                "web_search".to_string()
+            ))
         );
         assert_eq!(
-            build_client_exec_cli_projection_output("fake_exec", "stop_message_flow", json!({}), 1, 3),
-            Err(ServertoolCliError::UnsupportedTool("fake_exec".to_string()))
+            build_client_exec_cli_projection_output(
+                "fake_exec",
+                "stop_message_flow",
+                json!({}),
+                1,
+                3
+            ),
+            Err(ServertoolCliError::DeniedTool("fake_exec".to_string()))
+        );
+    }
+
+    #[test]
+    fn projection_rejects_old_restoration_marker_input() {
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "servertool_fixture",
+                "servertool_cli_projection",
+                json!({"value":"old_cli_result_123"}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedMarker("old_cli_"))
         );
     }
 
@@ -359,7 +573,22 @@ mod tests {
         let raw = json!({"toolName": "web_search", "flowId": "stop_message_flow"});
         assert_eq!(
             validate_client_exec_command_result(&raw.to_string()),
-            Err(ServertoolCliError::UnsupportedTool("web_search".to_string()))
+            Err(ServertoolCliError::UnsupportedTool(
+                "web_search".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn exec_result_validation_rejects_denied_markers() {
+        let raw = json!({
+            "toolName": "stop_message_auto",
+            "flowId": "stop_message_flow",
+            "extra": "old_cli_result_123"
+        });
+        assert_eq!(
+            validate_client_exec_command_result(&raw.to_string()),
+            Err(ServertoolCliError::DeniedMarker("old_cli_"))
         );
     }
 

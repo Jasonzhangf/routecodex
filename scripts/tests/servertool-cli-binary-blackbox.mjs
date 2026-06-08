@@ -103,7 +103,30 @@ console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
   console.log('  [PASS] web_search rejected (not ClientExecCliProjection)');
 }
 
-// RED TEST 4: invalid flowId fails fast
+// RED TEST 4: servertool_fixture is an executable client projection fixture
+{
+  const raw = run('servertool_fixture', { value: 1 }, { flow: 'servertool_cli_projection' });
+  const out = JSON.parse(raw);
+  assert.equal(out.ok, true, 'fixture ok');
+  assert.equal(out.kind, 'servertool_fixture', 'fixture kind');
+  assert.equal(out.tool, 'servertool_fixture', 'fixture tool');
+  assert.equal(out.toolName, 'servertool_fixture', 'fixture toolName');
+  assert.equal(out.flowId, 'servertool_cli_projection', 'fixture flowId');
+  assert.deepEqual(out.input, { value: 1 }, 'fixture input is preserved');
+  assert.equal(out.schemaGuidance, undefined, 'fixture has no stopless schema');
+  console.log('  [PASS] servertool_fixture outputs ordinary exec_command JSON');
+}
+
+// RED TEST 5: old restoration markers fail fast
+{
+  const stderr = runExpectFailure('servertool_fixture', {
+    value: 'old_cli_result_123',
+  }, { flow: 'servertool_cli_projection' });
+  assert.ok(stderr.includes('SERVERTOOL_DENIED_CLI_MARKER: old_cli_'), stderr);
+  console.log('  [PASS] old restoration markers fail fast');
+}
+
+// RED TEST 6: invalid flowId fails fast
 {
   const stderr = runExpectFailure('stop_message_auto', {
     continuationPrompt: 'continue with schema',
@@ -114,7 +137,7 @@ console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
   console.log('  [PASS] invalid flowId fails fast');
 }
 
-// RED TEST 5: repeatCount > maxRepeats fails fast
+// RED TEST 7: repeatCount > maxRepeats fails fast
 {
   const stderr = runExpectFailure('stop_message_auto', {
     continuationPrompt: 'continue with schema',

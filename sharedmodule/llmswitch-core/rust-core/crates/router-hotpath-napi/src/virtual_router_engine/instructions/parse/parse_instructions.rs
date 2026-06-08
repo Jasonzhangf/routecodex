@@ -165,8 +165,26 @@ fn parse_stop_message_instruction(instruction: &str) -> Result<Option<RoutingIns
                 kind: "clear".to_string(),
                 text: None,
                 max_repeats: None,
+                stage_mode: None,
                 ai_mode: None,
                 source: None,
+                from_historical: false,
+            }),
+            pre_command: None,
+        }));
+    }
+    if parsed.kind == "mode" {
+        return Ok(Some(RoutingInstruction {
+            kind: "stopMessageMode".to_string(),
+            target: None,
+            provider: None,
+            stop_message: Some(StopMessageInstruction {
+                kind: "mode".to_string(),
+                text: None,
+                max_repeats: parsed.max_repeats,
+                stage_mode: parsed.stage_mode.or_else(|| Some("on".to_string())),
+                ai_mode: parsed.ai_mode,
+                source: Some("explicit_text".to_string()),
                 from_historical: false,
             }),
             pre_command: None,
@@ -193,6 +211,7 @@ fn parse_stop_message_instruction(instruction: &str) -> Result<Option<RoutingIns
             kind: "set".to_string(),
             text: Some(resolved_text),
             max_repeats: parsed.max_repeats,
+            stage_mode: None,
             ai_mode: parsed.ai_mode,
             source,
             from_historical: false,
@@ -228,7 +247,7 @@ fn parse_named_target_instruction(instruction: &str, prefix: &str) -> Option<Rou
     })
 }
 
-pub(super) fn parse_single_instruction(
+pub(crate) fn parse_single_instruction(
     instruction: &str,
 ) -> Result<Option<RoutingInstruction>, String> {
     if Regex::new(r"^clear$")

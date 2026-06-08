@@ -90,7 +90,7 @@ describe('Error Pipeline contract', () => {
   });
 
   it('handleProviderFailure is not implemented as independent policy in the TS proxy', () => {
-    const filePath = path.join(ROOT, 'sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts');
+    const filePath = path.join(ROOT, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('handleProviderFailure(event: ProviderFailureEvent): void');
     expect(source).toContain('this.nativeProxy.handleProviderFailure(JSON.stringify(event));');

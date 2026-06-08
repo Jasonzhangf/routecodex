@@ -2,18 +2,18 @@ import {
   DEFAULT_MODEL_CONTEXT_TOKENS,
   DEFAULT_ROUTE,
   type ClassificationResult,
+  type ProviderProfile,
   type RoutingFeatures,
   type RoutingInstructionMode,
   type VirtualRouterContextRoutingConfig
 } from '../native/router-hotpath/virtual-router-contracts.js';
-import { ProviderRegistry } from '../router/virtual-router/provider-registry.js';
-import type { RoutingInstructionState } from '../router/virtual-router/routing-instructions.js';
+import type { RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import type { VirtualRouterHitEvent } from '../telemetry/stats-center.js';
 
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 
 type LoggingDeps = {
-  providerRegistry: ProviderRegistry;
+  providers: Record<string, ProviderProfile>;
   contextRouting: VirtualRouterContextRoutingConfig | undefined;
 };
 
@@ -293,13 +293,9 @@ function describeContextUsage(
     return undefined;
   }
   let limit = DEFAULT_MODEL_CONTEXT_TOKENS;
-  try {
-    const profile = deps.providerRegistry.get(providerKey);
-    if (profile?.maxContextTokens && Number.isFinite(profile.maxContextTokens)) {
-      limit = profile.maxContextTokens;
-    }
-  } catch {
-    limit = DEFAULT_MODEL_CONTEXT_TOKENS;
+  const profile = deps.providers[providerKey];
+  if (profile?.maxContextTokens && Number.isFinite(profile.maxContextTokens)) {
+    limit = profile.maxContextTokens;
   }
   if (!limit || limit <= 0) {
     return undefined;

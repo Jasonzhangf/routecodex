@@ -620,6 +620,42 @@ export function extractProviderKeysForRoutingGroup(
     const firstSegment = trimmed.split('.').map((part) => part.trim()).find(Boolean);
     return firstSegment || null;
   };
+  const collectProviderIdFromTargetNode = (targetNode: unknown, out: string[]): boolean => {
+    if (!targetNode || typeof targetNode !== 'object' || Array.isArray(targetNode)) {
+      return false;
+    }
+    const record = targetNode as Record<string, unknown>;
+    const providerId = normalizeProviderId(record.providerId);
+    if (providerId) {
+      out.push(providerId);
+      return true;
+    }
+    const providerKey = normalizeProviderId(record.providerKey);
+    if (providerKey) {
+      out.push(providerKey);
+      return true;
+    }
+    return false;
+  };
+  const collectForwarderTargetProviderIds = (forwarderId: string, out: string[]): boolean => {
+    const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
+    const forwarders =
+      vr && vr.forwarders && typeof vr.forwarders === 'object' && !Array.isArray(vr.forwarders)
+        ? (vr.forwarders as Record<string, unknown>)
+        : null;
+    const forwarderNode = forwarders?.[forwarderId];
+    if (!forwarderNode || typeof forwarderNode !== 'object' || Array.isArray(forwarderNode)) {
+      return false;
+    }
+    const targets = Array.isArray((forwarderNode as Record<string, unknown>).targets)
+      ? ((forwarderNode as Record<string, unknown>).targets as unknown[])
+      : [];
+    let collected = false;
+    for (const target of targets) {
+      collected = collectProviderIdFromTargetNode(target, out) || collected;
+    }
+    return collected;
+  };
   const groupsNode = (() => {
     const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
     if (vr && typeof vr.routingPolicyGroups === 'object') {
@@ -640,6 +676,12 @@ export function extractProviderKeysForRoutingGroup(
   if (!routing) return [];
   const keys: string[] = [];
   const collectTarget = (value: unknown): void => {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.startsWith('fwd.') && collectForwarderTargetProviderIds(trimmed, keys)) {
+        return;
+      }
+    }
     const providerId = normalizeProviderId(value);
     if (providerId) keys.push(providerId);
   };

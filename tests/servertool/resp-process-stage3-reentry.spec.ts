@@ -7,8 +7,8 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
-import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { runServertoolResponseStageOrchestrationShell } from '../../sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stage3-reentry-sessions');

@@ -1,6 +1,7 @@
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import type {
+  ProviderProfile,
   RouterMetadataInput,
   VirtualRouterBootstrapInput
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
@@ -210,6 +211,10 @@ function buildMetadata(
   };
 }
 
+function listProviderKeys(providers: Record<string, ProviderProfile>, providerId: string): string[] {
+  return Object.keys(providers).filter((key) => key.startsWith(`${providerId}.`));
+}
+
 describe('VirtualRouterEngine routing instructions', () => {
   let previousSessionDir: string | undefined;
   let tempSessionDir: string | null = null;
@@ -301,14 +306,42 @@ describe('VirtualRouterEngine routing instructions', () => {
   });
 
   test('prefer does not auto-clear on cooldown (e.g. HTTP 429) and resumes after cooldown', () => {
-    const engine = buildEnginePreferFallback();
+    const input: VirtualRouterBootstrapInput = {
+      virtualrouter: {
+        providers: {
+          antigravity: {
+            id: 'antigravity',
+            type: 'openai',
+            endpoint: 'https://example.invalid',
+            auth: {
+              type: 'apikey',
+              keys: {
+                sonnetkey: { value: 'SONNET' },
+                sonnetbackup: { value: 'SONNET-BACKUP' },
+                geminikey: { value: 'GEMINI' }
+              }
+            },
+            models: {
+              'claude-sonnet-4-5': {},
+              'gemini-3-pro-high': {}
+            }
+          }
+        },
+        routing: {
+          default: ['antigravity.claude-sonnet-4-5']
+        }
+      }
+    };
+    const { config } = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
     const sessionId = 'session-prefer-cooldown';
 
     const first = engine.route(buildRequest('<**!antigravity.gemini-3-pro-high**>'), buildMetadata({ sessionId }));
     expect(first.decision.routeName).toBe('prefer');
     expect(first.target.providerKey.includes('gemini-3-pro-high')).toBe(true);
 
-    const allKeys: string[] = (engine as any).providerRegistry.listProviderKeys('antigravity');
+    const allKeys = listProviderKeys(config.providers, 'antigravity');
     const preferredKeys = allKeys.filter((key) => key.includes('gemini-3-pro-high'));
     expect(preferredKeys.length).toBeGreaterThan(0);
 
@@ -350,7 +383,38 @@ describe('VirtualRouterEngine routing instructions', () => {
   });
 
   test('prefer provider.model instructions retain all aliases for retries', () => {
-    const engine = buildEngine();
+    const input: VirtualRouterBootstrapInput = {
+      virtualrouter: {
+        providers: {
+          antigravity: {
+            id: 'antigravity',
+            type: 'openai',
+            endpoint: 'https://example.invalid',
+            auth: {
+              type: 'apikey',
+              keys: {
+                sonnetkey: { value: 'SONNET' },
+                sonnetbackup: { value: 'SONNET-BACKUP' },
+                geminikey: { value: 'GEMINI' }
+              }
+            },
+            models: {
+              'claude-sonnet-4-5': {},
+              'gemini-3-pro-high': {}
+            }
+          }
+        },
+        routing: {
+          default: [
+            'antigravity.claude-sonnet-4-5',
+            'antigravity.geminikey.gemini-3-pro-high'
+          ]
+        }
+      }
+    };
+    const { config } = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
     const sessionId = 'session-prefer-multi-key';
     const first = engine.route(
       buildRequest('<**!antigravity.claude-sonnet-4-5**>'),
@@ -366,7 +430,7 @@ describe('VirtualRouterEngine routing instructions', () => {
 
     engine.route(buildRequest(`<**#antigravity[${firstAlias}]**>`), buildMetadata({ sessionId }));
     const followUp = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
-    const claudeKeys = ((engine.providerRegistry as any).listProviderKeys('antigravity') as string[]).filter((key) =>
+    const claudeKeys = listProviderKeys(config.providers, 'antigravity').filter((key) =>
       key.includes('claude-sonnet-4-5')
     );
     const remainingKeys = claudeKeys.filter((key) => !key.includes(`.${firstAlias}.`));

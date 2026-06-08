@@ -69,6 +69,49 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
     ]);
   });
 
+  test('expands forwarder targets into real provider ids for router port allowlist', () => {
+    const userConfig = {
+      virtualrouter: {
+        forwarders: {
+          'fwd.gpt.gpt-5.5': {
+            targets: [
+              { providerId: 'sdfv', providerKey: 'sdfv.key1.gpt-5.5' },
+              { providerId: 'llmgate', providerKey: 'llmgate.key1.free-gpt-5.5' },
+              { providerId: 'asxs', providerKey: 'asxs.crsa.gpt-5.5' },
+              { providerId: 'cc', providerKey: 'cc.key1.gpt-5.5' },
+            ],
+          },
+          'fwd.minimax.MiniMax-M3': {
+            targets: [
+              { providerId: 'minimax', providerKey: 'minimax.key1.MiniMax-M3' },
+            ],
+          },
+        },
+        routingPolicyGroups: {
+          gateway_priority_5555: {
+            routing: {
+              thinking: [
+                {
+                  mode: 'priority',
+                  targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5'],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    expect(extractProviderKeysForRoutingGroup(userConfig as any, 'gateway_priority_5555').sort()).toEqual([
+      'asxs',
+      'cc',
+      'llmgate',
+      'mimo',
+      'minimax',
+      'sdfv',
+    ]);
+  });
+
   test('returns empty array for missing routingPolicyGroup', () => {
     expect(extractProviderKeysForRoutingGroup({ virtualrouter: { routingPolicyGroups: {} } } as any, 'missing')).toEqual([]);
   });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { parseRoutingInstructions } from '../../src/router/virtual-router/routing-instructions/parse.js';
+import { parseRoutingInstructions } from '../../src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 describe('stopMessage shorthand parsing', () => {
   test('legacy stopMessage prefix is ignored', () => {

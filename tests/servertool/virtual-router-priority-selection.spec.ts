@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('virtual-router priority pool selection', () => {
   test('priority pools do not round-robin when all targets are healthy', () => {

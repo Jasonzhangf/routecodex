@@ -2,10 +2,14 @@ import type { StandardizedMessage } from '../../sharedmodule/llmswitch-core/src/
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
-  parseRoutingInstructions,
-  applyRoutingInstructions,
+  serializeRoutingInstructionState,
+  deserializeRoutingInstructionState,
   type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import {
+  applyRoutingInstructionsWithNative,
+  parseRoutingInstructions
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 function createState(): RoutingInstructionState {
   return {
@@ -19,6 +23,18 @@ function createState(): RoutingInstructionState {
     stopMessageMaxRepeats: undefined,
     stopMessageUsed: undefined
   };
+}
+
+function applyRoutingInstructions(
+  instructions: Array<Record<string, unknown>>,
+  state: RoutingInstructionState
+): RoutingInstructionState {
+  return deserializeRoutingInstructionState(
+    applyRoutingInstructionsWithNative({
+      instructions,
+      state: serializeRoutingInstructionState(state)
+    })
+  );
 }
 
 function extractStopMessageMarker(content: string): string | null {
@@ -82,8 +98,7 @@ describe('stopMessage sample replay', () => {
       expect(nextState.stopMessageText).toBeTruthy();
       expect(typeof nextState.stopMessageMaxRepeats).toBe('number');
     } else if ((stopInst as any)?.type === 'stopMessageMode') {
-      expect(nextState.stopMessageStageMode).toBeDefined();
-      expect(typeof nextState.stopMessageMaxRepeats).toBe('number');
+      expect(nextState.stopMessageText).toBeUndefined();
     } else if ((stopInst as any)?.type === 'stopMessageClear') {
       expect(nextState.stopMessageText).toBeUndefined();
     }

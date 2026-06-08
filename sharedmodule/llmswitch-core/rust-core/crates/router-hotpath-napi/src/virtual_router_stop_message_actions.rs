@@ -108,6 +108,14 @@ fn apply_stop_message_set(
         .unwrap_or(false);
     // Historical user markers are replay context only; they must not mutate current
     // runtime state (otherwise exhausted stopMessage can be re-armed on every turn).
+    let has_cleared_tombstone = from_historical
+        && read_finite_f64(state.get("stopMessageUpdatedAt")).is_some()
+        && read_trimmed_string(state.get("stopMessageText")).is_none()
+        && read_finite_f64(state.get("stopMessageMaxRepeats")).is_none()
+        && read_finite_f64(state.get("stopMessageUsed")).is_none();
+    if has_cleared_tombstone {
+        return make_result(true, Map::new(), Vec::new());
+    }
     if from_historical && !is_same_instruction {
         return make_result(true, Map::new(), Vec::new());
     }
@@ -159,6 +167,15 @@ fn apply_stop_message_mode(
 
     let explicit_max = read_finite_f64(instruction.get("stopMessageMaxRepeats")).map(to_i64_floor);
     let preserved_max = read_finite_f64(state.get("stopMessageMaxRepeats")).map(to_i64_floor);
+    let has_text = read_trimmed_string(state.get("stopMessageText"))
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+    let has_legacy_mode_state = preserved_max.map(|value| value > 0).unwrap_or(false)
+        || read_finite_f64(state.get("stopMessageUsed")).is_some()
+        || read_finite_f64(state.get("stopMessageLastUsedAt")).is_some();
+    if !has_text && !has_legacy_mode_state {
+        return make_result(true, Map::new(), Vec::new());
+    }
 
     let resolved_max = match explicit_max {
         Some(v) if v > 0 => v,
@@ -181,12 +198,12 @@ fn apply_stop_message_clear(now_ms: i64) -> NapiResult<String> {
     let mut unset = Vec::<&'static str>::new();
 
     set_i64(&mut set, "stopMessageUpdatedAt", now_ms);
+    set_i64(&mut set, "stopMessageLastUsedAt", now_ms);
 
     push_unset(&mut unset, "stopMessageText");
     push_unset(&mut unset, "stopMessageMaxRepeats");
     push_unset(&mut unset, "stopMessageUsed");
     push_unset(&mut unset, "stopMessageSource");
-    push_unset(&mut unset, "stopMessageLastUsedAt");
     push_unset(&mut unset, "stopMessageStageMode");
     push_unset(&mut unset, "stopMessageAiMode");
     push_unset(&mut unset, "stopMessageAiSeedPrompt");
@@ -226,6 +243,60 @@ mod tests {
                 .and_then(|v| v.as_i64()),
             Some(0)
         );
+    }
+
+    #[test]
+    fn historical_set_does_not_rearm_after_clear_tombstone() {
+        let instruction = json!({
+            "type": "stopMessageSet",
+            "stopMessageText": "继续执行",
+            "stopMessageMaxRepeats": 2,
+            "fromHistoricalUserMessage": true
+        });
+        let state = json!({
+            "stopMessageUpdatedAt": 12345,
+            "stopMessageLastUsedAt": 12345
+        });
+        let output =
+            apply_stop_message_instruction_json(instruction.to_string(), state.to_string(), 23456)
+                .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed
+            .get("set")
+            .and_then(|v| v.as_object())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn clear_emits_non_rearming_tombstone() {
+        let instruction = json!({
+            "type": "stopMessageClear"
+        });
+        let state = json!({
+            "stopMessageText": "继续执行",
+            "stopMessageMaxRepeats": 2,
+            "stopMessageUsed": 0,
+            "stopMessageStageMode": "on"
+        });
+        let output =
+            apply_stop_message_instruction_json(instruction.to_string(), state.to_string(), 34567)
+                .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        let set = parsed.get("set").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(
+            set.get("stopMessageUpdatedAt").and_then(|v| v.as_i64()),
+            Some(34567)
+        );
+        assert_eq!(
+            set.get("stopMessageLastUsedAt").and_then(|v| v.as_i64()),
+            Some(34567)
+        );
+        let unset = parsed.get("unset").and_then(|v| v.as_array()).unwrap();
+        assert!(unset.iter().any(|v| v.as_str() == Some("stopMessageText")));
+        assert!(!unset
+            .iter()
+            .any(|v| v.as_str() == Some("stopMessageLastUsedAt")));
     }
 }
 

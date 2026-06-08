@@ -9,7 +9,8 @@ fn read_conversation_scope(metadata: &Value) -> Option<String> {
 
 fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
     let continuation = metadata.get("continuation").and_then(|v| v.as_object())?;
-    let continuation_scope = read_trimmed_string(continuation.get("continuationScope"))?;
+    let continuation_scope = read_trimmed_string(continuation.get("continuationScope"))
+        .or_else(|| read_trimmed_string(continuation.get("stickyScope")))?;
     if continuation_scope != "request_chain" {
         return None;
     }
@@ -19,6 +20,21 @@ fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
             .and_then(|v| v.as_object())
             .and_then(|resume_from| read_trimmed_string(resume_from.get("requestId")))
     })
+}
+
+fn resolve_continuation_sticky_scope_key(metadata: &Value) -> Option<String> {
+    let continuation = metadata.get("continuation").and_then(|v| v.as_object())?;
+    let sticky_scope = read_trimmed_string(continuation.get("stickyScope"))
+        .or_else(|| read_trimmed_string(continuation.get("continuationScope")))?;
+    match sticky_scope.as_str() {
+        "session" => read_trimmed_string(metadata.get("sessionId"))
+            .map(|session_id| format!("session:{}", session_id)),
+        "conversation" => read_trimmed_string(metadata.get("conversationId"))
+            .map(|conversation_id| format!("conversation:{}", conversation_id)),
+        "request" => read_trimmed_string(metadata.get("requestId")),
+        "request_chain" => resolve_continuation_request_chain_key(metadata),
+        _ => None,
+    }
 }
 
 fn resolve_legacy_responses_request_chain_key(metadata: &Value) -> Option<String> {
@@ -35,6 +51,9 @@ pub(crate) fn is_continuation_request(metadata: &Value) -> bool {
 pub(crate) fn resolve_routing_state_key(metadata: &Value) -> String {
     if let Some(request_chain_key) = resolve_continuation_request_chain_key(metadata) {
         return request_chain_key;
+    }
+    if let Some(sticky_scope_key) = resolve_continuation_sticky_scope_key(metadata) {
+        return sticky_scope_key;
     }
 
     if let Some(protocol) = metadata.get("providerProtocol").and_then(|v| v.as_str()) {
@@ -92,6 +111,12 @@ pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
     };
     if !tmux_session.is_empty() {
         return Some(format!("tmux:{}", tmux_session));
+    }
+    if let Some(session) = read_trimmed_string(metadata.get("sessionId")) {
+        return Some(format!("session:{}", session));
+    }
+    if let Some(conversation) = read_trimmed_string(metadata.get("conversationId")) {
+        return Some(format!("conversation:{}", conversation));
     }
     None
 }
@@ -177,7 +202,23 @@ mod tests {
 
         assert_eq!(
             resolve_routing_state_key(&metadata),
-            "req_session_scope".to_string()
+            "session:session_should_win".to_string()
+        );
+    }
+
+    #[test]
+    fn uses_sticky_session_continuation_scope() {
+        let metadata = json!({
+            "requestId": "req_sticky_session_scope",
+            "sessionId": "sticky_session_should_win",
+            "continuation": {
+                "stickyScope": "session"
+            }
+        });
+
+        assert_eq!(
+            resolve_routing_state_key(&metadata),
+            "session:sticky_session_should_win".to_string()
         );
     }
 
@@ -249,14 +290,17 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_scope_does_not_fallback_to_plain_session_scope() {
+    fn stop_message_scope_falls_back_to_plain_session_scope() {
         let metadata = json!({
             "providerProtocol": "openai-chat",
             "requestId": "req_chat_cont_1",
             "sessionId": "session_should_not_become_stop_scope"
         });
 
-        assert_eq!(resolve_stop_message_scope(&metadata), None);
+        assert_eq!(
+            resolve_stop_message_scope(&metadata),
+            Some("session:session_should_not_become_stop_scope".to_string())
+        );
     }
 
     #[test]

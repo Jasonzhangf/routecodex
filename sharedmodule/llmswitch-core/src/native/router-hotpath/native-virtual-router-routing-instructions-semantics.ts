@@ -1,5 +1,8 @@
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import type { RoutingInstruction, RoutingInstructionState } from './native-virtual-router-routing-state.js';
+import { serializeRoutingInstructionState } from './native-virtual-router-routing-state.js';
+import type { StandardizedMessage } from '../../conversion/hub/types/standardized.js';
 import { resolveRccUserDir } from '../../runtime/user-data-paths.js';
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
@@ -137,6 +140,121 @@ export function cleanRoutingInstructionMarkersWithNative(
     }
     const parsed = parseRecordPayload(result);
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function applyRoutingInstructionsWithNative(input: {
+  instructions: Array<Record<string, unknown>>;
+  state: Record<string, unknown>;
+}): Record<string, unknown> {
+  const capability = 'applyRoutingInstructionsJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const result = fn(inputJson);
+    if (typeof result !== 'string' || !result) {
+      return fail('empty result');
+    }
+    const parsed = parseRecordPayload(result);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function readLatestUserMessageText(messages: StandardizedMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role !== 'user' || typeof message.content !== 'string') {
+      continue;
+    }
+    const trimmed = message.content.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return '';
+}
+
+export function parseRoutingInstructions(messages: StandardizedMessage[]): RoutingInstruction[] {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return [];
+  }
+  const instructions =
+    parseRoutingInstructionsWithNative(messages as unknown as Array<Record<string, unknown>>) as unknown as RoutingInstruction[];
+  const latestUserMessage = readLatestUserMessageText(messages);
+  if (!latestUserMessage || !latestUserMessage.includes('\u200BstopMessage')) {
+    return instructions;
+  }
+  return instructions.filter((inst) => !(
+    inst.type === 'stopMessageSet' ||
+    inst.type === 'stopMessageMode' ||
+    inst.type === 'stopMessageClear'
+  ));
+}
+
+export function parseAndPreprocessRoutingInstructions(messages: StandardizedMessage[]): RoutingInstruction[] {
+  const rawInstructions = parseRoutingInstructions(messages);
+  if (rawInstructions.length === 0) {
+    return [];
+  }
+  const clearIndex = rawInstructions.findIndex((inst) => inst.type === 'clear');
+  if (clearIndex < 0) {
+    return rawInstructions;
+  }
+  return rawInstructions.slice(clearIndex + 1);
+}
+
+export function extractClearInstruction(messages: StandardizedMessage[]): boolean {
+  return parseRoutingInstructions(messages).some((inst) => inst.type === 'clear');
+}
+
+export function extractStopMessageClearInstruction(messages: StandardizedMessage[]): boolean {
+  return parseRoutingInstructions(messages).some((inst) => inst.type === 'stopMessageClear');
+}
+
+export function applyRoutingInstructionsToStateWithNative(input: {
+  instructions: Array<Record<string, unknown>>;
+  state: RoutingInstructionState;
+}): Record<string, unknown> {
+  return applyRoutingInstructionsWithNative({
+    instructions: input.instructions,
+    state: serializeRoutingInstructionState(input.state)
+  });
+}
+
+export function isPreCommandScriptPathAllowedWithNative(rawPath: string): boolean {
+  const capability = 'isPreCommandScriptPathAllowedJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify({
+    path: rawPath,
+    rccUserDir: resolveRccUserDir()
+  });
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const result = fn(inputJson);
+    if (typeof result !== 'string' || !result) {
+      return fail('empty result');
+    }
+    const allowed = parseRecordPayload(result)?.allowed;
+    return typeof allowed === 'boolean' ? allowed : fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

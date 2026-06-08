@@ -5,11 +5,11 @@ import { runServerToolOrchestration } from "../../sharedmodule/llmswitch-core/sr
 import {
   serializeRoutingInstructionState,
   type RoutingInstructionState,
-} from "../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js";
+} from "../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js";
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync,
-} from "../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js";
+} from "../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js";
 import type { JsonObject } from "../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js";
 import type { AdapterContext } from "../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js";
 import { resetStopMessageRuntimeConfigCacheForTests } from "../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js";
@@ -309,11 +309,11 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       providerProtocol: "openai-chat",
     });
     expect(toolCall.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
 
     const afterLimit = await runStop("req-reset-after-tool-stop-4");
-    expect(afterLimit.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+    expect(afterLimit.executed).toBe(true);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
   test("非 /goal 场景出现非 stop finish_reason 不触发 stopless", async () => {
@@ -344,11 +344,11 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       providerProtocol: "openai-chat",
     });
     expect(nonStop.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
 
     const afterLimit = await runStop("req-reset-after-non-stop-4");
-    expect(afterLimit.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
+    expect(afterLimit.executed).toBe(true);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
   test("非 /goal 场景即使 sticky 里有 completed goal 也默认自动续", async () => {

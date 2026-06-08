@@ -92,14 +92,40 @@ export interface ClientExecCliProjectionOutput {
   schemaGuidance?: unknown;
 }
 
+export interface ServertoolBackendRoutePolicyInput {
+  toolName: string;
+  flowId?: string;
+  input?: unknown;
+  entryEndpoint?: string;
+}
+
+export interface ServertoolBackendRoutePolicyOutput {
+  toolName: string;
+  flowId: string;
+  routeHint: string;
+  executionMode: 'reenter';
+  shapeGuard: {
+    allowRequiresAction: boolean;
+    preserveStreaming: boolean;
+    failOnMissingPayload: boolean;
+  };
+  originDelta: {
+    requiresOriginSeed: boolean;
+    applyAssistantDelta: boolean;
+  };
+  finalize: {
+    contextDecorationMode?: string;
+    shortCircuitRequiresAction: boolean;
+  };
+  input: unknown;
+}
+
 // ── Stop gateway context ────────────────────────────────────────────────────
 
 export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
   const capability = 'inspectStopGatewaySignal';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    // Fallback: import and use the TS implementation directly
-    // This avoids circular deps during migration
     throw new Error('inspectStopGatewaySignal native unavailable');
   }
   const payloadJson = JSON.stringify(payload);
@@ -185,4 +211,19 @@ export function validateClientExecCommandResultWithNative(rawOutput: string): Re
     throw new Error(`validateClientExecCommandResultJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson) as Record<string, unknown>;
+}
+
+export function planServertoolBackendRoutePolicyWithNative(
+  input: ServertoolBackendRoutePolicyInput,
+): ServertoolBackendRoutePolicyOutput {
+  const capability = 'planServertoolBackendRoutePolicyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolBackendRoutePolicyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolBackendRoutePolicyJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as ServertoolBackendRoutePolicyOutput;
 }

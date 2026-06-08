@@ -17,7 +17,7 @@ const {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync
-} = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
+} = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
 
 describe('routing state store observability', () => {
   const prevHome = process.env.RCC_HOME;

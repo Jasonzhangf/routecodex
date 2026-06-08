@@ -65,7 +65,7 @@ import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../router/virtual-router/routing-state-store.js';
+} from '../native/router-hotpath/native-virtual-router-routing-state.js';
 
 function recordServertoolFollowupStage(
   stageRecorder: StageRecorder | undefined,

@@ -18,7 +18,7 @@ pub(crate) mod provider_runtime_ingress;
 mod quota;
 pub(crate) mod rcc_fence;
 pub(crate) mod routing;
-mod routing_state_store;
+pub(crate) mod routing_state_store;
 mod time_utils;
 
 #[allow(unused_imports)]

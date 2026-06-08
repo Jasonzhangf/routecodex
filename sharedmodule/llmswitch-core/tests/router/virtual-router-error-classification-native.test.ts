@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { VirtualRouterEngine } from '../../src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../src/native/router-hotpath/native-virtual-router-runtime.js';
 
 function buildConfig(providerKey = 'test.key1.gpt-test'): any {
   return {

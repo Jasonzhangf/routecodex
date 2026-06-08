@@ -1,5 +1,5 @@
 import { buildRouterMetadataInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
-import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
+import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('hub pipeline router metadata builder', () => {
   it('preserves followup routing directives required by virtual router', () => {
@@ -10,12 +10,11 @@ describe('hub pipeline router metadata builder', () => {
       stream: false,
       direction: 'request',
       providerProtocol: 'openai-responses',
+      includeEstimatedInputTokens: true,
       metadata: {
         __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
         disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
-        __rt: {
-          estimatedInputTokens: 123
-        }
+        estimatedInputTokens: 123
       }
     });
 
@@ -86,12 +85,9 @@ describe('hub pipeline router metadata builder', () => {
         resumeFrom: {
           requestId: 'chain_from_semantics'
         }
-      },
-      responsesResume: {
-        previousRequestId: 'chain_from_semantics',
-        restoredFromResponseId: 'resp_from_semantics'
       }
     });
+    expect(output).not.toHaveProperty('responsesResume');
     expect(resolveRoutingStateKey(output as any)).toBe('chain_from_semantics');
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 const originalFactory = (VirtualRouterEngine as unknown as { prototype: { nativeProxy: unknown } }).prototype;

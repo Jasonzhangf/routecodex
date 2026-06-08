@@ -3,11 +3,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 
-import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { persistStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import {
   applyStopMessageSnapshotToState,

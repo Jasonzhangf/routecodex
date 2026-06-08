@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 
 describe('routing state store paths', () => {
   const prevHome = process.env.RCC_HOME;
@@ -19,7 +19,7 @@ describe('routing state store paths', () => {
     process.env.RCC_HOME = tempRoot;
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;
-    delete process.env.ROUTECODEX_SESSION_DIR;
+    process.env.ROUTECODEX_SESSION_DIR = tempRoot;
   });
 
   afterEach(() => {
@@ -34,7 +34,7 @@ describe('routing state store paths', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test('writes tmux state to sessions root and session/conversation state to state/routing', () => {
+  test('writes all persistent routing scopes to explicit session-dir override', () => {
     const state = {
       allowedProviders: new Set<string>(),
       disabledProviders: new Set<string>(),
@@ -47,12 +47,12 @@ describe('routing state store paths', () => {
     saveRoutingInstructionStateSync('conversation:test-conv', state);
     saveRoutingInstructionStateSync('tmux:test-tmux', state);
 
-    expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-test-session.json'))).toBe(true);
-    expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'conversation-test-conv.json'))).toBe(true);
-    expect(fs.existsSync(path.join(tempRoot, 'sessions', 'tmux-test-tmux.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, 'session-test-session.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, 'conversation-test-conv.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempRoot, 'tmux-test-tmux.json'))).toBe(true);
 
-    expect(fs.existsSync(path.join(tempRoot, 'sessions', 'session-test-session.json'))).toBe(false);
-    expect(fs.existsSync(path.join(tempRoot, 'sessions', 'conversation-test-conv.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-test-session.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, 'sessions', 'tmux-test-tmux.json'))).toBe(false);
   });
 
   test('uses ROUTECODEX_SESSION_DIR override for routing scope too', () => {
@@ -95,7 +95,7 @@ describe('routing state store paths', () => {
     const restored = loadRoutingInstructionStateSync('session:goal-state');
     expect(restored?.stoplessGoalState).toEqual(state.stoplessGoalState);
     expect(
-      fs.existsSync(path.join(tempRoot, 'state', 'routing', 'session-goal-state.json'))
+      fs.existsSync(path.join(tempRoot, 'session-goal-state.json'))
     ).toBe(true);
   });
 });

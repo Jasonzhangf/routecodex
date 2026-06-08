@@ -27,8 +27,8 @@ const TEST_SESSION_IDS = [
 ];
 
 type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
-type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
-type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
+type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
+type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
 type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
 
 let bootstrapVirtualRouterConfig: BootstrapModule['bootstrapVirtualRouterConfig'];
@@ -77,8 +77,8 @@ describe('stopMessage is tmux-scoped', () => {
     }
 
     const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
-    const engineMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
-    const stickyMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
+    const engineMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
+    const stickyMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
     const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
     bootstrapVirtualRouterConfig = bootstrapMod.bootstrapVirtualRouterConfig;
     VirtualRouterEngine = engineMod.VirtualRouterEngine;
@@ -393,7 +393,9 @@ describe('stopMessage is tmux-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    expect(fs.existsSync(sessionStatePath(sessionId))).toBe(false);
+    const cleared = readSessionState(sessionId);
+    expect(cleared?.state?.stopMessageText).toBeUndefined();
+    expect(cleared?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
   test('inline stopMessage:clear marker with trailing text still clears stopMessage', () => {
@@ -434,7 +436,9 @@ describe('stopMessage is tmux-scoped', () => {
       } as any
     );
 
-    expect(fs.existsSync(sessionStatePath(sessionId))).toBe(false);
+    const cleared = readSessionState(sessionId);
+    expect(cleared?.state?.stopMessageText).toBeUndefined();
+    expect(cleared?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
   test('stopMessage:clear still applies when later user message has no marker (clock-like tail)', () => {
@@ -517,8 +521,9 @@ describe('stopMessage is tmux-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    const filepath = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
-    expect(fs.existsSync(filepath)).toBe(false);
+    const cleared = readSessionState(sessionId);
+    expect(cleared?.state?.stopMessageText).toBeUndefined();
+    expect(cleared?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
   test('activate then <**clear**> does not trigger stop_message followup', async () => {
@@ -556,8 +561,9 @@ describe('stopMessage is tmux-scoped', () => {
       }
     );
 
-    const filepath = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
-    expect(fs.existsSync(filepath)).toBe(false);
+    const cleared = readSessionState(sessionId);
+    expect(cleared?.state?.stopMessageText).toBeUndefined();
+    expect(cleared?.state?.stopMessageMaxRepeats).toBeUndefined();
 
     const adapterContext: AdapterContext = {
       requestId: 'req_stopmessage_clear_no_followup',

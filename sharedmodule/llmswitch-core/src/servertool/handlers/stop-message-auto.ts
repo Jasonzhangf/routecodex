@@ -35,7 +35,7 @@ import {
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
-import { loadRoutingInstructionStateSync } from '../../router/virtual-router/routing-state-store.js';
+import { loadRoutingInstructionStateSync } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
 import type {
   StopMessageDecisionContext,
   StopMessageDecision
@@ -483,11 +483,23 @@ function readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys: string
       continue;
     }
     const snapshot = resolveStopMessageSnapshot(loadRoutingInstructionStateSync(key));
+    if (isDefaultStopMessageExhausted(snapshot)) {
+      continue;
+    }
     if (snapshot) {
       return snapshot;
     }
   }
   return null;
+}
+
+function isDefaultStopMessageExhausted(snapshot: ReturnType<typeof resolveStopMessageSnapshot>): boolean {
+  return Boolean(
+    snapshot &&
+    snapshot.source === 'default' &&
+    snapshot.maxRepeats > 0 &&
+    snapshot.used >= snapshot.maxRepeats
+  );
 }
 
 function readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys: string[]): 'on' | 'off' | 'auto' | undefined {
@@ -496,6 +508,9 @@ function readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys: strin
       continue;
     }
     const state = loadRoutingInstructionStateSync(key);
+    if (isStopMessageClearedTombstone(state)) {
+      continue;
+    }
     const stageMode = normalizeStopMessageStageMode(state?.stopMessageStageMode);
     if (stageMode) {
       return stageMode;
@@ -506,6 +521,7 @@ function readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys: strin
 
 function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: string[]): {
   exhaustedDefault: boolean;
+  cleared: boolean;
 } {
   for (const key of candidateKeys) {
     if (!isPersistentStickyKey(key)) {
@@ -516,10 +532,26 @@ function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: strin
       continue;
     }
     if (state.stopMessageSource === 'default_exhausted') {
-      return { exhaustedDefault: true };
+      return { exhaustedDefault: true, cleared: false };
+    }
+    if (isDefaultStopMessageExhausted(resolveStopMessageSnapshot(state))) {
+      return { exhaustedDefault: true, cleared: false };
+    }
+    if (isStopMessageClearedTombstone(state)) {
+      return { exhaustedDefault: false, cleared: true };
     }
   }
-  return { exhaustedDefault: false };
+  return { exhaustedDefault: false, cleared: false };
+}
+
+function isStopMessageClearedTombstone(state: ReturnType<typeof loadRoutingInstructionStateSync>): boolean {
+  if (!state) {
+    return false;
+  }
+  const hasText = typeof state.stopMessageText === 'string' && state.stopMessageText.trim().length > 0;
+  const hasLifecycleStamp =
+    (typeof state.stopMessageLastUsedAt === 'number' && Number.isFinite(state.stopMessageLastUsedAt));
+  return !hasText && hasLifecycleStamp;
 }
 
 function resolveStopMessageDefaultEnabledLive(): boolean {
@@ -735,14 +767,17 @@ const handler: ServerToolHandler = async (
     : null;
   const runtimeSnap = resolveRuntimeStopMessageState(rt);
   const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
-  const persistedGoal = readStoplessGoalState(ctx.adapterContext).state;
-  const effectiveGoal = requestScopedGoal.state ?? persistedGoal;
+  const persistedGoalRead = readStoplessGoalState(ctx.adapterContext);
+  const effectiveGoal = requestScopedGoal.state ?? persistedGoalRead.state;
+  const hasExplicitGoalState = requestScopedGoal.explicit || Boolean(persistedGoalRead.state);
   const tombstone = persistedLookupPlan.readStopMessageTombstone
     ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
-    : { exhaustedDefault: false };
+    : { exhaustedDefault: false, cleared: false };
   const explicitMode = (
-    readRuntimeStopMessageStageMode(rt)
-    ?? readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys)
+    tombstone.cleared
+      ? undefined
+      : (readRuntimeStopMessageStageMode(rt)
+        ?? readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys))
   );
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);
@@ -777,13 +812,13 @@ const handler: ServerToolHandler = async (
     } : undefined,
     persisted_default_exhausted: tombstone.exhaustedDefault,
     explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
-    goal_status: requestScopedGoal.explicit && effectiveGoal?.status === 'active'
+    goal_status: hasExplicitGoalState && effectiveGoal?.status === 'active'
       ? 'active' as any
       : (!effectiveGoal || effectiveGoal.status === 'idle' || effectiveGoal.status === 'active'
         ? 'idle' as any
         : effectiveGoal.status as any),
     plan_mode_active: isPlanModeActiveFromCapturedRequest(ctx.adapterContext),
-    default_enabled: resolveStopMessageDefaultEnabledLive(),
+    default_enabled: tombstone.cleared ? false : resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
     default_text: resolveStopMessageDefaultTextLive(),
     empty_reply_continue_local: shouldYieldToEmptyReplyContinueLocal({
@@ -821,7 +856,7 @@ const handler: ServerToolHandler = async (
       return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
-      if (decision.skip_reason === 'skip_not_stop_finish_reason') {
+      if (!stopGateway.eligible) {
         resetPersistedStopMessageUsed(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       }
       if (decision.skip_reason === 'skip_no_stopmessage_snapshot' || decision.skip_reason === 'skip_goal_active') {

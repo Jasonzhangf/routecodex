@@ -457,9 +457,29 @@ impl VirtualRouterEngineCore {
                         all_candidate_keys.push(key.clone());
                     }
                 }
+                let mut pool_candidate_targets: Vec<String> = Vec::new();
+                for key in &pool.targets {
+                    if let Some(resolved_key) = self.resolve_forwarder_candidate_for_pool(
+                        env,
+                        key,
+                        &excluded_keys,
+                        forwarder_sticky_session_id.as_deref(),
+                        &mut unavailable_route_pools,
+                        &route_name,
+                        &pool.id,
+                        &pool.targets,
+                    ) {
+                        if !pool_candidate_targets.contains(&resolved_key) {
+                            pool_candidate_targets.push(resolved_key);
+                        }
+                    }
+                }
+                if pool_candidate_targets.is_empty() {
+                    continue;
+                }
                 let floor_candidates = apply_non_availability_filters(
                     &self.provider_registry,
-                    &pool.targets,
+                    &pool_candidate_targets,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
@@ -467,7 +487,7 @@ impl VirtualRouterEngineCore {
                 );
                 let mut available = self.apply_standard_filters(
                     env,
-                    &pool.targets,
+                    &pool_candidate_targets,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
@@ -595,88 +615,17 @@ impl VirtualRouterEngineCore {
                 };
 
                 for key in dedupe_candidate_order(selected_candidates) {
-                    let resolved_key = if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(
-                        &key,
-                    ) {
-                        // Pre-collect (clone out targets, then drop borrow) so we can call mutating self
-                        let cloned_targets: Vec<
-                            crate::virtual_router_engine::forwarder::ForwarderTarget,
-                        > = self
-                            .forwarder_registry
-                            .get(&key)
-                            .map(|e| e.targets.clone())
-                            .unwrap_or_default();
-                        let mut available_real_keys: std::collections::HashSet<String> =
-                            std::collections::HashSet::new();
-                        for target in &cloned_targets {
-                            if !target.disabled
-                                && !excluded_keys.contains(&target.provider_key)
-                                && self.is_provider_available(env, &target.provider_key)
-                            {
-                                available_real_keys.insert(target.provider_key.clone());
-                            }
-                        }
-                        match self.forwarder_registry.select(
-                            &key,
-                            &mut self.load_balancer,
-                            |k: &str| available_real_keys.contains(k),
-                            forwarder_sticky_session_id.as_deref(),
-                        ) {
-                            Ok(real) => Some(real),
-                            Err(e) if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET => {
-                                unavailable_route_pools.push(json!({
-                                    "routeName": route_name,
-                                    "poolId": pool.id,
-                                    "poolTargets": pool.targets,
-                                    "unavailableProviders": {
-                                        "candidateProviderKeys": [key.clone()],
-                                        "items": [{
-                                            "providerKey": key.clone(),
-                                            "reasons": [{
-                                                "type": "forwarder_no_available_target",
-                                                "code": e
-                                            }]
-                                        }]
-                                    }
-                                }));
-                                None
-                            }
-                            Err(e) => {
-                                unavailable_route_pools.push(json!({
-                                    "routeName": route_name,
-                                    "poolId": pool.id,
-                                    "poolTargets": pool.targets,
-                                    "unavailableProviders": {
-                                        "candidateProviderKeys": [key.clone()],
-                                        "items": [{
-                                            "providerKey": key.clone(),
-                                            "reasons": [{
-                                                "type": "forwarder_selection_error",
-                                                "message": e
-                                            }]
-                                        }]
-                                    }
-                                }));
-                                None
-                            }
-                        }
-                    } else {
-                        Some(key)
-                    };
-
-                    if let Some(provider_key) = resolved_key {
-                        return Ok(SelectionResult::new(
-                            provider_key,
-                            route_name.to_string(),
-                            pool.targets.clone(),
-                            Some(pool.id.clone()),
-                        )
-                        .with_route_params(pool.route_params.clone())
-                        .with_unavailable_providers(
-                            (!unavailable_route_pools.is_empty())
-                                .then_some(Value::Array(unavailable_route_pools)),
-                        ));
-                    }
+                    return Ok(SelectionResult::new(
+                        key,
+                        route_name.to_string(),
+                        pool.targets.clone(),
+                        Some(pool.id.clone()),
+                    )
+                    .with_route_params(pool.route_params.clone())
+                    .with_unavailable_providers(
+                        (!unavailable_route_pools.is_empty())
+                            .then_some(Value::Array(unavailable_route_pools)),
+                    ));
                 }
             }
         }
@@ -715,6 +664,85 @@ impl VirtualRouterEngineCore {
             }
         }
         self.health_manager.is_available(provider_key, now)
+    }
+
+    fn resolve_forwarder_candidate_for_pool(
+        &mut self,
+        env: Env,
+        key: &str,
+        excluded_keys: &HashSet<String>,
+        forwarder_sticky_session_id: Option<&str>,
+        unavailable_route_pools: &mut Vec<Value>,
+        route_name: &str,
+        pool_id: &str,
+        pool_targets: &[String],
+    ) -> Option<String> {
+        if !crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(key) {
+            return Some(key.to_string());
+        }
+
+        let cloned_targets: Vec<crate::virtual_router_engine::forwarder::ForwarderTarget> = self
+            .forwarder_registry
+            .get(key)
+            .map(|e| e.targets.clone())
+            .unwrap_or_default();
+        let mut available_real_keys: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for target in &cloned_targets {
+            if !target.disabled
+                && !excluded_keys.contains(&target.provider_key)
+                && self.is_provider_available(env, &target.provider_key)
+            {
+                available_real_keys.insert(target.provider_key.clone());
+            }
+        }
+
+        match self.forwarder_registry.select(
+            key,
+            &mut self.load_balancer,
+            |provider_key: &str| available_real_keys.contains(provider_key),
+            forwarder_sticky_session_id,
+        ) {
+            Ok(real) => Some(real),
+            Err(e)
+                if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET =>
+            {
+                unavailable_route_pools.push(json!({
+                    "routeName": route_name,
+                    "poolId": pool_id,
+                    "poolTargets": pool_targets,
+                    "unavailableProviders": {
+                        "candidateProviderKeys": [key],
+                        "items": [{
+                            "providerKey": key,
+                            "reasons": [{
+                                "type": "forwarder_no_available_target",
+                                "code": e
+                            }]
+                        }]
+                    }
+                }));
+                None
+            }
+            Err(e) => {
+                unavailable_route_pools.push(json!({
+                    "routeName": route_name,
+                    "poolId": pool_id,
+                    "poolTargets": pool_targets,
+                    "unavailableProviders": {
+                        "candidateProviderKeys": [key],
+                        "items": [{
+                            "providerKey": key,
+                            "reasons": [{
+                                "type": "forwarder_selection_error",
+                                "message": e
+                            }]
+                        }]
+                    }
+                }));
+                None
+            }
+        }
     }
 
     pub(crate) fn is_singleton_provider_soft_available_from_rust_quota(
@@ -1628,6 +1656,90 @@ mod tests {
             )
             .expect("second selection should succeed");
         assert_eq!(second.provider_key, first.provider_key);
+    }
+
+    #[test]
+    fn priority_pool_expands_forwarder_before_provider_filters() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "gpt-primary.key1.gpt-5.5".to_string(),
+            json!({
+                "providerKey": "gpt-primary.key1.gpt-5.5",
+                "providerType": "openai",
+                "modelId": "gpt-5.5",
+                "enabled": true,
+                "maxContextTokens": 900000
+            }),
+        );
+        providers.insert(
+            "backup.key1.backup-model".to_string(),
+            json!({
+                "providerKey": "backup.key1.backup-model",
+                "providerType": "anthropic",
+                "modelId": "backup-model",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.gpt.gpt-5.5".to_string(),
+            json!({
+                "forwarderId": "fwd.gpt.gpt-5.5",
+                "protocol": "openai",
+                "modelId": "gpt-5.5",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "targets": [
+                    {"providerKey": "gpt-primary.key1.gpt-5.5", "priority": 1, "disabled": false}
+                ],
+                "stickyKey": "session"
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![json!({
+                "id": "thinking-with-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.gpt.gpt-5.5", "backup.key1.backup-model"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({ "sessionId": "forwarder-filter-test" }),
+                &classification,
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("selection should keep forwarder primary");
+
+        assert_eq!(selected.provider_key, "gpt-primary.key1.gpt-5.5");
+        assert_eq!(
+            selected.pool,
+            vec!["fwd.gpt.gpt-5.5", "backup.key1.backup-model"]
+        );
     }
 
     #[test]

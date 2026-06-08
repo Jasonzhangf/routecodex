@@ -5,10 +5,10 @@ import {
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
+import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   saveRoutingInstructionStateSync
-} from '../../../router/virtual-router/routing-state-store.js';
+} from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import { isStopEligibleForServerTool } from '../../stop-gateway-context.js';
 import { extractResponsesOutputText, hasToolLikeOutput } from './ai-followup.js';
 import { resolveStopMessageSnapshot } from './routing-state.js';
@@ -103,7 +103,6 @@ export function persistStopMessageState(stickyKey: string | undefined, state: Ro
     Boolean(state.preCommandScriptPath && state.preCommandScriptPath.trim()) ||
     (typeof state.preCommandUpdatedAt === 'number' && Number.isFinite(state.preCommandUpdatedAt));
   const hasLifecycleStamp =
-    (typeof state.stopMessageUpdatedAt === 'number' && Number.isFinite(state.stopMessageUpdatedAt)) ||
     (typeof state.stopMessageLastUsedAt === 'number' && Number.isFinite(state.stopMessageLastUsedAt));
   const empty =
     (!state.stopMessageText || !state.stopMessageText.trim()) &&

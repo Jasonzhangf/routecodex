@@ -1,10 +1,10 @@
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { ProcessedRequest, StandardizedRequest, StandardizedMessage } from '../types/standardized.js';
-import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions/types.js';
+import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
-} from '../../../router/virtual-router/routing-state-store.js';
+} from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import { countRequestTokens } from '../../../native/router-hotpath/native-virtual-router-runtime.js';
 
 type UsageLike = {

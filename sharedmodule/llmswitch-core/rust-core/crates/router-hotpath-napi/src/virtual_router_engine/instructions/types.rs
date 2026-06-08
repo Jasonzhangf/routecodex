@@ -14,6 +14,10 @@ pub(crate) struct RoutingInstructionState {
     pub disabled_models: HashMap<String, HashSet<String>>,
     pub stop_message_state: StopMessageState,
     pub pre_command: PreCommandState,
+    pub chat_process_last_total_tokens: Option<i64>,
+    pub chat_process_last_input_tokens: Option<i64>,
+    pub chat_process_last_message_count: Option<i64>,
+    pub chat_process_last_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,6 +65,7 @@ pub(crate) struct StopMessageInstruction {
     pub kind: String,
     pub text: Option<String>,
     pub max_repeats: Option<i64>,
+    pub stage_mode: Option<String>,
     pub ai_mode: Option<String>,
     pub source: Option<String>,
     pub from_historical: bool,
@@ -83,6 +88,7 @@ pub(crate) struct StopMessageInstructionParseOutput {
     pub kind: String,
     pub text: Option<String>,
     pub max_repeats: Option<i64>,
+    pub stage_mode: Option<String>,
     pub ai_mode: Option<String>,
 }
 

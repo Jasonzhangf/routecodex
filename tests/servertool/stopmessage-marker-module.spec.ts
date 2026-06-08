@@ -2,7 +2,7 @@ import {
   buildStopMessageMarkerParseLog,
   cleanStopMessageMarkersInPlace,
   parseStopMessageInstruction
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-markers.js';
+} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.js';
 
 describe('stopmessage marker module', () => {
   test('parseStopMessageInstruction remains available from unified module', () => {
@@ -10,6 +10,15 @@ describe('stopmessage marker module', () => {
     expect(parsed).toEqual(expect.objectContaining({
       type: 'stopMessageSet',
       stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 3
+    }));
+  });
+
+  test('parseStopMessageInstruction preserves mode-only instruction', () => {
+    const parsed = parseStopMessageInstruction('stopMessage:on,3');
+    expect(parsed).toEqual(expect.objectContaining({
+      type: 'stopMessageMode',
+      stopMessageStageMode: 'on',
       stopMessageMaxRepeats: 3
     }));
   });

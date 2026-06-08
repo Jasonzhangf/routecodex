@@ -50,7 +50,7 @@ function buildStateIntegrationFailure(stage: string, error: unknown, details?: R
 export function loadRoutingInstructionStateSync(key: string): unknown | null {
   const routingStateStoreModule = requireCoreDist<{
     loadRoutingInstructionStateSync?: (key: string) => unknown | null;
-  }>('router/virtual-router/routing-state-store');
+  }>('native/router-hotpath/native-virtual-router-routing-state');
   const fn = routingStateStoreModule.loadRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -69,7 +69,7 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
   const routingStateStoreModule = requireCoreDist<{
     saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
-  }>('router/virtual-router/routing-state-store');
+  }>('native/router-hotpath/native-virtual-router-routing-state');
   const fn = routingStateStoreModule.saveRoutingInstructionStateAsync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(
@@ -88,7 +88,7 @@ export function saveRoutingInstructionStateAsync(key: string, state: unknown | n
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
   const routingStateStoreModule = requireCoreDist<{
     saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
-  }>('router/virtual-router/routing-state-store');
+  }>('native/router-hotpath/native-virtual-router-routing-state');
   const fn = routingStateStoreModule.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     throw buildStateIntegrationFailure(

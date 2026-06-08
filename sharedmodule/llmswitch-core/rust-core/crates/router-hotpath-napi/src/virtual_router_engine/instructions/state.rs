@@ -285,6 +285,7 @@ fn apply_stop_message_instruction_to_state(
         "type".to_string(),
         Value::String(match instruction.kind.as_str() {
             "clear" => "stopMessageClear".to_string(),
+            "mode" => "stopMessageMode".to_string(),
             _ => "stopMessageSet".to_string(),
         }),
     );
@@ -295,6 +296,12 @@ fn apply_stop_message_instruction_to_state(
         instruction_map.insert(
             "stopMessageMaxRepeats".to_string(),
             Value::Number(max_repeats.into()),
+        );
+    }
+    if let Some(mode) = &instruction.stage_mode {
+        instruction_map.insert(
+            "stopMessageStageMode".to_string(),
+            Value::String(mode.clone()),
         );
     }
     if let Some(mode) = &instruction.ai_mode {

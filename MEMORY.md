@@ -2393,3 +2393,10 @@ Tags: responses-sse, started-stream, error-projection, stream-intent, no-json-de
 - Direct provider errors (429/5xx/524) may delegate to the unified ErrorErr05 execution plan to switch/reroute providers. This is not ErrorHandlingCenter policy; ErrorHandlingCenter remains ErrorErr06 projection only.
 - Verified: native build PASS; `npx tsc --noEmit --pretty false` PASS; `npm run verify:repo-sanity` PASS; focused provider-ingress/error-contract Jest PASS (5 suites / 15 tests). `verify:vr-no-ts-runtime` still RED on remaining VR TS files, so this is a slice closeout, not full VR closeout.
 Tags: provider-runtime-ingress, error-chain, router-direct, native-owner, virtual-router, 2026-06-08
+
+## 2026-06-08 5555 GPT forwarder port allowlist root cause
+- Router port `allowedProviders` must expand `virtualrouter.forwarders.*.targets` to real provider ids. Treating `fwd.gpt.gpt-5.5` as provider id `fwd` filters out real GPT targets (`sdfv/llmgate/asxs/cc`) before provider resolution and makes priority pools appear to "leak" to the next non-GPT pool.
+- Root-cause evidence: live sample `req_1780881806721_e15cf40b` selected `minimax.key1.MiniMax-M3` while metadata allowlist was `["fwd","mimo","minimax",...]`; red test showed `extractProviderKeysForRoutingGroup()` returned `["fwd","mimo"]`.
+- Fix owner: `src/server/runtime/http-server/http-server-bootstrap.ts::extractProviderKeysForRoutingGroup()` expands forwarder target provider ids for router-port scope. Do not patch Virtual Router priority order for this symptom unless expanded allowlist is already correct.
+- Verified live after install/restart: 5555 `gpt-5.5` sample `req_1780882406344_e7775619` had allowlist `sdfv,llmgate,asxs,cc,...` and selected `llmgate.key1.free-gpt-5.5`; `sdfv.1.gpt-5.5` was legitimately skipped due to persisted `__http_503_daily_cooldown__`.
+Tags: virtual-router, forwarder, allowedProviders, router-port, priority, 5555, 2026-06-08

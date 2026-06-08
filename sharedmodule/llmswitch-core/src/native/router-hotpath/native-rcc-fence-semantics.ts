@@ -1,4 +1,4 @@
-import type { StoplessGoalStateSnapshot } from '../../router/virtual-router/routing-instructions.js';
+import type { StoplessGoalStateSnapshot } from './native-virtual-router-routing-state.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { parseRecord, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
 

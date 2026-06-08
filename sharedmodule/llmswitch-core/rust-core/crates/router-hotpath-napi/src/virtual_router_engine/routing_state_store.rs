@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::instructions::{InstructionTarget, RoutingInstructionState};
 use super::rcc_fence::StoplessGoalState;
@@ -148,7 +149,7 @@ pub(crate) fn persist_routing_instruction_state(
             return;
         }
     };
-    if let Err(e) = fs::write(&filepath, text) {
+    if let Err(e) = atomic_write_file(&filepath, &text) {
         eprintln!(
             "[routing_state_store] Failed to write state file {:?}: {}",
             filepath, e
@@ -193,7 +194,7 @@ fn resolve_rcc_user_dir() -> Option<PathBuf> {
     Some(home_dir.join(".rcc"))
 }
 
-fn resolve_session_dir() -> Option<PathBuf> {
+fn resolve_override_session_dir() -> Option<PathBuf> {
     if let Some(explicit) = read_override_session_dir() {
         return Some(explicit);
     }
@@ -203,7 +204,24 @@ fn resolve_session_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(trimmed));
         }
     }
+    None
+}
+
+fn resolve_session_dir() -> Option<PathBuf> {
+    if let Some(explicit) = resolve_override_session_dir() {
+        return Some(explicit);
+    }
     resolve_rcc_user_dir().map(|base| base.join("sessions"))
+}
+
+fn resolve_routing_state_dir(key: &str) -> Option<PathBuf> {
+    if let Some(explicit) = resolve_override_session_dir() {
+        return Some(explicit);
+    }
+    if key.starts_with("tmux:") {
+        return resolve_rcc_user_dir().map(|base| base.join("sessions"));
+    }
+    resolve_rcc_user_dir().map(|base| base.join("state").join("routing"))
 }
 
 fn key_to_filename(key: &str) -> Option<String> {
@@ -230,7 +248,7 @@ fn key_to_filename(key: &str) -> Option<String> {
 }
 
 fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
-    let dir = resolve_session_dir()?;
+    let dir = resolve_routing_state_dir(key)?;
     let filename = key_to_filename(key)?;
     Some(dir.join(Path::new(&filename)))
 }
@@ -265,6 +283,35 @@ pub(crate) fn persist_provider_health_state(state: &Value) {
     let _ = fs::write(&filepath, text);
 }
 
+fn atomic_write_file(filepath: &Path, content: &str) -> std::io::Result<()> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let filename = filepath
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("routing-state");
+    let tmp = filepath.with_file_name(format!("{}.tmp-{}-{}", filename, std::process::id(), now));
+    fs::write(&tmp, content)?;
+    match fs::rename(&tmp, filepath) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            let _ = fs::remove_file(filepath);
+            match fs::rename(&tmp, filepath) {
+                Ok(()) => Ok(()),
+                Err(second) => {
+                    let _ = fs::remove_file(&tmp);
+                    Err(std::io::Error::new(
+                        second.kind(),
+                        format!("rename failed: {}; retry failed: {}", first, second),
+                    ))
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
     is_stopless_goal_empty(state)
         && state.forced_target.is_none()
@@ -275,6 +322,7 @@ pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
         && state.disabled_models.is_empty()
         && is_stop_message_empty(state)
         && is_pre_command_empty(state)
+        && is_chat_process_usage_empty(state)
 }
 
 fn is_stopless_goal_empty(state: &RoutingInstructionState) -> bool {
@@ -286,6 +334,7 @@ fn is_stop_message_empty(state: &RoutingInstructionState) -> bool {
         && state.stop_message_state.stop_message_text.is_none()
         && state.stop_message_state.stop_message_max_repeats.is_none()
         && state.stop_message_state.stop_message_used.is_none()
+        && state.stop_message_state.stop_message_last_used_at.is_none()
         && state.stop_message_state.stop_message_stage_mode.is_none()
         && state.stop_message_state.stop_message_ai_mode.is_none()
         && state
@@ -301,7 +350,14 @@ fn is_pre_command_empty(state: &RoutingInstructionState) -> bool {
         && state.pre_command.pre_command_updated_at.is_none()
 }
 
-fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value {
+fn is_chat_process_usage_empty(state: &RoutingInstructionState) -> bool {
+    state.chat_process_last_total_tokens.is_none()
+        && state.chat_process_last_input_tokens.is_none()
+        && state.chat_process_last_message_count.is_none()
+        && state.chat_process_last_updated_at.is_none()
+}
+
+pub(crate) fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value {
     let mut out = Map::new();
     serialize_stopless_goal_state(state, &mut out);
     if let Some(target) = &state.forced_target {
@@ -362,7 +418,110 @@ fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value
     out.insert("disabledModels".to_string(), Value::Array(disabled_models));
     serialize_stop_message_state(state, &mut out);
     serialize_pre_command_state(state, &mut out);
+    serialize_chat_process_usage_state(state, &mut out);
     Value::Object(out)
+}
+
+pub(crate) fn merge_stop_message_from_persisted(
+    existing: &RoutingInstructionState,
+    persisted: Option<&RoutingInstructionState>,
+) -> RoutingInstructionState {
+    let Some(persisted) = persisted else {
+        return existing.clone();
+    };
+    let mut out = existing.clone();
+    let existing_updated_at = existing.stop_message_state.stop_message_updated_at;
+    let persisted_updated_at = persisted.stop_message_state.stop_message_updated_at;
+    let existing_is_newer = existing_updated_at
+        .map(|existing_at| {
+            persisted_updated_at
+                .map(|persisted_at| persisted_at < existing_at)
+                .unwrap_or(true)
+        })
+        .unwrap_or(false);
+
+    if existing_is_newer {
+        let existing_used = existing.stop_message_state.stop_message_used.unwrap_or(0);
+        let persisted_used = persisted.stop_message_state.stop_message_used.unwrap_or(0);
+        let persisted_has_usage_progress = persisted_used > existing_used
+            && existing
+                .stop_message_state
+                .stop_message_last_used_at
+                .map(|existing_last| {
+                    persisted
+                        .stop_message_state
+                        .stop_message_last_used_at
+                        .map(|persisted_last| persisted_last >= existing_last)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true);
+        if persisted_has_usage_progress && same_stop_message_config(existing, persisted) {
+            out.stopless_goal_state = merge_stopless_goal_state(existing, persisted);
+            out.stop_message_state.stop_message_used =
+                persisted.stop_message_state.stop_message_used;
+            out.stop_message_state.stop_message_last_used_at =
+                persisted.stop_message_state.stop_message_last_used_at;
+            out.stop_message_state.stop_message_ai_seed_prompt = persisted
+                .stop_message_state
+                .stop_message_ai_seed_prompt
+                .clone();
+            out.stop_message_state.stop_message_ai_history =
+                persisted.stop_message_state.stop_message_ai_history.clone();
+        }
+        return out;
+    }
+
+    out.stopless_goal_state = merge_stopless_goal_state(existing, persisted);
+    out.stop_message_state = persisted.stop_message_state.clone();
+    out
+}
+
+fn same_stop_message_config(
+    existing: &RoutingInstructionState,
+    persisted: &RoutingInstructionState,
+) -> bool {
+    normalize_text(existing.stop_message_state.stop_message_text.as_deref())
+        == normalize_text(persisted.stop_message_state.stop_message_text.as_deref())
+        && existing.stop_message_state.stop_message_max_repeats
+            == persisted.stop_message_state.stop_message_max_repeats
+        && normalize_text(
+            existing
+                .stop_message_state
+                .stop_message_stage_mode
+                .as_deref(),
+        ) == normalize_text(
+            persisted
+                .stop_message_state
+                .stop_message_stage_mode
+                .as_deref(),
+        )
+        && normalize_text(existing.stop_message_state.stop_message_ai_mode.as_deref())
+            == normalize_text(persisted.stop_message_state.stop_message_ai_mode.as_deref())
+}
+
+fn normalize_text(value: Option<&str>) -> String {
+    value.unwrap_or("").trim().to_string()
+}
+
+fn merge_stopless_goal_state(
+    existing: &RoutingInstructionState,
+    persisted: &RoutingInstructionState,
+) -> Option<StoplessGoalState> {
+    match (
+        &existing.stopless_goal_state,
+        &persisted.stopless_goal_state,
+    ) {
+        (None, None) => None,
+        (Some(goal), None) => Some(goal.clone()),
+        (None, Some(goal)) => Some(goal.clone()),
+        (Some(existing_goal), Some(persisted_goal)) => {
+            if existing_goal.updated_at > persisted_goal.updated_at {
+                Some(existing_goal.clone())
+            } else {
+                Some(persisted_goal.clone())
+            }
+        }
+    }
 }
 
 fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<String, Value>) {
@@ -579,7 +738,39 @@ fn serialize_pre_command_state(state: &RoutingInstructionState, out: &mut Map<St
     }
 }
 
-fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstructionState> {
+fn serialize_chat_process_usage_state(
+    state: &RoutingInstructionState,
+    out: &mut Map<String, Value>,
+) {
+    if let Some(value) = state.chat_process_last_total_tokens {
+        out.insert(
+            "chatProcessLastTotalTokens".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+    if let Some(value) = state.chat_process_last_input_tokens {
+        out.insert(
+            "chatProcessLastInputTokens".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+    if let Some(value) = state.chat_process_last_message_count {
+        out.insert(
+            "chatProcessLastMessageCount".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+    if let Some(value) = state.chat_process_last_updated_at {
+        out.insert(
+            "chatProcessLastUpdatedAt".to_string(),
+            Value::Number(value.max(0).into()),
+        );
+    }
+}
+
+pub(crate) fn deserialize_routing_instruction_state(
+    value: &Value,
+) -> Option<RoutingInstructionState> {
     let obj = value.as_object()?;
     let mut state = RoutingInstructionState::default();
     deserialize_stopless_goal_state(obj, &mut state);
@@ -617,6 +808,8 @@ fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstruc
                 for key in keys {
                     if let Some(text) = key.as_str() {
                         set.insert(text.to_string());
+                    } else if let Some(num) = key.as_i64() {
+                        set.insert(num.to_string());
                     }
                 }
             }
@@ -649,6 +842,7 @@ fn deserialize_routing_instruction_state(value: &Value) -> Option<RoutingInstruc
     }
     deserialize_stop_message_state(obj, &mut state);
     deserialize_pre_command_state(obj, &mut state);
+    deserialize_chat_process_usage_state(obj, &mut state);
     Some(state)
 }
 
@@ -815,6 +1009,28 @@ fn deserialize_pre_command_state(obj: &Map<String, Value>, state: &mut RoutingIn
         .map(|v| v.to_string());
     state.pre_command.pre_command_updated_at =
         obj.get("preCommandUpdatedAt").and_then(|v| v.as_i64());
+}
+
+fn deserialize_chat_process_usage_state(
+    obj: &Map<String, Value>,
+    state: &mut RoutingInstructionState,
+) {
+    state.chat_process_last_total_tokens = obj
+        .get("chatProcessLastTotalTokens")
+        .and_then(|v| v.as_i64())
+        .map(|v| v.max(0));
+    state.chat_process_last_input_tokens = obj
+        .get("chatProcessLastInputTokens")
+        .and_then(|v| v.as_i64())
+        .map(|v| v.max(0));
+    state.chat_process_last_message_count = obj
+        .get("chatProcessLastMessageCount")
+        .and_then(|v| v.as_i64())
+        .map(|v| v.max(0));
+    state.chat_process_last_updated_at = obj
+        .get("chatProcessLastUpdatedAt")
+        .and_then(|v| v.as_i64())
+        .map(|v| v.max(0));
 }
 
 // ============================================================
