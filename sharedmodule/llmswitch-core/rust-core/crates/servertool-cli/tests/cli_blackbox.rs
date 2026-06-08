@@ -114,19 +114,37 @@ fn non_object_input_json_fails_fast() {
 }
 
 #[test]
-fn old_restoration_marker_fails_fast() {
+fn fake_exec_tool_name_fails_fast() {
     let output = Command::new(bin())
-        .args([
-            "run",
-            "servertool_fixture",
-            "--input-json",
-            r#"{"value":"old_cli_result_123"}"#,
-        ])
+        .args(["run", "fake_exec", "--input-json", r#"{"value":1}"#])
         .output()
         .expect("run routecodex-servertool");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("SERVERTOOL_DENIED_CLI_MARKER: old_cli_"));
+    assert!(stderr.contains("SERVERTOOL_DENIED_TOOL: fake_exec"));
+}
+
+#[test]
+fn denied_cli_markers_fail_fast() {
+    for (raw_value, expected_marker) in [
+        ("--ticket abc", "--ticket"),
+        ("stcli_123", "stcli_"),
+        ("rcc_cli_123", "rcc_cli_"),
+        ("old_cli_123", "old_cli_"),
+        ("old_cli_result_123", "old_cli_"),
+    ] {
+        let input = format!(r#"{{"value":"{raw_value}"}}"#);
+        let output = Command::new(bin())
+            .args(["run", "servertool_fixture", "--input-json", &input])
+            .output()
+            .expect("run routecodex-servertool");
+        assert!(!output.status.success(), "{raw_value} must fail-fast");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("SERVERTOOL_DENIED_CLI_MARKER: {expected_marker}")),
+            "stderr={stderr}"
+        );
+    }
 }
 
 #[test]
