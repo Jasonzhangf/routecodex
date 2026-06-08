@@ -332,33 +332,38 @@ Evidence observed in the current worktree:
 - `scripts/verify-servertool-rust-only.mjs` already has gates for persisted lookup ownership and several TS semantic resurrection patterns.
 - TS servertool source still contains many semantic owner candidates under `sharedmodule/llmswitch-core/src/servertool/**`, especially backend-route blocks, stop-message-auto submodules, orchestration policy blocks, registry, pre-command hooks, and server-side tool execution.
 
-Known current red:
+Current verified status:
 
-- `tests/servertool/stopmessage-session-scope.spec.ts` is the active stopless validation red in the current dirty worktree.
-- The failure shape is persisted/tombstone lifecycle related: mode-only state can persist unexpectedly, clear must persist a non-rearming tombstone, and stale historical stopMessage must not reapply after clear/consume.
-- Before touching Virtual Router scope logic, inspect the TS stop-message persistence shell first. `stopMessageUpdatedAt` alone must not keep a persisted stop-message state file alive; clear tombstones need `stopMessageUpdatedAt` plus `stopMessageLastUsedAt` so historical user markers cannot re-arm after clear.
+- Stopless persisted-state focused validation is green in the current dirty worktree:
+  - `tests/servertool/stopmessage-session-scope.spec.ts`
+  - `tests/servertool/stop-message-native-decision.spec.ts`
+  - `tests/servertool/stop-message-auto.config-precedence.spec.ts`
+  - `tests/sharedmodule/stop-message-state-sync.spec.ts`
+- `servertool-core` now owns backend-route outcome policy contract through `backend_route_contract.rs`.
+- `router-hotpath-napi` exports `planServertoolBackendRoutePolicyJson`, and the TS native wrapper exposes `planServertoolBackendRoutePolicyWithNative`.
+- Runtime shells for `web_search` and `vision_auto` now consume Rust backend-route plans; focused backend-route behavior suites are green:
+  - `tests/servertool/server-side-web-search.spec.ts`
+  - `tests/servertool/vision-flow.spec.ts`
+  - `tests/servertool/servertool-mixed-tools.spec.ts`
 
 Next execution order:
 
-1. Close the stopless persisted-state red by aligning TS persistence shell behavior with Rust empty-state semantics, preserving clear tombstones as explicit non-rearming persisted state, and avoiding any fallback or silent cleanup path.
-2. Re-run the focused stop-message validation stack until green:
-   - `npm run jest:run -- --runTestsByPath tests/servertool/stopmessage-session-scope.spec.ts --runInBand --forceExit`
-   - `npm run jest:run -- --runTestsByPath tests/servertool/stop-message-native-decision.spec.ts tests/servertool/stop-message-auto.config-precedence.spec.ts tests/sharedmodule/stop-message-state-sync.spec.ts --runInBand --forceExit`
-3. Re-run servertool Rust-only gates and Rust core tests:
+1. Collapse or physically delete TS backend-route semantic owners after Rust plan ownership is wired and green:
+   - `backend-route-flow-policy.ts`
+   - `backend-route-shape-guard.ts`
+   - `backend-route-origin-delta.ts`
+   - `backend-route-finalize-block.ts`
+   - related web_search / vision semantic helper blocks.
+2. Re-run servertool Rust-only gates and Rust core tests:
    - `cargo test -p servertool-core`
    - `cargo test -p servertool-cli`
    - `cargo test -p router-hotpath-napi test_plan_stop_message_persisted_lookup_json_uses_servertool_core_contract --lib -- --nocapture`
+   - `cargo test -p router-hotpath-napi plans_backend_route_policy_via_servertool_core_bridge --lib -- --nocapture`
+   - `npm run jest:run -- --runTestsByPath tests/servertool/server-side-web-search.spec.ts tests/servertool/vision-flow.spec.ts tests/servertool/servertool-mixed-tools.spec.ts --runInBand --forceExit`
    - `npm run verify:servertool-rust-only`
    - `npx tsc --noEmit --pretty false`
-4. Move backend-route outcome policy into Rust-owned contract modules:
-   - route hint eligibility,
-   - shape guard,
-   - flow policy,
-   - origin delta,
-   - finalization decision.
-5. Collapse or physically delete TS backend-route semantic files after Rust plan ownership and focused tests are green.
-6. Tighten `verify:servertool-rust-only` so any restored TS backend-route/stopless semantic owner fails the gate.
-7. Finish with build/install and real sample validation only after code gates pass.
+3. Tighten `verify:servertool-rust-only` so any restored TS backend-route/stopless semantic owner fails the gate.
+4. Finish with build/install and real sample validation only after code gates pass.
 
 Coordination boundary:
 

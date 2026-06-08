@@ -3897,6 +3897,286 @@ pub fn build_servertool_tool_output_payload_json(input_json: String) -> NapiResu
     serde_json::to_string(&base).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+fn web_search_engine_matches_family(provider_key: &str, family: &str) -> bool {
+    let expected = family.trim().to_ascii_lowercase();
+    if expected.is_empty() {
+        return false;
+    }
+    let token = provider_key.trim().to_ascii_lowercase();
+    !token.is_empty()
+        && (token == expected
+            || token.starts_with(format!("{expected}.").as_str())
+            || token.contains(format!(".{expected}.").as_str())
+            || token
+                .split(|ch: char| matches!(ch, '.' | '-' | '_' | ':' | '/'))
+                .any(|part| part == expected))
+}
+
+#[napi]
+pub fn web_search_is_gemini_engine(provider_key_json: String) -> NapiResult<String> {
+    let provider_key: Option<String> = serde_json::from_str(&provider_key_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize providerKey: {e}")))?;
+    serde_json::to_string(&web_search_engine_matches_family(
+        provider_key.as_deref().unwrap_or(""),
+        "gemini",
+    ))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_is_qwen_engine(provider_key_json: String) -> NapiResult<String> {
+    let provider_key: Option<String> = serde_json::from_str(&provider_key_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize providerKey: {e}")))?;
+    serde_json::to_string(&web_search_engine_matches_family(
+        provider_key.as_deref().unwrap_or(""),
+        "qwen",
+    ))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_is_glm_engine(provider_key_json: String) -> NapiResult<String> {
+    let provider_key: Option<String> = serde_json::from_str(&provider_key_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize providerKey: {e}")))?;
+    serde_json::to_string(&web_search_engine_matches_family(
+        provider_key.as_deref().unwrap_or(""),
+        "glm",
+    ))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn web_search_normalize_result_count_value(value: &Value) -> u64 {
+    let parsed = match value {
+        Value::Number(number) => number.as_u64().or_else(|| {
+            number
+                .as_i64()
+                .and_then(|item| if item > 0 { Some(item as u64) } else { None })
+        }),
+        Value::String(raw) => raw.trim().parse::<u64>().ok(),
+        _ => None,
+    };
+    parsed
+        .filter(|count| *count > 0)
+        .map(|count| count.min(10))
+        .unwrap_or(10)
+}
+
+#[napi]
+pub fn web_search_normalize_result_count_json(value_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&value_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize count: {e}")))?;
+    serde_json::to_string(&web_search_normalize_result_count_value(&value))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_build_system_prompt(target_count: u32) -> NapiResult<String> {
+    let count = target_count.clamp(1, 10);
+    Ok(format!(
+        "You are a web search engine. Return up to {count} concise, current results. Include title, URL, source/date when available, and a short summary grounded in the search results."
+    ))
+}
+
+#[napi]
+pub fn web_search_sanitize_backend_error(message_json: String) -> NapiResult<String> {
+    let message: String = serde_json::from_str(&message_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize backend error: {e}")))?;
+    let mut sanitized = message.trim().to_string();
+    for marker in ["Bearer ", "sk-", "api_key=", "apiKey=", "Authorization:"] {
+        if sanitized.contains(marker) {
+            sanitized = sanitized.replace(marker, "[redacted]");
+        }
+    }
+    if sanitized.is_empty() {
+        sanitized = "web_search backend failed".to_string();
+    }
+    Ok(sanitized)
+}
+
+fn web_search_read_string(row: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| read_optional_trimmed_string(row.get(*key)))
+}
+
+fn web_search_hit_from_record(record: &Map<String, Value>) -> Option<Value> {
+    let link = web_search_read_string(record, &["link", "url"])?;
+    let mut hit = Map::new();
+    if let Some(title) = web_search_read_string(record, &["title"]) {
+        hit.insert("title".to_string(), Value::String(title));
+    }
+    hit.insert("link".to_string(), Value::String(link));
+    if let Some(content) = web_search_read_string(record, &["content", "snippet"]) {
+        hit.insert("content".to_string(), Value::String(content));
+    }
+    if let Some(media) = web_search_read_string(record, &["media", "source"]) {
+        hit.insert("media".to_string(), Value::String(media));
+    }
+    if let Some(publish_date) = web_search_read_string(
+        record,
+        &[
+            "publish_date",
+            "publishDate",
+            "timestamp_format",
+            "timestamp",
+            "time",
+        ],
+    ) {
+        hit.insert("publish_date".to_string(), Value::String(publish_date));
+    }
+    if let Some(refer) = web_search_read_string(record, &["refer"]) {
+        hit.insert("refer".to_string(), Value::String(refer));
+    }
+    Some(Value::Object(hit))
+}
+
+fn web_search_collect_hits_from_array(items: &[Value], target_count: u64, out: &mut Vec<Value>) {
+    for item in items {
+        if out.len() >= target_count as usize {
+            break;
+        }
+        let Some(record) = item.as_object() else {
+            continue;
+        };
+        if let Some(hit) = web_search_hit_from_record(record) {
+            out.push(hit);
+        }
+    }
+}
+
+fn web_search_find_hits_array<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Vec<Value>> {
+    let record = value.as_object()?;
+    for key in keys {
+        if let Some(items) = record.get(*key).and_then(Value::as_array) {
+            return Some(items);
+        }
+    }
+    for key in keys {
+        if let Some(items) = record
+            .get("data")
+            .and_then(Value::as_object)
+            .and_then(|data| data.get(*key))
+            .and_then(Value::as_array)
+        {
+            return Some(items);
+        }
+    }
+    None
+}
+
+#[napi]
+pub fn web_search_collect_hits_json(
+    chat_response_json: String,
+    target_count: u32,
+) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&chat_response_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize web_search response: {e}")))?;
+    let count = target_count.clamp(1, 10) as u64;
+    let mut hits = Vec::new();
+    if let Some(items) = web_search_find_hits_array(&value, &["results", "hits", "docs", "data"]) {
+        web_search_collect_hits_from_array(items, count, &mut hits);
+    }
+    serde_json::to_string(&hits).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_limit_hits_json(hits_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&hits_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize web_search hits: {e}")))?;
+    let mut hits = Vec::new();
+    if let Some(items) = value.as_array() {
+        web_search_collect_hits_from_array(items, 10, &mut hits);
+    }
+    serde_json::to_string(&hits).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_format_hits_summary_json(hits_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&hits_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize web_search hits: {e}")))?;
+    let Some(items) = value.as_array() else {
+        return Ok(String::new());
+    };
+    let mut lines = Vec::new();
+    for (idx, item) in items.iter().enumerate().take(10) {
+        let Some(record) = item.as_object() else {
+            continue;
+        };
+        let title =
+            web_search_read_string(record, &["title"]).unwrap_or_else(|| "Untitled".to_string());
+        let link = web_search_read_string(record, &["link", "url"]).unwrap_or_default();
+        let content = web_search_read_string(record, &["content", "snippet"]).unwrap_or_default();
+        let line = if content.is_empty() {
+            format!("{}. {} - {}", idx + 1, title, link)
+        } else {
+            format!("{}. {} - {} ({})", idx + 1, title, link, content)
+        };
+        lines.push(line);
+    }
+    Ok(lines.join("\n"))
+}
+
+fn web_search_assistant_message_from_openai_chat(value: &Value) -> Option<Value> {
+    value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .filter(|message| message.is_object())
+        .cloned()
+}
+
+#[napi]
+pub fn web_search_extract_assistant_message_json(chat_response_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&chat_response_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize chat response: {e}")))?;
+    let assistant = web_search_assistant_message_from_openai_chat(&value).unwrap_or(Value::Null);
+    serde_json::to_string(&assistant).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_build_tool_messages_json(chat_response_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&chat_response_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize chat response: {e}")))?;
+    let outputs = value
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut messages = Vec::new();
+    for output in outputs {
+        let Some(record) = output.as_object() else {
+            continue;
+        };
+        let Some(tool_call_id) = read_optional_trimmed_string(record.get("tool_call_id")) else {
+            continue;
+        };
+        let name =
+            read_optional_trimmed_string(record.get("name")).unwrap_or_else(|| "tool".to_string());
+        let content = match record.get("content") {
+            Some(Value::String(raw)) => raw.clone(),
+            Some(value) => serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
+            None => "null".to_string(),
+        };
+        messages.push(serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "content": content
+        }));
+    }
+    serde_json::to_string(&messages).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn web_search_find_array_json(value_json: String) -> NapiResult<String> {
+    let value: Value = serde_json::from_str(&value_json)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize value: {e}")))?;
+    let array = web_search_find_hits_array(&value, &["results", "hits", "docs", "data"])
+        .cloned()
+        .unwrap_or_default();
+    serde_json::to_string(&array).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 /// Read patch text from parsed args — try `patch`, `input`, `diff`, `changes` fields.
 fn read_patch_text_from_args(args: &serde_json::Value) -> String {
     for key in &["patch", "input", "diff", "changes"] {

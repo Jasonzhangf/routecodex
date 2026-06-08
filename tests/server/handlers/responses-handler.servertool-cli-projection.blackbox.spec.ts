@@ -111,9 +111,10 @@ describe('servertool CLI projection blackbox', () => {
       requestId: 'req_stop_cli_lifecycle'
     }) as Record<string, any>;
     const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
-    expect(reasoning?.content?.[0]?.type).toBe('reasoning_text');
-    expect(reasoning?.content?.[0]?.text).toContain('阶段完成');
-    expect(reasoning?.content?.[0]?.text).not.toContain(input.continuationPrompt);
+    expect(reasoning?.summary?.[0]?.type).toBe('summary_text');
+    expect(reasoning?.summary?.[0]?.text).toContain('阶段完成');
+    expect(reasoning?.summary?.[0]?.text).not.toContain(input.continuationPrompt);
+    expect(reasoning?.content).toBeUndefined();
   });
 
   it('does not re-project stop_message_auto after its exec_command output is already in request history', async () => {

@@ -10,6 +10,7 @@ import {
   visionBuildPinnedMetadataWithNative,
   visionExtractOriginalUserPromptWithNative
 } from '../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolBackendRoutePolicyWithNative } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 
 const FLOW_ID = 'vision_flow';
 const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(
@@ -18,6 +19,18 @@ const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(
 
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   if (!ctx.capabilities.reenterPipeline) {
+    return null;
+  }
+  const backendRoutePolicy = planServertoolBackendRoutePolicyWithNative({
+    toolName: 'vision_auto',
+    flowId: FLOW_ID,
+    input: {
+      adapterContext: ctx.adapterContext,
+      capturedChatRequest: getCapturedRequest(ctx.adapterContext)
+    },
+    entryEndpoint: ctx.entryEndpoint
+  });
+  if (backendRoutePolicy.eligible === false) {
     return null;
   }
   if (!shouldRunVisionFlow(ctx)) {
@@ -43,7 +56,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   };
 
   return {
-    flowId: FLOW_ID,
+    flowId: backendRoutePolicy.flowId || FLOW_ID,
     backend,
     finalize: async ({ backendResult }) => {
       if (!backendResult || backendResult.kind !== 'vision_analysis') {
@@ -72,7 +85,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       return {
         chatResponse: ctx.base,
         execution: {
-          flowId: FLOW_ID,
+          flowId: backendRoutePolicy.flowId || FLOW_ID,
           followup: {
             requestIdSuffix: ':vision_followup',
             entryEndpoint: '/v1/chat/completions',

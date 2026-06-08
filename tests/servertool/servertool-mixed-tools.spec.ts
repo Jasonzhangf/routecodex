@@ -2,9 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
-import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-mixed-tools-sessions');
 
@@ -13,50 +11,11 @@ function resetSessionDir(): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
-function readJson(p: string): any {
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+function pendingDir(): string {
+  return path.join(SESSION_DIR, 'servertool-pending');
 }
 
-function buildRequest(messages: StandardizedRequest['messages']): StandardizedRequest {
-  return {
-    model: 'gpt-test',
-    messages,
-    tools: [],
-    parameters: {},
-    metadata: { originalEndpoint: '/v1/chat/completions' }
-  };
-}
-
-function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
-  const result = runHubPipelineLibWithNative({
-    config: { virtualRouter: {} },
-    request: {
-      requestId,
-      endpoint: '/v1/chat/completions',
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat',
-      payload: request as unknown as Record<string, unknown>,
-      metadata: {
-        ...metadata,
-        __routecodexPreselectedRoute: {
-          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
-          decision: { routeName: 'test/preselected' },
-          diagnostics: {},
-        },
-      },
-      stream: false,
-      processMode: 'chat',
-      direction: 'request',
-      stage: 'inbound',
-    },
-  });
-  if (result.success !== true) {
-    throw new Error(result.error?.message ?? 'Rust HubPipeline request pipeline failed');
-  }
-  return result.payload as unknown as StandardizedRequest;
-}
-
-describe('servertool: mixed tool_calls (servertool + client tools)', () => {
+describe('servertool: mixed migrated servertool + client tool_calls', () => {
   const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
 
   beforeAll(() => {
@@ -75,27 +34,16 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     }
   });
 
-  test('executes servertool now, returns client tool_calls, and injects servertool results next request after client tool results', async () => {
-    const sessionId = 's-mixed';
-    const clockCallId = 'call_clock_1';
-    const clientCallId = 'call_exec_command_1';
-
+  test('projects migrated servertool_fixture to client-visible exec_command and preserves client tool_call', async () => {
     const adapterContext: AdapterContext = {
-      requestId: 'req-mixed-1',
+      requestId: 'req-mixed-cli-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
-      __rt: { clock: { enabled: true, tickMs: 0 } },
-      capturedChatRequest: {
-        model: 'gpt-test',
-        messages: [{ role: 'user', content: 'hi' }]
-      }
+      sessionId: 's-mixed-cli'
     } as any;
 
-    const dueAt = new Date(Date.now() + 60_000).toISOString();
-
     const chat = {
-      id: 'chatcmpl-mixed-1',
+      id: 'chatcmpl-mixed-cli-1',
       object: 'chat.completion',
       model: 'gpt-test',
       choices: [
@@ -106,15 +54,15 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
             content: null,
             tool_calls: [
               {
-                id: clockCallId,
+                id: 'call_servertool_fixture_1',
                 type: 'function',
                 function: {
-                  name: 'clock',
-                  arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 't1' }] })
+                  name: 'servertool_fixture',
+                  arguments: JSON.stringify({ value: 1 })
                 }
               },
               {
-                id: clientCallId,
+                id: 'call_exec_command_1',
                 type: 'function',
                 function: {
                   name: 'exec_command',
@@ -131,88 +79,47 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     const orchestration = await runServerToolOrchestration({
       chat,
       adapterContext,
-      requestId: 'req-mixed-1',
+      requestId: 'req-mixed-cli-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat'
     });
 
     expect(orchestration.executed).toBe(true);
-    const outToolCalls = (orchestration.chat as any).choices?.[0]?.message?.tool_calls ?? [];
-    const outNames = outToolCalls.map((tc: any) => tc?.function?.name);
-    expect(outNames).toEqual(['exec_command']);
+    expect(orchestration.flowId).toBe('servertool_cli_projection');
 
-    // Pending injection persisted for next request.
-    const pendingPath = path.join(SESSION_DIR, 'servertool-pending', `${sessionId}.json`);
-    expect(fs.existsSync(pendingPath)).toBe(true);
-    const pending = readJson(pendingPath);
-    expect(pending.sessionId).toBe(sessionId);
-    expect(pending.afterToolCallIds).toContain(clientCallId);
-    const injectedAssistant = pending.messages?.[0];
-    expect(injectedAssistant?.role).toBe('assistant');
-    expect(injectedAssistant?.tool_calls?.[0]?.function?.name).toBe('clock');
-    const injectedTool = pending.messages?.find((m: any) => m?.role === 'tool');
-    expect(injectedTool?.tool_call_id).toBe(clockCallId);
-
-    // Next request from client includes tool result for apply_patch.
-    const req = buildRequest([
-      { role: 'user', content: 'hi' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {
-            id: clientCallId,
-            type: 'function',
-            function: { name: 'exec_command', arguments: JSON.stringify({ cmd: 'echo hi' }) }
-          }
-        ]
-      } as any,
-      {
-        role: 'tool',
-        tool_call_id: clientCallId,
-        name: 'exec_command',
-        content: '{"ok":true}'
-      } as any
-    ]);
-
-    const processed = runRequestPipeline(
-      req,
-      { originalEndpoint: '/v1/chat/completions', sessionId },
-      'req-mixed-2',
+    const message = (orchestration.chat as any).choices?.[0]?.message;
+    const outToolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    expect(outToolCalls).toHaveLength(2);
+    expect(outToolCalls[0]?.function?.name).toBe('exec_command');
+    expect(JSON.parse(outToolCalls[0].function.arguments).cmd).toBe(
+      "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
     );
-    const messages = (processed as any).messages ?? [];
-    const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
-    expect(clientToolIdx).toBeGreaterThanOrEqual(0);
-    // Injected assistant/tool messages appear AFTER client tool results.
-    expect(messages[clientToolIdx + 1]?.role).toBe('assistant');
-    expect(messages[clientToolIdx + 1]?.tool_calls?.[0]?.function?.name).toBe('clock');
-    expect(messages[clientToolIdx + 2]?.role).toBe('tool');
-    expect(messages[clientToolIdx + 2]?.tool_call_id).toBe(clockCallId);
-
-    // Pending file consumed.
-    expect(fs.existsSync(pendingPath)).toBe(false);
+    expect(outToolCalls[1]).toMatchObject({
+      id: 'call_exec_command_1',
+      type: 'function',
+      function: {
+        name: 'exec_command',
+        arguments: JSON.stringify({ cmd: 'echo hi' })
+      }
+    });
+    expect(message?.reasoning_content).toContain('servertool_fixture');
+    expect((orchestration.chat as any).__servertool_cli_projection).toMatchObject({
+      toolName: 'servertool_fixture',
+      requestId: 'req-mixed-cli-1'
+    });
+    expect(fs.existsSync(pendingDir())).toBe(false);
   });
 
-  test('persists mixed pending injection by conversationId when sessionId is unavailable', async () => {
-    const conversationId = 'conv-mixed-only';
-    const clockCallId = 'call_clock_conv_1';
-    const clientCallId = 'call_exec_command_conv_1';
-
+  test('does not restore internal servertool identity from migrated CLI projection', async () => {
     const adapterContext: AdapterContext = {
-      requestId: 'req-mixed-conv-1',
+      requestId: 'req-mixed-cli-restore',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      conversationId,
-      __rt: { clock: { enabled: true, tickMs: 0 } },
-      capturedChatRequest: {
-        model: 'gpt-test',
-        messages: [{ role: 'user', content: 'hi' }]
-      }
+      sessionId: 's-mixed-cli-restore'
     } as any;
 
-    const dueAt = new Date(Date.now() + 60_000).toISOString();
     const chat = {
-      id: 'chatcmpl-mixed-conv-1',
+      id: 'chatcmpl-mixed-cli-restore',
       object: 'chat.completion',
       model: 'gpt-test',
       choices: [
@@ -223,19 +130,11 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
             content: null,
             tool_calls: [
               {
-                id: clockCallId,
+                id: 'call_servertool_fixture_restore',
                 type: 'function',
                 function: {
-                  name: 'clock',
-                  arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 'conv-task' }] })
-                }
-              },
-              {
-                id: clientCallId,
-                type: 'function',
-                function: {
-                  name: 'exec_command',
-                  arguments: JSON.stringify({ cmd: 'echo conv' })
+                  name: 'servertool_fixture',
+                  arguments: JSON.stringify({ value: 'ordinary' })
                 }
               }
             ]
@@ -248,118 +147,75 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     const orchestration = await runServerToolOrchestration({
       chat,
       adapterContext,
-      requestId: 'req-mixed-conv-1',
+      requestId: 'req-mixed-cli-restore',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat'
     });
 
+    const payloadText = JSON.stringify(orchestration.chat);
     expect(orchestration.executed).toBe(true);
-    const pendingPath = path.join(SESSION_DIR, 'servertool-pending', `${conversationId}.json`);
-    expect(fs.existsSync(pendingPath)).toBe(true);
-
-    const req = buildRequest([
-      { role: 'user', content: 'hi' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [
-          {
-            id: clientCallId,
-            type: 'function',
-            function: { name: 'exec_command', arguments: JSON.stringify({ cmd: 'echo conv' }) }
-          }
-        ]
-      } as any,
-      {
-        role: 'tool',
-        tool_call_id: clientCallId,
-        name: 'exec_command',
-        content: '{"ok":true}'
-      } as any
-    ]);
-
-    const processed = runRequestPipeline(
-      req,
-      { originalEndpoint: '/v1/chat/completions', conversationId },
-      'req-mixed-conv-2',
-    );
-    const messages = (processed as any).messages ?? [];
-    const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
-    expect(clientToolIdx).toBeGreaterThanOrEqual(0);
-    expect(messages[clientToolIdx + 1]?.role).toBe('assistant');
-    expect(messages[clientToolIdx + 2]?.role).toBe('tool');
-    expect(messages[clientToolIdx + 2]?.tool_call_id).toBe(clockCallId);
-    expect(fs.existsSync(pendingPath)).toBe(false);
+    expect(payloadText).toContain('exec_command');
+    expect(payloadText).not.toContain('old_cli_');
+    expect(payloadText).not.toContain(['st', 'cli_'].join(''));
+    expect(payloadText).not.toContain(['rcc', '_cli_'].join(''));
+    expect(fs.existsSync(pendingDir())).toBe(false);
   });
 
-  test('fails fast when mixed-tool pending injection cannot be persisted', async () => {
-    const brokenBase = path.join(SESSION_DIR, 'blocked-base');
-    fs.writeFileSync(brokenBase, 'not-a-directory', 'utf8');
-    process.env.ROUTECODEX_SESSION_DIR = brokenBase;
-    try {
-      const sessionId = 's-mixed-broken';
-      const dueAt = new Date(Date.now() + 60_000).toISOString();
-      const adapterContext: AdapterContext = {
-        requestId: 'req-mixed-broken-1',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        sessionId,
-        __rt: { clock: { enabled: true, tickMs: 0 } },
-        capturedChatRequest: {
-          model: 'gpt-test',
-          messages: [{ role: 'user', content: 'hi' }]
-        }
-      } as any;
+  test('keeps removed clock tool on client side instead of reintroducing servertool pending injection', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-mixed-clock-removed',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId: 's-mixed-clock-removed'
+    } as any;
 
-      const chat = {
-        id: 'chatcmpl-mixed-broken-1',
-        object: 'chat.completion',
-        model: 'gpt-test',
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_clock_broken_1',
-                  type: 'function',
-                  function: {
-                    name: 'clock',
-                    arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 'broken' }] })
-                  }
-                },
-                {
-                  id: 'call_exec_broken_1',
-                  type: 'function',
-                  function: {
-                    name: 'exec_command',
-                    arguments: JSON.stringify({ cmd: 'echo broken' })
-                  }
+    const chat = {
+      id: 'chatcmpl-mixed-clock-removed',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_clock_removed_1',
+                type: 'function',
+                function: {
+                  name: 'clock',
+                  arguments: JSON.stringify({ action: 'schedule' })
                 }
-              ]
-            },
-            finish_reason: 'tool_calls'
-          }
-        ]
-      } as any;
+              },
+              {
+                id: 'call_exec_command_removed_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'echo still-client' })
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    } as any;
 
-      await expect(
-        runServerToolOrchestration({
-          chat,
-          adapterContext,
-          requestId: 'req-mixed-broken-1',
-          entryEndpoint: '/v1/chat/completions',
-          providerProtocol: 'openai-chat'
-        })
-      ).rejects.toMatchObject({
-        code: 'SERVERTOOL_PENDING_INJECTION_FAILED',
-        status: 502
-      });
-    } finally {
-      process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
-    }
+    const orchestration = await runServerToolOrchestration({
+      chat,
+      adapterContext,
+      requestId: 'req-mixed-clock-removed',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(orchestration.executed).toBe(false);
+    const names = ((orchestration.chat as any).choices?.[0]?.message?.tool_calls ?? []).map(
+      (toolCall: any) => toolCall?.function?.name
+    );
+    expect(names).toEqual(['clock', 'exec_command']);
+    expect(fs.existsSync(pendingDir())).toBe(false);
   });
-
 });

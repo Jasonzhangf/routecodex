@@ -3,6 +3,7 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 import {
   buildClientExecCliProjectionOutputWithNative,
+  buildClientVisibleProjectionShellWithNative,
   type ClientExecCliProjectionOutput,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -22,6 +23,7 @@ type ServertoolCliProjectionOptions = Pick<ServerSideToolEngineOptions, 'request
 export function buildServertoolCliProjectionForToolCall(args: {
   options: ServertoolCliProjectionOptions;
   toolCall: ToolCall;
+  additionalToolCalls?: unknown[];
   reasoningText?: string;
 }): ServertoolCliProjectionPlan {
   const toolName = args.toolCall.name;
@@ -37,7 +39,8 @@ export function buildServertoolCliProjectionForToolCall(args: {
   return buildProjectionShell({
     requestId: args.options.requestId,
     nativeProjection,
-    reasoningText
+    reasoningText,
+    additionalToolCalls: args.additionalToolCalls
   });
 }
 
@@ -73,47 +76,18 @@ function buildProjectionShell(args: {
   requestId: string;
   nativeProjection: ClientExecCliProjectionOutput;
   reasoningText: string;
+  additionalToolCalls?: unknown[];
 }): ServertoolCliProjectionPlan {
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
   const toolName = args.nativeProjection.toolName;
   const command = args.nativeProjection.execCommand;
-  const chatResponse: JsonObject = {
-    id: `chatcmpl_${clientCallId}`,
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
-    model: 'routecodex-servertool-cli',
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: '',
-          reasoning_text: args.reasoningText,
-          reasoning_content: args.reasoningText,
-          reasoning: {
-            summary: [{ type: 'summary_text', text: args.reasoningText }],
-            content: [{ type: 'reasoning_text', text: args.reasoningText }]
-          },
-          tool_calls: [
-            {
-              id: clientCallId,
-              type: 'function',
-              function: {
-                name: 'exec_command',
-                arguments: JSON.stringify({ cmd: command })
-              }
-            }
-          ]
-        },
-        finish_reason: 'tool_calls'
-      }
-    ],
-    __servertool_cli_projection: {
-      clientCallId,
-      toolName,
-      requestId: args.requestId
-    }
-  };
+  const chatResponse = buildClientVisibleProjectionShellWithNative({
+    requestId: args.requestId,
+    clientCallId,
+    nativeProjection: args.nativeProjection,
+    reasoningText: args.reasoningText,
+    ...(args.additionalToolCalls?.length ? { additionalToolCalls: args.additionalToolCalls } : {})
+  }) as JsonObject;
   return {
     clientCallId,
     toolName,

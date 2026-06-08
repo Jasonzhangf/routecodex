@@ -10,8 +10,7 @@ import {
   parseServertoolFollowupRuntimePlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
-  parseServertoolResponseStagePayload,
-  parseStopMessagePersistedLookupPlanPayload
+  parseServertoolResponseStagePayload
 } from './native-router-hotpath-analysis.js';
 
 export type NativeChatWebSearchPlan = {
@@ -63,10 +62,6 @@ export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServert
   : never;
 
 export type NativeServertoolSkeletonDocument = Record<string, unknown>;
-
-export type NativeStopMessagePersistedLookupPlan = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
-  ? Exclude<T, null>
-  : never;
 
 export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
@@ -293,17 +288,6 @@ function parseBoolean(raw: string): boolean | null {
   return typeof parsed === 'boolean' ? parsed : null;
 }
 
-function parseStringOrUndefined(raw: string): string | undefined | null {
-  const parsed = parseJson('parseStringOrUndefined', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  return typeof parsed === 'string' ? parsed : null;
-}
-
 export function detectEmptyAssistantPayloadContractSignalWithNative(
   payload: unknown
 ): NativePayloadContractSignal | null {
@@ -376,62 +360,6 @@ export function isStopMessageStateActiveWithNative(raw: unknown): boolean {
     const response = invokeNativeStringCapabilityWithJsonArgs(capability, [raw ?? null]);
     const parsed = parseBoolean(response);
     return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveStopMessageSessionScopeWithNative(
-  metadata: Record<string, unknown>
-): string | undefined {
-  const capability = 'resolveStopMessageSessionScopeJson';
-  const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
-  try {
-    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
-    const parsed = parseStringOrUndefined(response);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveServertoolStickyKeyWithNative(
-  metadata: Record<string, unknown>
-): string | undefined {
-  const capability = 'resolveServertoolStickyKeyJson';
-  const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
-  try {
-    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
-    const parsed = parseStringOrUndefined(response);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveServertoolStateKeyWithNative(
-  metadata: Record<string, unknown>
-): string | undefined {
-  return resolveServertoolStickyKeyWithNative(metadata);
-}
-
-export function planStopMessagePersistedLookupWithNative(input: {
-  record: Record<string, unknown>;
-  runtimeMetadata?: Record<string, unknown>;
-  options?: {
-    includeSnapshotLookup?: boolean;
-    includeTombstoneLookup?: boolean;
-  };
-}): NativeStopMessagePersistedLookupPlan {
-  const capability = 'planStopMessagePersistedLookupJson';
-  const fail = (reason?: string) => failNativeRequired<NativeStopMessagePersistedLookupPlan>(capability, reason);
-  try {
-    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
-    const parsed = parseStopMessagePersistedLookupPlanPayload(response);
-    return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -902,21 +830,33 @@ export function buildServertoolToolOutputPayloadWithNative(input: {
 // ── Web Search Pure Blocks ────────────────────────────────────────────
 
 function invokeWebSearchNative(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
   if (isNativeDisabledByEnv()) {
-    return '';
+    return fail('native disabled');
   }
   const fn = readNativeFunction(capability);
   if (!fn) {
-    return '';
+    return fail();
   }
   try {
-    const encoded = args.map((a) => safeStringify(a) ?? 'null');
+    const encoded = args.map((a) => encodeJsonArg(capability, a));
     const raw = fn(...encoded);
-    if (typeof raw !== 'string') return '';
+    if (raw instanceof Error) {
+      return fail(raw.message || 'native error');
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+      return fail(String((raw as { message: unknown }).message));
+    }
+    if (typeof raw !== 'string') return fail('non-string result');
     return raw;
-  } catch {
-    return '';
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
   }
+}
+
+function invokeWebSearchNativeRaw(capability: string, args: unknown[]): string {
+  return invokeNativeStringCapability(capability, args);
 }
 
 export function webSearchResolveToolNameWithNative(raw: string | null): string {
@@ -935,56 +875,50 @@ export function webSearchIsQwenEngineWithNative(providerKey: string): boolean {
   return invokeWebSearchNative('webSearchIsQwenEngine', [providerKey]) === 'true';
 }
 
+export function webSearchIsGlmEngineWithNative(providerKey: string): boolean {
+  return invokeWebSearchNative('webSearchIsGlmEngine', [providerKey]) === 'true';
+}
+
 export function webSearchNormalizeResultCountWithNative(valueJson: string): number {
-  const raw = invokeWebSearchNative('webSearchNormalizeResultCountJson', [valueJson]);
+  const raw = invokeWebSearchNativeRaw('webSearchNormalizeResultCountJson', [valueJson]);
   const n = parseInt(raw, 10);
-  return isNaN(n) ? 10 : n;
+  if (!Number.isFinite(n) || n <= 0) {
+    return failNativeRequired<number>('webSearchNormalizeResultCountJson', 'invalid result');
+  }
+  return n;
 }
 
 export function webSearchBuildSystemPromptWithNative(targetCount: number): string {
-  const fn = readNativeFunction('webSearchBuildSystemPrompt');
-  if (!fn) return '';
-  try {
-    const raw = fn(targetCount);
-    return typeof raw === 'string' ? raw : '';
-  } catch {
-    return '';
-  }
+  const capability = 'webSearchBuildSystemPrompt';
+  return invokeNativeStringCapability(capability, [targetCount]);
 }
 
 export function webSearchSanitizeBackendErrorWithNative(message: string): string {
-  const fn = readNativeFunction('webSearchSanitizeBackendError');
-  if (!fn) return message;
-  try {
-    const raw = fn(message);
-    return typeof raw === 'string' ? raw : message;
-  } catch {
-    return message;
-  }
+  return invokeWebSearchNative('webSearchSanitizeBackendError', [message]);
 }
 
 export function webSearchCollectHitsWithNative(chatResponseJson: string, targetCount: number): string {
-  return invokeWebSearchNative('webSearchCollectHitsJson', [chatResponseJson, targetCount]);
+  return invokeWebSearchNativeRaw('webSearchCollectHitsJson', [chatResponseJson, targetCount]);
 }
 
 export function webSearchFormatHitsSummaryWithNative(hitsJson: string): string {
-  return invokeWebSearchNative('webSearchFormatHitsSummaryJson', [hitsJson]);
+  return invokeWebSearchNativeRaw('webSearchFormatHitsSummaryJson', [hitsJson]);
 }
 
 export function webSearchLimitHitsWithNative(hitsJson: string): string {
-  return invokeWebSearchNative('webSearchLimitHitsJson', [hitsJson]);
+  return invokeWebSearchNativeRaw('webSearchLimitHitsJson', [hitsJson]);
 }
 
 export function webSearchExtractAssistantMessageWithNative(chatResponseJson: string): string {
-  return invokeWebSearchNative('webSearchExtractAssistantMessageJson', [chatResponseJson]);
+  return invokeWebSearchNativeRaw('webSearchExtractAssistantMessageJson', [chatResponseJson]);
 }
 
 export function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string {
-  return invokeWebSearchNative('webSearchBuildToolMessagesJson', [chatResponseJson]);
+  return invokeWebSearchNativeRaw('webSearchBuildToolMessagesJson', [chatResponseJson]);
 }
 
 export function webSearchFindArrayWithNative(chatResponseJson: string): string {
-  return invokeWebSearchNative('webSearchFindArrayJson', [chatResponseJson]);
+  return invokeWebSearchNativeRaw('webSearchFindArrayJson', [chatResponseJson]);
 }
 
 // ── Vision Pure Blocks ────────────────────────────────────────────────

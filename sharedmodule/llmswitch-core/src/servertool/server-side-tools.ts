@@ -152,9 +152,11 @@ export async function runServerSideToolEngine(
 
   const cliProjectedToolCall = dispatchPlan.executableToolCalls.find(isClientExecCliProjectionToolCall);
   if (cliProjectedToolCall) {
+    const additionalToolCalls = collectAdditionalClientToolCalls(base, cliProjectedToolCall.id);
     const projection = buildServertoolCliProjectionForToolCall({
       options,
       toolCall: cliProjectedToolCall,
+      ...(additionalToolCalls.length ? { additionalToolCalls } : {}),
       reasoningText: `RouteCodex intercepted servertool ${cliProjectedToolCall.name} and will execute it through the client-visible CLI path.`
     });
     return {
@@ -244,6 +246,26 @@ function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?
     return true;
   }
   return toolCall.name === 'servertool_fixture';
+}
+
+function collectAdditionalClientToolCalls(base: JsonObject, projectedToolCallId: string): JsonValue[] {
+  const choices = getArray((base as { choices?: unknown }).choices);
+  const first = asObject(choices[0]);
+  const message = asObject(first?.message);
+  const toolCalls = getArray((message as { tool_calls?: unknown } | null)?.tool_calls);
+  return toolCalls.filter((toolCall) => {
+    const row = asObject(toolCall);
+    if (!row) {
+      return false;
+    }
+    const id = typeof row.id === 'string' ? row.id : '';
+    if (!id || id === projectedToolCallId) {
+      return false;
+    }
+    const functionRow = asObject((row as { function?: unknown }).function);
+    const name = typeof functionRow?.name === 'string' ? functionRow.name.trim() : '';
+    return name !== 'servertool_fixture' && name !== 'stop_message_auto';
+  });
 }
 
 export function extractToolCalls(chatResponse: JsonObject, requestId = ''): ToolCall[] {

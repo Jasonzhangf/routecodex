@@ -1347,6 +1347,12 @@ pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiR
 }
 
 #[napi]
+pub fn build_client_visible_projection_shell_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::build_client_visible_projection_shell_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn validate_client_exec_command_result_json(raw_output: String) -> NapiResult<String> {
     servertool_core_blocks::validate_client_exec_command_result_json(&raw_output)
         .map_err(|e| napi::Error::from_reason(e))

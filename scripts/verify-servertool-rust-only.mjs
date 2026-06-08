@@ -40,6 +40,7 @@ const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-co
 const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
+const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
 const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
 const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
 const NATIVE_BUILD_SCRIPT = `${ROOT}/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`;
@@ -264,7 +265,22 @@ function checkServertoolCliProjectionMap() {
     nativeServertoolWrapper,
     'buildClientExecCliProjectionOutputWithNative'
   );
-  assertContains('cli-projection-command-contract', CLI_PROJECTION, cliProjection, "name: 'exec_command'");
+  assertContains(
+    'cli-projection-native-wrapper',
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+    nativeServertoolWrapper,
+    'buildClientVisibleProjectionShellWithNative'
+  );
+  assertContains(
+    'cli-projection-command-contract',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+    rustCliContract,
+    '"name": "exec_command"'
+  );
+  assertContains('cli-projection-thin-wrapper', CLI_PROJECTION, cliProjection, 'buildClientVisibleProjectionShellWithNative');
+  if (cliProjection.includes("name: 'exec_command'") || cliProjection.includes('"name": "exec_command"')) {
+    fail('cli-projection-command-contract', 'cli-projection.ts must not build exec_command tool call shape in TS');
+  }
   if (cliProjection.includes('routecodex servertool run')) {
     fail('cli-projection-command-contract', 'cli-projection.ts must not build servertool CLI command strings in TS');
   }
@@ -390,6 +406,9 @@ function checkStopMessagePersistedLookupRustOwner() {
   const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const runtimeUtils = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
+  const stateScope = readRequired(SERVERTOOL_STATE_SCOPE);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
   const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
 
   assertContains(
@@ -406,10 +425,46 @@ function checkStopMessagePersistedLookupRustOwner() {
   );
   assertContains(
     'stop-message-persisted-lookup-bridge',
-    STOP_MESSAGE_RUNTIME_UTILS,
-    runtimeUtils,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
     'planStopMessagePersistedLookupWithNative'
   );
+  assertContains(
+    'stop-message-persisted-lookup-bridge',
+    STOP_MESSAGE_RUNTIME_UTILS,
+    runtimeUtils,
+    'native-servertool-core-semantics.js'
+  );
+  assertContains(
+    'stop-message-persisted-lookup-bridge',
+    SERVERTOOL_STATE_SCOPE,
+    stateScope,
+    'native-servertool-core-semantics.js'
+  );
+  for (const [file, content] of [
+    [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils],
+    [SERVERTOOL_STATE_SCOPE, stateScope],
+  ]) {
+    if (content.includes('native-chat-process-servertool-orchestration-semantics.js')) {
+      fail(
+        'stop-message-persisted-lookup-bridge-owner',
+        `${file.replace(`${ROOT}/`, '')} must import stop-message lookup/scope helpers from native-servertool-core-semantics.js`
+      );
+    }
+  }
+  for (const symbol of [
+    'planStopMessagePersistedLookupWithNative',
+    'resolveStopMessageSessionScopeWithNative',
+    'resolveServertoolStickyKeyWithNative',
+    'resolveServertoolStateKeyWithNative',
+  ]) {
+    if (chatProcessWrapper.includes(`export function ${symbol}`)) {
+      fail(
+        'stop-message-persisted-lookup-bridge-owner',
+        `${symbol} must not be exported from native-chat-process-servertool-orchestration-semantics.ts; servertool-core wrapper is the owner`
+      );
+    }
+  }
 
   const forbiddenTsLookupOwners = [
     'fallbackStickyKey',

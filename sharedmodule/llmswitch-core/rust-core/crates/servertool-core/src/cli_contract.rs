@@ -2,7 +2,7 @@ use crate::outcome_contract::{
     is_client_exec_cli_projection, is_denied_cli_projection, DENIED_CLI_MARKERS,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +47,17 @@ pub struct StopreasonValues {
     pub finished: u8,
     pub blocked: u8,
     pub continue_needed: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolClientVisibleProjectionShellInput {
+    pub request_id: String,
+    pub client_call_id: String,
+    pub native_projection: Value,
+    pub reasoning_text: String,
+    #[serde(default)]
+    pub additional_tool_calls: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,6 +258,25 @@ fn is_safe_tool_name(tool_name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
+fn is_safe_call_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn read_object_string<'a>(
+    object: &'a Map<String, Value>,
+    field: &'static str,
+) -> Result<&'a str, ServertoolCliError> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(ServertoolCliError::MissingField(field))
+}
+
 fn validate_no_denied_cli_marker(raw: &str) -> Result<(), ServertoolCliError> {
     for marker in DENIED_CLI_MARKERS {
         if raw.contains(marker) {
@@ -322,6 +352,107 @@ pub fn build_client_exec_cli_projection_output(
         "repeatCount": repeat_count,
         "maxRepeats": max_repeats,
         "execCommand": cmd
+    }))
+}
+
+pub fn build_client_visible_projection_shell(
+    input: ServertoolClientVisibleProjectionShellInput,
+) -> Result<Value, ServertoolCliError> {
+    let request_id = input.request_id.trim();
+    if request_id.is_empty() {
+        return Err(ServertoolCliError::MissingField("requestId"));
+    }
+    let client_call_id = input.client_call_id.trim();
+    if !is_safe_call_id(client_call_id) {
+        return Err(ServertoolCliError::InvalidField("clientCallId"));
+    }
+    let reasoning_text = input.reasoning_text.trim();
+    if reasoning_text.is_empty() {
+        return Err(ServertoolCliError::MissingField("reasoningText"));
+    }
+    validate_no_denied_cli_marker(reasoning_text)?;
+
+    let native_projection = input
+        .native_projection
+        .as_object()
+        .ok_or(ServertoolCliError::InvalidField("nativeProjection"))?;
+    let tool_name = read_object_string(native_projection, "toolName")?;
+    if !is_safe_tool_name(tool_name) {
+        return Err(ServertoolCliError::InvalidField("toolName"));
+    }
+    if is_denied_cli_projection(tool_name) {
+        return Err(ServertoolCliError::DeniedTool(tool_name.to_string()));
+    }
+    if !is_client_exec_cli_projection(tool_name) {
+        return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
+    }
+    let command = read_object_string(native_projection, "execCommand")?;
+    validate_no_denied_cli_marker(command)?;
+    let tool_arguments = serde_json::to_string(&serde_json::json!({ "cmd": command }))
+        .map_err(|_| ServertoolCliError::InvalidField("toolCallArguments"))?;
+    let mut tool_calls = vec![serde_json::json!({
+        "id": client_call_id,
+        "type": "function",
+        "function": {
+            "name": "exec_command",
+            "arguments": tool_arguments
+        }
+    })];
+    for tool_call in input.additional_tool_calls {
+        let row = tool_call
+            .as_object()
+            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls"))?;
+        let id = row
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls.id"))?;
+        if !is_safe_call_id(id) {
+            return Err(ServertoolCliError::InvalidField("additionalToolCalls.id"));
+        }
+        let function = row
+            .get("function")
+            .and_then(Value::as_object)
+            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls.function"))?;
+        let function_name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls.function.name"))?;
+        if is_denied_cli_projection(function_name) {
+            return Err(ServertoolCliError::DeniedTool(function_name.to_string()));
+        }
+        validate_no_denied_cli_marker(
+            &serde_json::to_string(&tool_call)
+                .map_err(|_| ServertoolCliError::InvalidField("additionalToolCalls"))?,
+        )?;
+        tool_calls.push(Value::Object(row.clone()));
+    }
+
+    Ok(serde_json::json!({
+        "id": format!("chatcmpl_{client_call_id}"),
+        "object": "chat.completion",
+        "created": 0,
+        "model": "routecodex-servertool-cli",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_text": reasoning_text,
+                    "reasoning_content": reasoning_text,
+                    "reasoning": {
+                        "summary": [{ "type": "summary_text", "text": reasoning_text }]
+                    },
+                    "tool_calls": tool_calls
+                },
+                "finish_reason": "tool_calls"
+            }
+        ],
+        "__servertool_cli_projection": {
+            "clientCallId": client_call_id,
+            "toolName": tool_name,
+            "requestId": request_id
+        }
     }))
 }
 
@@ -494,6 +625,71 @@ mod tests {
         assert!(!cmd.contains("stcli_"), "no old stcli_ marker");
         assert!(!cmd.contains("rcc_cli_"), "no old rcc_cli_ marker");
         assert!(!cmd.contains("--ticket"), "no --ticket marker");
+    }
+
+    #[test]
+    fn client_visible_projection_shell_omits_responses_reasoning_content_array() {
+        let native_projection = build_client_exec_cli_projection_output(
+            "stop_message_auto",
+            "stop_message_flow",
+            json!({"continuationPrompt":"continue","repeatCount":2,"maxRepeats":5}),
+            2,
+            5,
+        )
+        .expect("projection output");
+        let shell =
+            build_client_visible_projection_shell(ServertoolClientVisibleProjectionShellInput {
+                request_id: "req_stop_projection".to_string(),
+                client_call_id: "call_servertool_cli_stop_1".to_string(),
+                native_projection,
+                reasoning_text: "intercepted stop text".to_string(),
+                additional_tool_calls: vec![],
+            })
+            .expect("client visible shell");
+
+        let message = &shell["choices"][0]["message"];
+        assert_eq!(message["reasoning_content"], "intercepted stop text");
+        assert_eq!(message["reasoning"]["summary"][0]["type"], "summary_text");
+        assert!(message["reasoning"].get("content").is_none());
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+        assert_eq!(
+            shell["__servertool_cli_projection"]["requestId"],
+            "req_stop_projection"
+        );
+    }
+
+    #[test]
+    fn client_visible_projection_shell_preserves_additional_client_tool_calls() {
+        let native_projection = build_client_exec_cli_projection_output(
+            "servertool_fixture",
+            "servertool_cli_projection",
+            json!({"value":1}),
+            0,
+            0,
+        )
+        .expect("projection output");
+        let shell =
+            build_client_visible_projection_shell(ServertoolClientVisibleProjectionShellInput {
+                request_id: "req_mixed_projection".to_string(),
+                client_call_id: "call_servertool_cli_fixture_1".to_string(),
+                native_projection,
+                reasoning_text: "servertool fixture projection".to_string(),
+                additional_tool_calls: vec![json!({
+                    "id": "call_exec_command_1",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"echo hi\"}"
+                    }
+                })],
+            })
+            .expect("client visible shell");
+
+        let calls = shell["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["function"]["name"], "exec_command");
+        assert_eq!(calls[1]["id"], "call_exec_command_1");
+        assert_eq!(calls[1]["function"]["name"], "exec_command");
     }
 
     #[test]

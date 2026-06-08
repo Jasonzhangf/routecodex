@@ -2,6 +2,7 @@
 // Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
 
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
+import { parseStopMessagePersistedLookupPlanPayload } from './native-router-hotpath-analysis.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,14 @@ export interface ClientExecCliProjectionOutput {
   schemaGuidance?: unknown;
 }
 
+export interface ClientVisibleProjectionShellInput {
+  requestId: string;
+  clientCallId: string;
+  nativeProjection: ClientExecCliProjectionOutput;
+  reasoningText: string;
+  additionalToolCalls?: unknown[];
+}
+
 export interface ServertoolBackendRoutePolicyInput {
   toolName: string;
   flowId?: string;
@@ -104,6 +113,8 @@ export interface ServertoolBackendRoutePolicyOutput {
   flowId: string;
   routeHint: string;
   executionMode: 'reenter';
+  eligible: boolean;
+  skipReason?: string | null;
   shapeGuard: {
     allowRequiresAction: boolean;
     preserveStreaming: boolean;
@@ -119,6 +130,10 @@ export interface ServertoolBackendRoutePolicyOutput {
   };
   input: unknown;
 }
+
+export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
 
 // ── Stop gateway context ────────────────────────────────────────────────────
 
@@ -185,6 +200,62 @@ export function calculateBudgetWithNative(
   return JSON.parse(resultJson);
 }
 
+export function resolveStopMessageSessionScopeWithNative(
+  metadata: Record<string, unknown>,
+): string | undefined {
+  const capability = 'resolveStopMessageSessionScopeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveStopMessageSessionScopeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(metadata));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveStopMessageSessionScopeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
+}
+
+export function resolveServertoolStickyKeyWithNative(
+  metadata: Record<string, unknown>,
+): string | undefined {
+  const capability = 'resolveServertoolStickyKeyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveServertoolStickyKeyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(metadata));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveServertoolStickyKeyJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
+}
+
+export function planStopMessagePersistedLookupWithNative(input: {
+  record: Record<string, unknown>;
+  runtimeMetadata?: Record<string, unknown>;
+  options?: {
+    includeSnapshotLookup?: boolean;
+    includeTombstoneLookup?: boolean;
+  };
+}): StopMessagePersistedLookupPlanOutput {
+  const capability = 'planStopMessagePersistedLookupJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessagePersistedLookupJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessagePersistedLookupJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = parseStopMessagePersistedLookupPlanPayload(resultJson);
+  if (!parsed) {
+    throw new Error('planStopMessagePersistedLookupJson native returned invalid payload');
+  }
+  return parsed;
+}
+
 export function buildClientExecCliProjectionOutputWithNative(
   input: ClientExecCliProjectionInput,
 ): ClientExecCliProjectionOutput {
@@ -198,6 +269,21 @@ export function buildClientExecCliProjectionOutputWithNative(
     throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson);
+}
+
+export function buildClientVisibleProjectionShellWithNative(
+  input: ClientVisibleProjectionShellInput,
+): Record<string, unknown> {
+  const capability = 'buildClientVisibleProjectionShellJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('buildClientVisibleProjectionShellJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`buildClientVisibleProjectionShellJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as Record<string, unknown>;
 }
 
 export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {

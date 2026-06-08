@@ -86,7 +86,8 @@ describe('ServerTool web_search engine (generic)', () => {
       adapterContext: baseCtx,
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-no-tool',
-      providerProtocol: 'openai-chat'
+      providerProtocol: 'openai-chat',
+      excludeAutoHookIds: ['stop_message_auto']
     };
 
     const result = await runServerSideToolEngine(options);
@@ -184,7 +185,8 @@ describe('ServerTool web_search engine (generic)', () => {
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-web-auto-disabled',
       providerProtocol: 'openai-chat',
-      providerInvoker
+      providerInvoker,
+      excludeAutoHookIds: ['stop_message_auto']
     });
 
     expect(result.mode).toBe('passthrough');
@@ -324,7 +326,23 @@ describe('ServerTool web_search engine (generic)', () => {
       providerInvoker,
       reenterPipeline: async (opts: any) => {
         sawFollowup = opts;
-        return { body: {} as JsonObject };
+        return {
+          body: {
+            id: 'chatcmpl-web-responses-followup',
+            object: 'chat.completion',
+            model: 'gpt-4o-mini',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'final answer after web search'
+                },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
       }
     });
 
@@ -337,15 +355,15 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(sawFollowup?.metadata?.stream).toBe(false);
     const body = sawFollowup?.body as any;
     expect(body).toBeDefined();
-    expect(Array.isArray(body.messages)).toBe(true);
     expect(body.stream).toBe(false);
     expect(body.parameters?.stream).toBeUndefined();
-    const payloadText = JSON.stringify(body.messages);
-    // Origin-rebuild followup: messages are rebuilt from captured origin request,
-    // so tool call envelopes are not injected into followup messages.
+    const payloadText = JSON.stringify(body);
+    // Origin-rebuild followup for Responses keeps canonical function_call /
+    // function_call_output items instead of using the old Chat messages shell.
     expect(payloadText).toContain('hi');
-    expect(payloadText).not.toContain('web_search');
-    expect(payloadText).not.toContain('call_web_1');
+    expect(payloadText).toContain('function_call_output');
+    expect(payloadText).toContain('call_web_1');
+    expect(body.messages).toBeUndefined();
   });
 
   test('falls back to next engine on backend failure', async () => {

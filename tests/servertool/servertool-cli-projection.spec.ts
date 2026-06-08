@@ -21,6 +21,42 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
       execCommand: `routecodex servertool run ${input.toolName} --input-json '${JSON.stringify(input.input)}'`,
     };
   },
+  buildClientVisibleProjectionShellWithNative: (input: any) => ({
+    id: `chatcmpl_${input.clientCallId}`,
+    object: 'chat.completion',
+    created: 0,
+    model: 'routecodex-servertool-cli',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          reasoning_text: input.reasoningText,
+          reasoning_content: input.reasoningText,
+          reasoning: {
+            summary: [{ type: 'summary_text', text: input.reasoningText }]
+          },
+          tool_calls: [
+            {
+              id: input.clientCallId,
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: input.nativeProjection.execCommand })
+              }
+            }
+          ]
+        },
+        finish_reason: 'tool_calls'
+      }
+    ],
+    __servertool_cli_projection: {
+      clientCallId: input.clientCallId,
+      toolName: input.nativeProjection.toolName,
+      requestId: input.requestId
+    }
+  }),
 }));
 
 const {
@@ -52,6 +88,8 @@ describe('servertool CLI projection', () => {
     const command = JSON.parse(message.tool_calls[0].function.arguments).cmd;
 
     expect(message.reasoning_content).toBe('full stop summary');
+    expect(message.reasoning.summary[0].text).toBe('full stop summary');
+    expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
     expect(command).toBe("routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3}'");
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));

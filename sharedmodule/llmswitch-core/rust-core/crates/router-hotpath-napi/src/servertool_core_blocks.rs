@@ -5,6 +5,7 @@ use servertool_core::backend_route_contract::{
     ServertoolBackendRoutePolicyInput,
 };
 use servertool_core::cli_contract;
+use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
@@ -99,6 +100,14 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     )
     .map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
+}
+
+pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolClientVisibleProjectionShellInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize projection shell input: {e}"))?;
+    let output =
+        cli_contract::build_client_visible_projection_shell(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize projection shell: {e}"))
 }
 
 pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<String, String> {
