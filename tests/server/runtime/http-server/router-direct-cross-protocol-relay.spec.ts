@@ -1,6 +1,28 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 describe('router direct cross-protocol relay', () => {
+  it('source and runtime artifacts keep protocol mismatch out of failed_no_relay', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const os = await import('node:os');
+
+    const root = process.cwd();
+    const candidates = [
+      path.join(root, 'src/server/runtime/http-server/index.ts'),
+      path.join(root, 'dist/server/runtime/http-server/index.js'),
+      path.join(os.homedir(), '.rcc/install/current/dist/server/runtime/http-server/index.js'),
+    ].filter((filePath) => fs.existsSync(filePath));
+
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const filePath of candidates) {
+      const source = fs.readFileSync(filePath, 'utf8');
+      const failedNoRelayIndex = source.indexOf("router-direct.failed_no_relay");
+      const relayIndex = source.indexOf("directResult.requiresHubRelay === true");
+      expect(relayIndex).toBeGreaterThanOrEqual(0);
+      expect(failedNoRelayIndex).toBeGreaterThan(relayIndex);
+    }
+  });
+
   it('relays /v1/responses cross-protocol target once without failed_no_relay storm', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
