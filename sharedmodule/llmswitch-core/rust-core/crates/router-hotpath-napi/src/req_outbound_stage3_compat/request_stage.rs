@@ -23,74 +23,9 @@ use super::thinking_history::{
 use super::{CompatResult, ReqOutboundCompatInput};
 use crate::chat_process_media_semantics::{
     strip_chat_process_historical_images, strip_historical_visual_tool_uses_without_results,
-    strip_latest_responses_input_media, strip_latest_user_turn_media,
     strip_responses_context_input_historical_media, strip_tool_result_media_content,
 };
 use serde_json::Value;
-
-fn read_bool_from_rt(adapter_context: &super::AdapterContext, key: &str) -> Option<bool> {
-    adapter_context
-        .rt
-        .as_ref()
-        .and_then(Value::as_object)
-        .and_then(|rt| rt.get(key))
-        .and_then(|value| match value {
-            Value::Bool(flag) => Some(*flag),
-            Value::String(raw) => match raw.trim().to_ascii_lowercase().as_str() {
-                "true" => Some(true),
-                "false" => Some(false),
-                _ => None,
-            },
-            _ => None,
-        })
-}
-
-fn target_explicitly_has_no_visual_support(adapter_context: &super::AdapterContext) -> bool {
-    match (
-        read_bool_from_rt(adapter_context, "supportsMultimodal"),
-        read_bool_from_rt(adapter_context, "supportsVision"),
-    ) {
-        (Some(true), _) | (_, Some(true)) => false,
-        (Some(false), None | Some(false)) => true,
-        _ => false,
-    }
-}
-
-fn strip_media_for_non_multimodal_target(
-    payload: Value,
-    adapter_context: &super::AdapterContext,
-) -> Value {
-    if !target_explicitly_has_no_visual_support(adapter_context) {
-        return payload;
-    }
-    let Some(root) = payload.as_object() else {
-        return payload;
-    };
-    let placeholder = "[Image omitted]".to_string();
-    if let Some(messages) = root.get("messages").and_then(Value::as_array) {
-        let stripped = strip_latest_user_turn_media(messages.clone(), placeholder.clone());
-        if stripped.changed {
-            let mut next = root.clone();
-            next.insert("messages".to_string(), Value::Array(stripped.messages));
-            return Value::Object(next);
-        }
-        let stripped = strip_tool_result_media_content(messages.clone(), placeholder.clone());
-        if stripped.changed {
-            let mut next = root.clone();
-            next.insert("messages".to_string(), Value::Array(stripped.messages));
-            return Value::Object(next);
-        }
-    }
-    if let Some(input_entries) = root.get("input").and_then(Value::as_array) {
-        let stripped = strip_latest_responses_input_media(input_entries.clone(), placeholder);
-        if stripped.changed {
-            let mut next = root.clone();
-            next.insert("input".to_string(), Value::Array(stripped.messages));
-            return Value::Object(next);
-        }
-    }
-    payload
-}
 
 fn strip_historical_media(payload: Value) -> Value {
     let Some(root) = payload.as_object() else {
@@ -153,8 +88,7 @@ pub fn run_req_outbound_stage3_compat(
         ..
     } = input;
 
-    let payload = strip_historical_media(input_payload);
-    let mut payload = strip_media_for_non_multimodal_target(payload, &adapter_context);
+    let mut payload = strip_historical_media(input_payload);
     if should_apply_local_deepseek_thinking_history_compat(&payload, &adapter_context) {
         if let Some(root) = payload.as_object_mut() {
             ensure_reasoning_content_for_assistant_history(root);

@@ -355,7 +355,7 @@ fn test_pinned_alias_lookup_and_unpin_json_api() {
 }
 
 #[test]
-fn test_strip_latest_chat_media_when_target_is_not_multimodal() {
+fn test_preserve_latest_chat_media_when_target_is_not_multimodal() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "model": "text-only",
@@ -397,16 +397,13 @@ fn test_strip_latest_chat_media_when_target_is_not_multimodal() {
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert_eq!(
-        result.payload["messages"][0]["content"],
-        json!([
-            {"type": "text", "text": "look"},
-            {"type": "text", "text": "[Image omitted]"}
-        ])
+        result.payload["messages"][0]["content"][1]["image_url"]["url"],
+        "https://example.com/a.png"
     );
 }
 
 #[test]
-fn test_strip_latest_responses_media_when_target_is_not_multimodal() {
+fn test_preserve_latest_responses_media_when_target_is_not_multimodal() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "model": "text-only",
@@ -448,11 +445,8 @@ fn test_strip_latest_responses_media_when_target_is_not_multimodal() {
 
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert_eq!(
-        result.payload["input"][0]["content"],
-        json!([
-            {"type": "input_text", "text": "look"},
-            {"type": "input_text", "text": "[Image omitted]"}
-        ])
+        result.payload["input"][0]["content"][1]["image_url"],
+        "https://example.com/a.png"
     );
 }
 

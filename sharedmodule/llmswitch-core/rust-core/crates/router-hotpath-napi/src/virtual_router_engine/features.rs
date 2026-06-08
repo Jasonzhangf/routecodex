@@ -1213,6 +1213,24 @@ mod tests {
     }
 
     #[test]
+    fn responses_wire_input_image_placeholder_is_media_intent() {
+        let request = json!({
+            "model": "glm-5",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "请看这张图 [Image #1]" }
+                ]
+            }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+        assert!(features.latest_message_from_user);
+        assert!(features.has_image_attachment);
+    }
+
+    #[test]
     fn current_user_image_placeholder_is_media_intent() {
         let request = json!({
             "model": "glm-5",
