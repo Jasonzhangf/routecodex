@@ -177,7 +177,7 @@ impl RoutingClassifier {
                 }
             }
         }
-        build_classification(DEFAULT_ROUTE, "fallback:default", &evaluation)
+        build_classification(DEFAULT_ROUTE, "default:route-selected", &evaluation)
     }
 }
 

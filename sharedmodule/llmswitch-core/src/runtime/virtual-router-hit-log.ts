@@ -351,8 +351,8 @@ export function buildHitReason(
       return decorateWithDetail(primary || routeUsed, primary, commandDetail);
     }
 
-    if (routeUsed === DEFAULT_ROUTE && classification.fallback) {
-      return primary || 'fallback:default';
+    if (routeUsed === DEFAULT_ROUTE && classification.routeChanged) {
+      return primary || 'default:route-selected';
     }
 
     if (primary) {

@@ -20,11 +20,11 @@ use crate::virtual_router_engine::instructions::{
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
-    extract_excluded_provider_keys, extract_key_alias, filter_candidates_by_state,
-    is_continuation_request, is_server_tool_followup_request, parse_direct_provider_model,
-    resolve_instruction_process_mode_for_selection, resolve_instruction_target,
-    resolve_routing_state_key, resolve_session_scope, resolve_stop_message_scope,
-    should_fallback_direct_model_for_media,
+    direct_model_media_requirement_error, extract_excluded_provider_keys, extract_key_alias,
+    filter_candidates_by_state, is_continuation_request, is_server_tool_followup_request,
+    parse_direct_provider_model, resolve_instruction_process_mode_for_selection,
+    resolve_instruction_target, resolve_routing_state_key, resolve_session_scope,
+    resolve_stop_message_scope,
 };
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
@@ -474,14 +474,15 @@ impl VirtualRouterEngineCore {
                     format!("Unknown model {} for provider {}", model_id, provider_id),
                 ));
             }
-            if !should_fallback_direct_model_for_media(
+            if let Some(error_message) = direct_model_media_requirement_error(
                 &provider_id,
                 &model_id,
                 &features,
-                &self.routing,
                 &self.provider_registry,
-                Some(&self.forwarder_registry),
             ) {
+                return Err(format_virtual_router_error("CONFIG_ERROR", error_message));
+            }
+            {
                 let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
                 let mut eligible: Vec<String> = Vec::new();
                 for key in candidate_keys {
@@ -571,7 +572,7 @@ impl VirtualRouterEngineCore {
                         "poolId": selection.pool_id,
                         "confidence": 1.0,
                         "reasoning": reasoning,
-                        "fallback": false
+                        "routeChanged": false
                     },
                     "diagnostics": {
                         "routeName": "direct",
@@ -579,7 +580,7 @@ impl VirtualRouterEngineCore {
                         "pool": selection.pool,
                         "poolId": selection.pool_id,
                         "reasoning": reasoning,
-                        "fallback": false,
+                        "routeChanged": false,
                         "confidence": 1.0
                     }
                 }));
@@ -630,7 +631,7 @@ impl VirtualRouterEngineCore {
                 map.insert("processMode".to_string(), Value::String(mode));
             }
         }
-        let did_fallback = selection.route_used != requested_route;
+        let route_changed = selection.route_used != requested_route;
         let decision = json!({
             "routeName": selection.route_used,
             "providerKey": selection.provider_key,
@@ -638,7 +639,7 @@ impl VirtualRouterEngineCore {
             "poolId": selection.pool_id,
             "confidence": classification.confidence,
             "reasoning": classification.reasoning,
-            "fallback": did_fallback
+            "routeChanged": route_changed
         });
         let diagnostics = json!({
             "routeName": selection.route_used,
@@ -646,7 +647,7 @@ impl VirtualRouterEngineCore {
             "pool": selection.pool,
             "poolId": selection.pool_id,
             "reasoning": classification.reasoning,
-            "fallback": did_fallback,
+            "routeChanged": route_changed,
             "confidence": classification.confidence,
             "unavailableRoutePools": selection.unavailable_providers
         });

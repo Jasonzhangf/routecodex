@@ -49,7 +49,7 @@ export interface RoutePoolTier {
   /**
    * Pool-level routing mode:
    * - round-robin: force round-robin selection inside this pool (ignores global loadBalancing strategy)
-   * - priority: always pick highest-priority key first, only fallback when unavailable
+   * - priority: always pick highest-priority key first; unavailable keys are skipped by policy
    */
   mode?: RoutePoolMode;
   backup?: boolean;
@@ -509,7 +509,7 @@ export interface ClassificationResult {
   routeName: string;
   confidence: number;
   reasoning: string;
-  fallback: boolean;
+  routeChanged: boolean;
   candidates?: string[];
 }
 
@@ -518,7 +518,7 @@ export interface RoutingDecision {
   providerKey: string;
   confidence: number;
   reasoning: string;
-  fallback: boolean;
+  routeChanged: boolean;
   pool: string[];
   poolId?: string;
 }
@@ -577,7 +577,7 @@ export interface RoutingDiagnostics {
   routeName: string;
   providerKey: string;
   reasoning: string;
-  fallback: boolean;
+  routeChanged: boolean;
   pool: string[];
   poolId?: string;
   confidence: number;

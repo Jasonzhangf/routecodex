@@ -142,6 +142,7 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 7. ProviderForwarder 多模态排障（2026-06-08）：图片请求命中 forwarder 时，Rust capability filter 必须用 forwarder real targets 判断 `multimodal` / `vision`；不能因为 route target 是 `fwd.*` 且不在 `ProviderRegistry` 就裁掉 multimodal/vision route。只有无 multimodal target 且无 vision route 时才允许最新图片占位。
 8. ProviderForwarder 启动 cooldown reprobe（2026-06-08）：重启后所有 cooldown provider 必须有一次被动命中机会；fwd 内部 availability scan 只能 `peek` startup reprobe 状态，等 `forwarder_registry.select` 真正选中 real target 后再 `consume`，禁止在扫描候选时提前消耗未选中的 target。
 9. Hub/VR/ProviderForwarder function-map gate（2026-06-08）：修改 Hub Pipeline / Virtual Router / forwarder owner 时，必须同步 `docs/architecture/function-map.yml`、`docs/architecture/verification-map.yml` 和源码 `feature_id:` anchor；`npm run build` / `npm run build:min` 必须先跑 `verify:function-map-compile-gate`，禁止把 map gate 从 build 链路拔掉。
+10. Virtual Router direct provider.model 媒体能力规则（2026-06-08）：显式 `provider.model` 是用户指定 direct target；若请求带图片/远程视频而该 provider/model 缺少 `vision`/`multimodal`，必须 fail-fast 返回 `CONFIG_ERROR`，禁止改路由到 vision/multimodal/forwarder target；`verify:vr-no-fallback-semantics` 锁住旧 fallback 字段和 direct media reroute 语义。
 
 ## Provider 自动重试 (Auto-Retry) 配置（2026-05-27）
 

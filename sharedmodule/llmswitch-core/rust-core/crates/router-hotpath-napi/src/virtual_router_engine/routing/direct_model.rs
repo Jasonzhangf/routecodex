@@ -1,12 +1,7 @@
 use serde_json::Value;
 
 use super::super::features::RoutingFeatures;
-use super::super::forwarder::ForwarderRegistry;
 use super::super::provider_registry::ProviderRegistry;
-use super::config::{
-    filter_pools_by_capability_with_forwarders, filter_pools_by_visual_capability_with_forwarders,
-    RoutingPools,
-};
 
 pub(crate) fn parse_direct_provider_model(
     model_value: Option<&Value>,
@@ -48,21 +43,19 @@ pub(crate) fn select_direct_provider_model(
     None
 }
 
-pub(crate) fn should_fallback_direct_model_for_media(
+pub(crate) fn direct_model_media_requirement_error(
     provider_id: &str,
     model_id: &str,
     features: &RoutingFeatures,
-    routing: &RoutingPools,
     provider_registry: &ProviderRegistry,
-    forwarder_registry: Option<&ForwarderRegistry>,
-) -> bool {
+) -> Option<String> {
     if !features.has_image_attachment && !features.has_video_attachment {
-        return false;
+        return None;
     }
     let needs_multimodal = features.has_image_attachment
         || (features.has_video_attachment && features.has_remote_video_attachment);
     if !needs_multimodal {
-        return false;
+        return None;
     }
     let keys = provider_registry.list_provider_keys(provider_id);
     let requires_video_capability =
@@ -80,74 +73,23 @@ pub(crate) fn should_fallback_direct_model_for_media(
             }
     });
     if has_required_media_capability {
-        return false;
+        return None;
     }
-    if features.has_image_attachment && !requires_video_capability {
-        return routing_has_visual_targets(routing, provider_registry, forwarder_registry);
-    }
-    routing_has_capability_targets(routing, provider_registry, forwarder_registry, "multimodal")
-}
-
-fn routing_has_visual_targets(
-    routing: &RoutingPools,
-    provider_registry: &ProviderRegistry,
-    forwarder_registry: Option<&ForwarderRegistry>,
-) -> bool {
-    for route in matching_route_keys(routing, "multimodal")
-        .into_iter()
-        .chain(matching_route_keys(routing, "vision"))
-    {
-        let pools = routing.get(&route);
-        if !filter_pools_by_visual_capability_with_forwarders(
-            &pools,
-            provider_registry,
-            forwarder_registry,
-        )
-        .is_empty()
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn routing_has_capability_targets(
-    routing: &RoutingPools,
-    provider_registry: &ProviderRegistry,
-    forwarder_registry: Option<&ForwarderRegistry>,
-    capability: &str,
-) -> bool {
-    for route in matching_route_keys(routing, capability) {
-        let pools = routing.get(&route);
-        if !filter_pools_by_capability_with_forwarders(
-            &pools,
-            provider_registry,
-            forwarder_registry,
-            capability,
-        )
-        .is_empty()
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn matching_route_keys(routing: &RoutingPools, route: &str) -> Vec<String> {
-    let suffix = format!(":{}", route);
-    routing
-        .keys()
-        .filter(|key| key.as_str() == route || key.ends_with(&suffix))
-        .cloned()
-        .collect()
+    let requirement = if requires_video_capability {
+        "multimodal"
+    } else {
+        "vision or multimodal"
+    };
+    Some(format!(
+        "Direct model {}.{} cannot satisfy media requirement {}; explicit provider.model routing must not change route",
+        provider_id, model_id, requirement
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::config::parse_routing;
     use super::*;
-    use crate::virtual_router_engine::forwarder::ForwarderRegistry;
-    use serde_json::{json, Map, Value};
+    use serde_json::json;
 
     fn registry_with_text_and_vision_models() -> ProviderRegistry {
         let mut registry = ProviderRegistry::default();
@@ -179,131 +121,58 @@ mod tests {
     }
 
     #[test]
-    fn image_direct_model_without_visual_capability_falls_back_to_vision_route() {
+    fn image_direct_model_without_visual_capability_fails_fast() {
         let registry = registry_with_text_and_vision_models();
-        let routing = parse_routing(&Map::from_iter([(
-            "vision".to_string(),
-            Value::Array(vec![json!({
-                "id": "vision",
-                "priority": 100,
-                "targets": ["media.key1.vision-model"]
-            })]),
-        )]));
         let features = RoutingFeatures {
             has_image_attachment: true,
             ..RoutingFeatures::default()
         };
 
-        assert!(should_fallback_direct_model_for_media(
+        let error = direct_model_media_requirement_error(
             "text",
             "text-model",
             &features,
-            &routing,
             &registry,
-            None
-        ));
+        )
+        .expect("direct media requirement error");
+        assert!(error.contains("Direct model text.text-model cannot satisfy media requirement"));
     }
 
     #[test]
     fn image_direct_model_with_vision_capability_remains_direct() {
         let registry = registry_with_text_and_vision_models();
-        let routing = parse_routing(&Map::from_iter([(
-            "vision".to_string(),
-            Value::Array(vec![json!({
-                "id": "vision",
-                "priority": 100,
-                "targets": ["media.key1.vision-model"]
-            })]),
-        )]));
         let features = RoutingFeatures {
             has_image_attachment: true,
             ..RoutingFeatures::default()
         };
 
-        assert!(!should_fallback_direct_model_for_media(
+        assert!(direct_model_media_requirement_error(
             "media",
             "vision-model",
             &features,
-            &routing,
             &registry,
-            None
-        ));
+        )
+        .is_none());
     }
 
     #[test]
     fn remote_video_direct_model_requires_multimodal_not_vision() {
         let registry = registry_with_text_and_vision_models();
-        let routing = parse_routing(&Map::from_iter([(
-            "multimodal".to_string(),
-            Value::Array(vec![json!({
-                "id": "multimodal",
-                "priority": 100,
-                "targets": ["media.key1.mm-model"]
-            })]),
-        )]));
         let features = RoutingFeatures {
             has_video_attachment: true,
             has_remote_video_attachment: true,
             ..RoutingFeatures::default()
         };
 
-        assert!(should_fallback_direct_model_for_media(
+        let error = direct_model_media_requirement_error(
             "media",
             "vision-model",
             &features,
-            &routing,
             &registry,
-            None
-        ));
-        assert!(!should_fallback_direct_model_for_media(
-            "media", "mm-model", &features, &routing, &registry, None
-        ));
-    }
-
-    #[test]
-    fn image_direct_model_falls_back_when_visual_target_is_forwarder() {
-        let registry = registry_with_text_and_vision_models();
-        let mut forwarders = ForwarderRegistry::new();
-        forwarders
-            .load(
-                json!({
-                    "fwd.media.vision": {
-                        "forwarderId": "fwd.media.vision",
-                        "protocol": "openai",
-                        "modelId": "vision-model",
-                        "resolutionMode": "model-first",
-                        "strategy": "priority",
-                        "targets": [
-                            { "providerKey": "media.key1.vision-model", "priority": 100, "disabled": false }
-                        ],
-                        "stickyKey": "none"
-                    }
-                })
-                .as_object()
-                .expect("forwarders"),
-                &registry.list_keys().into_iter().collect(),
-            )
-            .expect("load forwarder");
-        let routing = parse_routing(&Map::from_iter([(
-            "multimodal".to_string(),
-            Value::Array(vec![json!({
-                "id": "multimodal",
-                "priority": 100,
-                "targets": ["fwd.media.vision"]
-            })]),
-        )]));
-        let features = RoutingFeatures {
-            has_image_attachment: true,
-            ..RoutingFeatures::default()
-        };
-
-        assert!(should_fallback_direct_model_for_media(
-            "text",
-            "text-model",
-            &features,
-            &routing,
-            &registry,
-            Some(&forwarders)
-        ));
+        )
+        .expect("remote video requires multimodal");
+        assert!(error.contains("media requirement multimodal"));
+        assert!(direct_model_media_requirement_error("media", "mm-model", &features, &registry)
+            .is_none());
     }
 }
