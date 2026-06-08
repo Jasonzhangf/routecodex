@@ -1185,6 +1185,8 @@ mod tests {
             .is_available(provider_key, first_expiry + 1));
 
         core.handle_provider_error(&mk("req-4"));
+        core.handle_provider_error(&mk("req-5"));
+        core.handle_provider_error(&mk("req-6"));
         let second_cycle = provider_state(&core, provider_key);
         assert_eq!(second_cycle.state, "tripped");
         let second_expiry = second_cycle
