@@ -53,21 +53,27 @@ fn missing_continuation_prompt_fails_fast() {
 }
 
 #[test]
-fn web_search_is_not_client_exec_cli_projection() {
-    let output = Command::new(bin())
-        .args([
-            "run",
-            "web_search",
-            "--flow",
-            "stop_message_flow",
-            "--input-json",
-            r#"{"continuationPrompt":"continue with schema","repeatCount":1,"maxRepeats":3}"#,
-        ])
-        .output()
-        .expect("run routecodex-servertool");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("SERVERTOOL_UNSUPPORTED_TOOL: web_search"));
+fn non_client_exec_servertools_fail_fast() {
+    for tool_name in ["web_search", "vision_auto", "memory_cache_auto"] {
+        let output = Command::new(bin())
+            .args([
+                "run",
+                tool_name,
+                "--input-json",
+                r#"{"query":"x","image":"data"}"#,
+            ])
+            .output()
+            .expect("run routecodex-servertool");
+        assert!(
+            !output.status.success(),
+            "{tool_name} must not be executable through client CLI stdout"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}")),
+            "stderr={stderr}"
+        );
+    }
 }
 
 #[test]
