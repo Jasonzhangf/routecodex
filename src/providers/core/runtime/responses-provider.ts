@@ -121,13 +121,11 @@ export class ResponsesProvider extends HttpTransportProvider {
     const explicitStream = extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
     const useSse: boolean =
-      explicitStream === false
-        ? false
-        : streamingPreference === 'always'
-          ? true
-          : streamingPreference === 'never'
-            ? false
-            : explicitStream === true;
+      streamingPreference === 'always'
+        ? true
+        : streamingPreference === 'never'
+          ? false
+          : explicitStream === true;
 
     const providerStream = explicitStream === true;
     this.responsesClient.ensureStreamFlag(finalBody, useSse);
@@ -138,14 +136,19 @@ export class ResponsesProvider extends HttpTransportProvider {
       explicitStream: explicitStream ?? null
     });
 
-    await this.snapshotPhase('provider-request', context, finalBody, headers, targetUrl, entryEndpoint);
+    const transportHeaders = {
+      ...headers,
+      Accept: useSse ? 'text/event-stream' : 'application/json'
+    };
+
+    await this.snapshotPhase('provider-request', context, finalBody, transportHeaders, targetUrl, entryEndpoint);
 
     try {
       if (useSse) {
         return await this.sendSseRequest({
           endpoint,
           body: finalBody,
-          headers,
+          headers: transportHeaders,
           context,
           targetUrl,
           entryEndpoint,
@@ -157,7 +160,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       return await this.sendJsonRequest({
         endpoint,
         body: finalBody,
-        headers,
+        headers: transportHeaders,
         context,
         targetUrl,
         entryEndpoint,

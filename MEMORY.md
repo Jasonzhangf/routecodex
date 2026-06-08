@@ -2402,3 +2402,9 @@ Tags: provider-runtime-ingress, error-chain, router-direct, native-owner, virtua
 - Fix owner: `src/server/runtime/http-server/http-server-bootstrap.ts::extractProviderKeysForRoutingGroup()` expands forwarder target provider ids for router-port scope. Do not patch Virtual Router priority order for this symptom unless expanded allowlist is already correct.
 - Verified live after install/restart: 5555 `gpt-5.5` sample `req_1780882406344_e7775619` had allowlist `sdfv,llmgate,asxs,cc,...` and selected `llmgate.key1.free-gpt-5.5`; `sdfv.1.gpt-5.5` was legitimately skipped due to persisted `__http_503_daily_cooldown__`.
 Tags: virtual-router, forwarder, allowedProviders, router-port, priority, 5555, 2026-06-08
+
+## 2026-06-08 llmgate EMPTY_ASSISTANT_RESPONSE upstream stream-shape root cause
+- For Responses providers, `responses.streaming = "always"` is an upstream transport policy. Client `stream:false` must not disable upstream SSE; it only means RouteCodex may materialize the upstream SSE back to a non-stream client response.
+- Fix owner: `src/providers/core/runtime/responses-provider.ts`. The focused regression locks that `responses.streaming = "always"` sends upstream SSE with `Accept:text/event-stream` and `body.stream=true` even when the client body has `stream:false`.
+- Verification: `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/protocol-http-providers.unit.test.ts --runInBand --forceExit` passed 11 tests, `npx tsc --noEmit --pretty false` passed, and `git diff --check` passed. Do not patch response contract or routing fallback for this symptom until provider-request shape and upstream stream mode have been verified.
+Tags: responses-provider, llmgate, empty-assistant-response, stream-shape, provider-runtime, 5555, 2026-06-08

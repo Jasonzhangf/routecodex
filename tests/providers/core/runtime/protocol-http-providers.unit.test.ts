@@ -323,7 +323,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(capturedBody.input[1].content).toEqual([{ type: 'output_text', text: 'historical leak' }]);
   });
 
-  test('ResponsesProvider honors explicit stream=false even when provider streaming preference is always', async () => {
+  test('ResponsesProvider uses upstream SSE when provider streaming preference is always even if client stream=false', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-stream-false',
       type: 'responses-http-provider',
@@ -337,36 +337,33 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     } as unknown as OpenAIStandardConfig;
     const provider = new ResponsesProvider(config, emptyDeps) as any;
     provider.isInitialized = true;
-    provider.snapshotPhase = async () => {};
+    provider.snapshotPhase = async (phase: string, _context: unknown, _data: unknown, headers: Record<string, string>) => {
+      if (phase === 'provider-request') {
+        provider.__snapshotHeaders = headers;
+      }
+    };
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
     provider.httpClient = {
-      post: async (_url: string, body: any) => {
-        provider.__captured = { mode: 'json', body };
-        return {
-          data: {
-            id: 'resp_1',
-            object: 'response',
-            status: 'completed',
-            model: body.model,
-            output: []
-          }
-        };
+      post: async () => {
+        throw new Error('MUST_NOT_USE_JSON_WHEN_STREAMING_ALWAYS');
       },
-      postStream: async () => {
-        throw new Error('MUST_NOT_USE_SSE_WHEN_STREAM_FALSE');
+      postStream: async (_url: string, body: any, headers: Record<string, string>) => {
+        provider.__captured = { mode: 'sse', body, headers };
+        throw new Error('STOP_AFTER_CAPTURE');
       }
     };
 
-    const outbound = await provider.sendRequestInternal({
+    await expect(provider.sendRequestInternal({
       model: 'gpt-5.3-codex',
       stream: false,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
-    });
+    })).rejects.toThrow('STOP_AFTER_CAPTURE');
 
-    expect(provider.__captured?.mode).toBe('json');
-    expect(provider.__captured?.body?.stream).toBeUndefined();
-    expect((outbound as any)?.data?.status).toBe('completed');
+    expect(provider.__captured?.mode).toBe('sse');
+    expect(provider.__captured?.headers?.Accept).toBe('text/event-stream');
+    expect(provider.__snapshotHeaders?.Accept).toBe('text/event-stream');
+    expect(provider.__captured?.body?.stream).toBe(true);
   });
 
   test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {
