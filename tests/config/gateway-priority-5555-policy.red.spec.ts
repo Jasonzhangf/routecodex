@@ -9,19 +9,19 @@ describe('gateway_priority_5555 routing policy guard', () => {
   };
   const policy = {
     routing: {
-      coding: [{ mode: 'priority', targets: ['sdfv.key1.gpt-5.5', 'cc.key1.gpt-5.5', 'mimo.mimo-v2.5'] }],
-      thinking: [{ mode: 'priority', targets: ['sdfv.key1.gpt-5.5', 'cc.key1.gpt-5.5', 'mimo.mimo-v2.5'] }],
+      coding: [{ mode: 'priority', targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5'] }],
+      thinking: [{ mode: 'priority', targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5'] }],
       tools: [{ mode: 'weighted', targets: ['mini27.MiniMax-M2.7', 'mimo.mimo-v2.5'], loadBalancing: toolLb }],
       search: [{ mode: 'weighted', targets: ['mini27.MiniMax-M2.7', 'mimo.mimo-v2.5'], loadBalancing: toolLb }],
       web_search: [{ mode: 'weighted', targets: ['mini27.MiniMax-M2.7', 'mimo.mimo-v2.5'], loadBalancing: toolLb }]
     }
   } as { routing: Record<string, Route[]> };
 
-  it('keeps coding/thinking routes on sdfv -> cc -> mimo priority order', () => {
+  it('keeps coding/thinking routes on GPT forwarder priority order', () => {
     for (const routeName of ['coding', 'thinking']) {
       const route = policy.routing[routeName]?.[0];
       expect(route?.mode).toBe('priority');
-      expect(route?.targets).toEqual(['sdfv.key1.gpt-5.5', 'cc.key1.gpt-5.5', 'mimo.mimo-v2.5']);
+      expect(route?.targets).toEqual(['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3', 'mimo.mimo-v2.5']);
       expect(route?.loadBalancing).toBeUndefined();
     }
   });
@@ -47,10 +47,12 @@ describe('gateway_priority_5555 routing policy guard', () => {
     expect(serializedToolRoutes).not.toContain('deepseek-v4-flash-free');
   });
 
-  it('does not route 5555 coding/thinking traffic to mini27 or opencode deepseek', () => {
+  it('does not route 5555 coding/thinking traffic directly to concrete GPT providers', () => {
     const serialized = JSON.stringify(policy.routing);
     expect(serialized).not.toContain('opencode');
     expect(serialized).not.toContain('deepseek-v4-flash-free');
     expect(JSON.stringify({ coding: policy.routing.coding, thinking: policy.routing.thinking })).not.toContain('mini27');
+    expect(JSON.stringify({ coding: policy.routing.coding, thinking: policy.routing.thinking })).not.toContain('sdfv.key1.gpt-5.5');
+    expect(JSON.stringify({ coding: policy.routing.coding, thinking: policy.routing.thinking })).not.toContain('cc.key1.gpt-5.5');
   });
 });

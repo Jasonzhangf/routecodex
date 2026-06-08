@@ -29,7 +29,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     }
   });
 
-  skipUnless('bootstrap forwarders section contains GPT priority + MiniMax forwarders', async () => {
+  skipUnless('bootstrap forwarders section contains GPT round-robin + MiniMax forwarders', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
@@ -44,14 +44,15 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
 
     const gpt55 = fwds['fwd.gpt.gpt-5.5'] as {
       strategy?: string;
+      stickyKey?: string;
       targets: Array<{ providerId?: string; providerKey?: string; priority?: number }>;
     };
-    expect(gpt55.strategy).toBe('priority');
+    expect(gpt55.strategy).toBe('round-robin');
+    expect(gpt55.stickyKey).toBe('none');
     expect(gpt55.targets.map((t) => [t.providerId, t.providerKey, t.priority])).toEqual([
-      ['sdfv', 'sdfv.key1.gpt-5.5', 1],
-      ['llmgate', 'llmgate.key1.free-gpt-5.5', 2],
-      ['asxs', 'asxs.crsa.gpt-5.5', 3],
-      ['cc', 'cc.key1.gpt-5.5', 4],
+      ['1token', '1token.key1.gpt-5.5', undefined],
+      ['sdfv', 'sdfv.key1.gpt-5.5', undefined],
+      ['llmgate', 'llmgate.key1.free-gpt-5.5', undefined],
     ]);
 
     const m27 = fwds['fwd.minimax.MiniMax-M2.7'] as {
