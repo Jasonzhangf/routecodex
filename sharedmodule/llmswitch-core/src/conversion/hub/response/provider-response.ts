@@ -26,8 +26,8 @@ import {
 import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
 import {
   buildProviderSseStreamReadErrorDescriptorWithNative,
-  buildResponsesPayloadFromChatWithNative,
-  materializeProviderResponseSsePayloadWithNative
+  materializeProviderResponseSsePayloadWithNative,
+  projectPostServertoolHubRespOutbound04ClientSemanticWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 type HubStageTopEntry = {
@@ -213,30 +213,12 @@ function readServertoolRuntimeActionChatPayload(effect: Record<string, unknown>)
   return payload as JsonObject;
 }
 
-type HubRespPayloadStage = 'HubRespOutbound04ClientSemantic' | 'HubRespChatProcess03Governed';
+type HubRespPayloadStage = 'client_semantic' | 'HubRespChatProcess03Governed';
 
 type HubRespProcessEffectResult = {
   payload: JsonObject;
   stage: HubRespPayloadStage;
 };
-
-// Normal adjacent response-stage builder. Servertool may leave a post-tool/followup
-// result at HubRespChatProcess03Governed, but it never owns a private response exit.
-// This is the only 03 -> 04 projection point for Responses-shaped client payloads.
-function buildHubRespOutbound04FromHubRespChatProcess03(args: {
-  payload: JsonObject;
-  entryEndpoint: string;
-  requestId: string;
-  context: AdapterContext;
-}): JsonObject {
-  if (!String(args.entryEndpoint || '').toLowerCase().includes('/v1/responses')) {
-    return args.payload;
-  }
-  return buildResponsesPayloadFromChatWithNative(args.payload, {
-    requestId: args.requestId,
-    responseSemantics: args.context as Record<string, unknown>
-  }) as JsonObject;
-}
 
 async function executeProviderResponseNativeServertoolEffects(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
@@ -251,7 +233,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
 }): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
-  let stage: HubRespPayloadStage = 'HubRespOutbound04ClientSemantic';
+  let stage: HubRespPayloadStage = 'client_semantic';
   for (const effect of readNativeServertoolRuntimeActionEffects(args.runtimeEffects)) {
     if (effect.action === 'requireReenterPipeline') {
       if (!args.reenterPipeline) {
@@ -412,12 +394,12 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     clientInjectDispatch: args.clientInjectDispatch
   });
   hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
-    ? buildHubRespOutbound04FromHubRespChatProcess03({
+    ? projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
       payload: respProcessEffect.payload,
       entryEndpoint: args.entryEndpoint,
       requestId: args.requestId,
-      context: args.context
-    })
+      responseSemantics: args.context as Record<string, unknown>
+    }) as JsonObject
     : respProcessEffect.payload;
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.runtimeEffects);
   await executeProviderResponseNativeRuntimeStateEffect({

@@ -22,6 +22,7 @@ import type {
   ProviderResponseToolCallSummary,
   ResponsesHostPolicyResult
 } from './native-hub-pipeline-resp-semantics-types.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 
 export function resolveAnthropicStopReasonWithNative(
   stopReason: string | undefined
@@ -323,6 +324,44 @@ export function buildResponsesPayloadFromChatWithNative(
       parsed.model = sourceModel;
     }
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function projectPostServertoolHubRespOutbound04ClientSemanticWithNative(input: {
+  payload: unknown;
+  entryEndpoint?: string;
+  requestId?: string;
+  responseSemantics?: Record<string, unknown>;
+}): JsonObject {
+  const capability = 'projectPostServertoolHubRespOutbound04ClientSemanticJson';
+  const fail = (reason?: string) => failNative<JsonObject>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(input.payload);
+  const entryEndpointJson = safeStringify(typeof input.entryEndpoint === 'string' ? input.entryEndpoint : null);
+  const requestIdJson = safeStringify(typeof input.requestId === 'string' ? input.requestId : null);
+  const responseSemanticsJson = safeStringify(input.responseSemantics ?? {});
+  if (!payloadJson || !entryEndpointJson || !requestIdJson || !responseSemanticsJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, entryEndpointJson, requestIdJson, responseSemanticsJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return (parseRecord(raw) as JsonObject | null | undefined) ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

@@ -12,9 +12,12 @@ use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
 use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
     merge_responses_output_items, normalize_reasoning_summary_for_codex_display,
 };
+use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::resolve_client_protocol_for_response_entry;
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
 use crate::shared_json_utils::read_object_trimmed_string;
+
+// feature_id: hub.response_post_servertool_client_projection
 
 fn now_unix_millis() -> u128 {
     SystemTime::now()
@@ -994,4 +997,28 @@ pub(crate) fn build_responses_payload_from_chat_core(
         response_row,
         context,
     ))
+}
+
+pub(crate) fn project_post_servertool_hub_resp_outbound_04_client_semantic(
+    payload: &Value,
+    entry_endpoint: Option<&str>,
+    request_id: Option<&str>,
+    response_semantics: &Value,
+) -> Result<Value, String> {
+    let client_protocol = resolve_client_protocol_for_response_entry(entry_endpoint, false);
+    if client_protocol != "openai-responses" {
+        return Ok(payload.clone());
+    }
+    let mut context = Map::new();
+    if let Some(request_id) = request_id.map(str::trim).filter(|value| !value.is_empty()) {
+        context.insert(
+            "requestId".to_string(),
+            Value::String(request_id.to_string()),
+        );
+    }
+    context.insert(
+        "responseSemantics".to_string(),
+        response_semantics.clone(),
+    );
+    build_responses_payload_from_chat_core(payload, request_id, &Value::Object(context))
 }

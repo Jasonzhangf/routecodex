@@ -7,6 +7,7 @@ pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
     build_openai_chat_from_anthropic_message_full_json, build_responses_payload_from_chat_json,
     normalize_alias_map_json, normalize_openai_chat_reasoning_outbound_json,
     normalize_responses_tool_call_arguments_for_client_json, normalize_responses_usage_json,
+    project_post_servertool_hub_resp_outbound_04_client_semantic_json,
     resolve_alias_map_from_resp_semantics_json, resolve_alias_map_from_sources_json,
     resolve_anthropic_chat_completion_outcome_json, resolve_anthropic_stop_reason_json,
     resolve_client_tools_raw_from_resp_semantics_json, resolve_client_tools_raw_json,

@@ -35,6 +35,7 @@ export {
   normalizeResponsesToolCallArgumentsForClientWithNative,
   normalizeResponsesUsageWithNative,
   buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
+  projectPostServertoolHubRespOutbound04ClientSemanticWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative,
   resolveAnthropicStopReasonWithNative,
   resolveProviderResponseContextHelpersWithNative,

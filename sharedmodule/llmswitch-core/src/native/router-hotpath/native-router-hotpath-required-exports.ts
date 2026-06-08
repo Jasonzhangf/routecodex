@@ -78,6 +78,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "detectToolExecutionFailuresJson",
   "buildFormatRequestJson",
   "buildResponsesPayloadFromChatJson",
+  "projectPostServertoolHubRespOutbound04ClientSemanticJson",
   "buildBridgeHistoryJson",
   "normalizeBridgeHistorySeedJson",
   "resolveResponsesBridgeToolsJson",

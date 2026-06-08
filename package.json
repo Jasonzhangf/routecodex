@@ -126,6 +126,7 @@
     "verify:hub-response-anthropic-native": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi anthropic --lib -- --nocapture'",
     "verify:hub-response-responses-chat-projection": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi build_chat_response_from_responses --lib -- --nocapture'",
     "verify:hub-response-provider-context-helpers": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi resolve_provider_response_context_helpers --lib -- --nocapture'",
+    "verify:hub-response-post-servertool-client-projection": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi project_post_servertool --lib -- --nocapture'",
     "verify:llmswitch-core-tsc": "npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false",
     "verify:vr-forwarder-runtime": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi forwarder --lib -- --nocapture'",
     "verify:architecture-deleted-path": "node scripts/architecture/verify-architecture-deleted-path.mjs",

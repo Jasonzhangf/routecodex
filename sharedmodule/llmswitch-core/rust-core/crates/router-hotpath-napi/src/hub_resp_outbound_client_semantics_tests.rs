@@ -1829,6 +1829,62 @@ fn resolve_provider_response_context_helpers_parses_followup_and_tool_surface_mo
 }
 
 #[test]
+fn project_post_servertool_hub_resp_outbound_04_projects_responses_endpoint() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_post_servertool",
+        "model": "upstream-model",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "done"
+                }
+            }
+        ]
+    });
+    let semantics = serde_json::json!({
+        "displayModel": "client-model"
+    });
+    let output = project_post_servertool_hub_resp_outbound_04_client_semantic(
+        &payload,
+        Some("/v1/responses"),
+        Some("req_post_servertool"),
+        &semantics,
+    )
+    .expect("project post-servertool client semantic");
+    assert_eq!(output["object"], Value::String("response".to_string()));
+    assert_eq!(
+        output["request_id"],
+        Value::String("req_post_servertool".to_string())
+    );
+    assert_eq!(output["model"], Value::String("upstream-model".to_string()));
+    assert!(output.get("choices").is_none());
+}
+
+#[test]
+fn project_post_servertool_hub_resp_outbound_04_keeps_non_responses_payload() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_post_servertool",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "done"
+                }
+            }
+        ]
+    });
+    let output = project_post_servertool_hub_resp_outbound_04_client_semantic(
+        &payload,
+        Some("/v1/chat/completions"),
+        Some("req_post_servertool"),
+        &serde_json::json!({}),
+    )
+    .expect("project post-servertool client semantic");
+    assert_eq!(output, payload);
+}
+
+#[test]
 fn resolve_sse_stream_mode_supports_gemini_chat() {
     assert!(resolve_sse_stream_mode(true, "gemini-chat").unwrap());
     assert!(resolve_sse_stream_mode(true, " gemini-chat ").unwrap());

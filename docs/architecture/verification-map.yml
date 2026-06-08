@@ -182,6 +182,7 @@ verification:
     integration:
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
       - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
       - npm run verify:hub-response-responses-chat-projection
       - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
@@ -189,6 +190,23 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
+
+  - feature_id: hub.response_post_servertool_client_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+    integration:
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - npm run verify:llmswitch-core-tsc
+    build:
+      - npm run build:min
+    notes:
+      - TS provider-response remains native invocation glue; 03->04 post-servertool projection and Responses client payload decisions stay in Rust.
 
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high

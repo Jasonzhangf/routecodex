@@ -330,6 +330,38 @@ owners:
     notes:
       - TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust.
 
+  - feature_id: hub.response_post_servertool_client_projection
+    status: active
+    summary: Post-servertool HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection for client Responses payloads
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
+    canonical_types:
+      - HubRespChatProcess03Governed
+      - HubRespOutbound04ClientSemantic
+    canonical_builders:
+      - project_post_servertool_hub_resp_outbound_04_client_semantic
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    forbidden_paths:
+      - src/providers
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+    required_gates:
+      - npm run verify:hub-response-post-servertool-client-projection
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - Post-servertool projection decisions belong to Rust; TS provider-response may only pass payload, entry endpoint, request id, and same-request response semantics into native.
+
   - feature_id: hub.response_provider_sse_materialization
     status: active
     summary: Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry
@@ -381,7 +413,6 @@ owners:
     forbidden_paths:
       - src/providers
       - src/server
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs

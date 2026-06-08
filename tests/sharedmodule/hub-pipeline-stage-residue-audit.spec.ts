@@ -1861,9 +1861,12 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
       { label: 'keeps streamPipe payload as response truth in TS shell', pattern: /payload:\s*streamPayload|streamPayload\s+as\s+JsonObject/ },
       { label: 'scans raw Rust effectPlan kinds in TS shell', pattern: /effectPlan\.effects\.filter\(\(effect\)\s*=>\s*effect\?\.(?:kind|kind\s*===)/ },
+      { label: 'ts-post-servertool-responses-endpoint-branch', pattern: /includes\(['"]\/v1\/responses['"]\)/ },
+      { label: 'ts-post-servertool-responses-projection-owner', pattern: /buildResponsesPayloadFromChatWithNative/ },
     ]);
 
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(source).toContain("hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'");
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');

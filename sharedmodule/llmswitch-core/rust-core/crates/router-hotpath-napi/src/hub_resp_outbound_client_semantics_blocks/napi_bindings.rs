@@ -20,6 +20,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::provider_outcome::{
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_payload::{
     build_responses_payload_from_chat_core, normalize_responses_function_name,
+    project_post_servertool_hub_resp_outbound_04_client_semantic,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
 use crate::hub_resp_outbound_client_semantics_blocks::tool_semantics::{
@@ -287,6 +288,31 @@ pub fn build_responses_payload_from_chat_json(
     let output =
         build_responses_payload_from_chat_core(&payload, request_id_hint.as_deref(), &context)
             .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn project_post_servertool_hub_resp_outbound_04_client_semantic_json(
+    payload_json: String,
+    entry_endpoint_json: String,
+    request_id_json: String,
+    response_semantics_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let entry_endpoint_raw: Value = serde_json::from_str(&entry_endpoint_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let request_id_raw: Value = serde_json::from_str(&request_id_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let response_semantics: Value = serde_json::from_str(&response_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = project_post_servertool_hub_resp_outbound_04_client_semantic(
+        &payload,
+        entry_endpoint_raw.as_str(),
+        request_id_raw.as_str(),
+        &response_semantics,
+    )
+    .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
