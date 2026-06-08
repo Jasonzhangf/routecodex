@@ -20,6 +20,7 @@ const requiredGateParts = [
   'verify:function-map-canonical-builder-definitions',
   'verify:function-map-forbidden-mentions',
   'verify:function-map-required-tests',
+  'verify:function-map-build-wiring',
 ];
 
 const failures = [];

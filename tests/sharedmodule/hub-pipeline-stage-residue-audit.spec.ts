@@ -483,6 +483,28 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('registerResponsesPassthrough');
   });
 
+  it('responses response utils must not own response restore semantics in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+
+    expect(source).toContain('buildChatResponseFromResponsesFullWithNative');
+    expect(source).not.toContain('responses-reasoning-registry');
+    expect(source).not.toContain('createBridgeActionState');
+    expect(source).not.toContain('runBridgeActionPipeline');
+    expect(source).not.toContain('resolveBridgePolicy');
+    expect(source).not.toContain('resolvePolicyActions');
+    expect(source).not.toContain('unwrapResponsesResponse');
+    expect(source).not.toContain('registerPassthroughSnapshot');
+    expect(source).not.toContain('cloneSnapshot');
+    expect(source).not.toContain('registerResponsesPayloadSnapshot');
+    expect(source).not.toContain('registerResponsesPassthrough');
+    expect(source).not.toContain('buildChatResponseFromResponsesWithNative');
+    expect(source).not.toContain('__responses_payload_snapshot');
+  });
+
   it('runtime source outside response-mappers must not import response mapper residue', () => {
     const sourceRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src');
     const findings: string[] = [];

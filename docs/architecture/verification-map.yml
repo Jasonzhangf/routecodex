@@ -170,6 +170,25 @@ verification:
     notes:
       - Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export.
 
+  - feature_id: hub.response_responses_chat_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
+      - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
+    smoke:
+      - npm run verify:hub-response-responses-chat-projection
+      - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+    build:
+      - npm run verify:llmswitch-core-tsc
+    notes:
+      - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
+
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
     unit:

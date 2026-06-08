@@ -5,7 +5,7 @@ mod bridge_input;
 mod history;
 mod local_image;
 mod metadata;
-mod pipeline;
+pub(crate) mod pipeline;
 mod reasoning;
 mod tool_ids;
 pub(crate) mod utils;

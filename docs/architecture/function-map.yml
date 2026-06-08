@@ -292,6 +292,43 @@ owners:
     notes:
       - TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust.
 
+  - feature_id: hub.response_responses_chat_projection
+    status: active
+    summary: OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+    canonical_types:
+      - ProviderRespInbound01Raw
+      - HubRespInbound02Parsed
+      - HubRespChatProcess03Governed
+      - HubRespOutbound04ClientSemantic
+    canonical_builders:
+      - build_chat_response_from_responses_full
+      - build_chat_response_from_responses_impl
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+    forbidden_paths:
+      - src/providers
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts
+      - sharedmodule/llmswitch-core/src/conversion/bridge-actions.ts
+      - sharedmodule/llmswitch-core/src/conversion/bridge-policies.ts
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
+      - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
+    required_gates:
+      - npm run verify:hub-response-responses-chat-projection
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust.
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance

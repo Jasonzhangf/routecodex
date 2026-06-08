@@ -176,6 +176,32 @@ export function buildChatResponseFromResponsesWithNative(payload: unknown): Reco
   }
 }
 
+export function buildChatResponseFromResponsesFullWithNative(input: { payload: string }): string {
+  const capability = 'buildChatResponseFromResponsesFullJson';
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function hasValidThoughtSignatureWithNative(
   block: unknown,
   options?: Record<string, unknown>

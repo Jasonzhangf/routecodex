@@ -395,7 +395,7 @@ fn gemini_policy() -> Value {
     })
 }
 
-fn resolve_bridge_policy(input: &ResolveBridgePolicyInput) -> Option<Value> {
+pub(crate) fn resolve_bridge_policy(input: &ResolveBridgePolicyInput) -> Option<Value> {
     match normalize_token(input.protocol.as_ref()).as_deref() {
         Some("openai-responses") => return Some(responses_policy()),
         Some("openai-chat") => return Some(openai_chat_policy()),
@@ -423,12 +423,25 @@ fn resolve_stage_keys(stage: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-fn resolve_bridge_policy_actions(policy: Option<&Value>, stage: &str) -> Option<Value> {
+pub(crate) fn resolve_bridge_policy_actions(policy: Option<&Value>, stage: &str) -> Option<Value> {
     let (phase_key, direction_key) = resolve_stage_keys(stage)?;
     let policy_obj = policy?.as_object()?;
     let phase = policy_obj.get(phase_key)?.as_object()?;
     let actions = phase.get(direction_key)?.as_array()?;
     Some(Value::Array(actions.clone()))
+}
+
+pub(crate) fn resolve_bridge_policy_actions_for_tokens(
+    protocol: Option<&str>,
+    module_type: Option<&str>,
+    stage: &str,
+) -> Option<Value> {
+    let input = ResolveBridgePolicyInput {
+        protocol: protocol.map(|value| value.to_string()),
+        module_type: module_type.map(|value| value.to_string()),
+    };
+    let policy = resolve_bridge_policy(&input)?;
+    resolve_bridge_policy_actions(Some(&policy), stage)
 }
 
 #[napi]

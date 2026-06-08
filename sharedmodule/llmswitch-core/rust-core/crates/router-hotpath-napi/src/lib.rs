@@ -670,6 +670,11 @@ pub fn build_chat_response_from_responses_json(payload_json: String) -> NapiResu
     shared_responses_response_utils::build_chat_response_from_responses_json(payload_json)
 }
 
+#[napi(js_name = "buildChatResponseFromResponsesFullJson")]
+pub fn build_chat_response_from_responses_full_json(input_json: String) -> NapiResult<String> {
+    shared_responses_response_utils::build_chat_response_from_responses_full_json(input_json)
+}
+
 #[napi(js_name = "updateResponsesContractProbeFromSseChunkJson")]
 pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
     chunk_json: String,

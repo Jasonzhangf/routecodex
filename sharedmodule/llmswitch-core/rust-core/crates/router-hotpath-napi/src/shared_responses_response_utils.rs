@@ -2,13 +2,36 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
+// feature_id: hub.response_responses_chat_projection
+
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot,
     project_message_reasoning_text, sanitize_reasoning_tagged_text,
 };
+use crate::hub_bridge_actions::{
+    BridgeActionDescriptor, BridgeActionPipelineInput, BridgeActionState,
+};
+use crate::hub_bridge_actions::pipeline::run_bridge_action_pipeline;
+use crate::hub_bridge_policies::resolve_bridge_policy_actions_for_tokens;
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
+use crate::responses_reasoning_registry::{
+    register_responses_passthrough_json, register_responses_payload_snapshot_json,
+};
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_output_content_normalizer::extract_output_segments;
+
+#[derive(serde::Deserialize)]
+pub(crate) struct BuildChatResponseFromResponsesFullInput {
+    pub(crate) payload: String,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct BuildChatResponseFromResponsesFullOutput {
+    pub(crate) result: String,
+    pub(crate) id: Option<String>,
+    #[serde(rename = "requestId")]
+    pub(crate) request_id: Option<String>,
+}
 
 fn normalize_function_call_id(call_id: Option<&str>, fallback: &str) -> String {
     let trimmed = call_id.unwrap_or("").trim();
@@ -537,6 +560,148 @@ pub(crate) fn build_chat_response_from_responses_impl(payload: &Value) -> Value 
     Value::Object(chat)
 }
 
+fn register_passthrough_snapshot(payload: &Value) -> Result<(), String> {
+    let Some(payload_obj) = payload.as_object() else {
+        return Ok(());
+    };
+    let ids = [
+        read_trimmed_string(payload_obj.get("request_id")),
+        read_trimmed_string(payload_obj.get("id")),
+    ];
+    let payload_json = serde_json::to_string(payload).map_err(|e| e.to_string())?;
+    let mut seen = std::collections::BTreeSet::new();
+    for id in ids.into_iter().flatten() {
+        if seen.insert(id.clone()) {
+            register_responses_passthrough_json(id, payload_json.clone(), Some(false))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_responses_inbound_bridge_actions(
+    chat: &mut Value,
+    response: &Value,
+) -> Result<(), String> {
+    let Some(message) = chat.pointer("/choices/0/message").cloned() else {
+        return Ok(());
+    };
+    if !message.is_object() {
+        return Ok(());
+    }
+    let Some(actions_value) = resolve_bridge_policy_actions_for_tokens(
+        Some("openai-responses"),
+        Some("openai-responses"),
+        "response_inbound",
+    ) else {
+        return Ok(());
+    };
+    let actions: Vec<BridgeActionDescriptor> =
+        serde_json::from_value(actions_value).map_err(|e| e.to_string())?;
+    if actions.is_empty() {
+        return Ok(());
+    }
+    let request_id = response
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("id")));
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "response_inbound".to_string(),
+        actions: Some(actions),
+        protocol: Some("openai-responses".to_string()),
+        module_type: Some("openai-responses".to_string()),
+        request_id,
+        state: BridgeActionState {
+            messages: vec![message],
+            required_action: None,
+            captured_tool_results: None,
+            raw_request: None,
+            raw_response: Some(response.clone()),
+            metadata: None,
+        },
+    })?;
+    let Some(next_message) = output.messages.into_iter().next() else {
+        return Ok(());
+    };
+    if let Some(message_slot) = chat.pointer_mut("/choices/0/message") {
+        *message_slot = next_message;
+    }
+    Ok(())
+}
+
+fn register_responses_payload_snapshot_for_chat(
+    chat: &mut Value,
+    response: &Value,
+) -> Result<(Option<String>, Option<String>), String> {
+    let id = chat.as_object().and_then(|row| read_trimmed_string(row.get("id")));
+    let request_id = chat
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("request_id")))
+        .or_else(|| {
+            response
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("request_id")))
+        });
+    let inline_snapshot = chat
+        .as_object()
+        .and_then(|row| row.get("__responses_payload_snapshot"))
+        .filter(|value| value.is_object())
+        .cloned();
+    let retained_snapshot = inline_snapshot.unwrap_or_else(|| response.clone());
+    if retained_snapshot.is_object() {
+        if let Some(chat_obj) = chat.as_object_mut() {
+            chat_obj.insert(
+                "__responses_payload_snapshot".to_string(),
+                retained_snapshot.clone(),
+            );
+        }
+        let snapshot_json = serde_json::to_string(&retained_snapshot).map_err(|e| e.to_string())?;
+        let mut seen = std::collections::BTreeSet::new();
+        for key in [id.clone(), request_id.clone()].into_iter().flatten() {
+            if seen.insert(key.clone()) {
+                register_responses_payload_snapshot_json(key, snapshot_json.clone(), Some(false))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok((id, request_id))
+}
+
+pub(crate) fn build_chat_response_from_responses_full(
+    input: BuildChatResponseFromResponsesFullInput,
+) -> Result<BuildChatResponseFromResponsesFullOutput, String> {
+    let payload: Value = serde_json::from_str(&input.payload).map_err(|e| e.to_string())?;
+    let Some(response) = unwrap_responses_response_impl(&payload) else {
+        if payload.get("choices").and_then(Value::as_array).is_some() {
+            register_passthrough_snapshot(&payload)?;
+        }
+        let result = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+        return Ok(BuildChatResponseFromResponsesFullOutput {
+            result,
+            id: payload.as_object().and_then(|row| read_trimmed_string(row.get("id"))),
+            request_id: payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("request_id"))),
+        });
+    };
+    let mut chat = build_chat_response_from_responses_impl(&response);
+    if !chat.is_object() {
+        let result = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+        return Ok(BuildChatResponseFromResponsesFullOutput {
+            result,
+            id: None,
+            request_id: None,
+        });
+    }
+    apply_responses_inbound_bridge_actions(&mut chat, &response)?;
+    let (id, request_id) = register_responses_payload_snapshot_for_chat(&mut chat, &response)?;
+    let result = serde_json::to_string(&chat).map_err(|e| e.to_string())?;
+    Ok(BuildChatResponseFromResponsesFullOutput {
+        result,
+        id,
+        request_id,
+    })
+}
+
 #[napi]
 pub fn collect_tool_calls_from_responses_json(response_json: String) -> NapiResult<String> {
     let response: Value = serde_json::from_str(&response_json)
@@ -563,6 +728,14 @@ pub fn build_chat_response_from_responses_json(payload_json: String) -> NapiResu
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = build_chat_response_from_responses_impl(&payload);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "buildChatResponseFromResponsesFullJson")]
+pub fn build_chat_response_from_responses_full_json(input_json: String) -> NapiResult<String> {
+    let input: BuildChatResponseFromResponsesFullInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = build_chat_response_from_responses_full(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -1059,6 +1232,42 @@ mod tests {
         );
         assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
         assert!(output.get("__responses_payload_snapshot").is_none());
+    }
+
+    #[test]
+    fn responses_response_utils_full_owner_restores_snapshot_and_bridge_reasoning() {
+        let output =
+            build_chat_response_from_responses_full(BuildChatResponseFromResponsesFullInput {
+                payload: serde_json::json!({
+                    "id": "resp_full",
+                    "request_id": "req_full",
+                    "object": "response",
+                    "model": "gpt-test",
+                    "output": [{
+                        "type": "reasoning",
+                        "summary": [{ "type": "summary_text", "text": "native bridge summary" }]
+                    }],
+                    "status": "completed"
+                })
+                .to_string(),
+            })
+            .expect("full responses chat output");
+        let chat: Value = serde_json::from_str(&output.result).expect("chat json");
+        assert_eq!(output.id.as_deref(), Some("resp_full"));
+        assert_eq!(output.request_id.as_deref(), Some("req_full"));
+        assert_eq!(chat["id"], "resp_full");
+        assert_eq!(chat["__responses_payload_snapshot"]["id"], "resp_full");
+        assert_eq!(
+            chat["choices"][0]["message"]["reasoning_content"],
+            "native bridge summary"
+        );
+        let retained = crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(
+            "req_full".to_string(),
+        )
+        .expect("registry lookup")
+        .expect("registered snapshot");
+        let retained_json: Value = serde_json::from_str(&retained).expect("snapshot json");
+        assert_eq!(retained_json["id"], "resp_full");
     }
 
     #[test]

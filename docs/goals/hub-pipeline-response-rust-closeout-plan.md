@@ -137,3 +137,23 @@ If a required verification fails because of unrelated dirty work, record the exa
 - PARTIAL: `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts --runInBand --no-cache --forceExit`
   - `tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts` passed.
   - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` failed only on existing unrelated dirty servertool stop-message residue in `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`; the new Anthropic response runtime residue gate passed.
+
+## 2026-06-08 Slice: Responses-to-Chat Shared Projection
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts` still owned response-side semantic residue used by the live Responses response path:
+  - Responses payload unwrap through `response` / `data`.
+  - Chat passthrough snapshot registration for already-chat payloads.
+  - OpenAI Responses bridge policy/action execution for `response_inbound`.
+  - Responses payload snapshot carrier restore and registry re-registration.
+- Rust already owned the base `build_chat_response_from_responses_impl`, bridge action pipeline, bridge policies, and Responses retention registry, so the closeout unit was a Rust full owner that composes those existing owners.
+
+### Implementation Result
+
+- Added Rust full owner `build_chat_response_from_responses_full`.
+- Kept TS `buildChatResponseFromResponses` as native invocation + JSON parse glue only.
+- Moved unwrap, bridge response actions, passthrough registration, and snapshot registration into Rust.
+- Added native export `buildChatResponseFromResponsesFullJson` and required-export coverage.
+- Added residue gate blocking TS bridge/registry/snapshot restore helpers from returning to `responses-response-utils.ts`.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` with `hub.response_responses_chat_projection`.
