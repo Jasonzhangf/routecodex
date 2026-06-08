@@ -23,4 +23,8 @@ describe('install-global artifact isolation', () => {
     expect(script).toContain('$INSTALL_BUILD_ROOT/artifacts/pack/install-global');
     expect(script).not.toContain('$INSTALL_BUILD_ROOT/.install-pack');
   });
+
+  it('copies servertool followup dispatch contract tests required by the build gate', () => {
+    expect(script).toContain('tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts');
+  });
 });

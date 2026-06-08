@@ -131,6 +131,7 @@ prepare_isolated_build_root() {
         copy_isolated_path "$item"
     done
     copy_isolated_path "samples/mock-provider"
+    copy_isolated_path "tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts"
     copy_llmswitch_core
 
     if [ -d "$SOURCE_ROOT/node_modules" ]; then
