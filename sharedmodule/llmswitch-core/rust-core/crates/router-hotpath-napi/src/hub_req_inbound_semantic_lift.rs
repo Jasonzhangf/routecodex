@@ -1,6 +1,5 @@
-use crate::shared_tool_mapping::{
-    build_anthropic_tool_alias_map_from_slice, normalize_anthropic_tool_name,
-};
+use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
+use crate::shared_tool_mapping::build_anthropic_tool_alias_map_from_slice;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -55,18 +54,6 @@ struct ReqInboundSemanticLiftOutput {
     mapped_tool_outputs: Option<Vec<ResumeToolOutput>>,
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
-}
-
 fn normalize_output_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
@@ -107,10 +94,6 @@ fn map_resume_tool_outputs_detailed(responses_resume: &Value) -> Vec<ResumeToolO
     mapped
 }
 
-fn read_trimmed_object_string(row: Option<&Map<String, Value>>, key: &str) -> Option<String> {
-    read_trimmed_string(row.and_then(|value| value.get(key)))
-}
-
 fn build_responses_continuation(
     payload: Option<&Value>,
     responses_resume: Option<&Value>,
@@ -118,10 +101,12 @@ fn build_responses_continuation(
     let payload_obj = payload.and_then(|value| value.as_object());
     let resume_obj = responses_resume.and_then(|value| value.as_object());
 
-    let previous_request_id = read_trimmed_object_string(resume_obj, "previousRequestId");
+    let previous_request_id =
+        resume_obj.and_then(|row| read_object_trimmed_string(row, "previousRequestId"));
     let restored_from_response_id =
-        read_trimmed_object_string(resume_obj, "restoredFromResponseId");
-    let previous_response_id = read_trimmed_object_string(payload_obj, "previous_response_id");
+        resume_obj.and_then(|row| read_object_trimmed_string(row, "restoredFromResponseId"));
+    let previous_response_id =
+        payload_obj.and_then(|row| read_object_trimmed_string(row, "previous_response_id"));
 
     let chain_id = previous_request_id
         .clone()

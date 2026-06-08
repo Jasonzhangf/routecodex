@@ -1,15 +1,8 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_id;
 use crate::hub_reasoning_tool_normalizer::normalize_assistant_text_to_tool_calls_json;
+use crate::shared_json_utils::read_trimmed_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
-
-fn read_trimmed_non_empty_string(value: Option<&Value>) -> Option<String> {
-    let text = value.and_then(Value::as_str)?.trim();
-    if text.is_empty() {
-        return None;
-    }
-    Some(text.to_string())
-}
 
 fn extract_responses_message_text(item: &Map<String, Value>) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -18,15 +11,15 @@ fn extract_responses_message_text(item: &Map<String, Value>) -> String {
             let Some(part_obj) = part.as_object() else {
                 continue;
             };
-            let text = read_trimmed_non_empty_string(part_obj.get("text"))
-                .or_else(|| read_trimmed_non_empty_string(part_obj.get("content")))
-                .or_else(|| read_trimmed_non_empty_string(part_obj.get("value")));
+            let text = read_trimmed_string(part_obj.get("text"))
+                .or_else(|| read_trimmed_string(part_obj.get("content")))
+                .or_else(|| read_trimmed_string(part_obj.get("value")));
             if let Some(text) = text {
                 parts.push(text);
             }
         }
     }
-    if let Some(text) = read_trimmed_non_empty_string(item.get("output_text")) {
+    if let Some(text) = read_trimmed_string(item.get("output_text")) {
         parts.push(text);
     }
     parts.join("\n").trim().to_string()
@@ -116,7 +109,7 @@ fn build_responses_function_calls_from_text(
         };
         let fn_obj = call_obj.get("function").and_then(Value::as_object);
         let name = fn_obj
-            .and_then(|row| read_trimmed_non_empty_string(row.get("name")))
+            .and_then(|row| read_trimmed_string(row.get("name")))
             .unwrap_or_default();
         if name.is_empty() {
             continue;
@@ -127,8 +120,8 @@ fn build_responses_function_calls_from_text(
             .unwrap_or("{}")
             .to_string();
 
-        let call_id = read_trimmed_non_empty_string(call_obj.get("call_id"))
-            .or_else(|| read_trimmed_non_empty_string(call_obj.get("id")))
+        let call_id = read_trimmed_string(call_obj.get("call_id"))
+            .or_else(|| read_trimmed_string(call_obj.get("id")))
             .unwrap_or_else(|| {
                 *fallback_counter += 1;
                 format!("call_auto_{}", fallback_counter)

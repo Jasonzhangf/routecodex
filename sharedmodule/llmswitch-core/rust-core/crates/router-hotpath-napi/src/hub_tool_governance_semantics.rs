@@ -1,3 +1,4 @@
+use crate::shared_json_utils::read_object_trimmed_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use regex::Regex;
@@ -146,13 +147,6 @@ fn default_registry() -> std::collections::BTreeMap<String, NativeToolGovernance
     out
 }
 
-fn read_string_field(obj: &Map<String, Value>, key: &str) -> Option<String> {
-    obj.get(key)
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 fn read_i64_field(obj: &Map<String, Value>, key: &str) -> Option<i64> {
     obj.get(key).and_then(|v| match v {
         Value::Number(n) => n.as_i64(),
@@ -183,16 +177,16 @@ fn parse_native_rule(value: Option<&Value>) -> Option<NativeToolGovernanceRule> 
     let mut rule = NativeToolGovernanceRule {
         max_name_length: read_i64_field(obj, "maxNameLength")
             .or_else(|| read_i64_field(obj, "max_name_length")),
-        allowed_characters: read_string_field(obj, "allowedCharacters")
-            .or_else(|| read_string_field(obj, "allowed_characters")),
-        force_case: read_string_field(obj, "forceCase")
-            .or_else(|| read_string_field(obj, "force_case")),
-        default_name: read_string_field(obj, "defaultName")
-            .or_else(|| read_string_field(obj, "default_name")),
+        allowed_characters: read_object_trimmed_string(obj, "allowedCharacters")
+            .or_else(|| read_object_trimmed_string(obj, "allowed_characters")),
+        force_case: read_object_trimmed_string(obj, "forceCase")
+            .or_else(|| read_object_trimmed_string(obj, "force_case")),
+        default_name: read_object_trimmed_string(obj, "defaultName")
+            .or_else(|| read_object_trimmed_string(obj, "default_name")),
         trim_whitespace: read_bool_field(obj, "trimWhitespace")
             .or_else(|| read_bool_field(obj, "trim_whitespace")),
-        on_violation: read_string_field(obj, "onViolation")
-            .or_else(|| read_string_field(obj, "on_violation")),
+        on_violation: read_object_trimmed_string(obj, "onViolation")
+            .or_else(|| read_object_trimmed_string(obj, "on_violation")),
     };
 
     if rule.allowed_characters.is_none() {

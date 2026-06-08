@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
-use crate::shared_json_utils::{read_first_object_trimmed_string, read_trimmed_string};
+use crate::shared_json_utils::read_first_object_trimmed_string;
+use crate::shared_json_utils::read_trimmed_string;
 
 const TOOL_UNKNOWN_PREFIX: &str = "[RouteCodex] Tool call result unknown";
 

@@ -1,17 +1,9 @@
+use crate::shared_json_utils::read_trimmed_string;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
 
 const DEFAULT_MARKER: &str = "Tool-call output contract (STRICT)";
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(|v| v.as_str())?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
 
 fn read_config_bool(config: Option<&Map<String, Value>>, key: &str, default: bool) -> bool {
     config

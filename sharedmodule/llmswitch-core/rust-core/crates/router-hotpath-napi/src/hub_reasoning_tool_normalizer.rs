@@ -1,13 +1,14 @@
 use crate::hub_bridge_actions::utils::create_harvested_tool_call_id;
-use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
-use crate::hub_text_markup_normalizer::{
-    extract_explicit_top_level_tool_calls_as_values, TextMarkupNormalizeOptions,
-};
+use crate::hub_text_markup_normalizer::TextMarkupNormalizeOptions;
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::shared_json_utils::extract_balanced_json_candidate_at;
+use crate::shared_tool_mapping::{
+    is_routecodex_explicit_tool_name_candidate, normalize_routecodex_tool_name_with_embedded_hint,
+    read_routecodex_tool_name_hint_from_args,
+};
 use crate::shared_tooling::{
-    extract_rcc_tool_call_fence_segments, normalize_xml_scalar_text, repair_arguments_to_string,
-    value_to_string,
+    extract_rcc_tool_call_fence_segments, is_structured_apply_patch_payload,
+    normalize_xml_scalar_text, repair_arguments_to_string, value_to_string,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -204,7 +205,7 @@ fn read_leading_markup_tool_name_candidate(raw: &str) -> Option<String> {
     {
         return None;
     }
-    if is_explicit_tool_name_candidate(candidate) {
+    if is_routecodex_explicit_tool_name_candidate(candidate) {
         Some(candidate.to_string())
     } else {
         None
@@ -986,62 +987,15 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     Value::String(normalized_scalar)
 }
 
-fn normalize_tool_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    let without_prefix = if trimmed.to_ascii_lowercase().starts_with("functions.") {
-        trimmed[10..].trim()
-    } else {
-        trimmed
-    };
-    let extracted_embedded =
-        cached_regex(r#"(?i)(?:^|[\s(<])(?:tool:|function:)([A-Za-z_][A-Za-z0-9_.-]*)"#)
-            .captures(without_prefix)
-            .and_then(|caps| caps.get(1))
-            .map(|value| value.as_str().trim().to_string())
-            .filter(|value| !value.is_empty());
-    let normalized_input = extracted_embedded.unwrap_or_else(|| without_prefix.to_string());
-    let lowered = normalized_input.to_ascii_lowercase();
-    if matches!(
-        lowered.as_str(),
-        "execute"
-            | "execute_command"
-            | "execute-command"
-            | "shell_command"
-            | "shell"
-            | "bash"
-            | "terminal"
-    ) {
-        return "exec_command".to_string();
-    }
-    normalize_responses_function_name(Some(normalized_input.as_str())).unwrap_or(normalized_input)
-}
-
-fn is_explicit_tool_name_candidate(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if is_structured_tool_name(trimmed) {
-        return true;
-    }
-    let lowered = trimmed.to_ascii_lowercase();
-    if lowered.starts_with("functions.")
-        || lowered.contains("tool:")
-        || lowered.contains("function:")
-        || lowered.contains("[tool_call")
-        || lowered.contains("[function_call")
-    {
-        let normalized = normalize_tool_name(trimmed);
-        return is_structured_tool_name(normalized.as_str());
-    }
-    false
+fn normalize_reasoning_tool_name(raw: &str) -> String {
+    normalize_routecodex_tool_name_with_embedded_hint(raw).unwrap_or_else(|| raw.trim().to_string())
 }
 
 fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -> Option<String> {
     let hinted = name_hint
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .filter(|value| is_explicit_tool_name_candidate(value.as_str()));
+        .filter(|value| is_routecodex_explicit_tool_name_candidate(value.as_str()));
     if hinted.is_some() {
         return hinted;
     }
@@ -1052,7 +1006,7 @@ fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -
     if let Some(caps) = name_tag_pattern.captures(trimmed) {
         if let Some(captured) = caps.get(1) {
             let value = captured.as_str().trim();
-            if !value.is_empty() && is_explicit_tool_name_candidate(value) {
+            if !value.is_empty() && is_routecodex_explicit_tool_name_candidate(value) {
                 return Some(value.to_string());
             }
         }
@@ -1076,7 +1030,7 @@ fn read_markup_explicit_name_candidate(trimmed: &str, name_hint: Option<&str>) -
             ) {
                 continue;
             }
-            if is_explicit_tool_name_candidate(candidate) {
+            if is_routecodex_explicit_tool_name_candidate(candidate) {
                 return Some(candidate.to_string());
             }
         }
@@ -1512,7 +1466,7 @@ fn normalize_reasoning_harvested_arguments(
     args_source: &Value,
     args_text: String,
 ) -> Option<String> {
-    let normalized_name = normalize_tool_name(tool_name);
+    let normalized_name = normalize_reasoning_tool_name(tool_name);
     let lowered = normalized_name.trim().to_ascii_lowercase();
     if !is_structured_tool_name(normalized_name.as_str()) {
         return None;
@@ -1590,7 +1544,7 @@ fn normalize_shell_like_args_text_for_tool_name(
     args_source: &Value,
     args_text: String,
 ) -> String {
-    let normalized_tool_name = normalize_tool_name(tool_name);
+    let normalized_tool_name = normalize_reasoning_tool_name(tool_name);
     if normalized_tool_name != "exec_command" {
         return args_text;
     }
@@ -1610,40 +1564,6 @@ fn normalize_shell_like_args_text_for_tool_name(
     }
 
     serde_json::to_string(&Value::Object(args_obj)).unwrap_or(args_text)
-}
-
-fn read_tool_name_hint_from_args(raw_args: Option<&Value>) -> Option<String> {
-    fn scan(value: &Value, depth: usize) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let obj = value.as_object()?;
-        if let Some(raw_name) = obj
-            .get("name")
-            .and_then(Value::as_str)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-        {
-            let normalized = normalize_tool_name(raw_name);
-            if is_structured_tool_name(normalized.as_str()) {
-                return Some(normalized);
-            }
-        }
-        for key in ["function", "input", "args", "payload"] {
-            if let Some(child) = obj.get(key) {
-                if let Some(found) = scan(child, depth - 1) {
-                    return Some(found);
-                }
-            }
-        }
-        None
-    }
-
-    match raw_args {
-        Some(Value::Object(_)) => scan(raw_args?, 3),
-        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 2)),
-        _ => None,
-    }
 }
 
 fn pick_tool_call_args_source<'a>(row: &'a Map<String, Value>) -> Option<&'a Value> {
@@ -1802,7 +1722,7 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         }
     }
 
-    let resolved_name = normalize_tool_name(name?.as_str());
+    let resolved_name = normalize_reasoning_tool_name(name?.as_str());
     apply_markup_arg_aliases(resolved_name.as_str(), &mut args_obj);
     let args_source = Value::Object(args_obj);
     let args = normalize_reasoning_harvested_arguments(
@@ -1841,7 +1761,7 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
             .and_then(Value::as_str)
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
-            .filter(|v| is_explicit_tool_name_candidate(v.as_str()));
+            .filter(|v| is_routecodex_explicit_tool_name_candidate(v.as_str()));
         if name.is_none() {
             name = name_hint
                 .map(|v| v.trim().to_string())
@@ -1864,7 +1784,7 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
                         .and_then(Value::as_str)
                         .map(|v| v.trim().to_string())
                         .filter(|v| !v.is_empty()),
-                    name: normalize_tool_name(resolved_name.as_str()),
+                    name: normalize_reasoning_tool_name(resolved_name.as_str()),
                     args,
                 });
             }
@@ -1876,7 +1796,10 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
 
 fn build_tool_call(parsed: &ParsedToolCall, prefix: &str, index: usize) -> Value {
     serde_json::json!({
-        "id": parsed.id.clone().unwrap_or_else(|| format!("{}_{}", prefix, index + 1)),
+        "id": parsed
+            .id
+            .clone()
+            .unwrap_or_else(|| create_harvested_tool_call_id(Some(prefix), index + 1)),
         "type": "function",
         "function": {
             "name": parsed.name,
@@ -1899,7 +1822,7 @@ fn normalize_structured_tool_call_entry(
         .or_else(|| call_obj.get("input"))
         .cloned()
         .unwrap_or(Value::Null);
-    let hinted_name = read_tool_name_hint_from_args(Some(&args_source));
+    let hinted_name = read_routecodex_tool_name_hint_from_args(Some(&args_source));
     let raw_name = function_node
         .and_then(|f| f.get("name"))
         .and_then(Value::as_str)
@@ -1909,7 +1832,7 @@ fn normalize_structured_tool_call_entry(
         .or(hinted_name.as_deref())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())?;
-    let normalized_name = normalize_tool_name(raw_name.as_str());
+    let normalized_name = normalize_reasoning_tool_name(raw_name.as_str());
     if normalized_name.trim().is_empty() || !is_structured_tool_name(normalized_name.as_str()) {
         return None;
     }
@@ -2111,7 +2034,7 @@ fn has_structured_or_nested_tool_name(row: &Map<String, Value>) -> bool {
             .is_some()
         || row.get("tool_name").is_some()
         || row.get("tool").is_some()
-        || read_tool_name_hint_from_args(pick_tool_call_args_source(row)).is_some()
+        || read_routecodex_tool_name_hint_from_args(pick_tool_call_args_source(row)).is_some()
 }
 
 fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
@@ -2208,6 +2131,60 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
     }
 
     tool_calls
+}
+
+fn is_pure_json_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+}
+
+fn has_explicit_tool_name_field(row: &Map<String, Value>) -> bool {
+    row.get("name")
+        .and_then(Value::as_str)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+        || row
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        || row
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        || row
+            .get("tool")
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn parse_plain_structured_apply_patch_json(text: &str, id_prefix: &str) -> Vec<Value> {
+    if !is_pure_json_payload(text) {
+        return Vec::new();
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(text.trim()) else {
+        return Vec::new();
+    };
+    if !is_structured_apply_patch_payload(&parsed) {
+        return Vec::new();
+    }
+    let args = serde_json::to_string(&parsed).unwrap_or_else(|_| "{}".to_string());
+    vec![serde_json::json!({
+        "id": create_harvested_tool_call_id(Some(id_prefix), 1),
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "arguments": args
+        }
+    })]
 }
 
 fn consume_pattern(
@@ -2703,7 +2680,7 @@ fn collect_message_content_text_candidates(message_obj: &Map<String, Value>) -> 
 
 fn harvest_tool_calls_from_message_content(
     message_obj: &mut Map<String, Value>,
-    _id_prefix: &str,
+    id_prefix: &str,
 ) -> usize {
     let has_structured_tool_calls = message_obj
         .get("tool_calls")
@@ -2720,10 +2697,11 @@ fn harvest_tool_calls_from_message_content(
     }
 
     for candidate in candidates {
-        let parsed_calls = normalize_structured_tool_call_values(
-            extract_explicit_top_level_tool_calls_as_values(candidate.as_str(), &None).as_slice(),
-            _id_prefix,
-        );
+        let mut parsed_calls = parse_explicit_json_tool_calls(candidate.as_str(), id_prefix);
+        if parsed_calls.is_empty() && is_pure_json_payload(candidate.as_str()) {
+            parsed_calls =
+                parse_plain_structured_apply_patch_json(candidate.as_str(), id_prefix);
+        }
         if parsed_calls.is_empty() {
             continue;
         }
@@ -3014,10 +2992,11 @@ pub fn normalize_assistant_text_to_tool_calls_json(
             continue;
         }
         if mapped_calls.is_empty() {
-            let explicit_calls = normalize_structured_tool_call_values(
-                extract_explicit_top_level_tool_calls_as_values(text.as_str(), &options).as_slice(),
-                "reasoning",
-            );
+            let mut explicit_calls = parse_explicit_json_tool_calls(text.as_str(), "reasoning");
+            if explicit_calls.is_empty() && is_pure_json_payload(text.as_str()) {
+                explicit_calls =
+                    parse_plain_structured_apply_patch_json(text.as_str(), "reasoning");
+            }
             if !explicit_calls.is_empty() {
                 mapped_calls.extend(explicit_calls);
                 emptied_fields.push(*field_name);

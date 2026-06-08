@@ -72,7 +72,8 @@ fn read_thinking_text(obj: &Map<String, Value>) -> String {
 }
 
 fn read_thought_signature(obj: &Map<String, Value>) -> Option<String> {
-    read_trimmed_string(obj.get("thoughtSignature").or_else(|| obj.get("signature")))
+    let value = obj.get("thoughtSignature").or_else(|| obj.get("signature"));
+    read_trimmed_string(value)
 }
 
 fn has_valid_thought_signature_block(

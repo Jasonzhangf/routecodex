@@ -411,6 +411,14 @@ fn extract_nested_entry_endpoint(value: &Value) -> Option<String> {
     None
 }
 
+fn normalize_provider_key(provider_key: &Option<String>) -> Option<String> {
+    let mut obj = Map::new();
+    if let Some(value) = provider_key {
+        obj.insert("providerKey".to_string(), Value::String(value.clone()));
+    }
+    read_trimmed_string(obj.get("providerKey"))
+}
+
 fn is_hub_policy_stage(stage: &str) -> bool {
     stage.starts_with("hub_policy.")
 }
@@ -673,6 +681,7 @@ fn build_runtime_metadata_payload(
     options: &SnapshotHookOptions,
     group_request_token: &str,
 ) -> Value {
+    let provider_key = normalize_provider_key(&options.provider_key);
     serde_json::json!({
       "timestamp": chrono::Utc::now().to_rfc3339(),
       "versions": {
@@ -684,7 +693,7 @@ fn build_runtime_metadata_payload(
       "endpoint": options.endpoint.clone(),
       "requestId": options.request_id.clone(),
       "groupRequestId": group_request_token,
-      "providerKey": options.provider_key.clone(),
+      "providerKey": provider_key,
       "entryProtocol": options.entry_protocol.clone(),
       "entryPort": options.entry_port
     })

@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
+use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 
 use self::envelope::normalize_deepseek_business_envelope;
 use self::tool_state::{
@@ -18,19 +19,6 @@ use super::AdapterContext;
 
 mod envelope;
 mod tool_state;
-
-fn is_exec_command_family(name: &str) -> bool {
-    matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "exec_command"
-            | "execute_command"
-            | "execute-command"
-            | "shell_command"
-            | "shell"
-            | "bash"
-            | "terminal"
-    )
-}
 
 fn resolve_requested_exec_tool_alias(adapter_context: &AdapterContext) -> Option<String> {
     let tools = adapter_context
@@ -52,7 +40,7 @@ fn resolve_requested_exec_tool_alias(adapter_context: &AdapterContext) -> Option
         let Some(raw_name) = raw_name else {
             continue;
         };
-        if is_exec_command_family(raw_name) {
+        if normalize_routecodex_tool_name(Some(raw_name)).as_deref() == Some("exec_command") {
             raw_matches.push(raw_name.to_string());
         }
     }
@@ -97,7 +85,9 @@ fn remap_exec_tool_name_to_requested_alias(payload: &mut Value, requested_alias:
             let is_exec = function
                 .get("name")
                 .and_then(Value::as_str)
-                .map(is_exec_command_family)
+                .and_then(|raw_name| normalize_routecodex_tool_name(Some(raw_name)))
+                .as_deref()
+                .map(|name| name == "exec_command")
                 .unwrap_or(false);
             if is_exec {
                 function.insert("name".to_string(), Value::String(alias.to_string()));
@@ -131,7 +121,9 @@ fn ensure_exec_command_args_have_cmd(payload: &mut Value) {
             let is_exec = function
                 .get("name")
                 .and_then(Value::as_str)
-                .map(is_exec_command_family)
+                .and_then(|raw_name| normalize_routecodex_tool_name(Some(raw_name)))
+                .as_deref()
+                .map(|name| name == "exec_command")
                 .unwrap_or(false);
             if !is_exec {
                 continue;

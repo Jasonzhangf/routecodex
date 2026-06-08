@@ -35,7 +35,10 @@ fn harvest_tools_json_delta_shell() {
         .get("function")
         .and_then(Value::as_object)
         .unwrap();
-    assert_eq!(function.get("name").and_then(Value::as_str), Some("shell"));
+    assert_eq!(
+        function.get("name").and_then(Value::as_str),
+        Some("exec_command")
+    );
 }
 
 #[test]

@@ -581,12 +581,17 @@ mod tests {
             .join("src/shared_gemini_tool_utils.rs");
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(source.as_str());
         assert!(
-            !source.contains("fn normalize_tool_name(name: &str, mode: &str) -> String {"),
+            !production_source
+                .contains("fn normalize_tool_name(name: &str, mode: &str) -> String {"),
             "shared_gemini_tool_utils.rs still owns local normalize_tool_name wrapper"
         );
         assert!(
-            source.contains("let final_name = name.to_string();"),
+            production_source.contains("let final_name = name.to_string();"),
             "shared_gemini_tool_utils.rs must inline name passthrough instead of retaining local normalize_tool_name wrapper"
         );
     }

@@ -14,6 +14,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
+use crate::shared_json_utils::read_object_trimmed_string;
 
 fn now_unix_millis() -> u128 {
     SystemTime::now()
@@ -31,7 +32,7 @@ fn is_chat_completion_id(value: &str) -> bool {
 }
 
 fn allocate_responses_id(response: &Map<String, Value>) -> String {
-    if let Some(existing) = read_object_string(response, "id") {
+    if let Some(existing) = read_object_trimmed_string(response, "id") {
         if !is_chat_completion_id(existing.as_str()) {
             return existing;
         }
@@ -58,13 +59,6 @@ fn unwrap_responses_data_node(payload: &Value) -> Value {
     current
 }
 
-fn read_object_string(row: &Map<String, Value>, key: &str) -> Option<String> {
-    row.get(key)
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
     let resolved = call_id.ok_or_else(|| reason.to_string())?;
     let lowered = resolved.trim().to_ascii_lowercase();
@@ -78,13 +72,13 @@ fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Resul
 }
 
 fn read_request_id(response: &Map<String, Value>, request_id_hint: Option<&str>) -> Option<String> {
-    read_object_string(response, "request_id")
+    read_object_trimmed_string(response, "request_id")
         .or_else(|| {
             request_id_hint
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty())
         })
-        .or_else(|| read_object_string(response, "id"))
+        .or_else(|| read_object_trimmed_string(response, "id"))
 }
 
 fn read_created_at(response: &Map<String, Value>) -> Value {
@@ -118,8 +112,8 @@ fn read_failed_status_code(response: &Map<String, Value>) -> Option<String> {
 }
 
 fn read_nonstandard_response_message(response: &Map<String, Value>) -> String {
-    read_object_string(response, "msg")
-        .or_else(|| read_object_string(response, "message"))
+    read_object_trimmed_string(response, "msg")
+        .or_else(|| read_object_trimmed_string(response, "message"))
         .unwrap_or_else(|| {
             "Upstream returned non-standard Chat completion payload (missing choices).".to_string()
         })
@@ -202,7 +196,7 @@ fn normalize_output_text_content(content: &Value) -> Vec<Value> {
         let Some(row) = part.as_object() else {
             continue;
         };
-        let raw_type = read_object_string(row, "type").unwrap_or_default();
+        let raw_type = read_object_trimmed_string(row, "type").unwrap_or_default();
         if raw_type.eq_ignore_ascii_case("text")
             || raw_type.eq_ignore_ascii_case("input_text")
             || raw_type.eq_ignore_ascii_case("output_text")
@@ -232,7 +226,7 @@ fn strip_tool_markup_from_output_text_parts(parts: &[Value]) -> Vec<Value> {
             output.push(part.clone());
             continue;
         };
-        let kind = read_object_string(row, "type").unwrap_or_default();
+        let kind = read_object_trimmed_string(row, "type").unwrap_or_default();
         if kind != "output_text" {
             output.push(part.clone());
             continue;
@@ -309,9 +303,9 @@ fn collect_executed_tool_call_ids(response: &Map<String, Value>) -> HashSet<Stri
         let Some(row) = entry.as_object() else {
             continue;
         };
-        let raw_id = read_object_string(row, "tool_call_id")
-            .or_else(|| read_object_string(row, "call_id"))
-            .or_else(|| read_object_string(row, "id"));
+        let raw_id = read_object_trimmed_string(row, "tool_call_id")
+            .or_else(|| read_object_trimmed_string(row, "call_id"))
+            .or_else(|| read_object_trimmed_string(row, "id"));
         if let Some(raw_id) = raw_id {
             ids.insert(raw_id.clone());
             ids.insert(format!("fc_{}", raw_id));
@@ -344,7 +338,7 @@ fn build_chat_payload_from_anthropic_message_for_responses(
         let Some(part_row) = part.as_object() else {
             continue;
         };
-        let kind = read_object_string(part_row, "type")
+        let kind = read_object_trimmed_string(part_row, "type")
             .unwrap_or_default()
             .to_ascii_lowercase();
         match kind.as_str() {
@@ -368,10 +362,10 @@ fn build_chat_payload_from_anthropic_message_for_responses(
                 }
             }
             "tool_use" => {
-                let Some(name) = read_object_string(part_row, "name") else {
+                let Some(name) = read_object_trimmed_string(part_row, "name") else {
                     continue;
                 };
-                let Some(id) = read_object_string(part_row, "id") else {
+                let Some(id) = read_object_trimmed_string(part_row, "id") else {
                     continue;
                 };
                 let arguments = serde_json::to_string(
@@ -396,7 +390,7 @@ fn build_chat_payload_from_anthropic_message_for_responses(
         }
     }
 
-    let finish_reason = match read_object_string(response_row, "stop_reason")
+    let finish_reason = match read_object_trimmed_string(response_row, "stop_reason")
         .unwrap_or_default()
         .as_str()
     {
@@ -470,8 +464,8 @@ fn read_response_continuation(context: &Value) -> Option<Map<String, Value>> {
 fn read_response_semantics_pointer_field(context: &Value, key: &str) -> Option<String> {
     let continuation = read_response_continuation(context)?;
     let resume_from = read_nested_object(&continuation, "resumeFrom");
-    read_object_string(&continuation, key)
-        .or_else(|| resume_from.and_then(|row| read_object_string(row, key)))
+    read_object_trimmed_string(&continuation, key)
+        .or_else(|| resume_from.and_then(|row| read_object_trimmed_string(row, key)))
 }
 
 fn read_context_client_model(context: &Value) -> Option<String> {
@@ -653,11 +647,12 @@ pub(crate) fn build_responses_payload_from_chat_core(
     normalize_message_reasoning_ssot(&mut normalized_message);
     let message = &normalized_message;
 
-    let role = read_object_string(message, "role").unwrap_or_else(|| "assistant".to_string());
+    let role =
+        read_object_trimmed_string(message, "role").unwrap_or_else(|| "assistant".to_string());
     let mut content_parts =
         normalize_output_text_content(message.get("content").unwrap_or(&Value::Null));
     let reasoning_payload = message.get("reasoning").cloned().or_else(|| {
-        read_object_string(message, "reasoning_content")
+        read_object_trimmed_string(message, "reasoning_content")
             .and_then(|text| build_message_reasoning_value(&[], &[text], None))
     });
 
@@ -841,7 +836,8 @@ pub(crate) fn build_responses_payload_from_chat_core(
         let client_declared_name = client_spec.as_ref().map(|spec| spec.declared_name.clone());
 
         let call_id = require_explicit_tool_call_id(
-            read_object_string(call_row, "id").or_else(|| read_object_string(call_row, "call_id")),
+            read_object_trimmed_string(call_row, "id")
+                .or_else(|| read_object_trimmed_string(call_row, "call_id")),
             format!(
                 "missing_tool_call_id: assistant tool_call is missing id/call_id at index {}",
                 index

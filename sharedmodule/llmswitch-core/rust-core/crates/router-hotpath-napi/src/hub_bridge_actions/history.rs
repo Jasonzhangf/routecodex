@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
-use crate::shared_json_utils::{clone_non_empty_object, read_optional_bool, read_trimmed_string};
+use crate::shared_json_utils::{
+    clone_non_empty_object, clone_plain_object, read_optional_bool, read_trimmed_string,
+};
 use crate::shared_metadata_semantics::read_runtime_metadata_json;
 use crate::shared_responses_tool_utils::resolve_tool_call_id_style_json;
 use crate::shared_tool_call_id_core::clamp_responses_input_item_id;
@@ -901,7 +903,7 @@ fn merge_parameters_into_request(request: &mut Map<String, Value>, source: &Map<
 pub(crate) fn prepare_responses_request_envelope(
     input: PrepareResponsesRequestEnvelopeInput,
 ) -> PrepareResponsesRequestEnvelopeOutput {
-    let mut request = input.request.as_object().cloned().unwrap_or_default();
+    let mut request = clone_plain_object(Some(&input.request)).unwrap_or_default();
 
     let instruction_candidates = [
         read_trimmed_string(input.extra_system_instruction.as_ref()),

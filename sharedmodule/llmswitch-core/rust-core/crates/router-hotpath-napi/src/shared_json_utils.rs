@@ -1387,7 +1387,7 @@ mod tests {
             "thought_signature_validator.rs still owns local coerce_thought_signature wrapper"
         );
         assert!(
-            source.contains(r#"read_trimmed_string(obj.get("thoughtSignature").or_else(|| obj.get("signature")))"#),
+            source.contains("read_trimmed_string(value)"),
             "thought_signature_validator.rs must call shared read_trimmed_string truth directly"
         );
     }

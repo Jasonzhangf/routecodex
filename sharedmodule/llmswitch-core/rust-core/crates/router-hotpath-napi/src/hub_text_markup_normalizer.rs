@@ -1,4 +1,8 @@
 use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
+use crate::shared_tool_mapping::{
+    is_routecodex_structured_tool_name, normalize_json_tool_name_with_aliases,
+    read_routecodex_json_tool_name_hint_from_args, resolve_routecodex_json_tool_name_aliases,
+};
 use crate::shared_tooling::{
     extract_structured_apply_patch_payloads_with, normalize_xml_scalar_text, value_to_string,
 };
@@ -37,31 +41,6 @@ pub(crate) struct TextMarkupNormalizeOptions {
 struct JsonToolCallsInput {
     text: String,
     options: Option<TextMarkupNormalizeOptions>,
-}
-
-fn known_tools() -> HashSet<&'static str> {
-    [
-        "shell",
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "update_plan",
-        "view_image",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "list_mcp_resource_templates",
-        "list_directory",
-    ]
-    .into_iter()
-    .collect()
-}
-
-fn is_structured_tool_name(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    !trimmed.is_empty()
-        && trimmed
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-')
 }
 
 fn allowed_keys_for_tool(name: &str) -> Option<&'static [&'static str]> {
@@ -149,7 +128,7 @@ fn filter_args_for_tool(name: &str, args: &Map<String, Value>) -> Map<String, Va
         }
         return out;
     }
-    if is_structured_tool_name(lname.as_str()) {
+    if is_routecodex_structured_tool_name(lname.as_str()) {
         for (k, v) in args.iter() {
             let key = normalize_key(k).to_string();
             if !key.is_empty() {
@@ -422,7 +401,7 @@ fn infer_tool_name_from_args_shape(
             .filter(|v| !v.is_empty())
         {
             let normalized =
-                canonicalize_json_tool_name(&Value::String(raw_name.to_string()), options)?;
+                normalize_text_json_tool_name(&Value::String(raw_name.to_string()), options)?;
             return Some(normalized);
         }
         if let Some(inferred) = infer_from_object(obj, options) {
@@ -537,7 +516,7 @@ fn extract_explicit_tool_name_from_broken_json_text(
                     || (function_object_depth == Some(depth) && token == "name");
                 if explicit_name_scope {
                     if let Some((raw_name, _)) = parse_quoted_token(&chars, cursor) {
-                        return canonicalize_json_tool_name(&Value::String(raw_name), options);
+                        return normalize_text_json_tool_name(&Value::String(raw_name), options);
                     }
                 }
                 pending_function_key_at_depth1 = false;
@@ -693,32 +672,14 @@ fn salvage_tool_args_from_raw_text(tool_name: &str, raw_args: &str) -> Option<Ma
     None
 }
 
-fn resolve_json_tool_name_aliases(
+fn resolve_text_json_tool_name_aliases(
     options: &Option<TextMarkupNormalizeOptions>,
 ) -> HashMap<String, String> {
-    let mut merged: HashMap<String, String> = HashMap::from([
-        ("shell_command".to_string(), "exec_command".to_string()),
-        ("execute".to_string(), "exec_command".to_string()),
-        ("execute_command".to_string(), "exec_command".to_string()),
-        ("execute-command".to_string(), "exec_command".to_string()),
-        ("shell".to_string(), "exec_command".to_string()),
-        ("bash".to_string(), "exec_command".to_string()),
-        ("terminal".to_string(), "exec_command".to_string()),
-    ]);
-    if let Some(opts) = options {
-        if let Some(repair) = &opts.json_tool_repair {
-            if let Some(alias_map) = &repair.tool_name_aliases {
-                for (k, v) in alias_map.iter() {
-                    let src = k.trim().to_lowercase();
-                    let dst = v.trim().to_lowercase();
-                    if !src.is_empty() && !dst.is_empty() {
-                        merged.insert(src, dst);
-                    }
-                }
-            }
-        }
-    }
-    merged
+    let overrides = options
+        .as_ref()
+        .and_then(|opts| opts.json_tool_repair.as_ref())
+        .and_then(|repair| repair.tool_name_aliases.as_ref());
+    resolve_routecodex_json_tool_name_aliases(overrides)
 }
 
 fn resolve_json_tool_arg_aliases(
@@ -862,29 +823,13 @@ fn apply_json_tool_argument_aliases(
     }
 }
 
-fn canonicalize_json_tool_name(
+fn normalize_text_json_tool_name(
     value: &Value,
     options: &Option<TextMarkupNormalizeOptions>,
 ) -> Option<String> {
     let raw = value.as_str()?;
-    let mut name = raw.trim().to_string();
-    if name.is_empty() {
-        return None;
-    }
-    if name.starts_with("functions.") {
-        name = name.replace("functions.", "");
-    }
-    let lowered = name.to_lowercase();
-    let alias_map = resolve_json_tool_name_aliases(options);
-    let canonical = alias_map.get(lowered.as_str()).cloned().unwrap_or(lowered);
-    let known = known_tools();
-    if known.contains(canonical.as_str()) {
-        Some(canonical)
-    } else if is_structured_tool_name(canonical.as_str()) {
-        Some(canonical)
-    } else {
-        None
-    }
+    let alias_map = resolve_text_json_tool_name_aliases(options);
+    normalize_json_tool_name_with_aliases(raw, Some(&alias_map))
 }
 
 fn coerce_tool_call_args_object(raw: &Value) -> Map<String, Value> {
@@ -1004,18 +949,21 @@ fn normalize_json_tool_call_entry_with_mode(
         } else {
             &Value::Null
         };
-        let hinted_name = read_tool_name_hint_from_args(Some(args_source), options).or_else(|| {
-            if allow_shape_inference {
-                infer_tool_name_from_args_shape(Some(entry), options)
-            } else {
-                None
-            }
-        });
+        let alias_map = resolve_text_json_tool_name_aliases(options);
+        let hinted_name =
+            read_routecodex_json_tool_name_hint_from_args(Some(args_source), Some(&alias_map))
+                .or_else(|| {
+                    if allow_shape_inference {
+                        infer_tool_name_from_args_shape(Some(entry), options)
+                    } else {
+                        None
+                    }
+                });
         let name_val = rec
             .get("name")
             .or_else(|| fn_obj.and_then(|f| f.get("name")));
         let name = name_val
-            .and_then(|value| canonicalize_json_tool_name(value, options))
+            .and_then(|value| normalize_text_json_tool_name(value, options))
             .or(hinted_name)?;
         let args_obj = normalize_json_tool_args(name.as_str(), args_source, options)?;
         let args = serde_json::to_string(&args_obj).unwrap_or_else(|_| "{}".to_string());
@@ -1397,53 +1345,6 @@ fn extract_rcc_tool_call_fence_segments(raw: &str) -> Vec<String> {
     out
 }
 
-fn read_tool_name_hint_from_args(
-    raw_args: Option<&Value>,
-    options: &Option<TextMarkupNormalizeOptions>,
-) -> Option<String> {
-    fn scan(
-        value: &Value,
-        depth: usize,
-        options: &Option<TextMarkupNormalizeOptions>,
-    ) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let obj = value.as_object()?;
-        if let Some(raw_name) = obj
-            .get("name")
-            .and_then(Value::as_str)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-        {
-            let normalized =
-                canonicalize_json_tool_name(&Value::String(raw_name.to_string()), options)?;
-            return Some(normalized);
-        }
-        for key in [
-            "function",
-            "input",
-            "args",
-            "payload",
-            "parameters",
-            "params",
-        ] {
-            if let Some(child) = obj.get(key) {
-                if let Some(found) = scan(child, depth - 1, options) {
-                    return Some(found);
-                }
-            }
-        }
-        None
-    }
-
-    match raw_args {
-        Some(Value::Object(_)) => scan(raw_args?, 4, options),
-        Some(Value::Array(items)) => items.iter().find_map(|item| scan(item, 3, options)),
-        _ => None,
-    }
-}
-
 fn extract_json_tool_calls_from_text_impl(
     text: &str,
     options: &Option<TextMarkupNormalizeOptions>,
@@ -1799,7 +1700,6 @@ fn extract_tool_namespace_xml_blocks_from_text_impl(text: &str) -> Option<Vec<To
     if !has_open && !(has_close && has_prefix) {
         return None;
     }
-    let known = known_tools();
     let mut out = Vec::new();
     let block_re =
         Regex::new(r"<\s*tool:([A-Za-z0-9_]+)\s*>([\s\S]*?)</\s*tool:\s*([A-Za-z0-9_]+)\s*>")
@@ -1820,10 +1720,9 @@ fn extract_tool_namespace_xml_blocks_from_text_impl(text: &str) -> Option<Vec<To
         if !raw_name.eq_ignore_ascii_case(close_name.as_str()) {
             continue;
         }
-        let lname = raw_name.to_lowercase();
-        if lname.is_empty() || !known.contains(lname.as_str()) {
+        let Some(lname) = normalize_json_tool_name_with_aliases(raw_name.as_str(), None) else {
             continue;
-        }
+        };
         let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let mut args_obj = Map::new();
         let kv_re = Regex::new(
@@ -1909,10 +1808,9 @@ fn extract_tool_namespace_xml_blocks_from_text_impl(text: &str) -> Option<Vec<To
         if !raw_name.eq_ignore_ascii_case(close_name.as_str()) {
             continue;
         }
-        let lname = raw_name.to_lowercase();
-        if lname.is_empty() || !known.contains(lname.as_str()) {
+        let Some(lname) = normalize_json_tool_name_with_aliases(raw_name.as_str(), None) else {
             continue;
-        }
+        };
         let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let mut args_obj = Map::new();
         let kv_re = Regex::new(

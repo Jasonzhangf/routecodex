@@ -3,9 +3,8 @@ use napi_derive::napi;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
 
+use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{strip_provider_tool_sentinel_residue, value_to_string};
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
@@ -221,18 +220,6 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
     }
 
     *messages = normalized_messages;
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(raw)
 }
 
 fn read_string_array_command(value: Option<&Value>) -> Option<String> {
