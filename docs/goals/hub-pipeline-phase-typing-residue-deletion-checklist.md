@@ -221,6 +221,12 @@ Phase 8F-11 legacy Anthropic response bridge policy deletion proof: `sharedmodul
 - Red test now fails if this legacy TS policy shell reappears.
 - This deletion removes a zero-consumer TS response policy shell only; provider wire payload and client response projection semantics remain owned by the Rust/native response helpers.
 
+Phase 8F-12 legacy generic marker strip wrapper deletion proof: `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts` had no live source/test/script importer; exact scan found only the file itself, one red test, and stale docs/memory references. The generic marker strip and routing marker retention behavior is owned by Rust `req_process_stage1_tool_governance_blocks/request_sanitizer.rs`, called from `request_result.rs` in the live req_process path.
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts`.
+- Updated the marker-strip red test and residue audit to fail if this legacy TS wrapper reappears.
+- This deletion removes a zero-consumer TS request wrapper only; live request marker behavior remains covered through Rust total HubPipeline by `tests/servertool/chat-request-marker-strip.spec.ts`.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

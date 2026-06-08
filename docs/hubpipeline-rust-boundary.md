@@ -31,7 +31,6 @@
 | 文件 | 性质 | 不可迁 Rust 原因 |
 |---|---|---|
 | `chat-process-session-usage.ts` | 会话 usage 快照持久化、token 估算 | 依赖 `loadRoutingInstructionStateSync` Node.js store |
-| `chat-process-generic-marker-strip.ts` | routing marker 保留判断 | 薄决策包装器（18 行），无 payload 语义；Rust 无对应能力时可保留 |
 
 ## Rust 真源路径索引
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/` → Hub Pipeline Rust lib 化总控入口骨架（`HubPipelineEngine`、typed contract、effect plan、diagnostics）；当前已接入 NAPI `executeHubPipelineJson`，但 TS 主链尚未切到该总入口。
@@ -43,3 +42,4 @@
 
 - 2026-06-07 Phase 0：`chat-process-governance-finalize.ts`、`chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`hub-pipeline-mutable-record-utils.ts`、`target-utils.ts`、`chat-response-utils.ts`、`provider-response-observation.ts` 均为 0 live consumer 的旧 TS native wrapper / helper，已物理删除并由 residue audit 锁住不得复活。
 - 2026-06-07 Phase 0：`hub-stage-timing-measure-blocks.ts` 及同名 generated JS/DTS/map 已删除；`hub-stage-timing.ts` 是 timing measure 唯一 TS owner。
+- 2026-06-08 Phase 0：`chat-process-generic-marker-strip.ts` 已证明为 0 live consumer 的旧 TS wrapper；generic marker strip 与 routing marker 保留判断已由 Rust `req_process_stage1_tool_governance_blocks/request_sanitizer.rs` 主链拥有，文件已物理删除并由 residue audit 锁住不得复活。

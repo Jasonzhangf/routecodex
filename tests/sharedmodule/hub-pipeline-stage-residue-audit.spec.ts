@@ -1432,6 +1432,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-intent.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search-tool-schema.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/client-inject-readiness.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-observation.ts',

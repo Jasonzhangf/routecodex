@@ -143,11 +143,11 @@
 - TS 目标文件：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-review.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts`
 - Rust 真源：
   - `chat_web_search_intent.rs`
   - `chat_web_search_tool_schema.rs`
   - `chat_process_media_semantics.rs`
+  - `req_process_stage1_tool_governance_blocks/request_sanitizer.rs`
   - 其余若仍无 Rust 真源，则先补 Rust 公共函数库/blocks，再迁移
 - 测试矩阵：
   - Contract：intent/schema/media normalization/readiness/marker behavior
@@ -156,6 +156,8 @@
   - 删除门禁：TS 不再保留文本/内容/工具语义改写
 
 Phase 0 deletion note (2026-06-07): `chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`chat-process-governance-finalize.ts` 已证明无 live consumer 并物理删除；相关 native capabilities 保留在 Rust/native wrapper 真源中，不再通过这些 TS helper 暴露。
+
+Phase 0 deletion note (2026-06-08): `chat-process-generic-marker-strip.ts` 已证明无 live consumer 并物理删除；generic marker strip / routing marker 保留判断由 Rust `request_sanitizer.rs` 主链拥有，并由 `tests/servertool/chat-request-marker-strip.spec.ts` 通过 Rust total HubPipeline 覆盖。
 
 ### Cross-cutting Stage Gate
 - 审核所有 stage index：
