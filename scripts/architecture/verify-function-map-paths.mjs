@@ -57,8 +57,8 @@ for (const feature of features) {
   if (!hasAllowedHit) failures.push(`${feature.featureId}: no allowed_path exists on disk`);
 
   for (const rel of feature.forbidden) {
-    if (!fs.existsSync(path.join(root, rel))) {
-      failures.push(`${feature.featureId}: forbidden_path missing on disk: ${rel}`);
+    if (!rel || rel.startsWith('/') || rel.includes('..')) {
+      failures.push(`${feature.featureId}: invalid forbidden_path: ${rel}`);
     }
   }
 }
@@ -70,4 +70,4 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:function-map-paths] ok');
-console.log(`- checked ${features.length} features for allowed/forbidden path presence`);
+console.log(`- checked ${features.length} features for allowed path presence and forbidden path syntax`);
