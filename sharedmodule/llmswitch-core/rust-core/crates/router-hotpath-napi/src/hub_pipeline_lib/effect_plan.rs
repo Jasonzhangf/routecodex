@@ -50,7 +50,10 @@ pub enum HubPipelineEffectKind {
     RuntimeStateWrite,
 }
 
-fn read_effect_payload<'a>(effect: &'a Map<String, Value>, kind: &str) -> Result<&'a Value, String> {
+fn read_effect_payload<'a>(
+    effect: &'a Map<String, Value>,
+    kind: &str,
+) -> Result<&'a Value, String> {
     let payload = effect
         .get("payload")
         .ok_or_else(|| format!("Rust HubPipeline {kind} effect missing payload"))?;
@@ -64,10 +67,9 @@ fn normalize_stream_pipe_payload(payload: &Value) -> Result<Value, String> {
     let record = payload
         .as_object()
         .ok_or_else(|| "Rust HubPipeline streamPipe effect missing payload".to_string())?;
-    let codec = record
-        .get("codec")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Rust HubPipeline streamPipe effect returned unsupported codec".to_string())?;
+    let codec = record.get("codec").and_then(Value::as_str).ok_or_else(|| {
+        "Rust HubPipeline streamPipe effect returned unsupported codec".to_string()
+    })?;
     if !matches!(
         codec,
         "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat"
@@ -103,9 +105,12 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
         let effect_record = effect.as_object().ok_or_else(|| {
             "Rust HubPipeline response effect plan returned unsupported effect kind".to_string()
         })?;
-        let kind = effect_record.get("kind").and_then(Value::as_str).ok_or_else(|| {
-            "Rust HubPipeline response effect plan returned unsupported effect kind".to_string()
-        })?;
+        let kind = effect_record
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "Rust HubPipeline response effect plan returned unsupported effect kind".to_string()
+            })?;
         match kind {
             "streamPipe" => {
                 if stream_pipe.is_some() {
@@ -147,8 +152,8 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
 pub fn normalize_provider_response_effect_plan_json(input_json: String) -> napi::Result<String> {
     let value: Value = serde_json::from_str(&input_json)
         .map_err(|error| napi::Error::from_reason(format!("invalid effect plan JSON: {error}")))?;
-    let output = normalize_provider_response_effect_plan(&value)
-        .map_err(napi::Error::from_reason)?;
+    let output =
+        normalize_provider_response_effect_plan(&value).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|error| napi::Error::from_reason(format!("serialize effect plan failed: {error}")))
 }
@@ -181,9 +186,15 @@ mod tests {
             ]
         }))
         .unwrap();
-        assert_eq!(output["streamPipe"], json!({ "codec": "openai-chat", "requestId": "req-1" }));
+        assert_eq!(
+            output["streamPipe"],
+            json!({ "codec": "openai-chat", "requestId": "req-1" })
+        );
         assert_eq!(output["runtimeStateWrite"]["requestId"], json!("req-1"));
-        assert_eq!(output["servertoolRuntimeActions"][0]["action"], json!("requireRuntimeExecutor"));
+        assert_eq!(
+            output["servertoolRuntimeActions"][0]["action"],
+            json!("requireRuntimeExecutor")
+        );
     }
 
     #[test]

@@ -2,7 +2,11 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { planFollowupExecutionModeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planFollowupExecutionModeWithNative,
+  planFollowupRuntimeMetadataWithNative,
+  planFollowupRuntimeActionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
@@ -117,7 +121,26 @@ export function resolveLoopPayload(args: {
   buildSeedLoopPayload: () => JsonObject | null;
 }): JsonObject | null {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  return args.followupPayloadRaw || (decision.seedLoopPayload ? args.buildSeedLoopPayload() : null);
+  const plan = planFollowupRuntimeActionWithNative({
+    ...(args.flowId ? { flowId: args.flowId } : {}),
+    decision: {
+      outcomeMode: decision.outcomeMode,
+      noFollowup: decision.noFollowup,
+      autoLimit: decision.autoLimit,
+      clientInjectOnly: decision.clientInjectOnly,
+      seedLoopPayload: decision.seedLoopPayload,
+      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
+    },
+    metadataClientInjectOnly: false,
+    hasFollowupPayloadRaw: Boolean(args.followupPayloadRaw)
+  });
+  if (plan.loopPayloadSource === 'payload') {
+    return args.followupPayloadRaw;
+  }
+  if (plan.loopPayloadSource === 'seed_loop_payload') {
+    return args.buildSeedLoopPayload();
+  }
+  return null;
 }
 
 export function assertAutoLimitNotExceeded(args: {
@@ -127,26 +150,45 @@ export function assertAutoLimitNotExceeded(args: {
   requestId: string;
 }): void {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  if (!decision.autoLimit) {
+  const plan = planFollowupRuntimeActionWithNative({
+    ...(args.flowId ? { flowId: args.flowId } : {}),
+    decision: {
+      outcomeMode: decision.outcomeMode,
+      noFollowup: decision.noFollowup,
+      autoLimit: decision.autoLimit,
+      clientInjectOnly: decision.clientInjectOnly,
+      seedLoopPayload: decision.seedLoopPayload,
+      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
+    },
+    metadataClientInjectOnly: false,
+    hasFollowupPayloadRaw: false,
+    ...(typeof args.loopState?.repeatCount === 'number' ? { loopStateRepeatCount: args.loopState.repeatCount } : {})
+  });
+  if (!plan.autoLimit.exceeded) {
     return;
   }
-  if (!args.loopState || typeof args.loopState.repeatCount !== 'number' || args.loopState.repeatCount < 3) {
-    return;
+  if (
+    !Number.isInteger(plan.autoLimit.status) ||
+    typeof plan.autoLimit.code !== 'string' ||
+    typeof plan.autoLimit.category !== 'string' ||
+    typeof plan.autoLimit.reason !== 'string'
+  ) {
+    throw new Error('planFollowupRuntimeActionJson native returned incomplete autoLimit failure plan');
   }
   const wrapped = new ProviderProtocolError(
     '[servertool] followup auto limit reached before stopless contract was satisfied',
     {
-      code: 'SERVERTOOL_FOLLOWUP_FAILED',
-      category: 'INTERNAL_ERROR',
+      code: plan.autoLimit.code,
+      category: plan.autoLimit.category,
       details: {
         flowId: args.flowId,
         requestId: args.requestId,
-        repeatCount: args.loopState.repeatCount,
-        reason: 'followup_auto_limit_hit'
+        repeatCount: plan.autoLimit.repeatCount,
+        reason: plan.autoLimit.reason
       }
     }
   ) as ProviderProtocolError & { status?: number };
-  wrapped.status = 502;
+  wrapped.status = plan.autoLimit.status;
   throw wrapped;
 }
 
@@ -159,14 +201,32 @@ export function applyClientInjectOnlyMetadata(args: {
   normalizeClientInjectText: (value: unknown) => string;
 }): { forced: boolean } {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  if (!decision.clientInjectOnly || args.readClientInjectOnly(args.metadata)) {
+  const record = args.metadata as Record<string, unknown>;
+  const existingClientInjectSource =
+    typeof record.clientInjectSource === 'string'
+      ? record.clientInjectSource.trim()
+      : '';
+  const plan = planFollowupRuntimeActionWithNative({
+    ...(args.flowId ? { flowId: args.flowId } : {}),
+    decision: {
+      outcomeMode: decision.outcomeMode,
+      noFollowup: decision.noFollowup,
+      autoLimit: decision.autoLimit,
+      clientInjectOnly: decision.clientInjectOnly,
+      seedLoopPayload: decision.seedLoopPayload,
+      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
+    },
+    metadataClientInjectOnly: args.readClientInjectOnly(args.metadata),
+    hasFollowupPayloadRaw: false,
+    ...(existingClientInjectSource ? { clientInjectSource: existingClientInjectSource } : {})
+  });
+  if (!plan.clientInjectMetadata.force) {
     return { forced: false };
   }
-  const record = args.metadata as Record<string, unknown>;
   record.clientInjectOnly = true;
   record.clientInjectText = args.normalizeClientInjectText(record.clientInjectText ?? args.defaultText);
-  if (typeof record.clientInjectSource !== 'string') {
-    record.clientInjectSource = decision.clientInjectSource ?? 'servertool.followup';
+  if (typeof record.clientInjectSource !== 'string' && plan.clientInjectMetadata.source) {
+    record.clientInjectSource = plan.clientInjectMetadata.source;
   }
   return { forced: true };
 }
@@ -179,68 +239,27 @@ export function applyFollowupRuntimeMetadata(args: {
   flowId: string | undefined;
   decision?: FollowupFlowDecision;
   adapterContext: AdapterContext;
-  resolveProviderKey: (adapterContext: AdapterContext) => string;
 }): void {
-  const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
   const adapterRecord =
     args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
       ? (args.adapterContext as Record<string, unknown>)
       : undefined;
-  const adapterTarget =
-    adapterRecord?.target && typeof adapterRecord.target === 'object' && !Array.isArray(adapterRecord.target)
-      ? (adapterRecord.target as Record<string, unknown>)
-      : undefined;
   const adapterRuntime = adapterRecord ? readRuntimeMetadata(adapterRecord) : undefined;
-  const runtimeRouteHint =
-    typeof adapterRuntime?.routeHint === 'string' ? String(adapterRuntime.routeHint).trim() : '';
-  const runtimeRouteName =
-    typeof adapterRuntime?.routeName === 'string' ? String(adapterRuntime.routeName).trim() : '';
-  const followupMode =
-    (typeof (args.metadata as Record<string, unknown>).routecodexPortMode === 'string'
-      ? String((args.metadata as Record<string, unknown>).routecodexPortMode).trim().toLowerCase()
-      : '')
-    || (typeof adapterRecord?.routecodexPortMode === 'string'
-      ? String(adapterRecord.routecodexPortMode).trim().toLowerCase()
-      : '')
-    || (typeof adapterRuntime?.serverToolFollowupMode === 'string'
-      ? String(adapterRuntime.serverToolFollowupMode).trim().toLowerCase()
-      : '');
-  const routeHint =
-    (typeof (args.metadata as Record<string, unknown>).routeHint === 'string'
-      ? String((args.metadata as Record<string, unknown>).routeHint).trim()
-      : '') ||
-    runtimeRouteHint ||
-    runtimeRouteName ||
-    (typeof adapterRecord?.routeHint === 'string' ? String(adapterRecord.routeHint).trim() : '') ||
-    (typeof adapterRecord?.routeId === 'string' ? String(adapterRecord.routeId).trim() : '') ||
-    (typeof adapterRecord?.routeName === 'string' ? String(adapterRecord.routeName).trim() : '') ||
-    (typeof adapterTarget?.routeName === 'string' ? String(adapterTarget.routeName).trim() : '');
+  const metadataRecord = args.metadata as Record<string, unknown>;
+  const existingRuntime = readRuntimeMetadata(metadataRecord);
+  const plan = planFollowupRuntimeMetadataWithNative({
+    metadata: metadataRecord,
+    ...(existingRuntime ? { metadataRuntime: existingRuntime as Record<string, unknown> } : {}),
+    ...(adapterRecord ? { adapterContext: adapterRecord } : {}),
+    ...(adapterRuntime ? { adapterRuntime: adapterRuntime as Record<string, unknown> } : {}),
+    ...(args.loopState ? { loopState: args.loopState as Record<string, unknown> } : {}),
+    originalEntryEndpoint: args.originalEntryEndpoint,
+    followupEntryEndpoint: args.followupEntryEndpoint
+  });
   const rt = ensureRuntimeMetadata(args.metadata as unknown as Record<string, unknown>);
-  (args.metadata as Record<string, unknown>).stream = false;
-  (rt as Record<string, unknown>).serverToolFollowup = true;
-  if (args.loopState) {
-    const rootLoopState = (args.metadata as Record<string, unknown>).serverToolLoopState;
-    const currentLoopState = (rt as Record<string, unknown>).serverToolLoopState;
-    const mergedLoopState = {
-      ...(rootLoopState && typeof rootLoopState === 'object' && !Array.isArray(rootLoopState)
-        ? (rootLoopState as Record<string, unknown>)
-        : {}),
-      ...(currentLoopState && typeof currentLoopState === 'object' && !Array.isArray(currentLoopState)
-        ? (currentLoopState as Record<string, unknown>)
-        : {}),
-      ...args.loopState
-    };
-    (rt as Record<string, unknown>).serverToolLoopState = mergedLoopState;
+  for (const key of plan.rootDelete) {
+    delete metadataRecord[key];
   }
-  (args.metadata as any).__hubEntry = 'chat_process';
-  if (followupMode === 'router' && routeHint) {
-    (args.metadata as Record<string, unknown>).routeHint = routeHint;
-  } else if ((args.metadata as Record<string, unknown>).routeHint !== undefined) {
-    delete (args.metadata as Record<string, unknown>).routeHint;
-  }
-  (rt as Record<string, unknown>).preserveRouteHint = false;
-  (rt as Record<string, unknown>).serverToolOriginalEntryEndpoint =
-    (typeof args.originalEntryEndpoint === 'string' && args.originalEntryEndpoint.trim().length
-      ? args.originalEntryEndpoint
-      : args.followupEntryEndpoint) as any;
+  Object.assign(metadataRecord, plan.rootSet);
+  Object.assign(rt as Record<string, unknown>, plan.runtimeSet);
 }

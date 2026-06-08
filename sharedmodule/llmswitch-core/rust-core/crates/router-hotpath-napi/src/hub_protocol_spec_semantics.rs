@@ -427,16 +427,16 @@ fn normalize_provider_outbound_tool(protocol: &str, tool: &Value) -> Vec<Value> 
                 .filter(|value| !value.is_empty())
                 .map(|value| Value::String(value.to_string()));
             let parameters = serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "patch": {
-                            "type": "string",
-                            "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
-                        }
-                    },
-                    "required": ["patch"],
-                    "additionalProperties": true
-                });
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
+                    }
+                },
+                "required": ["patch"],
+                "additionalProperties": true
+            });
             return vec![build_provider_outbound_function_tool(
                 protocol,
                 "apply_patch",
@@ -977,14 +977,8 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], serde_json::json!("function"));
         assert_eq!(tools[0]["name"], serde_json::json!("spawn_agent"));
-        assert_eq!(
-            tools[0]["description"],
-            serde_json::json!("spawn")
-        );
-        assert_eq!(
-            tools[0]["parameters"],
-            serde_json::json!({"type":"object"})
-        );
+        assert_eq!(tools[0]["description"], serde_json::json!("spawn"));
+        assert_eq!(tools[0]["parameters"], serde_json::json!({"type":"object"}));
         assert!(tools[0].get("function").is_none());
     }
 

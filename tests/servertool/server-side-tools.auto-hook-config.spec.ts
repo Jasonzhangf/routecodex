@@ -4,7 +4,7 @@ const skeletonDocument = {
   servertool: {
     skeleton: {
       autoHooks: {
-        optionalPrimaryOrder: ['stop_message_auto'],
+        optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
         mandatoryOrder: []
       },
       pendingInjection: {
@@ -31,6 +31,12 @@ const skeletonDocument = {
       pendingInjection: { enabled: true, strictContract: true }
     },
     internalTools: {
+      vision_auto: {
+        name: 'vision_auto',
+        enabled: true,
+        trigger: { type: 'auto', canonicalName: 'vision_auto', phase: 'default', priority: 20 },
+        execution: { mode: 'auto_hook', stripAfterExecute: true }
+      },
       stop_message_auto: {
         name: 'stop_message_auto',
         enabled: true,
@@ -74,10 +80,11 @@ describe('servertool skeleton config', () => {
   test('exposes declarative auto hook queue order from skeleton config', () => {
     const skeleton = getDefaultServertoolSkeletonDocument();
     expect(skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder).toEqual([
+      'vision_auto',
       'stop_message_auto'
     ]);
     expect(buildServertoolAutoHookQueueConfig()).toEqual({
-      optionalPrimaryOrder: ['empty_reply_continue', 'stop_message_auto'],
+      optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
       mandatoryOrder: []
     });
     expect(buildServertoolPendingInjectionConfig()).toEqual({

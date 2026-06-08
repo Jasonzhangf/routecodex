@@ -368,8 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_standardization_allows_output_only_orphan_tool_result_with_previous_response_id(
-    ) {
+    fn responses_standardization_allows_output_only_orphan_tool_result_with_previous_response_id() {
         let input = json!({
             "payload": {
                 "model": "minimax-m3-free",

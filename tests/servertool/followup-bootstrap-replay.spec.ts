@@ -60,7 +60,6 @@ describe('servertool bootstrap replay', () => {
       coerceFollowupPayloadStream: (payload: any, stream: boolean) => ({ ...payload, stream }),
       applyHubFollowupPolicyShadow,
       buildServerToolLoopState: () => null,
-      resolveProviderKey: () => 'provider.key.model',
       withTimeout: async (promise: Promise<unknown>) => promise,
       createServerToolTimeoutError: () => new Error('timeout'),
       choosePreferredFinalChatResponse: ({ followupBody, finalChatResponse }: any) => followupBody ?? finalChatResponse,

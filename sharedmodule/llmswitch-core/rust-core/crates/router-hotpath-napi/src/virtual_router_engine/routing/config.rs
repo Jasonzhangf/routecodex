@@ -252,9 +252,7 @@ pub(crate) fn filter_pools_by_visual_capability_with_forwarders(
         let targets: Vec<String> = pool
             .targets
             .iter()
-            .filter(|key| {
-                target_has_visual_capability(key, provider_registry, forwarder_registry)
-            })
+            .filter(|key| target_has_visual_capability(key, provider_registry, forwarder_registry))
             .cloned()
             .collect();
         if targets.is_empty() {

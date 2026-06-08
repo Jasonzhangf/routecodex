@@ -105,14 +105,14 @@ describe('req_process servertool bundle contract', () => {
     expect(readToolNames(result)).toContain('web_search');
   });
 
-  it('keeps continue_execution hidden but still injects review when stopMessage is not active', () => {
+  it('keeps continue_execution hidden and does not inject deleted review tool', () => {
     const result = runGovernance({
       request: buildBaseRequest('继续处理并自查当前实现')
     });
 
     const toolNames = readToolNames(result);
     expect(toolNames).not.toContain('continue_execution');
-    expect(toolNames).toContain('review');
+    expect(toolNames).not.toContain('review');
   });
 
   it('skips review/web_search/clock injection when client inject is not ready', () => {

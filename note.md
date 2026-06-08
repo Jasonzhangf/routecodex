@@ -16892,3 +16892,22 @@ Phase E: TS fallback 物理删除
 ## 2026-06-08 servertool followup execution mode Rust owner
 - Current dirty slice moves backend-route followup execution mode decision from TS `backend-route-runtime-block.ts` to Rust `servertool-core::backend_route_contract::plan_followup_execution_mode`, with NAPI export `planFollowupExecutionModeJson` and TS shell `planFollowupExecutionModeWithNative`.
 - Gate intent: `verify-servertool-rust-only` now rejects restored TS checks for `decision.outcomeMode`, `decision.noFollowup`, metadata client-inject-only, and `servertool.stopless_goal_continue` inside `resolveFollowupExecutionMode`.
+
+## 2026-06-08 servertool followup runtime-action Rust owner
+- Current dirty slice extends backend-route runtime action ownership into Rust `servertool-core::backend_route_contract::plan_followup_runtime_action`, with native export `planFollowupRuntimeActionJson`.
+- TS `backend-route-runtime-block.ts` now uses the native plan for loop-payload source, auto-limit fail-fast contract, and client-inject metadata force/source. TS remains IO glue only: materialize payload, throw ProviderProtocolError from Rust plan fields, and write metadata.
+- Gate intent: `verify-servertool-rust-only` now rejects restored TS branches for direct `followupPayloadRaw || seedLoopPayload`, local `autoLimit/repeatCount < 3`, hardcoded `followup_auto_limit_hit`, and local `clientInjectOnly/clientInjectSource` decisions.
+- Review correction: `plan_followup_runtime_metadata` is connected through NAPI/native and consumed by `backend-route-runtime-block.ts::applyFollowupRuntimeMetadata`; keep it as Rust owner rather than deleting the core implementation.
+- Review deletion cleanup: `review` servertool followup is legacy-deleted in this slice. `tests/servertool/review-followup.spec.ts` is intentionally absent; related active tests must assert no `review` injection instead of restoring `review_flow`.
+- Review cleanup: removed unverified empty-reply continue half-chain from this commit scope (`servertool-core` module/export plus router-hotpath NAPI/required-export bridge). It lacked a complete verified TS/runtime consumer and represented a second feature slice unrelated to current followup runtime-action/runtime-metadata ownership.
+
+## 2026-06-08 16:59 CST servertool empty-reply followup Rustification gap
+- Focused Jest after native rebuild exposed `tests/servertool/gemini-empty-reply-continue.spec.ts` failing: orchestration stayed `executed=false` and no followup body was built.
+- Root cause trace: old standalone `gemini-empty-reply-continue` handler was physically deleted in `1e839fa11`, but TS `skeleton-config.ts` still inserted virtual `empty_reply_continue` into optional primary hook order. Registry has no real handler for that id, and `server-side-tools.ts` early empty-payload bypass returns passthrough before `stop_message_auto` can set `empty_reply_continue_local`.
+- Fix direction: do not restore old TS handler semantics. Move empty-reply continue trigger/followup plan to Rust/native owner and keep TS as a registration/execution shell only.
+
+## 2026-06-08 direct Responses 200-SSE rate-limit failure
+- Live symptom: client saw `stream disconnected before completion: Concurrency limit exceeded...`; server logs showed secondary `upstream_stream_incomplete`.
+- Root trace: `ResponsesProvider.sendDirectSsePassthroughRequest` accepts upstream HTTP 200 SSE and returns `{status:200,__sse_responses}` without pre-reading `event:error` / `response.failed`, unlike `OpenAiResponsesSdkTransport` which already maps early 200-SSE rate-limit frames to retryable provider 429.
+- Required fix boundary: provider runtime direct SSE path must pre-read early SSE frames, preserve normal streams by replaying buffered bytes, and throw recoverable provider error for `rate_limit_error` / concurrency so router-direct ErrorErr chain can switch provider. No payload cleanup, no relay.
+- 2026-06-08 review correction: the empty-reply continue Rust/NAPI/TS half-chain was removed from the current servertool followup runtime-action/runtime-metadata commit scope. The earlier local tests were insufficient for a full feature commit because the live consumer/registration/verification scope was a separate feature slice. Current commit should contain no `empty_reply_continue_contract`, no `planEmptyReply*` native exports, and no `handlers/empty-reply-continue.ts`.

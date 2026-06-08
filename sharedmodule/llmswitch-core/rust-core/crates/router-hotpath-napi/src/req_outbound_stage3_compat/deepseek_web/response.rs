@@ -201,7 +201,10 @@ fn payload_text_contains_bash_lc_single_quote(payload: &Value) -> bool {
     false
 }
 
-fn restore_deepseek_single_quoted_bash_lc_args(payload: &mut Value, original_had_single_quote: bool) {
+fn restore_deepseek_single_quoted_bash_lc_args(
+    payload: &mut Value,
+    original_had_single_quote: bool,
+) {
     if !original_had_single_quote {
         return;
     }
@@ -257,7 +260,10 @@ fn restore_deepseek_single_quoted_bash_lc_args(payload: &mut Value, original_had
             if inner.contains('\"') || inner.contains('\'') {
                 continue;
             }
-            arguments_obj.insert("cmd".to_string(), Value::String(format!("bash -lc '{}'", inner)));
+            arguments_obj.insert(
+                "cmd".to_string(),
+                Value::String(format!("bash -lc '{}'", inner)),
+            );
             if let Ok(serialized) = serde_json::to_string(&arguments) {
                 function.insert("arguments".to_string(), Value::String(serialized));
             }
@@ -792,10 +798,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
         resolve_requested_exec_tool_alias(adapter_context).as_deref(),
     );
     ensure_exec_command_args_have_cmd(&mut governed);
-    restore_deepseek_single_quoted_bash_lc_args(
-        &mut governed,
-        original_had_single_quoted_bash_lc,
-    );
+    restore_deepseek_single_quoted_bash_lc_args(&mut governed, original_had_single_quoted_bash_lc);
     let forbidden_transport_detected = hidden_transport_detected_before_governance
         || sanitize_deepseek_meta_leakage(&mut governed);
     normalize_tool_call_only_content_to_null(&mut governed);

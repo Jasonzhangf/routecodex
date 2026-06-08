@@ -1,14 +1,13 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use servertool_core::backend_route_contract::{
-    decorate_servertool_final_chat_with_context,
-    plan_followup_execution_mode,
+    decorate_servertool_final_chat_with_context, plan_followup_execution_mode,
+    plan_followup_runtime_action, plan_followup_runtime_metadata,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
-    should_short_circuit_requires_action_followup,
-    ServertoolBackendRouteFinalizeInput,
-    ServertoolBackendRoutePolicyInput,
-    ServertoolBackendRouteRequiresActionShortCircuitInput,
-    ServertoolFollowupExecutionModeInput,
+    should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
+    ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
+    ServertoolFollowupExecutionModeInput, ServertoolFollowupRuntimeActionInput,
+    ServertoolFollowupRuntimeMetadataInput,
 };
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -131,15 +130,19 @@ pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<Stri
     serde_json::to_string(&output).map_err(|e| format!("serialize command result: {e}"))
 }
 
-pub fn has_stop_message_auto_cli_result_in_request_json(input_json: &str) -> Result<String, String> {
+pub fn has_stop_message_auto_cli_result_in_request_json(
+    input_json: &str,
+) -> Result<String, String> {
     let payload: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize cli result guard input: {e}"))?;
-    Ok(if cli_result_guard::has_stop_message_auto_cli_result_in_request(&payload) {
-        "true"
-    } else {
-        "false"
-    }
-    .to_string())
+    Ok(
+        if cli_result_guard::has_stop_message_auto_cli_result_in_request(&payload) {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    )
 }
 
 pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
@@ -176,6 +179,20 @@ pub fn plan_followup_execution_mode_json(input_json: &str) -> Result<String, Str
         .map_err(|e| format!("deserialize followup execution mode input: {e}"))?;
     let output = plan_followup_execution_mode(input).map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize execution mode plan: {e}"))
+}
+
+pub fn plan_followup_runtime_action_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupRuntimeActionInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup runtime action input: {e}"))?;
+    let output = plan_followup_runtime_action(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize runtime action plan: {e}"))
+}
+
+pub fn plan_followup_runtime_metadata_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupRuntimeMetadataInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup runtime metadata input: {e}"))?;
+    let output = plan_followup_runtime_metadata(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize runtime metadata plan: {e}"))
 }
 
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
@@ -286,6 +303,70 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
         assert_eq!(parsed["flowId"], "continue_execution_flow");
         assert_eq!(parsed["executionMode"], "client_inject_only");
+    }
+
+    #[test]
+    fn plans_followup_runtime_action_via_servertool_core_bridge() {
+        let raw = plan_followup_runtime_action_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "decision": {
+                    "outcomeMode": "reenter",
+                    "noFollowup": false,
+                    "autoLimit": true,
+                    "clientInjectOnly": true,
+                    "seedLoopPayload": true,
+                    "clientInjectSource": "servertool.continue_execution"
+                },
+                "metadataClientInjectOnly": false,
+                "hasFollowupPayloadRaw": false,
+                "loopStateRepeatCount": 3,
+                "clientInjectSource": null
+            })
+            .to_string(),
+        )
+        .expect("runtime action bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["flowId"], "stop_message_flow");
+        assert_eq!(parsed["loopPayloadSource"], "seed_loop_payload");
+        assert_eq!(parsed["autoLimit"]["exceeded"], true);
+        assert_eq!(parsed["autoLimit"]["status"], 502);
+        assert_eq!(parsed["clientInjectMetadata"]["force"], true);
+        assert_eq!(
+            parsed["clientInjectMetadata"]["source"],
+            "servertool.continue_execution"
+        );
+    }
+
+    #[test]
+    fn plans_followup_runtime_metadata_via_servertool_core_bridge() {
+        let raw = plan_followup_runtime_metadata_json(
+            &json!({
+                "metadata": {},
+                "metadataRuntime": null,
+                "adapterContext": {
+                    "routecodexPortMode": "router",
+                    "routeId": "coding"
+                },
+                "adapterRuntime": null,
+                "loopState": {
+                    "repeatCount": 1
+                },
+                "originalEntryEndpoint": "/v1/responses",
+                "followupEntryEndpoint": "/v1/responses"
+            })
+            .to_string(),
+        )
+        .expect("runtime metadata bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["rootSet"]["routeHint"], "coding");
+        assert_eq!(parsed["rootSet"]["stream"], false);
+        assert_eq!(parsed["runtimeSet"]["serverToolFollowup"], true);
+        assert_eq!(
+            parsed["runtimeSet"]["serverToolLoopState"]["repeatCount"],
+            1
+        );
+        assert_eq!(parsed["rootDelete"].as_array().map(Vec::len), Some(0));
     }
 
     #[test]

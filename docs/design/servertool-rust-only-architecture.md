@@ -235,7 +235,6 @@ Host HTTP shell
 - `servertool/handlers/clock/`
 - `servertool/handlers/continue_execution/`
 - `servertool/handlers/web_search/`
-- `servertool/handlers/review/`
 
 每个 handler 目录统一结构：
 
@@ -423,7 +422,6 @@ servertool 的真正骨架层：
       "clock": { "enabled": true, "mode": "client_inject" },
       "continue_execution": { "enabled": true, "mode": "client_inject" },
       "stop_message_auto": { "enabled": true, "mode": "auto_hook" },
-      "review": { "enabled": true, "mode": "reenter" },
       "web_search": { "enabled": true, "mode": "backend" }
     },
     "skeleton": {

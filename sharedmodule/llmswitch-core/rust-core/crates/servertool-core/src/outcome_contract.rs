@@ -5,7 +5,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ServertoolOutcome {
-    /// stop_message_auto / review / servertool_fixture -> client-visible exec_command CLI projection
+    /// stop_message_auto / servertool_fixture -> client-visible exec_command CLI projection
     ClientExecCliProjection,
     /// web_search / vision_auto -> server-side backend route reenter, not visible to client
     BackendRouteReenter,

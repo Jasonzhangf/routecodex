@@ -177,6 +177,57 @@ export interface ServertoolFollowupExecutionModePlan {
   executionMode: 'skip' | 'client_inject_only' | 'reenter';
 }
 
+export interface ServertoolFollowupRuntimeActionDecision {
+  outcomeMode?: 'skip' | 'client_inject_only' | 'reenter';
+  noFollowup?: boolean;
+  autoLimit?: boolean;
+  clientInjectOnly?: boolean;
+  seedLoopPayload?: boolean;
+  clientInjectSource?: string;
+}
+
+export interface ServertoolFollowupRuntimeActionInput {
+  flowId?: string;
+  decision?: ServertoolFollowupRuntimeActionDecision;
+  metadataClientInjectOnly: boolean;
+  hasFollowupPayloadRaw: boolean;
+  loopStateRepeatCount?: number;
+  clientInjectSource?: string;
+}
+
+export interface ServertoolFollowupRuntimeActionPlan {
+  flowId?: string;
+  loopPayloadSource: 'payload' | 'seed_loop_payload' | 'none';
+  autoLimit: {
+    exceeded: boolean;
+    status?: number;
+    code?: 'SERVERTOOL_FOLLOWUP_FAILED';
+    category?: 'INTERNAL_ERROR';
+    reason?: string;
+    repeatCount?: number;
+  };
+  clientInjectMetadata: {
+    force: boolean;
+    source?: string;
+  };
+}
+
+export interface ServertoolFollowupRuntimeMetadataInput {
+  metadata: Record<string, unknown>;
+  metadataRuntime?: Record<string, unknown> | null;
+  adapterContext?: Record<string, unknown> | null;
+  adapterRuntime?: Record<string, unknown> | null;
+  loopState?: Record<string, unknown> | null;
+  originalEntryEndpoint?: string;
+  followupEntryEndpoint?: string;
+}
+
+export interface ServertoolFollowupRuntimeMetadataPlan {
+  rootSet: Record<string, unknown>;
+  rootDelete: string[];
+  runtimeSet: Record<string, unknown>;
+}
+
 export interface ServertoolBackendRouteFinalizeExecution {
   flowId?: string;
   context?: Record<string, unknown>;
@@ -473,6 +524,126 @@ export function planFollowupExecutionModeWithNative(
   return {
     ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
     executionMode: record.executionMode
+  };
+}
+
+export function planFollowupRuntimeActionWithNative(
+  input: ServertoolFollowupRuntimeActionInput,
+): ServertoolFollowupRuntimeActionPlan {
+  const capability = 'planFollowupRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.loopPayloadSource !== 'payload' &&
+    record.loopPayloadSource !== 'seed_loop_payload' &&
+    record.loopPayloadSource !== 'none'
+  ) {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid loopPayloadSource');
+  }
+  const autoLimit = record.autoLimit;
+  if (!autoLimit || typeof autoLimit !== 'object' || Array.isArray(autoLimit)) {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit');
+  }
+  const autoLimitRecord = autoLimit as Record<string, unknown>;
+  if (typeof autoLimitRecord.exceeded !== 'boolean') {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.exceeded');
+  }
+  const clientInjectMetadata = record.clientInjectMetadata;
+  if (!clientInjectMetadata || typeof clientInjectMetadata !== 'object' || Array.isArray(clientInjectMetadata)) {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid clientInjectMetadata');
+  }
+  const clientInjectRecord = clientInjectMetadata as Record<string, unknown>;
+  if (typeof clientInjectRecord.force !== 'boolean') {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid clientInjectMetadata.force');
+  }
+  const rawAutoLimitCode =
+    typeof autoLimitRecord.code === 'string'
+      ? autoLimitRecord.code.trim()
+      : '';
+  if (rawAutoLimitCode && rawAutoLimitCode !== 'SERVERTOOL_FOLLOWUP_FAILED') {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.code');
+  }
+  const autoLimitCode: 'SERVERTOOL_FOLLOWUP_FAILED' | undefined =
+    rawAutoLimitCode ? 'SERVERTOOL_FOLLOWUP_FAILED' : undefined;
+  const rawAutoLimitCategory =
+    typeof autoLimitRecord.category === 'string'
+      ? autoLimitRecord.category.trim()
+      : '';
+  if (rawAutoLimitCategory && rawAutoLimitCategory !== 'INTERNAL_ERROR') {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.category');
+  }
+  const autoLimitCategory: 'INTERNAL_ERROR' | undefined =
+    rawAutoLimitCategory ? 'INTERNAL_ERROR' : undefined;
+  return {
+    ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
+    loopPayloadSource: record.loopPayloadSource,
+    autoLimit: {
+      exceeded: autoLimitRecord.exceeded,
+      ...(Number.isInteger(autoLimitRecord.status) ? { status: autoLimitRecord.status as number } : {}),
+      ...(autoLimitCode
+        ? { code: autoLimitCode }
+        : {}),
+      ...(autoLimitCategory
+        ? { category: autoLimitCategory }
+        : {}),
+      ...(typeof autoLimitRecord.reason === 'string' && autoLimitRecord.reason.trim()
+        ? { reason: autoLimitRecord.reason.trim() }
+        : {}),
+      ...(Number.isInteger(autoLimitRecord.repeatCount) ? { repeatCount: autoLimitRecord.repeatCount as number } : {})
+    },
+    clientInjectMetadata: {
+      force: clientInjectRecord.force,
+      ...(typeof clientInjectRecord.source === 'string' && clientInjectRecord.source.trim()
+        ? { source: clientInjectRecord.source.trim() }
+        : {})
+    }
+  };
+}
+
+export function planFollowupRuntimeMetadataWithNative(
+  input: ServertoolFollowupRuntimeMetadataInput,
+): ServertoolFollowupRuntimeMetadataPlan {
+  const capability = 'planFollowupRuntimeMetadataJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupRuntimeMetadataJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupRuntimeMetadataJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupRuntimeMetadataJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  const rootSet = record.rootSet;
+  const rootDelete = record.rootDelete;
+  const runtimeSet = record.runtimeSet;
+  if (!rootSet || typeof rootSet !== 'object' || Array.isArray(rootSet)) {
+    throw new Error('planFollowupRuntimeMetadataJson native returned invalid rootSet');
+  }
+  if (!Array.isArray(rootDelete) || rootDelete.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new Error('planFollowupRuntimeMetadataJson native returned invalid rootDelete');
+  }
+  if (!runtimeSet || typeof runtimeSet !== 'object' || Array.isArray(runtimeSet)) {
+    throw new Error('planFollowupRuntimeMetadataJson native returned invalid runtimeSet');
+  }
+  return {
+    rootSet: rootSet as Record<string, unknown>,
+    rootDelete: rootDelete.map((item) => item.trim()),
+    runtimeSet: runtimeSet as Record<string, unknown>
   };
 }
 

@@ -156,16 +156,6 @@ export function buildServertoolAutoHookQueueConfig(): {
   const optionalPrimaryOrder = [...skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder]
       .map((value) => normalizeServerToolName(value))
       .filter(Boolean);
-  if (!optionalPrimaryOrder.includes('vision_auto')) {
-    const stopIdx = optionalPrimaryOrder.indexOf('stop_message_auto');
-    if (stopIdx >= 0) optionalPrimaryOrder.splice(stopIdx, 0, 'vision_auto');
-    else optionalPrimaryOrder.push('vision_auto');
-  }
-  if (!optionalPrimaryOrder.includes('empty_reply_continue')) {
-    const stopIdx = optionalPrimaryOrder.indexOf('stop_message_auto');
-    if (stopIdx >= 0) optionalPrimaryOrder.splice(stopIdx, 0, 'empty_reply_continue');
-    else optionalPrimaryOrder.push('empty_reply_continue');
-  }
   return {
     optionalPrimaryOrder,
     mandatoryOrder: [...skeleton.servertool.skeleton.autoHooks.mandatoryOrder]

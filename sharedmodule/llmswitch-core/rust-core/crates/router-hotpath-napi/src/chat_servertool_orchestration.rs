@@ -1709,8 +1709,9 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
             input.tool_name
         )));
     }
-    let visible_summary = resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
-        .map_err(napi::Error::from_reason)?;
+    let visible_summary =
+        resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
+            .map_err(napi::Error::from_reason)?;
     let client_inject_text = if visible_summary.is_empty() {
         LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT.to_string()
     } else {
@@ -2744,7 +2745,10 @@ mod tests {
         )
         .unwrap();
         let parsed: Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(parsed["followup"]["metadata"]["clientInjectText"], "继续执行");
+        assert_eq!(
+            parsed["followup"]["metadata"]["clientInjectText"],
+            "继续执行"
+        );
         assert_eq!(parsed["followup"]["metadata"]["visibleSummary"], "");
         assert_eq!(
             parsed["executionContext"]["continue_execution"]["visibleSummary"],

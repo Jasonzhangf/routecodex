@@ -1388,7 +1388,9 @@ pub fn decorate_servertool_final_chat_json(input_json: String) -> NapiResult<Str
 }
 
 #[napi]
-pub fn should_short_circuit_requires_action_followup_json(input_json: String) -> NapiResult<String> {
+pub fn should_short_circuit_requires_action_followup_json(
+    input_json: String,
+) -> NapiResult<String> {
     servertool_core_blocks::should_short_circuit_requires_action_followup_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
@@ -1396,6 +1398,18 @@ pub fn should_short_circuit_requires_action_followup_json(input_json: String) ->
 #[napi]
 pub fn plan_followup_execution_mode_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_execution_mode_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_followup_runtime_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_followup_runtime_metadata_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_runtime_metadata_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

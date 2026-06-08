@@ -131,7 +131,11 @@ fn recover_qwen_style_tool_tokens_from_text(text: &str) -> Vec<Value> {
         let Some(full) = caps.get(0) else {
             continue;
         };
-        let Some(name) = caps.get(1).map(|m| m.as_str().trim()).filter(|v| !v.is_empty()) else {
+        let Some(name) = caps
+            .get(1)
+            .map(|m| m.as_str().trim())
+            .filter(|v| !v.is_empty())
+        else {
             continue;
         };
         let mut args_start = full.end();

@@ -120,6 +120,83 @@ pub struct ServertoolFollowupExecutionModePlan {
     pub execution_mode: ServertoolFollowupExecutionMode,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupRuntimeActionInput {
+    pub flow_id: Option<String>,
+    pub decision: Option<ServertoolFollowupRuntimeActionDecision>,
+    pub metadata_client_inject_only: bool,
+    pub has_followup_payload_raw: bool,
+    pub loop_state_repeat_count: Option<i64>,
+    pub client_inject_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupRuntimeActionDecision {
+    pub outcome_mode: Option<String>,
+    pub no_followup: Option<bool>,
+    pub auto_limit: Option<bool>,
+    pub client_inject_only: Option<bool>,
+    pub seed_loop_payload: Option<bool>,
+    pub client_inject_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolFollowupLoopPayloadSource {
+    Payload,
+    SeedLoopPayload,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupAutoLimitPlan {
+    pub exceeded: bool,
+    pub status: Option<u16>,
+    pub code: Option<String>,
+    pub category: Option<String>,
+    pub reason: Option<String>,
+    pub repeat_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupClientInjectMetadataPlan {
+    pub force: bool,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupRuntimeActionPlan {
+    pub flow_id: Option<String>,
+    pub loop_payload_source: ServertoolFollowupLoopPayloadSource,
+    pub auto_limit: ServertoolFollowupAutoLimitPlan,
+    pub client_inject_metadata: ServertoolFollowupClientInjectMetadataPlan,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupRuntimeMetadataInput {
+    pub metadata: Value,
+    pub metadata_runtime: Option<Value>,
+    pub adapter_context: Option<Value>,
+    pub adapter_runtime: Option<Value>,
+    pub loop_state: Option<Value>,
+    pub original_entry_endpoint: Option<String>,
+    pub followup_entry_endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupRuntimeMetadataPlan {
+    pub root_set: Value,
+    pub root_delete: Vec<String>,
+    pub runtime_set: Value,
+}
+
 pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
     input: ServertoolBackendRoutePolicyInput,
 ) -> Result<ServertoolBackendRoutePolicy01Planned, ServertoolOutcomeError> {
@@ -266,9 +343,7 @@ pub fn plan_followup_execution_mode(
         .filter(|value| !value.is_empty())
         .unwrap_or("reenter");
     if !matches!(outcome_mode, "skip" | "client_inject_only" | "reenter") {
-        return Err(ServertoolOutcomeError::InvalidField(
-            "decision.outcomeMode",
-        ));
+        return Err(ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
     }
     let no_followup = decision
         .as_ref()
@@ -300,6 +375,184 @@ pub fn plan_followup_execution_mode(
         flow_id,
         execution_mode,
     })
+}
+
+pub fn plan_followup_runtime_action(
+    input: ServertoolFollowupRuntimeActionInput,
+) -> Result<ServertoolFollowupRuntimeActionPlan, ServertoolOutcomeError> {
+    let flow_id = input
+        .flow_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let decision = input.decision;
+    let outcome_mode = decision
+        .as_ref()
+        .and_then(|item| item.outcome_mode.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("reenter");
+    if !matches!(outcome_mode, "skip" | "client_inject_only" | "reenter") {
+        return Err(ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
+    }
+    let no_followup = decision
+        .as_ref()
+        .and_then(|item| item.no_followup)
+        .unwrap_or(false);
+    if outcome_mode == "skip" || no_followup {
+        return Ok(ServertoolFollowupRuntimeActionPlan {
+            flow_id,
+            loop_payload_source: ServertoolFollowupLoopPayloadSource::None,
+            auto_limit: ServertoolFollowupAutoLimitPlan {
+                exceeded: false,
+                status: None,
+                code: None,
+                category: None,
+                reason: None,
+                repeat_count: input.loop_state_repeat_count,
+            },
+            client_inject_metadata: ServertoolFollowupClientInjectMetadataPlan {
+                force: false,
+                source: None,
+            },
+        });
+    }
+
+    let seed_loop_payload = decision
+        .as_ref()
+        .and_then(|item| item.seed_loop_payload)
+        .unwrap_or(false);
+    let loop_payload_source = if input.has_followup_payload_raw {
+        ServertoolFollowupLoopPayloadSource::Payload
+    } else if seed_loop_payload {
+        ServertoolFollowupLoopPayloadSource::SeedLoopPayload
+    } else {
+        ServertoolFollowupLoopPayloadSource::None
+    };
+
+    let auto_limit = decision
+        .as_ref()
+        .and_then(|item| item.auto_limit)
+        .unwrap_or(false);
+    let repeat_count = input.loop_state_repeat_count;
+    let auto_limit_exceeded = auto_limit && repeat_count.unwrap_or(0) >= 3;
+    let auto_limit_plan = if auto_limit_exceeded {
+        ServertoolFollowupAutoLimitPlan {
+            exceeded: true,
+            status: Some(502),
+            code: Some("SERVERTOOL_FOLLOWUP_FAILED".to_string()),
+            category: Some("INTERNAL_ERROR".to_string()),
+            reason: Some("followup_auto_limit_hit".to_string()),
+            repeat_count,
+        }
+    } else {
+        ServertoolFollowupAutoLimitPlan {
+            exceeded: false,
+            status: None,
+            code: None,
+            category: None,
+            reason: None,
+            repeat_count,
+        }
+    };
+
+    let client_inject_only = decision
+        .as_ref()
+        .and_then(|item| item.client_inject_only)
+        .unwrap_or(false);
+    let client_inject_source = input
+        .client_inject_source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            decision
+                .as_ref()
+                .and_then(|item| item.client_inject_source.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("servertool.followup");
+    let force_client_inject_metadata = client_inject_only && !input.metadata_client_inject_only;
+    Ok(ServertoolFollowupRuntimeActionPlan {
+        flow_id,
+        loop_payload_source,
+        auto_limit: auto_limit_plan,
+        client_inject_metadata: ServertoolFollowupClientInjectMetadataPlan {
+            force: force_client_inject_metadata,
+            source: if force_client_inject_metadata {
+                Some(client_inject_source.to_string())
+            } else {
+                None
+            },
+        },
+    })
+}
+
+pub fn plan_followup_runtime_metadata(
+    input: ServertoolFollowupRuntimeMetadataInput,
+) -> ServertoolFollowupRuntimeMetadataPlan {
+    let metadata = input.metadata;
+    let metadata_runtime = input.metadata_runtime.unwrap_or(Value::Null);
+    let adapter_context = input.adapter_context.unwrap_or(Value::Null);
+    let adapter_runtime = input.adapter_runtime.unwrap_or(Value::Null);
+    let followup_mode = read_trimmed_string(metadata.get("routecodexPortMode"))
+        .or_else(|| read_trimmed_string(adapter_context.get("routecodexPortMode")))
+        .or_else(|| read_trimmed_string(adapter_runtime.get("serverToolFollowupMode")))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let route_hint = read_trimmed_string(metadata.get("routeHint"))
+        .or_else(|| read_trimmed_string(adapter_runtime.get("routeHint")))
+        .or_else(|| read_trimmed_string(adapter_runtime.get("routeName")))
+        .or_else(|| read_trimmed_string(adapter_context.get("routeHint")))
+        .or_else(|| read_trimmed_string(adapter_context.get("routeId")))
+        .or_else(|| read_trimmed_string(adapter_context.get("routeName")))
+        .or_else(|| {
+            adapter_context
+                .get("target")
+                .and_then(|target| read_trimmed_string(target.get("routeName")))
+        });
+
+    let mut root_set = serde_json::Map::new();
+    let mut root_delete = Vec::new();
+    root_set.insert("stream".to_string(), Value::Bool(false));
+    root_set.insert(
+        "__hubEntry".to_string(),
+        Value::String("chat_process".to_string()),
+    );
+    if followup_mode == "router" {
+        if let Some(route_hint) = route_hint {
+            root_set.insert("routeHint".to_string(), Value::String(route_hint));
+        } else if metadata.get("routeHint").is_some() {
+            root_delete.push("routeHint".to_string());
+        }
+    } else if metadata.get("routeHint").is_some() {
+        root_delete.push("routeHint".to_string());
+    }
+
+    let mut runtime_set = serde_json::Map::new();
+    runtime_set.insert("serverToolFollowup".to_string(), Value::Bool(true));
+    runtime_set.insert("preserveRouteHint".to_string(), Value::Bool(false));
+    runtime_set.insert(
+        "serverToolOriginalEntryEndpoint".to_string(),
+        Value::String(resolve_original_entry_endpoint(
+            input.original_entry_endpoint.as_deref(),
+            input.followup_entry_endpoint.as_deref(),
+        )),
+    );
+    if let Some(loop_state) = input.loop_state {
+        let merged = merge_loop_state(
+            metadata.get("serverToolLoopState"),
+            &metadata_runtime,
+            loop_state,
+        );
+        runtime_set.insert("serverToolLoopState".to_string(), merged);
+    }
+
+    ServertoolFollowupRuntimeMetadataPlan {
+        root_set: Value::Object(root_set),
+        root_delete,
+        runtime_set: Value::Object(runtime_set),
+    }
 }
 
 fn normalize_backend_route_input(
@@ -474,6 +727,38 @@ fn normalize_flow_id(actual: &str, default_flow_id: &'static str) -> String {
         return default_flow_id.to_string();
     }
     normalized.to_string()
+}
+
+fn resolve_original_entry_endpoint(original: Option<&str>, followup: Option<&str>) -> String {
+    original
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| followup.map(str::trim).filter(|value| !value.is_empty()))
+        .unwrap_or("/v1/chat/completions")
+        .to_string()
+}
+
+fn merge_loop_state(root_loop_state: Option<&Value>, runtime: &Value, loop_state: Value) -> Value {
+    let mut merged = serde_json::Map::new();
+    if let Some(root) = root_loop_state.and_then(Value::as_object) {
+        for (key, value) in root {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(current) = runtime
+        .get("serverToolLoopState")
+        .and_then(Value::as_object)
+    {
+        for (key, value) in current {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(next) = loop_state.as_object() {
+        for (key, value) in next {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
 }
 
 #[cfg(test)]
@@ -718,7 +1003,10 @@ mod tests {
             client_inject_source: None,
         })
         .expect("execution mode");
-        assert_eq!(plan.flow_id.as_deref(), Some("reasoning_stop_finalize_flow"));
+        assert_eq!(
+            plan.flow_id.as_deref(),
+            Some("reasoning_stop_finalize_flow")
+        );
         assert_eq!(plan.execution_mode, ServertoolFollowupExecutionMode::Skip);
     }
 
@@ -754,7 +1042,10 @@ mod tests {
             client_inject_source: Some("servertool.stopless_goal_continue".to_string()),
         })
         .expect("execution mode");
-        assert_eq!(plan.execution_mode, ServertoolFollowupExecutionMode::Reenter);
+        assert_eq!(
+            plan.execution_mode,
+            ServertoolFollowupExecutionMode::Reenter
+        );
     }
 
     #[test]
@@ -770,6 +1061,247 @@ mod tests {
             client_inject_source: None,
         })
         .expect_err("invalid mode");
-        assert_eq!(err, ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::InvalidField("decision.outcomeMode")
+        );
+    }
+
+    #[test]
+    fn followup_runtime_action_uses_payload_before_seed_loop_payload() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("reenter".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(false),
+                client_inject_only: Some(false),
+                seed_loop_payload: Some(true),
+                client_inject_source: None,
+            }),
+            metadata_client_inject_only: false,
+            has_followup_payload_raw: true,
+            loop_state_repeat_count: None,
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert_eq!(
+            plan.loop_payload_source,
+            ServertoolFollowupLoopPayloadSource::Payload
+        );
+        assert!(!plan.auto_limit.exceeded);
+        assert!(!plan.client_inject_metadata.force);
+    }
+
+    #[test]
+    fn followup_runtime_action_selects_seed_loop_payload_when_raw_missing() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("reenter".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(false),
+                client_inject_only: Some(false),
+                seed_loop_payload: Some(true),
+                client_inject_source: None,
+            }),
+            metadata_client_inject_only: false,
+            has_followup_payload_raw: false,
+            loop_state_repeat_count: None,
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert_eq!(
+            plan.loop_payload_source,
+            ServertoolFollowupLoopPayloadSource::SeedLoopPayload
+        );
+    }
+
+    #[test]
+    fn followup_runtime_action_reports_auto_limit_failure_contract() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("apply_patch_read_before_retry_guard".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("reenter".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(true),
+                client_inject_only: Some(false),
+                seed_loop_payload: Some(false),
+                client_inject_source: None,
+            }),
+            metadata_client_inject_only: false,
+            has_followup_payload_raw: false,
+            loop_state_repeat_count: Some(3),
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert!(plan.auto_limit.exceeded);
+        assert_eq!(plan.auto_limit.status, Some(502));
+        assert_eq!(
+            plan.auto_limit.code.as_deref(),
+            Some("SERVERTOOL_FOLLOWUP_FAILED")
+        );
+        assert_eq!(
+            plan.auto_limit.reason.as_deref(),
+            Some("followup_auto_limit_hit")
+        );
+    }
+
+    #[test]
+    fn followup_runtime_action_plans_client_inject_metadata_force() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("continue_execution_flow".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("client_inject_only".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(false),
+                client_inject_only: Some(true),
+                seed_loop_payload: Some(false),
+                client_inject_source: Some("servertool.continue_execution".to_string()),
+            }),
+            metadata_client_inject_only: false,
+            has_followup_payload_raw: false,
+            loop_state_repeat_count: None,
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert!(plan.client_inject_metadata.force);
+        assert_eq!(
+            plan.client_inject_metadata.source.as_deref(),
+            Some("servertool.continue_execution")
+        );
+    }
+
+    #[test]
+    fn followup_runtime_action_does_not_force_existing_client_inject_metadata() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("continue_execution_flow".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("client_inject_only".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(false),
+                client_inject_only: Some(true),
+                seed_loop_payload: Some(false),
+                client_inject_source: Some("servertool.continue_execution".to_string()),
+            }),
+            metadata_client_inject_only: true,
+            has_followup_payload_raw: false,
+            loop_state_repeat_count: None,
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert!(!plan.client_inject_metadata.force);
+        assert!(plan.client_inject_metadata.source.is_none());
+    }
+
+    #[test]
+    fn followup_runtime_action_skip_has_no_runtime_side_effects() {
+        let plan = plan_followup_runtime_action(ServertoolFollowupRuntimeActionInput {
+            flow_id: Some("reasoning_stop_finalize_flow".to_string()),
+            decision: Some(ServertoolFollowupRuntimeActionDecision {
+                outcome_mode: Some("skip".to_string()),
+                no_followup: Some(false),
+                auto_limit: Some(true),
+                client_inject_only: Some(true),
+                seed_loop_payload: Some(true),
+                client_inject_source: Some("servertool.continue_execution".to_string()),
+            }),
+            metadata_client_inject_only: false,
+            has_followup_payload_raw: true,
+            loop_state_repeat_count: Some(3),
+            client_inject_source: None,
+        })
+        .expect("runtime action");
+        assert_eq!(
+            plan.loop_payload_source,
+            ServertoolFollowupLoopPayloadSource::None
+        );
+        assert!(!plan.auto_limit.exceeded);
+        assert!(!plan.client_inject_metadata.force);
+    }
+
+    #[test]
+    fn followup_runtime_metadata_preserves_router_route_hint_from_adapter() {
+        let plan = plan_followup_runtime_metadata(ServertoolFollowupRuntimeMetadataInput {
+            metadata: json!({}),
+            metadata_runtime: None,
+            adapter_context: Some(json!({
+                "routecodexPortMode": "router",
+                "routeId": "coding"
+            })),
+            adapter_runtime: None,
+            loop_state: None,
+            original_entry_endpoint: Some("/v1/responses".to_string()),
+            followup_entry_endpoint: Some("/v1/responses".to_string()),
+        });
+        assert_eq!(plan.root_set["stream"], false);
+        assert_eq!(plan.root_set["__hubEntry"], "chat_process");
+        assert_eq!(plan.root_set["routeHint"], "coding");
+        assert!(plan.root_delete.is_empty());
+        assert_eq!(plan.runtime_set["serverToolFollowup"], true);
+        assert_eq!(plan.runtime_set["preserveRouteHint"], false);
+        assert_eq!(
+            plan.runtime_set["serverToolOriginalEntryEndpoint"],
+            "/v1/responses"
+        );
+    }
+
+    #[test]
+    fn followup_runtime_metadata_deletes_route_hint_outside_router_mode() {
+        let plan = plan_followup_runtime_metadata(ServertoolFollowupRuntimeMetadataInput {
+            metadata: json!({
+                "routeHint": "coding",
+                "routecodexPortMode": "provider"
+            }),
+            metadata_runtime: None,
+            adapter_context: Some(json!({})),
+            adapter_runtime: None,
+            loop_state: None,
+            original_entry_endpoint: Some("".to_string()),
+            followup_entry_endpoint: Some("/v1/chat/completions".to_string()),
+        });
+        assert!(plan.root_set.get("routeHint").is_none());
+        assert_eq!(plan.root_delete, vec!["routeHint".to_string()]);
+        assert_eq!(
+            plan.runtime_set["serverToolOriginalEntryEndpoint"],
+            "/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn followup_runtime_metadata_merges_loop_state_in_rust_order() {
+        let plan = plan_followup_runtime_metadata(ServertoolFollowupRuntimeMetadataInput {
+            metadata: json!({
+                "serverToolLoopState": {
+                    "repeatCount": 1,
+                    "rootOnly": true
+                }
+            }),
+            metadata_runtime: Some(json!({
+                "serverToolLoopState": {
+                    "repeatCount": 2,
+                    "runtimeOnly": true
+                }
+            })),
+            adapter_context: Some(json!({})),
+            adapter_runtime: None,
+            loop_state: Some(json!({
+                "repeatCount": 3,
+                "flowId": "stop_message_flow"
+            })),
+            original_entry_endpoint: None,
+            followup_entry_endpoint: None,
+        });
+        assert_eq!(plan.runtime_set["serverToolLoopState"]["repeatCount"], 3);
+        assert_eq!(plan.runtime_set["serverToolLoopState"]["rootOnly"], true);
+        assert_eq!(plan.runtime_set["serverToolLoopState"]["runtimeOnly"], true);
+        assert_eq!(
+            plan.runtime_set["serverToolLoopState"]["flowId"],
+            "stop_message_flow"
+        );
+        assert_eq!(
+            plan.runtime_set["serverToolOriginalEntryEndpoint"],
+            "/v1/chat/completions"
+        );
     }
 }

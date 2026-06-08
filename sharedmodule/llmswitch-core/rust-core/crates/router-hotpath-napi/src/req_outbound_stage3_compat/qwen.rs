@@ -92,7 +92,11 @@ fn normalize_tool_choice(root: &mut Map<String, Value>) {
     if choice_type != "function" {
         return;
     }
-    if choice_obj.get("function").and_then(Value::as_object).is_some() {
+    if choice_obj
+        .get("function")
+        .and_then(Value::as_object)
+        .is_some()
+    {
         return;
     }
     if let Some(name) = read_trimmed_string(choice_obj.get("name")) {
@@ -288,7 +292,11 @@ fn normalize_existing_tool_calls(root: &mut Map<String, Value>) {
 }
 
 fn normalize_legacy_function_call(message: &mut Map<String, Value>) {
-    if message.get("tool_calls").and_then(Value::as_array).is_some() {
+    if message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some()
+    {
         message.remove("function_call");
         return;
     }

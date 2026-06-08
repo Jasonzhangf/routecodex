@@ -23,13 +23,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "stop_message_auto", "phase": "default", "priority": 40 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
-                "review": {
-                    "name": "review",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "review" },
-                    "execution": { "mode": "reenter", "stripAfterExecute": true }
-                },
                 "web_search": {
                     "name": "web_search",
                     "enabled": true,
@@ -64,7 +57,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
             "skeleton": {
                 "finalizeStrip": { "enabled": true, "requireFinalizedMarker": true },
                 "autoHooks": {
-                    "optionalPrimaryOrder": ["stop_message_auto"],
+                    "optionalPrimaryOrder": ["vision_auto", "stop_message_auto"],
                     "mandatoryOrder": []
                 },
                 "pendingInjection": {
@@ -102,7 +95,6 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "autoLimit": true,
                                 "flowOnlyLoopLimit": true
                             },
-
                             "stop_message_flow": {
                                 "seedLoopPayload": true
                             },
@@ -262,6 +254,37 @@ mod tests {
             Some(true)
         );
         assert!(parsed.get("stopMessageFollowupPolicy").is_none());
+    }
+
+    #[test]
+    fn skeleton_owns_vision_auto_hook_order() {
+        let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
+        let internal_tools = parsed
+            .get("servertool")
+            .and_then(|v| v.get("internalTools"))
+            .and_then(|v| v.as_object())
+            .expect("internal tools object");
+        assert!(internal_tools.contains_key("vision_auto"));
+        assert_eq!(
+            internal_tools["vision_auto"]
+                .get("trigger")
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("auto")
+        );
+        let optional = parsed
+            .get("servertool")
+            .and_then(|v| v.get("skeleton"))
+            .and_then(|v| v.get("autoHooks"))
+            .and_then(|v| v.get("optionalPrimaryOrder"))
+            .and_then(|v| v.as_array())
+            .expect("optional primary order");
+        let ids = optional
+            .iter()
+            .filter_map(|item| item.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["vision_auto", "stop_message_auto"]);
     }
 
     #[test]

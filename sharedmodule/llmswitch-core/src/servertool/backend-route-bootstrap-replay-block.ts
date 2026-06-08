@@ -117,7 +117,6 @@ export async function maybeRunTransparentBootstrapReplay(args: {
     payloadHash?: string;
     stopPairHash?: string;
   } | null;
-  resolveProviderKey: (adapterContext: AdapterContext) => string;
   withTimeout: <T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => Error) => Promise<T>;
   createServerToolTimeoutError: (options: {
     requestId: string;
@@ -188,8 +187,7 @@ export async function maybeRunTransparentBootstrapReplay(args: {
     followupEntryEndpoint: args.followupEntryEndpoint,
     flowId: args.execution.flowId,
     decision,
-    adapterContext: args.adapterContext,
-    resolveProviderKey: args.resolveProviderKey
+    adapterContext: args.adapterContext
   });
 
   const replayRequestId = buildFollowupRequestId(args.requestId, replayRequestSuffix);

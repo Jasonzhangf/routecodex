@@ -79,13 +79,15 @@ describe('servertool followup runtime block', () => {
         requestId: 'req-followup',
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
+        routecodexPortMode: 'router',
         routeId: 'coding'
-      } as any,
-      resolveProviderKey: () => 'mini27.key1.MiniMax-M2.7'
+      } as any
     });
     expect(metadata.routeHint).toBe('coding');
     expect((metadata as any).__shadowCompareForcedProviderKey).toBeUndefined();
-    expect((metadata as any).__rt).toBeUndefined();
+    expect((metadata as any).__rt?.serverToolFollowup).toBe(true);
+    expect((metadata as any).__rt?.preserveRouteHint).toBe(false);
+    expect((metadata as any).__rt?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
   });
 
   test('falls back to runtime route name when adapter routeId/routeHint are absent', () => {
@@ -112,12 +114,13 @@ describe('servertool followup runtime block', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
         __rt: {
+          serverToolFollowupMode: 'router',
           routeName: 'coding'
         }
-      } as any,
-      resolveProviderKey: () => 'mini27.key1.MiniMax-M2.7'
+      } as any
     });
     expect(metadata.routeHint).toBe('coding');
     expect((metadata as any).__shadowCompareForcedProviderKey).toBeUndefined();
+    expect((metadata as any).__rt?.serverToolFollowup).toBe(true);
   });
 });

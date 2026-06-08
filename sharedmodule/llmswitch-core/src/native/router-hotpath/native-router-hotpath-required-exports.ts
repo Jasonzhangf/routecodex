@@ -327,6 +327,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "decorateServertoolFinalChatJson",
   "shouldShortCircuitRequiresActionFollowupJson",
   "planFollowupExecutionModeJson",
+  "planFollowupRuntimeActionJson",
+  "planFollowupRuntimeMetadataJson",
   "extractServertoolTextFromChatLikeJson",
   "resolveVirtualRouterRoutingStateKeyJson",
   "resolveVirtualRouterStopMessageScopeJson",

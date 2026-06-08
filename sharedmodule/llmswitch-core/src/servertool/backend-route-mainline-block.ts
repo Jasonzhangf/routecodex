@@ -55,8 +55,7 @@ import {
 import {
   compactFollowupErrorReason,
   normalizeClientInjectText,
-  readClientInjectOnly,
-  resolveAdapterContextProviderKey
+  readClientInjectOnly
 } from './orchestration-policy-block.js';
 import { isAdapterClientDisconnected } from './timeout-error-block.js';
 import { resolveFollowupFlowDecision } from './backend-route-flow-policy.js';
@@ -292,8 +291,7 @@ export async function runFollowupMainline(args: {
     followupEntryEndpoint,
     flowId: args.execution.flowId,
     decision,
-    adapterContext: args.adapterContext,
-    resolveProviderKey: resolveAdapterContextProviderKey
+    adapterContext: args.adapterContext
   });
   const followupRequestId = buildFollowupRequestId(args.requestId, args.execution.followup.requestIdSuffix);
   const executionMode = resolveFollowupExecutionMode({
@@ -532,7 +530,6 @@ export async function runFollowupMainline(args: {
     coerceFollowupPayloadStream,
     applyHubFollowupPolicyShadow,
     buildServerToolLoopState,
-    resolveProviderKey: resolveAdapterContextProviderKey,
     withTimeout,
     createServerToolTimeoutError,
     choosePreferredFinalChatResponse,

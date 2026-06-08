@@ -30,7 +30,6 @@ functions -> blocks -> orchestration
 - `exec_command_guard`
 - `recursive_detection_guard`
 - 另外测试中还出现：
-  - `review_flow`
   - `reasoning_stop_guard_flow`
   - `reasoning_stop_finalize_flow`
 
@@ -76,7 +75,6 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 | `apply_patch_read_before_retry_guard` | guard | Rust skeleton profile | `reenter` | 否 |
 | `exec_command_guard` | guard | Rust skeleton profile | `reenter` + autoLimit | 否 |
 | `recursive_detection_guard` | auto hook | Rust skeleton profile 不完整 | 需要统一定义 | 轻微 |
-| `review_flow` | tool call | 目前更多靠 handler 结果 | 应补进 skeleton profile | **缺口** |
 | `reasoning_stop_guard_flow` | auto/tool | 目前更多靠 handler 结果 | 应补进 skeleton profile | **缺口** |
 | `reasoning_stop_finalize_flow` | finalize 路径 | 目前更多靠 handler 结果 | 应补进 skeleton profile | **缺口** |
 
@@ -379,11 +377,10 @@ request_context
 - Rust `servertool_skeleton_config.rs`
 
 目标：
-1. 把 `review_flow`
-2. `reasoning_stop_guard_flow`
-3. `reasoning_stop_finalize_flow`
-4. `vision_flow`
-5. `recursive_detection_guard`
+1. 把 `reasoning_stop_guard_flow`
+2. `reasoning_stop_finalize_flow`
+3. `vision_flow`
+4. `recursive_detection_guard`
 
 统一补到 profile。
 

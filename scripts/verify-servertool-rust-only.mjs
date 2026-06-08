@@ -44,6 +44,7 @@ const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
+const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
 const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
@@ -71,6 +72,11 @@ const ACTIVE_RUNTIME_EXCLUDE_SUBSTRINGS = [
   '/coverage/',
   '/tests/',
   '/__tests__/',
+];
+const DELETED_REVIEW_TOOL_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/review.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/review-pure-blocks.ts`,
+  `${ROOT}/tests/servertool/review-followup.spec.ts`,
 ];
 
 // ── Issues accumulator ─────────────────────────────────────────
@@ -137,7 +143,34 @@ function extractFunctionBlock(content, functionName) {
   const signature = `function ${functionName}`;
   const start = content.indexOf(signature);
   if (start < 0) return '';
-  const braceStart = content.indexOf('{', start);
+  let parenDepth = 0;
+  let sawParams = false;
+  let paramsEnd = -1;
+  for (let index = start + signature.length; index < content.length; index += 1) {
+    const char = content[index];
+    if (char === '(') {
+      parenDepth += 1;
+      sawParams = true;
+      continue;
+    }
+    if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+      if (sawParams && parenDepth === 0) {
+        paramsEnd = index;
+        break;
+      }
+      continue;
+    }
+  }
+  if (paramsEnd < 0) return '';
+  let braceStart = -1;
+  for (let index = paramsEnd + 1; index < content.length; index += 1) {
+    const char = content[index];
+    if (char === '{' && (content[index + 1] === '\n' || content[index + 1] === '\r')) {
+      braceStart = index;
+      break;
+    }
+  }
   if (braceStart < 0) return '';
   let depth = 0;
   for (let index = braceStart; index < content.length; index += 1) {
@@ -505,6 +538,31 @@ function checkStoplessNoReenterContract() {
   pass('stopless-no-reenter-contract', `scanned ${files.length} files for stopless reenter expectations`);
 }
 
+function checkLegacyReviewToolDeleted() {
+  for (const file of DELETED_REVIEW_TOOL_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'legacy-review-tool-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; legacy review servertool orchestration was removed`
+      );
+    }
+  }
+  const skeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
+  const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
+  for (const [file, content] of [
+    [`${RUST_SRC_DIR}/servertool_skeleton_config.rs`, skeletonConfig],
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, outcomeContract],
+  ]) {
+    if (content.includes('"review"') || content.includes('review_flow') || content.includes('servertool.review')) {
+      fail(
+        'legacy-review-tool-deleted',
+        `${file.replace(`${ROOT}/`, '')} must not expose deleted review servertool semantics`
+      );
+    }
+  }
+  pass('legacy-review-tool-deleted', 'deleted review servertool path is absent from active servertool gates');
+}
+
 // ── Check 11: persisted lookup policy is Rust-owned ───────────
 function checkStopMessagePersistedLookupRustOwner() {
   const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
@@ -807,6 +865,7 @@ function checkFollowupMainlineNativeBridgeRustOwner() {
 // ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
+  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
@@ -870,6 +929,20 @@ function checkBackendRoutePolicyRustOwner() {
     readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`),
     'pub fn plan_servertool_followup_runtime_json'
   );
+  for (const keyword of [
+    "optionalPrimaryOrder.splice",
+    "optionalPrimaryOrder.push('empty_reply_continue')",
+    "optionalPrimaryOrder.push('vision_auto')",
+    "!optionalPrimaryOrder.includes('empty_reply_continue')",
+    "!optionalPrimaryOrder.includes('vision_auto')",
+  ]) {
+    if (skeletonConfigShell.includes(keyword)) {
+      fail(
+        'servertool-skeleton-config-no-ts-queue-owner',
+        `Forbidden TS auto-hook queue semantic "${keyword}" found in skeleton-config.ts`
+      );
+    }
+  }
   assertContains(
     'backend-route-finalize-rust-owner',
     RUST_SERVERTOOL_BACKEND_ROUTE,
@@ -923,6 +996,42 @@ function checkBackendRoutePolicyRustOwner() {
     NATIVE_REQUIRED_EXPORTS,
     requiredExports,
     'planFollowupExecutionModeJson'
+  );
+  assertContains(
+    'backend-route-followup-runtime-action-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_runtime_action'
+  );
+  assertContains(
+    'backend-route-followup-runtime-action-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planFollowupRuntimeActionWithNative'
+  );
+  assertContains(
+    'backend-route-followup-runtime-action-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planFollowupRuntimeActionJson'
+  );
+  assertContains(
+    'backend-route-followup-runtime-metadata-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_runtime_metadata'
+  );
+  assertContains(
+    'backend-route-followup-runtime-metadata-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planFollowupRuntimeMetadataWithNative'
+  );
+  assertContains(
+    'backend-route-followup-runtime-metadata-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planFollowupRuntimeMetadataJson'
   );
   for (const [toolName, forbiddenProjection] of [
     ['web_search', 'ClientExecCliProjection'],
@@ -1028,15 +1137,91 @@ function checkBackendRoutePolicyRustOwner() {
   const executionModeBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupExecutionMode');
   for (const keyword of [
     "decision.outcomeMode === 'skip'",
-    'decision.noFollowup',
+    'if (decision.noFollowup',
+    '|| decision.noFollowup',
+    'decision.noFollowup ||',
     "clientInjectSource === 'servertool.stopless_goal_continue'",
     "decision.outcomeMode === 'client_inject_only'",
-    'decision.clientInjectOnly',
+    'if (decision.clientInjectOnly',
+    '|| decision.clientInjectOnly',
+    'decision.clientInjectOnly ||',
   ]) {
     if (executionModeBlock.includes(keyword)) {
       fail(
         'backend-route-followup-execution-mode-no-ts-owner',
         `Forbidden TS followup execution mode semantic "${keyword}" found in backend-route-runtime-block.ts`
+      );
+    }
+  }
+  for (const [functionName, keywords] of [
+    [
+      'resolveLoopPayload',
+      [
+        'args.followupPayloadRaw ||',
+        '? args.buildSeedLoopPayload()',
+      ],
+    ],
+    [
+      'assertAutoLimitNotExceeded',
+      [
+        'if (!decision.autoLimit',
+        'args.loopState.repeatCount < 3',
+        'repeatCount < 3',
+        "reason: 'followup_auto_limit_hit'",
+      ],
+    ],
+    [
+      'applyClientInjectOnlyMetadata',
+      [
+        'if (!decision.clientInjectOnly',
+        'decision.clientInjectSource ??',
+        "'servertool.followup'",
+      ],
+    ],
+  ]) {
+    const block = extractFunctionBlock(runtimeShell, functionName);
+    assertContains(
+      'backend-route-followup-runtime-action-thin-shell',
+      TS_BACKEND_ROUTE_RUNTIME,
+      block,
+      'planFollowupRuntimeActionWithNative'
+    );
+    for (const keyword of keywords) {
+      if (block.includes(keyword)) {
+        fail(
+          'backend-route-followup-runtime-action-no-ts-owner',
+          `Forbidden TS followup runtime semantic "${keyword}" found in ${functionName}`
+        );
+      }
+    }
+  }
+  const runtimeMetadataBlock = extractFunctionBlock(runtimeShell, 'applyFollowupRuntimeMetadata');
+  assertContains(
+    'backend-route-followup-runtime-metadata-thin-shell',
+    TS_BACKEND_ROUTE_RUNTIME,
+    runtimeMetadataBlock,
+    'planFollowupRuntimeMetadataWithNative'
+  );
+  for (const keyword of [
+    'const adapterTarget',
+    'runtimeRouteHint',
+    'runtimeRouteName',
+    'followupMode',
+    'const routeHint',
+    "routecodexPortMode === 'string'",
+    "serverToolFollowupMode === 'string'",
+    'rootLoopState',
+    'currentLoopState',
+    'mergedLoopState',
+    'metadata.routeHint =',
+    'delete (args.metadata as Record<string, unknown>).routeHint',
+    "serverToolOriginalEntryEndpoint =",
+    "args.originalEntryEndpoint.trim().length",
+  ]) {
+    if (runtimeMetadataBlock.includes(keyword)) {
+      fail(
+        'backend-route-followup-runtime-metadata-no-ts-owner',
+        `Forbidden TS followup runtime metadata semantic "${keyword}" found in applyFollowupRuntimeMetadata`
       );
     }
   }
@@ -1208,6 +1393,7 @@ checkMigratedProjectionDoesNotReenter();
 checkApplyPatchNotCliProjected();
 checkStandaloneServertoolBinary();
 checkStoplessNoReenterContract();
+checkLegacyReviewToolDeleted();
 checkStopMessagePersistedLookupRustOwner();
 checkStopMessageLoopGuardRustOwner();
 checkStopMessageCounterRustOwner();
