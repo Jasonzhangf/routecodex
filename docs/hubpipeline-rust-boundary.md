@@ -24,7 +24,6 @@
 ### 编排薄壳（TS 仅调度 + native 调用，无 payload 语义重写）
 | 文件 | native 调用 | 性质 |
 |---|---|---|
-| `chat-process-node-result.ts` | — | 纯构造：无 payload 语义 |
 | `chat-process-media.ts` | `analyzeChatProcessMedia` 等 | 薄壳：media 分析结果透传 |
 
 ### Runtime 基础设施（依赖 Node.js runtime，不属于 pipeline 语义）
@@ -43,3 +42,4 @@
 - 2026-06-07 Phase 0：`chat-process-governance-finalize.ts`、`chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`hub-pipeline-mutable-record-utils.ts`、`target-utils.ts`、`chat-response-utils.ts`、`provider-response-observation.ts` 均为 0 live consumer 的旧 TS native wrapper / helper，已物理删除并由 residue audit 锁住不得复活。
 - 2026-06-07 Phase 0：`hub-stage-timing-measure-blocks.ts` 及同名 generated JS/DTS/map 已删除；`hub-stage-timing.ts` 是 timing measure 唯一 TS owner。
 - 2026-06-08 Phase 0：`chat-process-generic-marker-strip.ts` 已证明为 0 live consumer 的旧 TS wrapper；generic marker strip 与 routing marker 保留判断已由 Rust `req_process_stage1_tool_governance_blocks/request_sanitizer.rs` 主链拥有，文件已物理删除并由 residue audit 锁住不得复活。
+- 2026-06-08 Phase 0：`chat-process-node-result.ts` runtime functions 已无 live caller；唯一 type-only metadata 引用已内联到 `hub-pipeline-types.ts`，Rust/native `chat_node_result_semantics.rs` 与 `native-chat-process-node-result-semantics.ts` 继续作为 active owner。

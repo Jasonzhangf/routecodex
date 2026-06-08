@@ -9,7 +9,6 @@ import type {
   TargetMetadata,
   VirtualRouterHealthStore,
 } from "../../../native/router-hotpath/virtual-router-contracts.js";
-import { type HubProcessNodeResult } from "../process/chat-process-node-result.js";
 import {
   type HubPolicyConfig,
   type HubPolicyMode,
@@ -55,7 +54,12 @@ export interface HubPipelineRequest {
 }
 
 type HubPipelineNodeMetadata =
-  | HubProcessNodeResult["metadata"]
+  | {
+      node: string;
+      executionTime: number;
+      startTime: number;
+      endTime: number;
+    }
   | Record<string, unknown>;
 
 export interface HubPipelineNodeResult {

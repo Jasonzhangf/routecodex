@@ -227,6 +227,12 @@ Phase 8F-12 legacy generic marker strip wrapper deletion proof: `sharedmodule/ll
 - Updated the marker-strip red test and residue audit to fail if this legacy TS wrapper reappears.
 - This deletion removes a zero-consumer TS request wrapper only; live request marker behavior remains covered through Rust total HubPipeline by `tests/servertool/chat-request-marker-strip.spec.ts`.
 
+Phase 8F-13 legacy chat process node result wrapper deletion proof: `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-node-result.ts` had no live runtime caller for `buildProcessedRequest`, `buildSuccessResult`, or `buildErrorResult`. The only source consumer was a type-only `HubProcessNodeResult["metadata"]` reference in `hub-pipeline-types.ts`; that metadata shape is now local to the pipeline type file. Active node-result semantics remain in Rust/native `chat_node_result_semantics.rs` and `native-chat-process-node-result-semantics.ts`.
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-node-result.ts`.
+- Updated the residue audit to fail if this legacy TS wrapper reappears.
+- This deletion removes a zero-consumer TS request wrapper only; Rust/native node-result capabilities remain available to current live consumers.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:

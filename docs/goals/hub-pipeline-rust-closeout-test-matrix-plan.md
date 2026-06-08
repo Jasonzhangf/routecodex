@@ -72,7 +72,6 @@
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-orchestration.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-node-result.ts`
 - Rust 真源：
   - `chat_governance_context.rs`
   - `chat_governance_finalize.rs`
@@ -108,6 +107,7 @@
 - 当前状态：
   - 已完成从 disabled native export 到 active Rust truth 的接通；
   - 该切片的定向 contract + behavior 测试已通过。
+  - 2026-06-08：`chat-process-node-result.ts` 已证明 runtime 函数无 live caller，并在 metadata type shape 内联后物理删除；node-result runtime owner 保持 Rust/native。
 - 唯一真源文件：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - 边界文件：
