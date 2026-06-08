@@ -172,6 +172,23 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decision.skip_reason).toContain('servertool_followup');
   });
 
+  test('submit_tool_outputs resume remains eligible for stopless continuation', () => {
+    const ctx: StopMessageDecisionContext = {
+      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      has_responses_submit_tool_outputs_resume: true,
+      persisted_snapshot: {
+        text: '继续执行',
+        max_repeats: 3,
+        used: 1,
+        source: 'persisted',
+        stage_mode: 'on',
+      },
+    };
+    const decision = decideStopMessageActionWithNative(ctx);
+    expect(decision.action).toBe('trigger');
+    expect(decision.skip_reason ?? undefined).toBeUndefined();
+  });
+
   test('stop schema gate counts missing schema as schema error budget', () => {
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '未完成。继续处理 DNS。',

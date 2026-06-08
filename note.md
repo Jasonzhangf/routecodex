@@ -17005,3 +17005,79 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - Checked ordinary 5520/5555 route targets: no direct `llmgate.*` target existed; routes only referenced `fwd.gpt.*`, `asxs.*`, `cc.*`, `fwd.minimax.*`, minimax/mini27/minimonth/mimo pools.
 - Verification: `rg -n "llmgate" ~/.rcc/config.toml` returned no matches; `routecodex config validate --config ~/.rcc/config.toml` passed.
 - Did not delete global provider file `~/.rcc/provider/llmgate/config.v2.toml`; this task only removed 5520/5555 scheduling references.
+## 2026-06-08 stopless 停止设定验证设计
+
+- 新增 `docs/goals/stopless-stop-condition-verification-plan.md`，把 stopless 停止设定的验证设计独立成单一文档：
+  - 收敛 continue / allow-stop / skip / budget-exhausted / reset 的 truth table。
+  - 按 Rust unit、TS/native focused、HTTP blackbox、5555 live 四层测试组织。
+  - 每个 live case 强制留 request id / response id / sample / log / 最终用户可见文本证据。
+- 本轮目标不是声称 stopless 已完成，而是把“完整交付需要验证什么、按什么标准提交”定义清楚，并生成可直接执行的 `/goal`。
+
+## 2026-06-08 router-direct protocol mismatch vs storm
+
+- User correction: distinguish the original error from the error storm.
+- Original error in the shown log was `protocol mismatch: inbound=openai-responses, provider=anthropic-messages/openai-chat`; correct path is `requiresHubRelay -> router-direct.relay -> executePipeline`, not `failed_no_relay`.
+- Storm handling is separate: it may reduce repeated delivery/logging/session backoff amplification, but must not rewrite the original error into empty reply, success, payload sanitizer, or semantic fallback.
+- Verification run: `router-direct-cross-protocol-relay.spec.ts` passed 4/4, including HTTP blackbox `/v1/responses` cross-protocol relay and no `router-direct.failed_no_relay`; `request-executor.spec.ts -t "session storm backoff|router direct"` passed 6/6 storm-backoff tests.
+- Live probe: `curl http://127.0.0.1:5555/health` returned ready/version `0.90.3011`; active log is `~/.rcc/logs/server-5520.log`, current tail shows normal `router-direct.send` completions and no new `router-direct.failed_no_relay`. `~/.rcc/logs/server-5555.log` is stale 2026-06-06 evidence.
+
+## 2026-06-08 Windsurf repository removal follow-up
+
+- User correction: remove Windsurf repository code only; do not stop other workers/processes and do not edit runtime config as a shortcut.
+- Confirmed active code/test/script/package scan is clean: `rg -n "windsurf|Windsurf|WINDSURF_|windsurf-chat-provider|windsurf-provider-contract|Cascade|cascade" src sharedmodule tests scripts package.json package-lock.json -S` returned no matches.
+- Removed remaining local residue after tracked deletions: empty directories `src/providers/core/runtime/windsurf`, `tests/fixtures/windsurf-samples`, `tests/fixtures/windsurf-static-request-harness`, plus ignored generated `sharedmodule/llmswitch-core/dist/conversion/compat/profiles/chat-windsurf.json`.
+- Confirmed path scan is clean: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- Verification PASS: `npm run verify:architecture-provider-specific-leaks`; `node scripts/architecture/verify-architecture-deleted-path.mjs`; `git diff --check`.
+
+## 2026-06-09 servertool Rust-only gate closeout
+
+- Fixed `verify:servertool-rust-only` gate drift: `sharedmodule/llmswitch-core/src/servertool/cli-result-guard.ts` is physically deleted and must stay deleted; the gate now checks Rust `servertool-core/src/cli_result_guard.rs`, NAPI export, required native export, and native wrapper instead of requiring a TS thin shell.
+- Moved stop_schema visible text cleanup fully to Rust owner `servertool-core/src/stop_visible_text.rs`; TS call sites use native wrappers only, and deleted `handlers/stop-message-auto/visible-text.ts` stays blocked by the gate.
+- Corrected Rust stop visible cleanup behavior: removed blank-line residue after control block deletion and stripped lines containing visible stop-reason markers.
+- Verification PASS: `npm run verify:servertool-rust-only`; `cargo test -p servertool-core stop_visible_text --lib -- --nocapture`; `cargo test -p router-hotpath-napi strips_stop_schema --lib -- --nocapture`; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused servertool Jest 70 passed / 16 skipped across stop-message tests; `git diff --check`.
+2026-06-09: router-direct /v1/responses protocol mismatch storm: source HEAD already relays cross-protocol direct miss, but dist and ~/.rcc/install/current still had old failed_no_relay branch. Treat error body and storm separately: first error is protocol mismatch/direct boundary; storm is repeated old failed_no_relay projection from stale runtime artifact.
+
+## 2026-06-09 stopless 停止设定测试设计收敛
+
+- 复用并确认 `docs/goals/stopless-stop-condition-verification-plan.md` 作为 stopless 停止设定测试真源，覆盖 skip/continue/allow-stop/budget-exhausted/reset、`/v1/responses`、`submit_tool_outputs`、stream/live 5555 证据要求。
+- 收敛 `/goal` 到 `docs/goals/stopless-full-delivery-goal-prompt.md`，新增引用 `docs/goals/stopless-stop-condition-verification-plan.md`，要求完整交付必须包含 5555 live 的 continue/allow-stop/budget/reset/needs_user_input/stream 验证。
+
+## 2026-06-09 Windsurf/Cascade removal gate extension
+
+- User correction remains active: remove repository Windsurf/Cascade code/docs/tests only; do not stop local workers/processes and do not edit runtime config as a shortcut.
+- Added deleted-path gate coverage for removed Windsurf/Cascade audit/design/goal/provider docs, in addition to existing runtime/script/test/source deleted paths.
+- Current active source scan is clean: `rg -n -i "windsurf|cascade" package.json package-lock.json src sharedmodule scripts tests --glob '!**/node_modules/**' --glob '!**/*.snap'` returned no matches.
+- Current disk path scan is clean: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*qoder*'` returned no matches. `git ls-files` still lists deleted tracked paths until commit, which is expected for the current removal slice.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npx tsc --noEmit --pretty false`; `npm run verify:llmswitch-core-tsc`; `git diff --check`.
+
+## 2026-06-09 Hub Pipeline zero-consumer session identifier wrapper removed
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/session-identifiers.ts`; it had no production importers and only forwarded to native `native-hub-pipeline-session-identifiers-semantics.ts`.
+- Updated `tests/servertool/hub-pipeline-session-headers.spec.ts` to test the native wrapper contract directly: direct metadata and client headers are supported; raw request body metadata / SSE rawText `user_id` derivation is intentionally not supported.
+- Added residue gate coverage in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`: the deleted wrapper path must stay absent and active source/tests must not import it.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by removing the 41 LOC wrapper entry and decrementing conversion/file totals only for this deletion.
+- Verification PASS: focused session header Jest 8/8; Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 Hub Pipeline zero-consumer adapter-context constants removed
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/adapter-context-fields.ts`; it was a 49 LOC non-native constant file with no source/test/script/doc import, no public `conversion/index.ts` export, and no `importCoreDist` dynamic entry.
+- Added the deleted path to the Hub residue audit zero-consumer forbidden list.
+- Updated rustification baseline by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -49`, `nonNativeFileCount -1`, `nonNativeLocTotal -49`, and conversion topDir totals.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `rg -n "adapter-context-fields|ADAPTER_CONTEXT_CWD|STANDARD_ADAPTER_CONTEXT_FIELDS" src sharedmodule tests scripts docs --glob '!**/node_modules/**'` only hits the residue gate; `git diff --check`.
+
+## 2026-06-09 stopless terminal final reasoning closeout
+
+- Root cause: terminal allow-stop only stripped stop schema text; it still preserved visible `reasoning` / `reasoning_text` / `reasoning_content`, so live `/v1/responses` could still expose `stopreason` / `has_evidence` / `needs_user_input` inside reasoning items even when `output_text` was clean.
+- Fix owner stays in `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`: `buildStopSchemaFinalPlan()` now routes through `stripTerminalStopVisiblePayload()`, which first applies native stop schema cleanup and then removes terminal-visible reasoning fields / Responses reasoning items in one place.
+- Focused source verification PASS:
+  - `cargo test -p stop-message-core -- --nocapture`
+  - `cargo test -p servertool-core -- --nocapture`
+  - `npm run jest:run -- --runTestsByPath tests/servertool/stop-message-auto.spec.ts tests/servertool/stop-message-native-decision.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand --forceExit`
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - `cd sharedmodule/llmswitch-core && npm run build -- --pretty false`
+- Live 5555 evidence after syncing dist/native + `routecodex restart --port 5555`:
+  - allow-stop non-stream PASS: request_id `openai-responses-mini27.key1-MiniMax-M2.7-20260609T003519294-321608-3491`, response id `0676224726d8ffa0590c0a6f364f01d3`, completed markdown only, no reasoning item.
+  - continue/resume PASS: first request_id `openai-responses-mini27.key1-MiniMax-M2.7-20260609T003544147-321612-3495`, response id `resp_1780936552930`; second request_id `openai-responses-mini27.key1-MiniMax-M2.7-20260609T003553693-321615-3498`, response id `resp_1780936570765`; second round still `requires_action`, `repeatCount` advanced to 2.
+  - needs_user_input PASS: request_id `openai-responses-mini27.key1-MiniMax-M2.7-20260609T003648512-321621-3504`, response id `067622a1d7ecea8b48f337485fbf8fc0`, output only shows `## 需要确认` plus the user question.
+  - stream allow-stop PASS: response id `067622a1a0e82e7a5f74d929b9617bf9`; SSE `response.completed` only contains message output text markdown, no reasoning event/item and no schema fields.
+- One transient live failure during resume was upstream/provider, not stopless: sample `~/.rcc/codex-samples/openai-responses/port-5555/req_1780936478774_87bbfdb3/provider-response.json` shows MiniMax `status_code=2049 invalid api key`.

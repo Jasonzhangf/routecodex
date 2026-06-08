@@ -21,6 +21,7 @@ import {
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
 import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
+import { stripStopSchemaControlTextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -204,6 +205,13 @@ function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
 }
 
+function isStopMessageTerminalFinal(execution: NonNullable<ServerToolEngineResult['execution']>): boolean {
+  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? execution.context as Record<string, unknown>
+    : undefined;
+  return context?.stopMessageTerminalFinal === true;
+}
+
 function buildStopMessageCliProjectionResult(args: {
   options: ServerToolOrchestrationOptions;
   execution: NonNullable<ServerToolEngineResult['execution']>;
@@ -213,10 +221,15 @@ function buildStopMessageCliProjectionResult(args: {
   logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): ServerToolOrchestrationResult {
   const continuationPrompt = readStopMessageFollowupText(args.execution);
-  const assistantStopText =
+  const assistantStopTextRaw =
     readStopMessageAssistantStopText(args.execution) ||
     readAssistantStopTextFromChat(args.finalChatResponse) ||
     '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
+  const assistantStopText =
+    stripStopSchemaControlTextWithNative(assistantStopTextRaw) ||
+    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
+  const repeatCount = readStopMessageLoopNumber(args.execution, 'repeatCount') ?? 0;
+  const maxRepeats = readStopMessageLoopNumber(args.execution, 'maxRepeats') ?? 1;
   const projection = buildServertoolCliProjectionForAutoFlow({
     options: args.options,
     flowId: args.flowId,
@@ -224,8 +237,8 @@ function buildStopMessageCliProjectionResult(args: {
     stdoutPreview: continuationPrompt,
     input: {
       continuationPrompt,
-      repeatCount: readStopMessageLoopNumber(args.execution, 'repeatCount') ?? 0,
-      maxRepeats: readStopMessageLoopNumber(args.execution, 'maxRepeats') ?? 1
+      repeatCount,
+      maxRepeats
     }
   });
   args.logProgress(5, args.totalSteps, 'completed (stop_message_auto cli projection; no reenter)', {
@@ -481,6 +494,14 @@ export async function runServerToolOrchestration(
     (engineResult.execution.context as Record<string, unknown>).servertoolCliProjection
   ) {
     logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
+    return {
+      chat: engineResult.finalChatResponse,
+      executed: true,
+      flowId: engineResult.execution.flowId
+    };
+  }
+  if (flowId === 'stop_message_flow' && isStopMessageTerminalFinal(engineResult.execution)) {
+    logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', { flowId });
     return {
       chat: engineResult.finalChatResponse,
       executed: true,

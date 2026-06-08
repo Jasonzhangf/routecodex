@@ -217,11 +217,6 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     return { action: 'skip', skip_reason: 'skip_port_stopmessage_disabled' };
   }
 
-  // Responses submit tool outputs resume?
-  if (ctx.has_responses_submit_tool_outputs_resume) {
-    return { action: 'skip', skip_reason: 'skip_responses_submit_tool_outputs_resume' };
-  }
-
   if (ctx.plan_mode_active) {
     return { action: 'skip', skip_reason: 'skip_plan_mode' };
   }
@@ -864,6 +859,154 @@ describe('stop_message_auto servertool', () => {
     expect(content).toContain('证据: exec_command rejected');
     expect(content).not.toContain('停止原因：工具权限被拒');
     expect(content).not.toContain('<stop_schema>');
+    expect(content).not.toContain('"stopreason"');
+  });
+
+  test('terminal final visible stop text removes reasoning fields instead of leaking cleaned reasoning', async () => {
+    const sessionId = 'stopmessage-spec-session-strip-schema-reasoning-summary';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 1
+    });
+
+    const chatResponse = buildStopChatResponse('chatcmpl-strip-schema-reasoning-summary');
+    const message = ((chatResponse.choices as any[])[0].message as any);
+    message.content = [
+      '已完成本轮校验。',
+      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+    ].join('\n');
+    message.reasoning_content = [
+      '先给用户看这一段。',
+      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+    ].join('\n');
+    message.reasoning = {
+      summary: [
+        {
+          type: 'summary_text',
+          text: [
+            '阶段总结：输出已经可见。',
+            '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+          ].join('\n')
+        }
+      ]
+    };
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-strip-schema-reasoning-summary',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-strip-schema-reasoning-summary',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const finalMessage = ((result.finalChatResponse.choices as any[])[0].message as any);
+    expect(finalMessage.reasoning_content).toBeUndefined();
+    expect(finalMessage.reasoning_text).toBeUndefined();
+    expect(finalMessage.reasoning).toBeUndefined();
+    expect(String(finalMessage.content)).toContain('## 完成内容');
+    expect(String(finalMessage.content)).not.toContain('"stopreason"');
+  });
+
+  test('terminal allow-stop removes visible reasoning fields from final response shell', async () => {
+    const sessionId = 'stopmessage-spec-session-terminal-no-reasoning';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 1
+    });
+
+    const chatResponse = buildStopChatResponse('chatcmpl-terminal-no-reasoning');
+    const message = ((chatResponse.choices as any[])[0].message as any);
+    message.content = [
+      '已完成在线验证。',
+      '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}'
+    ].join('\n');
+    message.reasoning_text = '模型内部推理包含 stopreason=0 与 has_evidence=1，不应再对用户可见。';
+    message.reasoning_content = '这里仍有 stopreason=0 与 needs_user_input=false。';
+    message.reasoning = {
+      summary: [
+        {
+          type: 'summary_text',
+          text: '阶段推理：stopreason=0，reason=已完成 allow-stop live 验证。'
+        }
+      ]
+    };
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-terminal-no-reasoning',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-terminal-no-reasoning',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const finalMessage = ((result.finalChatResponse.choices as any[])[0].message as any);
+    expect(finalMessage.content).toContain('## 完成内容');
+    expect(finalMessage.reasoning_text).toBeUndefined();
+    expect(finalMessage.reasoning_content).toBeUndefined();
+    expect(finalMessage.reasoning).toBeUndefined();
+    expect(String(finalMessage.content)).not.toContain('stopreason');
+    expect(String(finalMessage.content)).not.toContain('needs_user_input');
+  });
+
+  test('allow_stop does not fail when only requestId exists and no persisted scope key is available', async () => {
+    const chatResponse = buildStopChatResponse('chatcmpl-allow-stop-requestid-only');
+    ((chatResponse.choices as any[])[0].message as any).content = [
+      '已完成在线验证。',
+      '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}'
+    ].join('\n');
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-allow-stop-requestid-only',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-allow-stop-requestid-only',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const content = String(((result.finalChatResponse.choices as any[])[0].message as any).content);
+    expect(content).toContain('## 完成内容');
+    expect(content).toContain('已完成 allow-stop live 验证');
     expect(content).not.toContain('"stopreason"');
   });
 

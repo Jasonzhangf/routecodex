@@ -2,6 +2,10 @@
 
 - 2026-06-08: 5555 image routing correction in Rust VR: image-only requests on `multimodal`/`default` routes must filter by visual capability (`multimodal` OR `vision`), not `multimodal` only; remote video still requires `multimodal`. Direct model media fallback must inspect ProviderForwarder real targets, otherwise a text direct model can bypass a valid visual target behind `fwd.*`. Do not fix this by config edits or payload placeholdering; route to a visual target first, and only an explicit VR no-visual-target policy may allow latest-image placeholdering.
 
+- 2026-06-08 correction: distinguish the original error from the error storm. The original error must be fixed or fail-fast at its unique protocol/routing/provider/error-chain owner. Error storm handling only controls repeated trigger/delivery/logging/client reconnect/session backoff amplification; it must not rewrite the original error into empty reply, success, relay fallback, payload sanitizer, or any semantic workaround.
+
+- 2026-06-08: Verification standard correction - unit tests and code regressions are gates only; completion requires at least one live/runtime probe or real-entry smoke with evidence tied to actual port/request/response. Do not claim validation complete from tests alone.
+
 - 2026-06-08 correction: direct/router-direct/provider-direct errors must never enter relay or the standard executor. Recoverable direct provider errors may consume the unified ErrorErr05 request-local decision inside the direct wrapper only: 429/concurrency excludes the current provider for this request and asks VR to reselect in the same route/policy group; other recoverable errors retry the same provider once and then exclude on repeat. This never mutates health/cooldown/config/pool state and the next request starts from priority order again. Deterministic request/protocol/model errors such as special_400/400 and 404 fail fast and are not hidden by provider switching. Direct still must not call `executePipeline()` or rebuild/sanitize payloads. If a standard relay request later sees valid Responses tools, it must preserve flat Responses wire shape (`tools[n].name`), not convert to Chat nested `tools[n].function.name`.
 
 - 2026-06-08: Servertool backend-route followup execution mode is Rust-owned by `servertool-core::backend_route_contract::plan_followup_execution_mode` and exposed through native `planFollowupExecutionModeJson`. TS `backend-route-runtime-block.ts::resolveFollowupExecutionMode` must be a thin native shell; do not restore TS branching on `decision.outcomeMode`, `decision.noFollowup`, `decision.clientInjectOnly`, metadata client-inject-only, or `servertool.stopless_goal_continue`. `verify-servertool-rust-only` gates this owner.
@@ -2487,3 +2491,19 @@ Tags: forwarder, virtual-router, config, providerKey, providerId, startup, 2026-
 - Error handling boundary: upstream 429/concurrency from early Responses SSE must become a retryable provider error and enter ErrorErr05 request-local switch; ErrorHandlingCenter is only ErrorErr06 client projection and must not decide retry/reroute.
 - Verification in current worktree: focused Rust image-forwarder capability test and focused Jest forwarder/multimodal/retry plan tests passed before commit; broader verification must still be run for final commit.
 Tags: forwarder, config-state, providerKey-materialization, virtual-router, multimodal, vision, request-local-retry, 2026-06-08
+
+## 2026-06-08 Windsurf provider removal boundary
+- Windsurf/Cascade provider is removed from RouteCodex. Do not restore its runtime, contracts, probes, harnesses, compat profile, fixtures, scripts, tests, docs, or config entries without explicit user authorization and a new provider design.
+- User correction: "remove Windsurf related code" means repository code/docs/tests cleanup only. Do not stop local workers/processes and do not edit runtime config as a shortcut.
+- Verified cleanup scope in current worktree: active `src` / `sharedmodule` / `scripts` / `tests` / `package*.json` content has no `windsurf|Windsurf|Cascade|cascade|WINDSURF_|windsurf-chat-provider|windsurf-provider-contract` matches; only the local skill keeps a removed-provider guard to prevent resurrection.
+Tags: removed-provider, windsurf, no-resurrection, repository-cleanup, 2026-06-08
+
+## 2026-06-09 stopless terminal final transparency
+- Terminal allow-stop / needs_user_input visible output must not retain any `reasoning` / `reasoning_text` / `reasoning_content` payload. Cleaning stop schema text alone is insufficient because Responses can still expose internal stop schema fields through a separate reasoning item even when `output_text` is already clean.
+- Unique owner is `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts::buildStopSchemaFinalPlan()`. Final visible payload must pass one terminal-only cleanup that first strips stop schema control payload via native `servertool-core::stop_visible_text`, then removes visible reasoning fields / Responses reasoning items.
+- Verified live on 5555 after rebuild + dist sync + `routecodex restart --port 5555`:
+  - non-stream allow-stop returns only markdown message (`request_id=openai-responses-mini27.key1-MiniMax-M2.7-20260609T003519294-321608-3491`)
+  - continue/resume re-projects `exec_command` with `repeatCount 1 -> 2` (`request_id=openai-responses-mini27.key1-MiniMax-M2.7-20260609T003553693-321615-3498`)
+  - `needs_user_input=true` returns only `## 需要确认` + question (`request_id=openai-responses-mini27.key1-MiniMax-M2.7-20260609T003648512-321621-3504`)
+  - streamed allow-stop SSE emits only markdown message output and no reasoning item (`response id=067622a1a0e82e7a5f74d929b9617bf9`)
+Tags: stopless, terminal-final, reasoning-removal, live-verified, 5555, 2026-06-09

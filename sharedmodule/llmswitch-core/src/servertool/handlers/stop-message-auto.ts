@@ -30,7 +30,7 @@ import {
   resolveClientConnectionState,
   resolveDefaultStopMessageSnapshot,
   resolveImplicitGeminiStopMessageSnapshot,
-  resolveRuntimeStopMessageState,
+  resolveRuntimeStopMessageStateFromAdapterContext,
   planStopMessagePersistedLookup,
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
@@ -55,6 +55,9 @@ import {
   resolveWorkingDirectoryFromAdapterContext,
   writeStoplessLearnedNoteEntry
 } from './memory/cache-writer.js';
+import {
+  stripStopSchemaControlPayloadWithNative
+} from '../../native/router-hotpath/native-servertool-core-semantics.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
@@ -141,159 +144,65 @@ function collectTextBlocks(value: unknown, out: string[]): void {
 
 function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
   const text = typeof prefix === 'string' ? prefix.trim() : '';
-  const cloned = stripStopSchemaControlText(JSON.parse(JSON.stringify(payload)) as JsonObject);
+  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
   if (!text) return cloned;
   if (prefixChatChoiceContent(cloned, text)) return cloned;
   if (prefixResponsesOutputContent(cloned, text)) return cloned;
   return cloned;
 }
 
-function stripStopSchemaControlBlocks(text: string): string {
-  let current = String(text || '');
-  current = current.replace(/<stop_schema>\s*[\s\S]*?\s*<\/stop_schema>/gi, '');
-  current = current.replace(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/gi, (block, rawJson) => {
-    if (!isStopSchemaControlJson(rawJson)) {
-      return block;
-    }
-    return '';
-  });
-  current = removeBareStopSchemaJsonObjects(current);
-  return current
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => !/^停止原因\s*[:：]/.test(line.trim()))
-    .filter((line, index, lines) => line.trim() || (index > 0 && index < lines.length - 1))
-    .join('\n')
-    .trim();
+function stripTerminalStopVisiblePayload(payload: JsonObject): JsonObject {
+  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
+  stripVisibleReasoningFields(cloned);
+  return cloned;
 }
 
-function removeBareStopSchemaJsonObjects(text: string): string {
-  const source = String(text || '');
-  let out = '';
-  let cursor = 0;
-  while (cursor < source.length) {
-    const start = source.indexOf('{', cursor);
-    if (start < 0) {
-      out += source.slice(cursor);
-      break;
-    }
-    out += source.slice(cursor, start);
-    const end = findJsonObjectEnd(source, start);
-    if (end < 0) {
-      out += source.slice(start);
-      break;
-    }
-    const candidate = source.slice(start, end + 1);
-    if (!isStopSchemaControlJson(candidate)) {
-      out += candidate;
-    }
-    cursor = end + 1;
+function stripVisibleReasoningFields(value: unknown): void {
+  if (!value || typeof value !== 'object') {
+    return;
   }
-  return out;
-}
-
-function findJsonObjectEnd(text: string, start: number): number {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < text.length; index += 1) {
-    const ch = text[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === '\\') {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
+  if (Array.isArray(value)) {
+    for (let index = value.length - 1; index >= 0; index -= 1) {
+      const entry = value[index];
+      if (isResponsesReasoningItem(entry)) {
+        value.splice(index, 1);
+        continue;
       }
-      continue;
+      stripVisibleReasoningFields(entry);
     }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === '{') {
-      depth += 1;
-      continue;
-    }
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
+    return;
   }
-  return -1;
-}
-
-function isStopSchemaControlJson(rawJson: string): boolean {
-  try {
-    const parsed = JSON.parse(String(rawJson || '').trim()) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return false;
-    }
-    const record = parsed as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(record, 'stopreason')) {
-      return false;
-    }
-    const recognized = [
-      'stopreason',
-      'reason',
-      'has_evidence',
-      'evidence',
-      'issue_cause',
-      'excluded_factors',
-      'diagnostic_order',
-      'next_step',
-      'learned'
-    ];
-    return recognized.some((key) => Object.prototype.hasOwnProperty.call(record, key));
-  } catch {
-    return false;
+  const row = value as Record<string, unknown>;
+  delete row.reasoning_text;
+  delete row.reasoning_content;
+  delete row.reasoning;
+  delete row.reasoning_details;
+  for (const child of Object.values(row)) {
+    stripVisibleReasoningFields(child);
   }
 }
 
-function stripStopSchemaControlText(payload: JsonObject): JsonObject {
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  for (const choice of choices) {
-    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
-    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
-      ? choiceRow.message as Record<string, unknown>
-      : null;
-    if (!message) continue;
-    if (typeof message.content === 'string') {
-      message.content = stripStopSchemaControlBlocks(message.content);
-      continue;
-    }
-    if (Array.isArray(message.content)) {
-      for (const part of message.content) {
-        const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
-        if (typeof partRow?.text === 'string') partRow.text = stripStopSchemaControlBlocks(partRow.text);
-        if (typeof partRow?.content === 'string') partRow.content = stripStopSchemaControlBlocks(partRow.content);
-      }
-    }
-  }
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  for (const item of output) {
-    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
-    const content = Array.isArray(itemRow?.content) ? itemRow.content : [];
-    for (const part of content) {
-      const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
-      if (typeof partRow?.text === 'string') partRow.text = stripStopSchemaControlBlocks(partRow.text);
-      if (typeof partRow?.output_text === 'string') partRow.output_text = stripStopSchemaControlBlocks(partRow.output_text);
-      if (typeof partRow?.content === 'string') partRow.content = stripStopSchemaControlBlocks(partRow.content);
-    }
-  }
-  return payload;
+function isResponsesReasoningItem(value: unknown): boolean {
+  return Boolean(
+    value
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && (value as Record<string, unknown>).type === 'reasoning'
+  );
 }
 
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
-  const visibleChatResponse = stripStopSchemaControlText({ ...chatResponse } as JsonObject);
+  const visibleChatResponse = stripTerminalStopVisiblePayload(chatResponse);
   return {
     flowId: FLOW_ID,
     finalize: async () => ({
       chatResponse: visibleChatResponse,
-      execution: { flowId: FLOW_ID }
+      execution: {
+        flowId: FLOW_ID,
+        context: {
+          stopMessageTerminalFinal: true
+        }
+      }
     })
   };
 }
@@ -732,7 +641,7 @@ const handler: ServerToolHandler = async (
   const persistedSnap = persistedLookupPlan.readStopMessageSnapshot
     ? readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys)
     : null;
-  const runtimeSnap = resolveRuntimeStopMessageState(rt);
+  const runtimeSnap = resolveRuntimeStopMessageStateFromAdapterContext(ctx.adapterContext);
   const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
   const persistedGoalRead = readStoplessGoalState(ctx.adapterContext);
   const effectiveGoal = requestScopedGoal.state ?? persistedGoalRead.state;
@@ -961,7 +870,12 @@ const handler: ServerToolHandler = async (
             followup: handlerResult.followup as unknown as ServerToolFollowupPlan,
             context: {
               decision: effectiveDecision as unknown as JsonObject,
-              assistantStopText
+              assistantStopText,
+              serverToolLoopState: {
+                flowId: FLOW_ID,
+                repeatCount: nextUsed,
+                maxRepeats: nextMaxRepeats
+              }
             }
           }
         };

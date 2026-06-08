@@ -3,7 +3,8 @@ import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import {
   planStopMessagePersistedLookupWithNative,
   resolveStopMessageSessionScopeWithNative,
-  resolveServertoolStickyKeyWithNative
+  resolveServertoolStickyKeyWithNative,
+  validateClientExecCommandResultWithNative
 } from '../../../native/router-hotpath/native-servertool-core-semantics.js';
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
@@ -163,6 +164,236 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
     source: 'servertool.stop_message',
     stageMode: 'on'
   };
+}
+
+function collectRequestLikeRecords(adapterContext: unknown): Record<string, unknown>[] {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return [];
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const values = [
+    asRecord(record.__raw_request_body),
+    asRecord(record.capturedEntryRequest),
+    asRecord(record.capturedChatRequest)
+  ];
+  return values.filter((value): value is Record<string, unknown> => Boolean(value));
+}
+
+function decodePosixSingleQuotedArgument(raw: string): string {
+  return raw.replace(/'\\''/g, "'");
+}
+
+function parseStopMessageCliInputFromCommand(command: string): {
+  continuationPrompt?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  stdoutPreview?: string;
+} | null {
+  const text = typeof command === 'string' ? command.trim() : '';
+  if (!text.includes('routecodex servertool run stop_message_auto')) {
+    return null;
+  }
+  const match = text.match(/--input-json '([\s\S]+)'$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(decodePosixSingleQuotedArgument(match[1])) as Record<string, unknown>;
+    return {
+      continuationPrompt: toNonEmptyText(parsed.continuationPrompt),
+      repeatCount: readPositiveInteger(parsed.repeatCount),
+      maxRepeats: readPositiveInteger(parsed.maxRepeats),
+      stdoutPreview: toNonEmptyText(parsed.stdoutPreview)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readStopMessageCliCommandMap(record: Record<string, unknown>): Map<string, {
+  continuationPrompt?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  stdoutPreview?: string;
+}> {
+  const map = new Map<string, {
+    continuationPrompt?: string;
+    repeatCount?: number;
+    maxRepeats?: number;
+    stdoutPreview?: string;
+  }>();
+  const input = Array.isArray(record.input) ? record.input : [];
+  for (const item of input) {
+    const row = asRecord(item);
+    if (!row) {
+      continue;
+    }
+    const type = toNonEmptyText(row.type)?.toLowerCase();
+    if (type !== 'function_call') {
+      continue;
+    }
+    const name = toNonEmptyText(row.name) ?? toNonEmptyText(asRecord(row.function)?.name);
+    if (name !== 'exec_command') {
+      continue;
+    }
+    const callId = toNonEmptyText(row.call_id) ?? toNonEmptyText(row.tool_call_id) ?? toNonEmptyText(row.id);
+    if (!callId) {
+      continue;
+    }
+    const argumentsRaw = toNonEmptyText(row.arguments) ?? toNonEmptyText(asRecord(row.function)?.arguments);
+    if (!argumentsRaw) {
+      continue;
+    }
+    try {
+      const parsedArgs = JSON.parse(argumentsRaw) as Record<string, unknown>;
+      const command = toNonEmptyText(parsedArgs.cmd);
+      if (!command) {
+        continue;
+      }
+      const restored = parseStopMessageCliInputFromCommand(command);
+      if (restored) {
+        map.set(callId, restored);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return map;
+}
+
+function findLastStopMessageCliCommandSeed(record: Record<string, unknown>): {
+  continuationPrompt?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  stdoutPreview?: string;
+} | undefined {
+  const input = Array.isArray(record.input) ? record.input : [];
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const row = asRecord(input[index]);
+    if (!row) {
+      continue;
+    }
+    const type = toNonEmptyText(row.type)?.toLowerCase();
+    if (type !== 'function_call') {
+      continue;
+    }
+    const name = toNonEmptyText(row.name) ?? toNonEmptyText(asRecord(row.function)?.name);
+    if (name !== 'exec_command') {
+      continue;
+    }
+    const argumentsRaw = toNonEmptyText(row.arguments) ?? toNonEmptyText(asRecord(row.function)?.arguments);
+    if (!argumentsRaw) {
+      continue;
+    }
+    try {
+      const parsedArgs = JSON.parse(argumentsRaw) as Record<string, unknown>;
+      const command = toNonEmptyText(parsedArgs.cmd);
+      if (!command) {
+        continue;
+      }
+      const restored = parseStopMessageCliInputFromCommand(command);
+      if (restored) {
+        return restored;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function resolveRuntimeStopMessageStateFromRequestRecord(record: Record<string, unknown>): {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  source?: string;
+  stageMode?: 'on';
+} | null {
+  const commandMap = readStopMessageCliCommandMap(record);
+  const lastCommandSeed = findLastStopMessageCliCommandSeed(record) ?? [...commandMap.values()].at(-1);
+  const input = Array.isArray(record.input) ? record.input : [];
+  const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : [];
+  const outputs = [...input, ...toolOutputs];
+  for (let index = outputs.length - 1; index >= 0; index -= 1) {
+    const row = asRecord(outputs[index]);
+    if (!row) {
+      continue;
+    }
+    const type = toNonEmptyText(row.type)?.toLowerCase();
+    if (type && type !== 'function_call_output' && type !== 'tool_result' && type !== 'tool_message') {
+      continue;
+    }
+    const rawOutput = toNonEmptyText(row.output) ?? toNonEmptyText(row.content) ?? toNonEmptyText(row.text);
+    if (!rawOutput) {
+      continue;
+    }
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = validateClientExecCommandResultWithNative(rawOutput);
+    } catch {
+      parsed = null;
+    }
+    const callId = toNonEmptyText(row.call_id) ?? toNonEmptyText(row.tool_call_id) ?? toNonEmptyText(row.id);
+    const commandSeed = (callId ? commandMap.get(callId) : undefined) ?? lastCommandSeed;
+    const toolName = toNonEmptyText(parsed?.toolName) || toNonEmptyText(parsed?.tool) || toNonEmptyText(parsed?.kind);
+    const flowId = toNonEmptyText(parsed?.flowId) || 'stop_message_flow';
+    const commandLooksLikeStopless = Boolean(commandSeed);
+    const parsedLooksLikeStopless =
+      (toolName === 'stop_message_auto' || toolName === 'stop_message_flow')
+      && flowId === 'stop_message_flow';
+    if (!parsedLooksLikeStopless && !commandLooksLikeStopless) {
+      continue;
+    }
+    const continuationPrompt = toNonEmptyText(parsed?.continuationPrompt) || commandSeed?.continuationPrompt;
+    const text =
+      continuationPrompt
+      || toNonEmptyText(parsed?.summary)
+      || commandSeed?.stdoutPreview
+      || '继续执行';
+    const maxRepeats =
+      readPositiveInteger(parsed?.maxRepeats)
+      ?? commandSeed?.maxRepeats
+      ?? 1;
+    const used =
+      readPositiveInteger(parsed?.repeatCount)
+      ?? commandSeed?.repeatCount
+      ?? 0;
+    return {
+      text,
+      maxRepeats,
+      used,
+      source: 'client_exec_result',
+      stageMode: 'on'
+    };
+  }
+  return null;
+}
+
+export function resolveRuntimeStopMessageStateFromAdapterContext(adapterContext: unknown): {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  source?: string;
+  updatedAt?: number;
+  lastUsedAt?: number;
+  stageMode?: 'on' | 'off' | 'auto';
+  aiMode?: 'on' | 'off';
+} | null {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return null;
+  }
+  const runtime = readRuntimeMetadata(adapterContext as Record<string, unknown>);
+  const direct = resolveRuntimeStopMessageState(runtime);
+  if (direct) {
+    return direct;
+  }
+  for (const record of collectRequestLikeRecords(adapterContext)) {
+    const restored = resolveRuntimeStopMessageStateFromRequestRecord(record);
+    if (restored) {
+      return restored;
+    }
+  }
+  return null;
 }
 
 export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' | 'off' | 'auto' | undefined {

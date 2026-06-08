@@ -927,9 +927,6 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
             return Some(SkipReason::ServertoolFollowupHop);
         }
     }
-    if ctx.has_responses_submit_tool_outputs_resume {
-        return Some(SkipReason::ResponsesSubmitToolOutputsResume);
-    }
     if matches!(ctx.explicit_mode, Some(StageMode::Off)) {
         return Some(SkipReason::ExplicitModeOff);
     }

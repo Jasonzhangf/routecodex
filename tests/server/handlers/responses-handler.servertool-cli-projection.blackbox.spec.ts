@@ -117,7 +117,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(reasoning?.content).toBeUndefined();
   });
 
-  it('does not re-project stop_message_auto after its exec_command output is already in request history', async () => {
+  it('re-projects stop_message_auto on submit_tool_outputs resume when current response stops again', async () => {
+    const validResumeCommand = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行。\",\"repeatCount\":1,\"maxRepeats\":3,\"stdoutPreview\":\"stopless continuation ready\"}'";
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_after_cli_result',
@@ -134,7 +135,7 @@ describe('servertool CLI projection blackbox', () => {
         ]
       },
       adapterContext: {
-        sessionId: 'sess-stop-cli-loop-guard',
+        sessionId: 'sess-stop-cli-loop-guard-resume-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
         __raw_request_body: {
@@ -146,7 +147,7 @@ describe('servertool CLI projection blackbox', () => {
               call_id: 'call_servertool_cli_stop_1',
               name: 'exec_command',
               arguments: JSON.stringify({
-                cmd: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"stdoutPreview\":\"stopless continuation ready\"}'"
+                cmd: validResumeCommand
               })
             },
             {
@@ -161,13 +162,137 @@ describe('servertool CLI projection blackbox', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       reenterPipeline: async () => {
-        throw new Error('stop_message_auto CLI result must not trigger followup reentry');
+        throw new Error('stop_message_auto CLI projection must not reenter server-side followup');
       }
     });
 
-    expect(result.executed).toBe(false);
-    expect(result.flowId).toBeUndefined();
-    expect(JSON.stringify(result.chat)).not.toContain('routecodex servertool run stop_message_auto');
-    expect(JSON.stringify(result.chat)).not.toContain('call_servertool_cli_');
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    expect(toolCall.function.name).toBe('exec_command');
+    expect(command).toContain('routecodex servertool run stop_message_auto');
+  });
+
+  it('returns terminal allow-stop result without re-projecting exec_command', async () => {
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_stop_allow_stop_terminal',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: [
+                '已完成在线验证。',
+                '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}'
+              ].join('\n')
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      },
+      adapterContext: {
+        sessionId: 'sess-stop-cli-allow-stop-terminal',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: '继续执行' }]
+        },
+        __rt: {
+          stopMessageState: {
+            stopMessageText: '继续执行原任务',
+            stopMessageMaxRepeats: 3,
+            stopMessageUsed: 0,
+            stopMessageStageMode: 'on'
+          }
+        }
+      } as any,
+      requestId: 'req_stop_cli_allow_stop_terminal',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('allow-stop terminal result must not reenter server-side followup');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    const payload = result.chat as any;
+    expect(JSON.stringify(payload)).not.toContain('routecodex servertool run stop_message_auto');
+    expect(payload.required_action).toBeUndefined();
+    const message = payload.choices?.[0]?.message;
+    expect(String(message?.content)).toContain('## 完成内容');
+    expect(String(message?.content)).not.toContain('"stopreason"');
+    expect(message?.reasoning_text).toBeUndefined();
+    expect(message?.reasoning_content).toBeUndefined();
+    expect(message?.reasoning).toBeUndefined();
+
+    const responsesPayload = buildResponsesPayloadFromChatWithNative(payload, {
+      requestId: 'req_stop_cli_allow_stop_terminal'
+    }) as Record<string, any>;
+    expect(Array.isArray(responsesPayload.output)).toBe(true);
+    expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
+    expect(String(responsesPayload.output_text)).toContain('## 完成内容');
+    expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
+    expect(JSON.stringify(responsesPayload)).not.toContain('needs_user_input');
+    expect(JSON.stringify(responsesPayload)).not.toContain('has_evidence');
+  });
+
+  it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_stop_after_legacy_cli_result',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'stopless continuation ready'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      },
+      adapterContext: {
+        sessionId: 'sess-stop-cli-legacy-shape-reproject',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true,
+        __raw_request_body: {
+          model: 'gpt-5.5',
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: '继续执行' }] },
+            {
+              type: 'function_call',
+              call_id: 'call_servertool_cli_stop_legacy_1',
+              name: 'exec_command',
+              arguments: JSON.stringify({
+                cmd: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"stdoutPreview\":\"stopless continuation ready\"}'"
+              })
+            },
+            {
+              type: 'function_call_output',
+              call_id: 'call_servertool_cli_stop_legacy_1',
+              output: '{"ok":true,"kind":"stop_message_auto","tool":"stop_message_auto","summary":"stopless continuation ready"}'
+            }
+          ]
+        }
+      } as any,
+      requestId: 'req_stop_cli_legacy_shape_guard',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stop_message_auto CLI projection must not reenter server-side followup');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
+    expect(toolCall.function.name).toBe('exec_command');
+    expect(JSON.parse(toolCall.function.arguments).cmd).toContain('routecodex servertool run stop_message_auto');
   });
 });

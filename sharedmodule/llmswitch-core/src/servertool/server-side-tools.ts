@@ -28,7 +28,6 @@ import {
   runToolCallExecutionLoop
 } from './execution-shell.js';
 import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
-import { hasStopMessageAutoCliResultInRequest } from './cli-result-guard.js';
 import { extractTextFromChatLikeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   appendToolOutput,
@@ -199,10 +198,6 @@ export async function runServerSideToolEngine(
   if (payloadContractSignal && !isStopEligibleForServerTool(base, options.adapterContext)) {
     return { mode: 'passthrough', finalChatResponse: base };
   }
-  if (hasStopMessageAutoCliResultInRequest({ adapterContext: options.adapterContext, runtimeMetadata })) {
-    return { mode: 'passthrough', finalChatResponse: base };
-  }
-
   const autoHookExecutionList = listAutoServerToolHooks();
   const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromConfig({
     hooks: autoHookExecutionList,
