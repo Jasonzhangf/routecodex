@@ -106,11 +106,12 @@ describe('provider response Rust native plan', () => {
   });
 
   it('projects stopless CLI command instead of reentering followup for Anthropic relay stop', async () => {
+    const suffix = `anthropic_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const context: Record<string, unknown> = {
-      requestId: 'req_provider_response_stopless_followup_projection',
+      requestId: `req_provider_response_stopless_followup_projection_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'anthropic-messages',
-      sessionId: 'provider-response-stopless-followup-projection',
+      sessionId: `provider-response-stopless-followup-projection-${suffix}`,
       __rt: {
         stopMessageEnabled: true,
         routecodexPortStopMessageEnabled: true
@@ -160,11 +161,12 @@ describe('provider response Rust native plan', () => {
   });
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
+    const suffix = `responses_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const context: Record<string, unknown> = {
-      requestId: 'req_provider_response_responses_stopless_cli_projection',
+      requestId: `req_provider_response_responses_stopless_cli_projection_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
-      sessionId: 'provider-response-responses-stopless-cli-projection',
+      sessionId: `provider-response-responses-stopless-cli-projection-${suffix}`,
       stopMessageEnabled: true,
       routecodexPortStopMessageEnabled: true,
       capturedEntryRequest: {
@@ -192,13 +194,7 @@ describe('provider response Rust native plan', () => {
       context: context as any,
       entryEndpoint: '/v1/responses',
       wantsStream: false,
-      clientInjectDispatch: jest.fn(async () => ({
-        body: {
-          id: 'chatcmpl_unused',
-          object: 'chat.completion',
-          choices: [{ index: 0, message: { role: 'assistant', content: 'unused' }, finish_reason: 'stop' }]
-        }
-      })) as any
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
     });
 
     expect(result.body?.object).toBe('response');
@@ -213,11 +209,12 @@ describe('provider response Rust native plan', () => {
   });
 
   it('streams stopless CLI command for relay OpenAI Responses completed stop', async () => {
+    const suffix = `responses_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const context: Record<string, unknown> = {
-      requestId: 'req_provider_response_responses_stopless_cli_projection_stream',
+      requestId: `req_provider_response_responses_stopless_cli_projection_stream_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
-      sessionId: 'provider-response-responses-stopless-cli-projection-stream',
+      sessionId: `provider-response-responses-stopless-cli-projection-stream-${suffix}`,
       stopMessageEnabled: true,
       routecodexPortStopMessageEnabled: true,
       capturedEntryRequest: {
@@ -245,13 +242,7 @@ describe('provider response Rust native plan', () => {
       context: context as any,
       entryEndpoint: '/v1/responses',
       wantsStream: true,
-      clientInjectDispatch: jest.fn(async () => ({
-        body: {
-          id: 'chatcmpl_unused',
-          object: 'chat.completion',
-          choices: [{ index: 0, message: { role: 'assistant', content: 'unused' }, finish_reason: 'stop' }]
-        }
-      })) as any
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
     });
 
     expect(result.__sse_responses).toBeDefined();

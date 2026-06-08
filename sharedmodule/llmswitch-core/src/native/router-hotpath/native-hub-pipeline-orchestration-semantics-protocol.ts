@@ -41,6 +41,15 @@ type HubPipelineLibOutput = HubPipelineOutput & {
   diagnostics: Array<Record<string, unknown>>;
 };
 
+export type ProviderResponseRuntimeEffectPlan = {
+  streamPipe?: {
+    codec: string;
+    requestId: string;
+  } | null;
+  runtimeStateWrite?: Record<string, unknown> | null;
+  servertoolRuntimeActions: Array<Record<string, unknown>>;
+};
+
 const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
 const nonBlockingProtocolLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
@@ -254,6 +263,41 @@ export function runHubPipelineLibWithNative(
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
+}
+
+function parseProviderResponseRuntimeEffectPlan(raw: string): ProviderResponseRuntimeEffectPlan | null {
+  const parsed = parseJson('parseProviderResponseRuntimeEffectPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const streamPipe = row.streamPipe === null || row.streamPipe === undefined
+    ? null
+    : row.streamPipe && typeof row.streamPipe === 'object' && !Array.isArray(row.streamPipe)
+      ? row.streamPipe as ProviderResponseRuntimeEffectPlan['streamPipe']
+      : undefined;
+  const runtimeStateWrite = row.runtimeStateWrite === null || row.runtimeStateWrite === undefined
+    ? null
+    : row.runtimeStateWrite && typeof row.runtimeStateWrite === 'object' && !Array.isArray(row.runtimeStateWrite)
+      ? row.runtimeStateWrite as Record<string, unknown>
+      : undefined;
+  if (streamPipe === undefined || runtimeStateWrite === undefined || !Array.isArray(row.servertoolRuntimeActions)) {
+    return null;
+  }
+  return {
+    streamPipe,
+    runtimeStateWrite,
+    servertoolRuntimeActions: row.servertoolRuntimeActions as Array<Record<string, unknown>>,
+  };
+}
+
+export function normalizeProviderResponseEffectPlanWithNative(
+  effectPlan: { effects: Array<Record<string, unknown>> }
+): ProviderResponseRuntimeEffectPlan {
+  const capability = 'normalizeProviderResponseEffectPlanJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderResponseRuntimeEffectPlan>(capability, reason);
+  const raw = callNativeJsonString(capability, effectPlan);
+  return parseProviderResponseRuntimeEffectPlan(raw) ?? fail('invalid payload');
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

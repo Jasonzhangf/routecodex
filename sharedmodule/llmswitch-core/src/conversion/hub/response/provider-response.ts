@@ -5,7 +5,11 @@ import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { recordStage } from '../pipeline/stages/utils.js';
 import { ProviderProtocolError } from '../../provider-protocol-error.js';
-import { executeHubPipelineWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import {
+  executeHubPipelineWithNative,
+  normalizeProviderResponseEffectPlanWithNative,
+  type ProviderResponseRuntimeEffectPlan,
+} from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import {
   logHubStageTiming,
   peekHubStageTopSummary
@@ -132,6 +136,7 @@ function attachHubStageTopToContext(context: AdapterContext, requestId: string):
 function runProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): {
   payload?: JsonObject;
   effectPlan: { effects: Array<Record<string, unknown>> };
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
   diagnostics: Array<Record<string, unknown>>;
 } {
   const nativeResponsePlan = executeHubPipelineWithNative({
@@ -174,59 +179,26 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
   return {
     payload: nativeResponsePlan.payload as JsonObject,
     effectPlan: { effects },
+    runtimeEffects: normalizeProviderResponseEffectPlanWithNative({ effects }),
     diagnostics: nativeResponsePlan.diagnostics
   };
 }
 
-function readNativeStreamPipeEffect(effectPlan: { effects: Array<Record<string, unknown>> }): {
+function readNativeStreamPipeEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): {
   codec: SseProtocol;
   requestId: string;
 } | null {
-  const streamEffects = effectPlan.effects.filter((effect) => effect?.kind === 'streamPipe');
-  if (streamEffects.length === 0) return null;
-  if (streamEffects.length !== 1) throw new Error('Rust HubPipeline response effect plan returned duplicate streamPipe effects');
-  const effect = streamEffects[0];
-  const payload = effect.payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Rust HubPipeline streamPipe effect missing payload');
-  }
-  const record = payload as Record<string, unknown>;
-  const codec = record.codec;
-  const requestId = record.requestId;
-  if (
-    codec !== 'openai-chat'
-    && codec !== 'openai-responses'
-    && codec !== 'anthropic-messages'
-    && codec !== 'gemini-chat'
-  ) {
-    throw new Error('Rust HubPipeline streamPipe effect returned unsupported codec');
-  }
-  if (typeof requestId !== 'string' || !requestId.trim()) {
-    throw new Error('Rust HubPipeline streamPipe effect missing requestId');
-  }
+  if (!runtimeEffects.streamPipe) return null;
+  const codec = runtimeEffects.streamPipe.codec;
+  const requestId = runtimeEffects.streamPipe.requestId;
   return {
-    codec,
+    codec: codec as SseProtocol,
     requestId
   };
 }
 
-function assertKnownNativeResponseEffectKinds(effectPlan: { effects: Array<Record<string, unknown>> }): void {
-  for (const effect of effectPlan.effects) {
-    if (effect?.kind === 'streamPipe' || effect?.kind === 'runtimeStateWrite' || effect?.kind === 'servertoolRuntimeAction') continue;
-    throw new Error('Rust HubPipeline response effect plan returned unsupported effect kind');
-  }
-}
-
-function readNativeServertoolRuntimeActionEffects(effectPlan: { effects: Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
-  return effectPlan.effects
-    .filter((effect) => effect?.kind === 'servertoolRuntimeAction')
-    .map((effect) => {
-      const payload = effect.payload;
-      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-        throw new Error('Rust HubPipeline servertoolRuntimeAction effect missing payload');
-      }
-      return payload as Record<string, unknown>;
-    });
+function readNativeServertoolRuntimeActionEffects(runtimeEffects: ProviderResponseRuntimeEffectPlan): Array<Record<string, unknown>> {
+  return runtimeEffects.servertoolRuntimeActions;
 }
 
 function readServertoolRuntimeActionChatPayload(effect: Record<string, unknown>): JsonObject {
@@ -263,7 +235,7 @@ function buildHubRespOutbound04FromHubRespChatProcess03(args: {
 }
 
 async function executeProviderResponseNativeServertoolEffects(args: {
-  effectPlan: { effects: Array<Record<string, unknown>> };
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
   payload: JsonObject;
   requestId: string;
   context: AdapterContext;
@@ -276,7 +248,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
 }): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
   let stage: HubRespPayloadStage = 'HubRespOutbound04ClientSemantic';
-  for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
+  for (const effect of readNativeServertoolRuntimeActionEffects(args.runtimeEffects)) {
     if (effect.action === 'requireReenterPipeline') {
       if (!args.reenterPipeline) {
         throw new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
@@ -344,7 +316,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
 }
 
 function assertMissingServertoolRuntimeExecutor(args: {
-  effectPlan: { effects: Array<Record<string, unknown>> };
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
   providerInvoker?: ProviderInvoker;
   reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
   clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
@@ -352,7 +324,7 @@ function assertMissingServertoolRuntimeExecutor(args: {
   if (args.providerInvoker || args.reenterPipeline || args.clientInjectDispatch) {
     return;
   }
-  for (const effect of readNativeServertoolRuntimeActionEffects(args.effectPlan)) {
+  for (const effect of readNativeServertoolRuntimeActionEffects(args.runtimeEffects)) {
     if (effect.action === 'requireReenterPipeline') {
       throw new ProviderProtocolError('[servertool] followup requires reenter pipeline', {
         code: 'SERVERTOOL_FOLLOWUP_FAILED',
@@ -377,22 +349,15 @@ function assertMissingServertoolRuntimeExecutor(args: {
   }
 }
 
-function readNativeRuntimeStateWriteEffect(effectPlan: { effects: Array<Record<string, unknown>> }): Record<string, unknown> | null {
-  const runtimeEffects = effectPlan.effects.filter((effect) => effect?.kind === 'runtimeStateWrite');
-  if (runtimeEffects.length === 0) return null;
-  if (runtimeEffects.length !== 1) throw new Error('Rust HubPipeline response effect plan returned duplicate runtimeStateWrite effects');
-  const payload = runtimeEffects[0]?.payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Rust HubPipeline runtimeStateWrite effect missing payload');
-  }
-  return payload as Record<string, unknown>;
+function readNativeRuntimeStateWriteEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): Record<string, unknown> | null {
+  return runtimeEffects.runtimeStateWrite ?? null;
 }
 
 async function executeProviderResponseNativeRuntimeStateEffect(args: {
-  effectPlan: { effects: Array<Record<string, unknown>> };
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
   context: AdapterContext;
 }): Promise<void> {
-  const runtimeEffect = readNativeRuntimeStateWriteEffect(args.effectPlan);
+  const runtimeEffect = readNativeRuntimeStateWriteEffect(args.runtimeEffects);
   if (!runtimeEffect) return;
   finalizeResponsesConversationRequestRetention(args.context.requestId, {
     keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
@@ -409,6 +374,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   nativeResponsePlan: {
     payload?: JsonObject;
     effectPlan: { effects: Array<Record<string, unknown>> };
+    runtimeEffects: ProviderResponseRuntimeEffectPlan;
   };
   requestId: string;
   context: AdapterContext;
@@ -423,15 +389,14 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   if (!hubRespOutbound04ClientSemantic || typeof hubRespOutbound04ClientSemantic !== 'object') {
     throw new Error('Rust HubPipeline native response payload unavailable');
   }
-  assertKnownNativeResponseEffectKinds(args.nativeResponsePlan.effectPlan);
   assertMissingServertoolRuntimeExecutor({
-    effectPlan: args.nativeResponsePlan.effectPlan,
+    runtimeEffects: args.nativeResponsePlan.runtimeEffects,
     providerInvoker: args.providerInvoker,
     reenterPipeline: args.reenterPipeline,
     clientInjectDispatch: args.clientInjectDispatch
   });
   const respProcessEffect = await executeProviderResponseNativeServertoolEffects({
-    effectPlan: args.nativeResponsePlan.effectPlan,
+    runtimeEffects: args.nativeResponsePlan.runtimeEffects,
     payload: hubRespOutbound04ClientSemantic,
     requestId: args.requestId,
     context: args.context,
@@ -450,9 +415,9 @@ async function executeProviderResponseNativeOutboundEffects(args: {
       context: args.context
     })
     : respProcessEffect.payload;
-  const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.effectPlan);
+  const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.runtimeEffects);
   await executeProviderResponseNativeRuntimeStateEffect({
-    effectPlan: args.nativeResponsePlan.effectPlan,
+    runtimeEffects: args.nativeResponsePlan.runtimeEffects,
     context: args.context
   });
   if (!streamEffect) {

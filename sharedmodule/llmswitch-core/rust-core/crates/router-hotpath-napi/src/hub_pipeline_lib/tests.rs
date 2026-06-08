@@ -735,6 +735,71 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
 }
 
 #[test]
+fn response_stream_stop_with_runtime_callbacks_returns_stream_and_servertool_effects() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stream-servertool-effect-1".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_stream_servertool_effect",
+                "object": "response",
+                "status": "completed",
+                "model": "gpt-test",
+                "output": [{
+                    "id": "msg_stream_servertool_effect",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{ "type": "output_text", "text": "done" }]
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "runtimeEffects": { "clientInjectDispatch": true }
+            }),
+            stream: true,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let stream_effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("streamPipe"))
+        .unwrap();
+    assert_eq!(stream_effect.payload["codec"], json!("openai-responses"));
+    assert_eq!(
+        stream_effect.payload["requestId"],
+        json!("req-stream-servertool-effect-1")
+    );
+    let servertool_effect = output
+        .effect_plan
+        .effects
+        .iter()
+        .find(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+                && effect.payload["action"] == json!("requireRuntimeExecutor")
+        })
+        .unwrap();
+    assert_eq!(
+        servertool_effect.payload["reason"],
+        json!("stop_eligible_followup")
+    );
+    assert_eq!(
+        servertool_effect.payload["requestId"],
+        json!("req-stream-servertool-effect-1")
+    );
+}
+
+#[test]
 fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
