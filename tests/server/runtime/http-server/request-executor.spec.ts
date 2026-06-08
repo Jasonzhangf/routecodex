@@ -2858,7 +2858,7 @@ describe('HubRequestExecutor failover', () => {
     expect(routeHints[1]).toBe('longcontext');
   });
 
-  test('surfaces 403 OAuth reauth-required error without alias rotation', async () => {
+  test('reroutes 403 OAuth reauth-required error when provider pool has an alternative', async () => {
     const firstProviderKey = 'gemini.primary.gemini-2.5-pro';
     const secondProviderKey = 'gemini.backup.gemini-2.5-pro';
     const failingError = new Error('HTTP 403: Please authenticate with Google OAuth first');
@@ -2922,20 +2922,19 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(executor.execute({
+    const result = await executor.execute({
       requestId: 'req-403-reauth',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
-    })).rejects.toMatchObject({
-      message: 'HTTP 403: Please authenticate with Google OAuth first',
-      statusCode: 403
     });
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual(expect.objectContaining({ id: 'ok' }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(failingProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(0);
+    expect(successProcess).toHaveBeenCalledTimes(1);
   });
   test('preserves first upstream error when retry-exhausted routing reports provider unavailable', async () => {
     const firstProviderKey = 'glm.1-186.kimi-k2.5';
@@ -3774,7 +3773,7 @@ describe('HubRequestExecutor failover', () => {
     expect(successProcess).toHaveBeenCalledTimes(0);
   });
 
-  test('surfaces converted HTTP 401 without provider failover', async () => {
+  test('reroutes converted HTTP 401 when provider pool has an alternative', async () => {
     const firstProviderKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
     const secondProviderKey = 'opencode-zen-free.key2.mimo-v2-pro-free';
 
@@ -3834,21 +3833,19 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(executor.execute({
+    const result = await executor.execute({
       requestId: 'req-401-failover',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
-    })).rejects.toMatchObject({
-      statusCode: 401,
-      status: 401,
-      message: 'Upstream authentication failed'
     });
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual(expect.objectContaining({ id: 'resp_ok' }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(0);
+    expect(successProcess).toHaveBeenCalledTimes(1);
   });
 
   test('surfaces HTTP 401 only after pool is exhausted', async () => {

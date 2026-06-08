@@ -958,4 +958,146 @@ describe('direct passthrough route-level', () => {
     }
   }, 15000);
 
+  it('HTTP BLACKBOX: router-direct reroutes provider HTTP 401 through standard executor', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.5';
+    const secondProviderKey = 'llmgate.key1.gpt-5.5';
+    const direct401 = Object.assign(new Error('HTTP 401: Upstream authentication failed'), {
+      statusCode: 401,
+      status: 401,
+      code: 'HTTP_401',
+    });
+    const firstDirectSend = jest.fn(async () => { throw direct401; });
+    const secondStandardSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_401_rerouted',
+        object: 'response',
+        status: 'completed',
+        output_text: 'ok',
+      },
+    }));
+    const route = jest.fn((_payload: Record<string, unknown>, metadata: Record<string, unknown>) => {
+      const excluded = new Set<string>(
+        Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys as string[] : []
+      );
+      const providerKey = excluded.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: 'gpt-5.5',
+        },
+        decision: { routeName: 'thinking', pool: [firstProviderKey, secondProviderKey], reason: 'thinking:test' },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async (input: any) => {
+        const routeResult = route(input.body ?? {}, input.metadata ?? {});
+        return {
+          requestId: input.id,
+          providerPayload: input.body,
+          target: routeResult.target,
+          routingDecision: routeResult.decision,
+          metadata: input.metadata ?? {},
+        };
+      }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'llmgate',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: secondStandardSend,
+          processIncomingDirect: jest.fn(),
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5555',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'router-gpt-5.5',
+          stream: false,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({ id: 'resp_router_direct_401_rerouted' }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondStandardSend).toHaveBeenCalledTimes(1);
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
 });

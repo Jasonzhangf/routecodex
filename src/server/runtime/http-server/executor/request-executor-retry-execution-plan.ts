@@ -6,6 +6,7 @@ import {
   shouldCancelUnrecoverableRerouteWithoutAlternative,
   shouldDirectReturnUnrecoverableWithoutForcedExclusion,
   shouldRerouteTerminalPeriodicRecovery,
+  shouldRerouteTerminalUnrecoverableProviderFailure,
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   applyRetryExclusionForCurrentProvider,
@@ -127,7 +128,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: eligibilityPlan.shouldRetry,
       hasTerminalAlternativeCandidate
     });
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute) {
+  const terminalUnrecoverableProviderReroute =
+    shouldRerouteTerminalUnrecoverableProviderFailure({
+      classification,
+      shouldRetry: eligibilityPlan.shouldRetry,
+      hasTerminalAlternativeCandidate,
+      statusCode: args.retryError.statusCode,
+      errorCode: args.retryError.errorCode,
+      upstreamCode: args.retryError.upstreamCode
+    });
+  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalUnrecoverableProviderReroute) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return {
       shouldRetry: false,
@@ -139,7 +149,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute) {
+  if (terminalQuotaReroute || terminalUnrecoverableProviderReroute) {
     const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
           error: args.error,
           retryError: args.retryError,

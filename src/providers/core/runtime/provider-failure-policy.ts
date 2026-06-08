@@ -14,6 +14,7 @@ export {
   resolveProviderFailureExclusionDecision,
   shouldKeepProviderExcludedForNextAttempt,
   shouldRerouteTerminalPeriodicRecovery,
+  shouldRerouteTerminalUnrecoverableProviderFailure,
   shouldDirectReturnUnrecoverableWithoutForcedExclusion,
   shouldCancelUnrecoverableRerouteWithoutAlternative,
   shouldSuppressForcedProviderExclusion,

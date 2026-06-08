@@ -118,7 +118,15 @@ function isRetryableProviderResponseProcessingFailure(args: {
   if (
     record.requestExecutorProviderErrorStage === 'provider.http'
     && typeof statusCode === 'number'
-    && (statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500)
+    && (
+      statusCode === 401
+      || statusCode === 402
+      || statusCode === 403
+      || statusCode === 408
+      || statusCode === 425
+      || statusCode === 429
+      || statusCode >= 500
+    )
   ) {
     return true;
   }

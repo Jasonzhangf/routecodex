@@ -2415,3 +2415,9 @@ Tags: responses-provider, llmgate, empty-assistant-response, stream-shape, provi
 - Contract: stopless reasoning uses intercepted stop text in `reasoning.summary`; `continuationPrompt` stays only in CLI `--input-json`; replayable Responses history must not include non-empty `reasoning.content` for this projection.
 - Verification: `cargo test -p servertool-core`; servertool CLI projection Jest; direct passthrough Jest; native required exports Jest; `node scripts/verify-servertool-rust-only.mjs`; `npx tsc --noEmit --pretty false`.
 Tags: servertool-cli-projection, responses-history, direct-passthrough, rust-owner, 2026-06-08
+
+## 2026-06-08 provider auth failure reroute boundary
+- Provider/account auth failures (`401/402/403` or equivalent invalid key/access/quota/account codes) are `unrecoverable` for the failing provider, but ErrorErr05 must still `exclude_and_reroute` when the route pool has an alternative candidate. Only after pool exhaustion should the sanitized ErrorErr06 client error surface.
+- Deterministic request/model errors such as `404` remain direct-return even if alternatives exist; do not mask request-shape/model-support bugs by provider switching. Router-direct stays same-protocol passthrough and delegates provider errors to the unified execution plan via retry metadata, not local classification or payload cleanup.
+- Verified: request-executor, router-direct route-level blackbox, retry-execution-plan, request-error-log, `npx tsc --noEmit --pretty false`, and scoped `git diff --check` passed on 2026-06-08.
+Tags: error-chain, ErrorErr05, provider-switch, router-direct, auth-failure, 5555, 2026-06-08

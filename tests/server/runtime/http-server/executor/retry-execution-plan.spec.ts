@@ -76,7 +76,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
-  it('direct-returns unrecoverable provider failures instead of executor alternative cycling', async () => {
+  it('reroutes unrecoverable provider failures when route pool has an alternative', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 403: {"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}'), {
       statusCode: 403,
@@ -106,8 +106,9 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logNonBlockingError: jest.fn()
     });
 
-    expect(plan.shouldRetry).toBe(false);
-    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).not.toContain('same_provider');
     expect(plan.excludedCurrentProvider).toBe(true);
     expect(Array.from(excludedProviderKeys)).toEqual(['dibittai.crsa.gpt-5.5']);
   });

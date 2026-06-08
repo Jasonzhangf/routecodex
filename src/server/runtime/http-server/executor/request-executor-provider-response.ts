@@ -263,6 +263,8 @@ export async function processSuccessfulProviderResponse(args: {
   const isGlobalRetryableStatus =
     typeof convertedStatus === 'number' &&
     (convertedStatus === 401 ||
+      convertedStatus === 402 ||
+      convertedStatus === 403 ||
       convertedStatus === 429 ||
       convertedStatus === 408 ||
       convertedStatus === 425 ||
