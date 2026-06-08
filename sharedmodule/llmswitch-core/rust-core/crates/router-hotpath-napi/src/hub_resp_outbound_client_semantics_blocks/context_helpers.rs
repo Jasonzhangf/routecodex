@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+// feature_id: hub.response_provider_context_helpers
 pub(crate) fn resolve_truthy_flag(raw: &Value) -> bool {
     if raw.as_bool().unwrap_or(false) {
         return true;

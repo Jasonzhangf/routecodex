@@ -1780,6 +1780,18 @@ fn resolve_provider_response_context_helpers_prefers_display_and_request_id_cand
 }
 
 #[test]
+fn resolve_provider_response_context_helpers_omits_request_id_when_context_has_no_candidate() {
+    let context = serde_json::json!({
+        "modelId": "glm-4.7"
+    });
+    assert_eq!(resolve_client_facing_request_id_from_context(&context), None);
+    assert_eq!(
+        resolve_display_model_from_context(&context),
+        Some("glm-4.7".to_string())
+    );
+}
+
+#[test]
 fn resolve_provider_response_context_helpers_parses_followup_and_tool_surface_mode() {
     assert!(resolve_truthy_flag(&Value::String("true".to_string())));
     assert!(resolve_truthy_flag(&Value::String("1".to_string())));

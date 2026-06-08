@@ -26,22 +26,14 @@ export function resolveProviderResponseContextSignals(
     entryEndpoint,
     toolSurfaceModeRaw: String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE || '')
   });
-  const clientFacingRequestId =
-    typeof resolved.clientFacingRequestId === 'string' && resolved.clientFacingRequestId.trim()
-      ? resolved.clientFacingRequestId.trim()
-      : context.requestId;
-  const clientProtocol: ClientProtocol =
-    resolved.clientProtocol === 'openai-responses' || resolved.clientProtocol === 'anthropic-messages'
-      ? resolved.clientProtocol
-      : 'openai-chat';
+  if (typeof resolved.clientFacingRequestId !== 'string' || !resolved.clientFacingRequestId) {
+    throw new Error('Rust provider response context helper returned no client-facing request id');
+  }
   return {
     isFollowup: resolved.isServerToolFollowup === true,
     toolSurfaceShadowEnabled: resolved.toolSurfaceShadowEnabled === true,
-    clientProtocol,
-    displayModel:
-      typeof resolved.displayModel === 'string' && resolved.displayModel.trim()
-        ? resolved.displayModel.trim()
-        : undefined,
-    clientFacingRequestId
+    clientProtocol: resolved.clientProtocol,
+    ...(resolved.displayModel ? { displayModel: resolved.displayModel } : {}),
+    clientFacingRequestId: resolved.clientFacingRequestId
   };
 }

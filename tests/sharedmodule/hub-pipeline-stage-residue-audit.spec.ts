@@ -468,8 +468,16 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts-client-facing-request-id-fallback', pattern: /:\s*context\.requestId\b/ },
+      { label: 'ts-client-protocol-openai-chat-default', pattern: /:\s*['"]openai-chat['"]/ },
+      { label: 'ts-client-protocol-branching-default', pattern: /resolved\.clientProtocol\s*===/ },
+      { label: 'ts-display-model-trim-defaulting', pattern: /resolved\.displayModel\.trim\(\)/ },
+    ]);
 
     expect(source).toContain('resolveProviderResponseContextSignals');
+    expect(source).toContain('resolveProviderResponseContextHelpersWithNative');
+    expect(findings).toEqual([]);
     expect(source).not.toContain('maybeCommitClockReservationFromContext');
     expect(source).not.toContain('ClockReservation');
     expect(source).not.toContain('response-mappers');

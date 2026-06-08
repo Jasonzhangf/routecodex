@@ -362,6 +362,36 @@ owners:
     notes:
       - TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust.
 
+  - feature_id: hub.response_provider_context_helpers
+    status: active
+    summary: Provider response context helper resolution for client protocol, followup, display model, and client-facing request id
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
+    canonical_types:
+      - HubRespOutbound04ClientSemantic
+    canonical_builders:
+      - resolve_client_protocol_for_response_entry
+      - resolve_display_model_from_context
+      - resolve_client_facing_request_id_from_context
+      - resolve_tool_surface_shadow_enabled
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts
+    forbidden_paths:
+      - src/providers
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+    required_gates:
+      - npm run verify:hub-response-provider-context-helpers
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - TS `provider-response-helpers.ts` is native invocation and field-name mapping only; clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser.
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance
