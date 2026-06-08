@@ -346,7 +346,6 @@ pub fn evaluate_stop_schema_gate(
         }
     };
 
-
     // needs_user_input gate: if model needs to ask user a simple question,
     // allow stop without counting budget. Next_step must contain the question.
     if parsed.needs_user_input.unwrap_or(false) {

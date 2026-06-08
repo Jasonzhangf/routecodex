@@ -1,5 +1,6 @@
 use crate::outcome_contract::{
-    is_client_exec_cli_projection, is_denied_cli_projection, DENIED_CLI_MARKERS,
+    is_client_exec_cli_projection, is_denied_cli_projection, quote_posix_single_argument,
+    DENIED_CLI_MARKERS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -317,16 +318,17 @@ pub fn build_client_exec_cli_projection_output(
             return Err(ServertoolCliError::InvalidField("flowId"));
         }
         let continuation_prompt = read_non_empty_string(&input, "continuationPrompt")?;
+        let input_json = serde_json::to_string(&serde_json::json!({
+            "flowId": flow_id,
+            "continuationPrompt": continuation_prompt,
+            "repeatCount": repeat_count,
+            "maxRepeats": max_repeats
+        }))
+        .map_err(|_| ServertoolCliError::InvalidField("json"))?;
         let cmd = format!(
-            "routecodex servertool run {} --input-json '{}'",
+            "routecodex servertool run {} --input-json {}",
             tool_name,
-            serde_json::to_string(&serde_json::json!({
-                "flowId": flow_id,
-                "continuationPrompt": continuation_prompt,
-                "repeatCount": repeat_count,
-                "maxRepeats": max_repeats
-            }))
-            .map_err(|_| ServertoolCliError::InvalidField("json"))?
+            quote_posix_single_argument(&input_json)
         );
         validate_no_denied_cli_marker(&cmd)?;
         return Ok(serde_json::json!({
@@ -340,10 +342,12 @@ pub fn build_client_exec_cli_projection_output(
         }));
     }
 
+    let input_json =
+        serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("json"))?;
     let cmd = format!(
-        "routecodex servertool run {} --input-json '{}'",
+        "routecodex servertool run {} --input-json {}",
         tool_name,
-        serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("json"))?
+        quote_posix_single_argument(&input_json)
     );
     validate_no_denied_cli_marker(&cmd)?;
     Ok(serde_json::json!({
@@ -409,14 +413,12 @@ pub fn build_client_visible_projection_shell(
         if !is_safe_call_id(id) {
             return Err(ServertoolCliError::InvalidField("additionalToolCalls.id"));
         }
-        let function = row
-            .get("function")
-            .and_then(Value::as_object)
-            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls.function"))?;
-        let function_name = function
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or(ServertoolCliError::InvalidField("additionalToolCalls.function.name"))?;
+        let function = row.get("function").and_then(Value::as_object).ok_or(
+            ServertoolCliError::InvalidField("additionalToolCalls.function"),
+        )?;
+        let function_name = function.get("name").and_then(Value::as_str).ok_or(
+            ServertoolCliError::InvalidField("additionalToolCalls.function.name"),
+        )?;
         if is_denied_cli_projection(function_name) {
             return Err(ServertoolCliError::DeniedTool(function_name.to_string()));
         }
@@ -628,6 +630,22 @@ mod tests {
     }
 
     #[test]
+    fn projection_output_quotes_json_apostrophes() {
+        let out = build_client_exec_cli_projection_output(
+            "stop_message_auto",
+            "stop_message_flow",
+            json!({"continuationPrompt":"can't stop","repeatCount":2,"maxRepeats":5}),
+            2,
+            5,
+        )
+        .expect("projection output");
+        assert_eq!(
+            out["execCommand"],
+            "routecodex servertool run stop_message_auto --input-json '{\"continuationPrompt\":\"can'\\''t stop\",\"flowId\":\"stop_message_flow\",\"maxRepeats\":5,\"repeatCount\":2}'"
+        );
+    }
+
+    #[test]
     fn client_visible_projection_shell_omits_responses_reasoning_content_array() {
         let native_projection = build_client_exec_cli_projection_output(
             "stop_message_auto",
@@ -685,7 +703,9 @@ mod tests {
             })
             .expect("client visible shell");
 
-        let calls = shell["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        let calls = shell["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0]["function"]["name"], "exec_command");
         assert_eq!(calls[1]["id"], "call_exec_command_1");

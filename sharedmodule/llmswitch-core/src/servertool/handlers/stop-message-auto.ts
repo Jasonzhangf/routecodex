@@ -769,7 +769,7 @@ const handler: ServerToolHandler = async (
   const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
   const persistedGoalRead = readStoplessGoalState(ctx.adapterContext);
   const effectiveGoal = requestScopedGoal.state ?? persistedGoalRead.state;
-  const hasExplicitGoalState = requestScopedGoal.explicit || Boolean(persistedGoalRead.state);
+  const hasExplicitGoalState = requestScopedGoal.explicit;
   const tombstone = persistedLookupPlan.readStopMessageTombstone
     ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
     : { exhaustedDefault: false, cleared: false };
@@ -811,7 +811,13 @@ const handler: ServerToolHandler = async (
       stage_mode: 'on' as any,
     } : undefined,
     persisted_default_exhausted: tombstone.exhaustedDefault,
-    explicit_mode: explicitMode === 'on' ? 'on' as any : explicitMode === 'auto' ? 'auto' as any : undefined,
+    explicit_mode: explicitMode === 'on'
+      ? 'on' as any
+      : explicitMode === 'auto'
+        ? 'auto' as any
+        : explicitMode === 'off'
+          ? 'off' as any
+          : undefined,
     goal_status: hasExplicitGoalState && effectiveGoal?.status === 'active'
       ? 'active' as any
       : (!effectiveGoal || effectiveGoal.status === 'idle' || effectiveGoal.status === 'active'

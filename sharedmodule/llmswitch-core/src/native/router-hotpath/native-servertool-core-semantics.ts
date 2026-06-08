@@ -66,6 +66,8 @@ export interface BudgetSnapshot {
   max_repeats: number;
   used: number;
   source: string;
+  stage_mode?: string;
+  ai_mode?: string;
 }
 
 export interface DefaultBudgetConfig {
@@ -73,6 +75,27 @@ export interface DefaultBudgetConfig {
   text: string;
   max_repeats: number;
   is_non_active_managed_goal: boolean;
+}
+
+export interface BudgetStateUpdatePlanInput {
+  stopSignal: {
+    observed: boolean;
+    eligible: boolean;
+    reason: string;
+  };
+  existingState?: Record<string, unknown> | null;
+  snapshot?: BudgetSnapshot | null;
+  defaultConfig?: DefaultBudgetConfig | null;
+  nowMs: number;
+}
+
+export interface BudgetStateUpdatePlanOutput {
+  observed: boolean;
+  stopEligible: boolean;
+  used?: number;
+  maxRepeats?: number;
+  shouldPersist: boolean;
+  nextState?: Record<string, unknown> | null;
 }
 
 export interface ClientExecCliProjectionInput {
@@ -129,6 +152,16 @@ export interface ServertoolBackendRoutePolicyOutput {
     shortCircuitRequiresAction: boolean;
   };
   input: unknown;
+}
+
+export interface ServertoolBackendRouteFinalizeDecision {
+  contextDecorationMode?: string;
+  ignoreRequiresActionFollowup?: boolean;
+}
+
+export interface ServertoolBackendRouteFinalizeExecution {
+  flowId?: string;
+  context?: Record<string, unknown>;
 }
 
 export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
@@ -198,6 +231,25 @@ export function calculateBudgetWithNative(
     throw new Error(`calculateBudget native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson);
+}
+
+export function planBudgetStateUpdateWithNative(
+  input: BudgetStateUpdatePlanInput,
+): BudgetStateUpdatePlanOutput {
+  const capability = 'planBudgetStateUpdateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planBudgetStateUpdateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planBudgetStateUpdateJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planBudgetStateUpdateJson native returned invalid payload');
+  }
+  return parsed as BudgetStateUpdatePlanOutput;
 }
 
 export function resolveStopMessageSessionScopeWithNative(
@@ -299,6 +351,28 @@ export function validateClientExecCommandResultWithNative(rawOutput: string): Re
   return JSON.parse(resultJson) as Record<string, unknown>;
 }
 
+export function hasStopMessageAutoCliResultInRequestWithNative(input: {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+}): boolean {
+  const capability = 'hasStopMessageAutoCliResultInRequestJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('hasStopMessageAutoCliResultInRequestJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`hasStopMessageAutoCliResultInRequestJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`hasStopMessageAutoCliResultInRequestJson native returned invalid bool: ${resultJson}`);
+}
+
 export function planServertoolBackendRoutePolicyWithNative(
   input: ServertoolBackendRoutePolicyInput,
 ): ServertoolBackendRoutePolicyOutput {
@@ -312,4 +386,61 @@ export function planServertoolBackendRoutePolicyWithNative(
     throw new Error(`planServertoolBackendRoutePolicyJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson) as ServertoolBackendRoutePolicyOutput;
+}
+
+export function decorateServertoolFinalChatWithNative(input: {
+  chat: Record<string, unknown>;
+  execution?: ServertoolBackendRouteFinalizeExecution;
+  decision?: ServertoolBackendRouteFinalizeDecision;
+}): Record<string, unknown> {
+  const capability = 'decorateServertoolFinalChatJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('decorateServertoolFinalChatJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`decorateServertoolFinalChatJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as Record<string, unknown>;
+}
+
+export function shouldShortCircuitRequiresActionFollowupWithNative(input: {
+  flowId?: string;
+  decision?: ServertoolBackendRouteFinalizeDecision;
+  hasRequiresActionShape: boolean;
+}): boolean {
+  const capability = 'shouldShortCircuitRequiresActionFollowupJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('shouldShortCircuitRequiresActionFollowupJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`shouldShortCircuitRequiresActionFollowupJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`shouldShortCircuitRequiresActionFollowupJson native returned invalid bool: ${resultJson}`);
+}
+
+export function extractTextFromChatLikeWithNative(payload: unknown): string {
+  const capability = 'extractServertoolTextFromChatLikeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractServertoolTextFromChatLikeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(payload));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractServertoolTextFromChatLikeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string') {
+    throw new Error(`extractServertoolTextFromChatLikeJson native returned invalid payload: ${typeof parsed}`);
+  }
+  return parsed;
 }

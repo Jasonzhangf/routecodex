@@ -36,9 +36,20 @@ const CLI_PROJECTION = `${SERVERTOOL_TS_DIR}/cli-projection.ts`;
 const CLI_RESULT_GUARD = `${SERVERTOOL_TS_DIR}/cli-result-guard.ts`;
 const TS_CLI_EXECUTOR = `${SERVERTOOL_TS_DIR}/cli-executor.ts`;
 const RUST_SERVERTOOL_CLI = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs`;
+const RUST_FOLLOWUP_CORE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs`;
+const RUST_ROUTER_HOTPATH_NAPI_LIB = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`;
 const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
+const RUST_SERVERTOOL_COUNTER = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_counter.rs`;
 const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
+const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
+const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
+const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
+const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
+const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
+const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard-block.ts`;
+const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
+const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
@@ -117,6 +128,27 @@ function findJestUnstableMockModuleBlock(content, modulePath) {
     return content.slice(moduleIndex);
   }
   return content.slice(moduleIndex, nextMockIndex);
+}
+
+function extractFunctionBlock(content, functionName) {
+  const signature = `function ${functionName}`;
+  const start = content.indexOf(signature);
+  if (start < 0) return '';
+  const braceStart = content.indexOf('{', start);
+  if (braceStart < 0) return '';
+  let depth = 0;
+  for (let index = braceStart; index < content.length; index += 1) {
+    const char = content[index];
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return content.slice(start, index + 1);
+      }
+    }
+  }
+  return content.slice(start);
 }
 
 // ── Check 1: No .bak files in active servertool paths ──────────
@@ -235,6 +267,7 @@ function checkServertoolCliProjectionMap() {
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const cliProjection = readRequired(CLI_PROJECTION);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
+  const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
 
   assertContains(
@@ -273,6 +306,36 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     'routecodex servertool run {} --input-json'
   );
+  assertContains(
+    'cli-projection-command-contract',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    rustOutcomeContract,
+    'pub fn quote_posix_single_argument'
+  );
+  assertContains(
+    'cli-projection-command-contract',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    rustOutcomeContract,
+    'quote_posix_single_argument(&input_json)'
+  );
+  assertContains(
+    'cli-projection-command-contract',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+    rustCliContract,
+    'quote_posix_single_argument(&input_json)'
+  );
+  for (const [file, content] of [
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, rustOutcomeContract],
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract],
+  ]) {
+    const runtimeSource = content.split('#[cfg(test)]')[0];
+    if (runtimeSource.includes("--input-json '")) {
+      fail(
+        'cli-projection-command-contract',
+        `${file.replace(`${ROOT}/`, '')} runtime command builder must not wrap input JSON with raw single quotes; use quote_posix_single_argument`
+      );
+    }
+  }
   assertContains(
     'cli-projection-native-wrapper',
     `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
@@ -538,13 +601,190 @@ function checkStopMessagePersistedLookupRustOwner() {
   pass('stop-message-persisted-lookup-no-ts-owner', `scanned ${tsFiles.length} servertool TS files`);
 }
 
-// ── Check 12: backend-route policy has Rust owner ─────────────
+// ── Check 12: stop-message loop guard is Rust-owned ───────────
+function checkStopMessageLoopGuardRustOwner() {
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const rustLoopGuard = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_loop_guard.rs`);
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const tsLoopGuard = readRequired(TS_STOP_MESSAGE_LOOP_GUARD);
+
+  assertContains(
+    'stop-message-loop-guard-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod stop_message_loop_guard'
+  );
+  assertContains(
+    'stop-message-loop-guard-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_loop_guard.rs`,
+    rustLoopGuard,
+    'pub fn evaluate'
+  );
+  assertContains(
+    'stop-message-loop-guard-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'evaluateLoopGuardWithNative'
+  );
+  assertContains(
+    'stop-message-loop-guard-thin-shell',
+    TS_STOP_MESSAGE_LOOP_GUARD,
+    tsLoopGuard,
+    'evaluateLoopGuardWithNative'
+  );
+  for (const keyword of [
+    'Fallback: pure TS',
+    'Date.now()',
+    'Math.floor',
+    'Math.max(0',
+    'elapsedMs >=',
+    'pairRepeatCount >=',
+  ]) {
+    if (tsLoopGuard.includes(keyword)) {
+      fail(
+        'stop-message-loop-guard-no-ts-fallback',
+        `Forbidden TS loop guard semantic "${keyword}" found in stop-message-loop-guard-block.ts`
+      );
+    }
+  }
+  pass('stop-message-loop-guard-no-ts-fallback', 'stop-message loop guard TS block is a native fail-fast shell');
+}
+
+// ── Check 12b: stop-message counter persisted update is Rust-owned ─
+function checkStopMessageCounterRustOwner() {
+  const rustCounter = readRequired(RUST_SERVERTOOL_COUNTER);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const tsCounter = readRequired(TS_STOP_MESSAGE_COUNTER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const symbol of [
+    'pub fn plan_budget_state_update',
+    'BudgetStateUpdateInput',
+    'BudgetStateUpdatePlan',
+  ]) {
+    assertContains('stop-message-counter-rust-owner', RUST_SERVERTOOL_COUNTER, rustCounter, symbol);
+  }
+  assertContains(
+    'stop-message-counter-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_budget_state_update_json'
+  );
+  assertContains(
+    'stop-message-counter-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_budget_state_update_json'
+  );
+  assertContains(
+    'stop-message-counter-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planBudgetStateUpdateJson'
+  );
+  assertContains(
+    'stop-message-counter-native-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planBudgetStateUpdateWithNative'
+  );
+  assertContains(
+    'stop-message-counter-thin-shell',
+    TS_STOP_MESSAGE_COUNTER,
+    tsCounter,
+    'planBudgetStateUpdateWithNative'
+  );
+  assertContains(
+    'stop-message-counter-error-budget',
+    TS_STOP_MESSAGE_COUNTER,
+    tsCounter,
+    'incrementStopMessageErrorBudget'
+  );
+
+  for (const keyword of [
+    'applyStopMessageSnapshotToState',
+    'calculateBudgetWithNative',
+    'stopMessageUsed =',
+    'stopMessageLastUsedAt =',
+    'stopMessageMaxRepeats =',
+    'stopMessageText =',
+    'stopMessageSource =',
+    'stopMessageStageMode =',
+    'stopMessageAiMode =',
+    'Math.max(0',
+    'used + 1',
+  ]) {
+    if (tsCounter.includes(keyword)) {
+      fail(
+        'stop-message-counter-no-ts-owner',
+        `Forbidden TS stop-message counter semantic "${keyword}" found in stop-message-counter.ts`
+      );
+    }
+  }
+  pass('stop-message-counter-no-ts-owner', 'stop-message counter TS file is a native IO shell');
+}
+
+// ── Check 13: followup mainline bridge is Rust-owned ──────────
+function checkFollowupMainlineNativeBridgeRustOwner() {
+  const rustFollowupCore = readRequired(RUST_FOLLOWUP_CORE);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_FOLLOWUP_MAINLINE_WRAPPER);
+
+  for (const symbol of [
+    'pub fn build_followup_request_id',
+    'pub fn inject_loop_warning',
+    'pub fn decide_budget_reset',
+  ]) {
+    assertContains('followup-mainline-rust-owner', RUST_FOLLOWUP_CORE, rustFollowupCore, symbol);
+  }
+  for (const symbol of [
+    'pub fn build_followup_request_id',
+    'pub fn inject_loop_warning_json',
+    'pub fn decide_budget_reset_json',
+  ]) {
+    assertContains('followup-mainline-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, symbol);
+  }
+  for (const symbol of [
+    'buildFollowupRequestId',
+    'injectLoopWarningJson',
+    'decideBudgetResetJson',
+  ]) {
+    assertContains('followup-mainline-native-wrapper', NATIVE_FOLLOWUP_MAINLINE_WRAPPER, nativeWrapper, symbol);
+  }
+  for (const keyword of [
+    'Fallback: pure TS',
+    'return input.messages',
+    'return { should_reset',
+    'currentUsed + 1',
+    'Math.max(input.warn_threshold, input.repeat_count)',
+    '检测到 stopMessage 请求/响应参数已连续',
+  ]) {
+    if (nativeWrapper.includes(keyword)) {
+      fail(
+        'followup-mainline-no-ts-fallback',
+        `Forbidden TS followup-mainline fallback semantic "${keyword}" found in native-followup-mainline-semantics.ts`
+      );
+    }
+  }
+  if (napiLib.includes('r#"{"should_reset":false,"next_used":0}"#') || napiLib.includes('unwrap_or_else(|_|')) {
+    fail(
+      'followup-mainline-no-native-default-fallback',
+      'decide_budget_reset_json must return a NapiResult error on serialization failure, not a default decision'
+    );
+  }
+  pass('followup-mainline-no-ts-fallback', 'native followup mainline bridge is fail-fast and Rust-owned');
+}
+
+// ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const flowPolicyShell = readRequired(TS_BACKEND_ROUTE_FLOW_POLICY);
 
   if (existsSync(TS_BACKEND_ROUTE_SHAPE_GUARD)) {
     fail(
@@ -585,6 +825,54 @@ function checkBackendRoutePolicyRustOwner() {
     requiredExports,
     'planServertoolBackendRoutePolicyJson'
   );
+  assertContains(
+    'backend-route-flow-policy-native-owner',
+    TS_BACKEND_ROUTE_FLOW_POLICY,
+    flowPolicyShell,
+    'planServertoolFollowupRuntimeWithNative'
+  );
+  assertContains(
+    'backend-route-flow-policy-native-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`),
+    'pub fn plan_servertool_followup_runtime_json'
+  );
+  assertContains(
+    'backend-route-finalize-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn decorate_servertool_final_chat_with_context'
+  );
+  assertContains(
+    'backend-route-finalize-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn should_short_circuit_requires_action_followup'
+  );
+  assertContains(
+    'backend-route-finalize-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'decorateServertoolFinalChatWithNative'
+  );
+  assertContains(
+    'backend-route-finalize-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'shouldShortCircuitRequiresActionFollowupWithNative'
+  );
+  assertContains(
+    'backend-route-finalize-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'decorateServertoolFinalChatJson'
+  );
+  assertContains(
+    'backend-route-finalize-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'shouldShortCircuitRequiresActionFollowupJson'
+  );
   for (const [toolName, forbiddenProjection] of [
     ['web_search', 'ClientExecCliProjection'],
     ['vision_auto', 'ClientExecCliProjection'],
@@ -595,6 +883,47 @@ function checkBackendRoutePolicyRustOwner() {
       fail(
         'backend-route-policy-rust-owner',
         `${toolName} has forbidden ${forbiddenProjection} mapping in backend_route_contract.rs`
+      );
+    }
+  }
+  const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
+  for (const keyword of [
+    'isNoFollowupFlowId',
+    'isAutoLimitFlowId',
+    'isFlowOnlyLoopLimitFlowId',
+    'isClientInjectOnlyFollowupFlowId',
+    'isSeedLoopPayloadFollowupFlowId',
+    'resolveClientInjectSourceForFlowId',
+    'resolveTransparentReplayRequestSuffixForFlowId',
+    'shouldIgnoreRequiresActionFollowup',
+    'resolveContextDecorationModeForFlowId',
+    'shouldPreserveStopMessageEligibilityForFollowup',
+    "outcomeMode: plan?.outcomeMode ?? 'reenter'",
+    'plan?.noFollowup === true',
+    'plan?.autoLimit === true',
+    'plan?.flowOnlyLoopLimit === true',
+    'plan?.clientInjectOnly === true',
+    'plan?.seedLoopPayload === true',
+  ]) {
+    if (flowPolicyShell.includes(keyword)) {
+      fail(
+        'backend-route-flow-policy-no-ts-owner',
+        `Forbidden TS flow policy semantic "${keyword}" found in backend-route-flow-policy.ts`
+      );
+    }
+  }
+  for (const keyword of [
+    'visibleSummary',
+    'decorateContinueExecutionSummary',
+    'decorateWebSearchSummary',
+    'message.content',
+    'cloneJsonObject',
+    '【web_search',
+  ]) {
+    if (finalizeShell.includes(keyword)) {
+      fail(
+        'backend-route-finalize-no-ts-owner',
+        `Forbidden TS finalize semantic "${keyword}" found in backend-route-finalize-block.ts`
       );
     }
   }
@@ -623,6 +952,136 @@ function checkBackendRoutePolicyRustOwner() {
   pass('backend-route-policy-rust-owner', 'servertool-core owns backend-route policy contract');
 }
 
+// ── Check 15: servertool text extraction has Rust owner ───────
+function checkServertoolTextExtractionRustOwner() {
+  const rustTextExtraction = readRequired(RUST_SERVERTOOL_TEXT_EXTRACTION);
+  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+
+  assertContains(
+    'servertool-text-extraction-rust-owner',
+    RUST_SERVERTOOL_TEXT_EXTRACTION,
+    rustTextExtraction,
+    'pub fn extract_text_from_chat_like'
+  );
+  assertContains(
+    'servertool-text-extraction-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'extract_servertool_text_from_chat_like_json'
+  );
+  assertContains(
+    'servertool-text-extraction-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'extractServertoolTextFromChatLikeJson'
+  );
+  assertContains(
+    'servertool-text-extraction-thin-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'extractTextFromChatLikeWithNative'
+  );
+  assertContains(
+    'servertool-text-extraction-thin-wrapper',
+    TS_SERVER_SIDE_TOOLS,
+    serverSideTools,
+    'extractTextFromChatLikeWithNative(payload)'
+  );
+
+  const functionBlock = extractFunctionBlock(serverSideTools, 'extractTextFromChatLike');
+  if (!functionBlock) {
+    fail('servertool-text-extraction-no-ts-owner', 'extractTextFromChatLike function not found');
+    return;
+  }
+  for (const keyword of [
+    'choices',
+    'message.content',
+    'output_text',
+    'web_search',
+    'publish_date',
+    '【',
+    'join',
+    'slice',
+    'trim()',
+  ]) {
+    if (functionBlock.includes(keyword)) {
+      fail(
+        'servertool-text-extraction-no-ts-owner',
+        `Forbidden TS text extraction semantic "${keyword}" found in extractTextFromChatLike`
+      );
+    }
+  }
+  pass('servertool-text-extraction-rust-owner', 'servertool-core owns chat-like text extraction');
+}
+
+// ── Check 16: servertool CLI result guard has Rust owner ──────
+function checkServertoolCliResultGuardRustOwner() {
+  const rustCliResultGuard = readRequired(RUST_SERVERTOOL_CLI_RESULT_GUARD);
+  const cliResultGuardShell = readRequired(CLI_RESULT_GUARD);
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+
+  assertContains(
+    'servertool-cli-result-guard-rust-owner',
+    RUST_SERVERTOOL_CLI_RESULT_GUARD,
+    rustCliResultGuard,
+    'pub fn has_stop_message_auto_cli_result_in_request'
+  );
+  assertContains(
+    'servertool-cli-result-guard-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'has_stop_message_auto_cli_result_in_request_json'
+  );
+  assertContains(
+    'servertool-cli-result-guard-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'hasStopMessageAutoCliResultInRequestJson'
+  );
+  assertContains(
+    'servertool-cli-result-guard-native-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'hasStopMessageAutoCliResultInRequestWithNative'
+  );
+  assertContains(
+    'servertool-cli-result-guard-thin-shell',
+    CLI_RESULT_GUARD,
+    cliResultGuardShell,
+    'hasStopMessageAutoCliResultInRequestWithNative(args)'
+  );
+
+  for (const keyword of [
+    'ROUTECODEX_STOP_MESSAGE_AUTO_CLI',
+    'MAX_SCAN_DEPTH',
+    'MAX_SCAN_NODES',
+    'collectScanRoots',
+    'scanValue',
+    'isToolResultLike',
+    'readResultText',
+    'collectText',
+    'parseJsonObjectFromText',
+    'validateClientExecCommandResultWithNative',
+    'routecodex servertool run stop_message_auto',
+    'function_call_output',
+    'tool_call_id',
+    'output_text',
+  ]) {
+    if (cliResultGuardShell.includes(keyword)) {
+      fail(
+        'servertool-cli-result-guard-no-ts-owner',
+        `Forbidden TS CLI result guard semantic "${keyword}" found in cli-result-guard.ts`
+      );
+    }
+  }
+  pass('servertool-cli-result-guard-rust-owner', 'servertool-core owns CLI result guard scanning');
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -637,7 +1096,12 @@ checkApplyPatchNotCliProjected();
 checkStandaloneServertoolBinary();
 checkStoplessNoReenterContract();
 checkStopMessagePersistedLookupRustOwner();
+checkStopMessageLoopGuardRustOwner();
+checkStopMessageCounterRustOwner();
+checkFollowupMainlineNativeBridgeRustOwner();
 checkBackendRoutePolicyRustOwner();
+checkServertoolTextExtractionRustOwner();
+checkServertoolCliResultGuardRustOwner();
 
 console.log();
 

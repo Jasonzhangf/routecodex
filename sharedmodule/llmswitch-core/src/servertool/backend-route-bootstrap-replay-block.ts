@@ -3,7 +3,7 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { applyFollowupRuntimeMetadata } from './backend-route-runtime-block.js';
-import { resolveFollowupFlowDecision, resolveTransparentReplayRequestSuffixForFlowId, type FollowupFlowDecision } from './backend-route-flow-policy.js';
+import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
 import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
@@ -140,8 +140,7 @@ export async function maybeRunTransparentBootstrapReplay(args: {
   onLogProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): Promise<{ chat: JsonObject; executed: true; flowId?: string } | null> {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  const replayRequestSuffix =
-    decision.transparentReplayRequestSuffix ?? resolveTransparentReplayRequestSuffixForFlowId(args.flowId);
+  const replayRequestSuffix = decision.transparentReplayRequestSuffix;
   if (!replayRequestSuffix || !args.reenterPipeline || !args.execution?.flowId) {
     return null;
   }

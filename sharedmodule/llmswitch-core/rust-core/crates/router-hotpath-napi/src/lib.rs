@@ -1305,11 +1305,11 @@ pub fn decide_budget_reset_json(
     stop_observed: bool,
     stop_eligible: bool,
     current_used: u32,
-) -> String {
+) -> NapiResult<String> {
     let decision =
         followup_mainline_blocks::budget_reset(stop_observed, stop_eligible, current_used);
     serde_json::to_string(&decision)
-        .unwrap_or_else(|_| r#"{"should_reset":false,"next_used":0}"#.to_string())
+        .map_err(|e| napi::Error::from_reason(format!("serialize BudgetResetDecision: {e}")))
 }
 
 #[napi]
@@ -1341,6 +1341,12 @@ pub fn calculate_budget(
 }
 
 #[napi]
+pub fn plan_budget_state_update_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_budget_state_update_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_client_exec_cli_projection_output_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1359,8 +1365,32 @@ pub fn validate_client_exec_command_result_json(raw_output: String) -> NapiResul
 }
 
 #[napi]
+pub fn has_stop_message_auto_cli_result_in_request_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::has_stop_message_auto_cli_result_in_request_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_backend_route_policy_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_backend_route_policy_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn decorate_servertool_final_chat_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::decorate_servertool_final_chat_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn should_short_circuit_requires_action_followup_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::should_short_circuit_requires_action_followup_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::extract_text_from_chat_like_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

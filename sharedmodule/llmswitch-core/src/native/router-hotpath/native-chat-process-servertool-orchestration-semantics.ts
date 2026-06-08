@@ -68,6 +68,7 @@ export type NativeServertoolNoopOutcome = {
   flowId: string;
   toolContent: Record<string, unknown>;
   followup: Record<string, unknown>;
+  executionContext: Record<string, unknown>;
 };
 
 const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
@@ -563,6 +564,7 @@ export function planServertoolOutcomeWithNative(input: {
 export function planServertoolNoopOutcomeWithNative(input: {
   toolCallId: string;
   toolName: string;
+  toolArguments?: string;
   base: Record<string, unknown>;
 }): NativeServertoolNoopOutcome {
   const capability = 'planServertoolNoopOutcomeJson';
@@ -579,7 +581,8 @@ export function planServertoolNoopOutcomeWithNative(input: {
       !row.chatResponse || typeof row.chatResponse !== 'object' ||
       typeof row.flowId !== 'string' ||
       !row.toolContent || typeof row.toolContent !== 'object' ||
-      !row.followup || typeof row.followup !== 'object'
+      !row.followup || typeof row.followup !== 'object' ||
+      !row.executionContext || typeof row.executionContext !== 'object'
     ) {
       return fail('invalid shape');
     }
@@ -587,7 +590,8 @@ export function planServertoolNoopOutcomeWithNative(input: {
       chatResponse: row.chatResponse as Record<string, unknown>,
       flowId: row.flowId,
       toolContent: row.toolContent as Record<string, unknown>,
-      followup: row.followup as Record<string, unknown>
+      followup: row.followup as Record<string, unknown>,
+      executionContext: row.executionContext as Record<string, unknown>
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

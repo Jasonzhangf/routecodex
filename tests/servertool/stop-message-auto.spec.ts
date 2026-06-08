@@ -56,6 +56,11 @@ function resolveStopStatePath(sessionId: string): string {
   return path.join(SESSION_DIR, `session-${sessionId}.json`);
 }
 
+function clearStopStateForSession(sessionId: string): void {
+  fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
+  fs.rmSync(path.join(SESSION_DIR, `session-${sessionId}.json`), { force: true });
+}
+
 function withTmuxAdapterContext<T>(adapterContext: T): T {
   if (!adapterContext || typeof adapterContext !== 'object') {
     return adapterContext;
@@ -230,6 +235,10 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
   const followupFlowId = typeof ctx.followup_flow_id === 'string' ? ctx.followup_flow_id.trim() : '';
   if (followupFlowId && followupFlowId !== 'stop_message_flow') {
     return { action: 'skip', skip_reason: 'skip_servertool_followup_hop' };
+  }
+
+  if (String(ctx.explicit_mode ?? '').trim().toLowerCase() === 'off') {
+    return { action: 'skip', skip_reason: 'skip_stopmessage_mode_off' };
   }
 
   // Resolve snapshot.
@@ -442,7 +451,7 @@ describe('stop_message_auto servertool', () => {
     resetStopMessageRuntimeConfigCacheForTests();
 
     const sessionId = 'stopmessage-red-default-no-followup';
-    fs.rmSync(resolveStopStatePath(sessionId), { force: true });
+    clearStopStateForSession(sessionId);
     // No persisted stopMessage state — no writeRoutingStateForSession
 
     const capturedChatRequest: JsonObject = {
@@ -1062,6 +1071,9 @@ describe('stop_message_auto servertool', () => {
   });
 
   test('responses entrypoint chatprocess payload does not skip default stopless as empty reply', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+    clearStopStateForSession('stopmessage-spec-session-responses-entry-chatprocess-standard-origin');
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
       decisionContexts.push(ctx);
@@ -1125,10 +1137,15 @@ describe('stop_message_auto servertool', () => {
       expect(result.flowId).toBe('stop_message_flow');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
+      process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+      resetStopMessageRuntimeConfigCacheForTests();
     }
   });
 
   test('persisted active goal without current goal context does not skip stopless', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+    clearStopStateForSession('stopmessage-spec-session-persisted-active-not-current-goal');
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
       decisionContexts.push(ctx);
@@ -1173,10 +1190,15 @@ describe('stop_message_auto servertool', () => {
       expect(result.flowId).toBe('stop_message_flow');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
+      process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+      resetStopMessageRuntimeConfigCacheForTests();
     }
   });
 
   test('completed goal with current goal context does not skip stopless as active', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+    clearStopStateForSession('stopmessage-spec-session-completed-goal-current-context');
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
       decisionContexts.push(ctx);
@@ -1233,10 +1255,15 @@ describe('stop_message_auto servertool', () => {
       expect(result.flowId).toBe('stop_message_flow');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
+      process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+      resetStopMessageRuntimeConfigCacheForTests();
     }
   });
 
   test('historical goal context without current goal turn does not skip stopless', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+    clearStopStateForSession('stopmessage-spec-session-historical-goal-not-current');
     const decisionContexts: StopMessageDecisionContext[] = [];
     __setDecideOverrideForTests((ctx: StopMessageDecisionContext): StopMessageDecision => {
       decisionContexts.push(ctx);
@@ -1276,6 +1303,8 @@ describe('stop_message_auto servertool', () => {
       expect(result.flowId).toBe('stop_message_flow');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
+      process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+      resetStopMessageRuntimeConfigCacheForTests();
     }
   });
 
@@ -2613,6 +2642,7 @@ describe('stop_message_auto servertool', () => {
 
   test('openai-responses does not trigger stop_message when session stage mode is off', async () => {
     const sessionId = 'stopmessage-spec-session-responses-mode-off';
+    clearStopStateForSession(sessionId);
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
         allowedProviders: new Set(),
@@ -2656,8 +2686,8 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
   test('stop_message followup pins exact routed provider and model from adapter context', async () => {

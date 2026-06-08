@@ -27,7 +27,10 @@ fn stop_message_auto_outputs_rust_owned_schema() {
     assert_eq!(value["tool"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
     assert_eq!(value["summary"], "stopless continuation ready");
-    assert_eq!(value["schemaGuidance"]["stopreasonValues"]["continueNeeded"], 2);
+    assert_eq!(
+        value["schemaGuidance"]["stopreasonValues"]["continueNeeded"],
+        2
+    );
     assert_eq!(value["injectedPromptPreview"], "continue with schema");
 }
 

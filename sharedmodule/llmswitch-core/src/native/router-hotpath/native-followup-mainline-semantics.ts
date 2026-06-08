@@ -31,42 +31,76 @@ export interface FollowupFlowDecision {
   contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
 }
 
+function requireNativeFunction(capability: string): (...args: unknown[]) => unknown {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`native ${capability} is required`);
+  }
+  return fn;
+}
+
+function parseNativeJson(capability: string, raw: unknown): unknown {
+  if (typeof raw !== 'string') {
+    throw new Error(`native ${capability} returned non-string: ${typeof raw}`);
+  }
+  return JSON.parse(raw) as unknown;
+}
+
+function assertLoopWarningMessages(
+  capability: string,
+  parsed: unknown
+): Array<{ role: string; content: string }> {
+  if (!Array.isArray(parsed)) {
+    throw new Error(`native ${capability} returned non-array messages`);
+  }
+  for (const [index, item] of parsed.entries()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`native ${capability} returned invalid message at index ${index}`);
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.role !== 'string' || typeof record.content !== 'string') {
+      throw new Error(`native ${capability} returned invalid message fields at index ${index}`);
+    }
+  }
+  return parsed as Array<{ role: string; content: string }>;
+}
+
+function assertBudgetResetDecision(capability: string, parsed: unknown): BudgetResetDecision {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`native ${capability} returned non-object decision`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.should_reset !== 'boolean') {
+    throw new Error(`native ${capability} returned invalid should_reset`);
+  }
+  if (!Number.isInteger(record.next_used) || (record.next_used as number) < 0) {
+    throw new Error(`native ${capability} returned invalid next_used`);
+  }
+  return {
+    should_reset: record.should_reset,
+    next_used: record.next_used as number
+  };
+}
+
 // ── Followup request ID builder ─────────────────────────────────────────────
 
 export function buildFollowupRequestIdWithNative(base: string, suffix?: string | null): string {
   const capability = 'buildFollowupRequestId';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('native buildFollowupRequestId is required');
+  const fn = requireNativeFunction(capability);
+  const result = fn(base, suffix ?? null);
+  if (typeof result !== 'string') {
+    throw new Error(`native ${capability} returned non-string: ${typeof result}`);
   }
-  return String(fn(base, suffix ?? null));
+  return result;
 }
 
 // ── Loop warning injector ───────────────────────────────────────────────────
 
 export function injectLoopWarningWithNative(input: LoopWarningInput): Array<{ role: string; content: string }> {
   const capability = 'injectLoopWarningJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    // Fallback: pure TS
-    const repeatCount = Math.max(input.warn_threshold, input.repeat_count);
-    const warningText = [
-      `检测到 stopMessage 请求/响应参数已连续 ${repeatCount} 轮一致。`,
-      '请立即尝试跳出循环（换路径、换验证方法、或直接给结论）。',
-      `若继续达到 ${input.fail_threshold} 轮一致，将返回 fetch failed 网络错误并停止自动续跑。`
-    ].join('\n');
-    return [...input.messages, { role: 'system', content: warningText }];
-  }
+  const fn = requireNativeFunction(capability);
   const inputJson = JSON.stringify(input);
-  const resultJson = fn(inputJson);
-  if (typeof resultJson !== 'string') {
-    return input.messages;
-  }
-  try {
-    return JSON.parse(resultJson);
-  } catch {
-    return input.messages;
-  }
+  return assertLoopWarningMessages(capability, parseNativeJson(capability, fn(inputJson)));
 }
 
 // ── Budget reset decision ───────────────────────────────────────────────────
@@ -77,23 +111,11 @@ export function decideBudgetResetWithNative(
   currentUsed: number
 ): BudgetResetDecision {
   const capability = 'decideBudgetResetJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    // Fallback: pure TS
-    if (!stopObserved || stopEligible) {
-      return { should_reset: false, next_used: currentUsed };
-    }
-    return { should_reset: true, next_used: currentUsed + 1 };
-  }
-  const resultJson = fn(stopObserved, stopEligible, currentUsed);
-  if (typeof resultJson !== 'string') {
-    return { should_reset: false, next_used: currentUsed };
-  }
-  try {
-    return JSON.parse(resultJson);
-  } catch {
-    return { should_reset: false, next_used: currentUsed };
-  }
+  const fn = requireNativeFunction(capability);
+  return assertBudgetResetDecision(capability, parseNativeJson(
+    capability,
+    fn(stopObserved, stopEligible, currentUsed)
+  ));
 }
 
 // ── Skeleton config types ───────────────────────────────────────────────────

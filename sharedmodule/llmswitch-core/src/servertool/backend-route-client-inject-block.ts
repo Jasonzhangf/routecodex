@@ -134,7 +134,7 @@ export async function runClientInjectOnlyFollowup(args: {
     disconnectWatcher.cancel();
     args.onLogProgress(5, 5, 'completed (client inject only)', { flowId: args.flowId });
     return {
-      chat: args.finalChatResponse,
+      chat: args.decorateFinalChatWithServerToolContext(args.finalChatResponse, args.execution),
       executed: true,
       flowId: args.flowId
     };

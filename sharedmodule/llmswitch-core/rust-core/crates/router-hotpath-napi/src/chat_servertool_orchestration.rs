@@ -1682,6 +1682,7 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     struct NoopInput {
         tool_call_id: String,
         tool_name: String,
+        tool_arguments: Option<String>,
         /// The base chat response payload to inject the tool_output into.
         base: Value,
     }
@@ -1695,10 +1696,26 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         /// The injected tool output content.
         tool_content: Value,
         followup: Value,
+        execution_context: Value,
     }
 
     let input: NoopInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let tool_name = normalize_routecodex_tool_name(Some(input.tool_name.as_str()))
+        .unwrap_or_else(|| input.tool_name.trim().to_ascii_lowercase());
+    if tool_name != "continue_execution" {
+        return Err(napi::Error::from_reason(format!(
+            "unsupported noop servertool: {}",
+            input.tool_name
+        )));
+    }
+    let visible_summary = resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
+        .map_err(napi::Error::from_reason)?;
+    let client_inject_text = if visible_summary.is_empty() {
+        LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT.to_string()
+    } else {
+        visible_summary.clone()
+    };
 
     // Build the standard noop tool output content
     let tool_content = serde_json::json!({
@@ -1718,12 +1735,17 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     let mut new_outputs = existing_outputs.clone();
     new_outputs.push(serde_json::json!({
         "tool_call_id": input.tool_call_id,
-        "name": input.tool_name,
+        "name": tool_name,
         "content": tool_content.to_string()
     }));
     if let Some(obj) = chat_response.as_object_mut() {
         obj.insert("tool_outputs".to_string(), Value::Array(new_outputs));
     }
+    let execution_context = serde_json::json!({
+        "continue_execution": {
+            "visibleSummary": visible_summary
+        }
+    });
 
     let followup = serde_json::json!({
         "requestIdSuffix": ":continue_execution_followup",
@@ -1735,8 +1757,9 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         },
         "metadata": {
             "clientInjectOnly": true,
-            "clientInjectText": "继续执行",
-            "clientInjectSource": "servertool.continue_execution"
+            "clientInjectText": client_inject_text,
+            "clientInjectSource": "servertool.continue_execution",
+            "visibleSummary": visible_summary
         }
     });
 
@@ -1745,8 +1768,25 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         flow_id: "continue_execution_flow".to_string(),
         tool_content,
         followup,
+        execution_context,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn resolve_continue_execution_visible_summary(arguments: Option<&str>) -> Result<String, String> {
+    let Some(raw) = arguments.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(String::new());
+    };
+    let parsed: Value = serde_json::from_str(raw)
+        .map_err(|_| "continue_execution arguments must be a JSON object".to_string())?;
+    let Some(record) = parsed.as_object() else {
+        return Err("continue_execution arguments must be a JSON object".to_string());
+    };
+    match record.get("summary") {
+        Some(Value::String(text)) => Ok(text.trim().to_string()),
+        Some(Value::Null) | None => Ok(String::new()),
+        Some(_) => Err("continue_execution summary must be a string".to_string()),
+    }
 }
 
 fn build_assistant_tool_call_message_value(tool_calls: &[Value]) -> Value {
@@ -2649,6 +2689,66 @@ mod tests {
         assert_eq!(
             runtime["serverToolLoopState"]["maxRepeats"].as_u64(),
             Some(3)
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_noop_outcome_extracts_continue_execution_summary() {
+        let output = plan_servertool_noop_outcome_json(
+            json!({
+                "toolCallId": "call_continue",
+                "toolName": "continue_execution",
+                "toolArguments": "{\"summary\":\" Processing data... \"}",
+                "base": {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": null
+                        }
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(parsed["flowId"], "continue_execution_flow");
+        assert_eq!(
+            parsed["followup"]["metadata"]["clientInjectText"],
+            "Processing data..."
+        );
+        assert_eq!(
+            parsed["followup"]["metadata"]["visibleSummary"],
+            "Processing data..."
+        );
+        assert_eq!(
+            parsed["executionContext"]["continue_execution"]["visibleSummary"],
+            "Processing data..."
+        );
+        assert_eq!(
+            parsed["chatResponse"]["tool_outputs"][0]["name"],
+            "continue_execution"
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_noop_outcome_defaults_empty_continue_execution_summary() {
+        let output = plan_servertool_noop_outcome_json(
+            json!({
+                "toolCallId": "call_continue",
+                "toolName": "continue_execution",
+                "toolArguments": "{}",
+                "base": {}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(parsed["followup"]["metadata"]["clientInjectText"], "继续执行");
+        assert_eq!(parsed["followup"]["metadata"]["visibleSummary"], "");
+        assert_eq!(
+            parsed["executionContext"]["continue_execution"]["visibleSummary"],
+            ""
         );
     }
 

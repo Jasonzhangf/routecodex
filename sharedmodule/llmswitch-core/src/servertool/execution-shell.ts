@@ -455,6 +455,7 @@ export async function runToolCallExecutionLoop(args: {
     const noopResult = planServertoolNoopOutcomeWithNative({
       toolCallId: toolCall.id,
       toolName: toolCall.name,
+      toolArguments: toolCall.arguments,
       base: args.baseForExecution as Record<string, unknown>
     });
 
@@ -472,7 +473,7 @@ export async function runToolCallExecutionLoop(args: {
     }, {
       flowId: noopResult.flowId,
       followup: noopResult.followup as unknown as ServerToolFollowupPlan,
-      context: { [toolCall.name]: { visibleSummary: '' } }
+      context: noopResult.executionContext as JsonObject
     });
   }
 

@@ -1,3 +1,4 @@
+// Required-export contract for the native-router-hotpath binding.
 export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "analyzeChatProcessMediaJson",
   "analyzeChatWebSearchIntentJson",
@@ -318,9 +319,14 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveGovernanceContextJson",
   "resolveStopMessageSessionScopeJson",
   "resolveServertoolStickyKeyJson",
+  "planBudgetStateUpdateJson",
   "planStopMessagePersistedLookupJson",
   "buildClientVisibleProjectionShellJson",
+  "hasStopMessageAutoCliResultInRequestJson",
   "planServertoolBackendRoutePolicyJson",
+  "decorateServertoolFinalChatJson",
+  "shouldShortCircuitRequiresActionFollowupJson",
+  "extractServertoolTextFromChatLikeJson",
   "resolveVirtualRouterRoutingStateKeyJson",
   "resolveVirtualRouterStopMessageScopeJson",
   "VirtualRouterEngineProxy",

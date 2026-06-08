@@ -1,14 +1,20 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use servertool_core::backend_route_contract::{
+    decorate_servertool_final_chat_with_context,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
+    should_short_circuit_requires_action_followup,
+    ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput,
+    ServertoolBackendRouteRequiresActionShortCircuitInput,
 };
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
+use servertool_core::cli_result_guard;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
+use servertool_core::text_extraction;
 
 /// Inspect a response payload and return the stop gateway context as JSON.
 pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String> {
@@ -66,6 +72,13 @@ pub fn calculate_budget_json(
     serde_json::to_string(&decision).map_err(|e| format!("serialize decision: {e}"))
 }
 
+pub fn plan_budget_state_update_json(input_json: &str) -> Result<String, String> {
+    let input: stop_message_counter::BudgetStateUpdateInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize BudgetStateUpdateInput: {e}"))?;
+    let plan = stop_message_counter::plan_budget_state_update(input);
+    serde_json::to_string(&plan).map_err(|e| format!("serialize budget state update plan: {e}"))
+}
+
 pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<String, String> {
     let input: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize projection input: {e}"))?;
@@ -116,12 +129,51 @@ pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<Stri
     serde_json::to_string(&output).map_err(|e| format!("serialize command result: {e}"))
 }
 
+pub fn has_stop_message_auto_cli_result_in_request_json(input_json: &str) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize cli result guard input: {e}"))?;
+    Ok(if cli_result_guard::has_stop_message_auto_cli_result_in_request(&payload) {
+        "true"
+    } else {
+        "false"
+    }
+    .to_string())
+}
+
 pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolBackendRoutePolicyInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize backend route input: {e}"))?;
     let output = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(input)
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize backend route plan: {e}"))
+}
+
+pub fn decorate_servertool_final_chat_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolBackendRouteFinalizeInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize backend route finalize input: {e}"))?;
+    let output = decorate_servertool_final_chat_with_context(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize backend route final chat: {e}"))
+}
+
+pub fn should_short_circuit_requires_action_followup_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: ServertoolBackendRouteRequiresActionShortCircuitInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize backend route requires_action input: {e}"))?;
+    Ok(if should_short_circuit_requires_action_followup(input) {
+        "true"
+    } else {
+        "false"
+    }
+    .to_string())
+}
+
+pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize text extraction payload: {e}"))?;
+    let text = text_extraction::extract_text_from_chat_like(&payload);
+    serde_json::to_string(&text).map_err(|e| format!("serialize extracted text: {e}"))
 }
 
 /// Resolve default max repeats.
@@ -166,5 +218,108 @@ mod tests {
         )
         .expect_err("stop_message_auto is not backend route");
         assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
+    }
+
+    #[test]
+    fn decorates_final_chat_via_servertool_core_bridge() {
+        let raw = decorate_servertool_final_chat_json(
+            &json!({
+                "chat": {
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": { "role": "assistant", "content": null }
+                    }]
+                },
+                "execution": {
+                    "flowId": "continue_execution_flow",
+                    "context": { "continue_execution": { "visibleSummary": "ok" } }
+                },
+                "decision": { "contextDecorationMode": "continue_execution_summary" }
+            })
+            .to_string(),
+        )
+        .expect("finalize bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["choices"][0]["message"]["content"], "ok");
+        assert_eq!(parsed["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn requires_action_short_circuit_bridge_returns_bool_json() {
+        let raw = should_short_circuit_requires_action_followup_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "decision": { "ignoreRequiresActionFollowup": true },
+                "hasRequiresActionShape": true
+            })
+            .to_string(),
+        )
+        .expect("requires action bridge");
+        assert_eq!(raw, "true");
+    }
+
+    #[test]
+    fn extracts_text_from_chat_like_via_servertool_core_bridge() {
+        let raw = extract_text_from_chat_like_json(
+            &json!({
+                "response": {
+                    "output": [{
+                        "content": [{ "type": "output_text", "text": "ok" }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .expect("text extraction bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("ok"));
+    }
+
+    #[test]
+    fn detects_stop_message_auto_cli_result_via_servertool_core_bridge() {
+        let raw = has_stop_message_auto_cli_result_in_request_json(
+            &json!({
+                "adapterContext": {
+                    "__raw_request_body": {
+                        "input": [{
+                            "type": "function_call_output",
+                            "call_id": "call_servertool",
+                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+                        }]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("cli result guard bridge");
+        assert_eq!(raw, "true");
+    }
+
+    #[test]
+    fn plans_budget_state_update_via_servertool_core_bridge() {
+        let raw = plan_budget_state_update_json(
+            &json!({
+                "stopSignal": {
+                    "observed": true,
+                    "eligible": true,
+                    "reason": "finish_reason_stop"
+                },
+                "existingState": { "stopMessageUsed": 1 },
+                "snapshot": {
+                    "text": "继续执行",
+                    "max_repeats": 3,
+                    "used": 1,
+                    "source": "persisted"
+                },
+                "defaultConfig": null,
+                "nowMs": 1234
+            })
+            .to_string(),
+        )
+        .expect("budget state update bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["shouldPersist"], true);
+        assert_eq!(parsed["used"], 2);
+        assert_eq!(parsed["nextState"]["stopMessageUsed"], 2);
     }
 }

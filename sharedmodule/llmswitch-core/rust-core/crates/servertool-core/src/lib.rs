@@ -9,9 +9,11 @@
 
 pub mod backend_route_contract;
 pub mod cli_contract;
+pub mod cli_result_guard;
 pub mod outcome_contract;
 pub mod persisted_lookup;
 pub mod stop_gateway_context;
 pub mod stop_message_counter;
 pub mod stop_message_loop_guard;
+pub mod text_extraction;
 pub mod tool_name_projection;

@@ -135,6 +135,7 @@ export type ServertoolFollowupFlowProfilePayload = {
 };
 
 export type ServertoolFollowupRuntimePlanPayload = {
+  flowId?: string;
   outcomeMode: 'skip' | 'client_inject_only' | 'reenter';
   noFollowup: boolean;
   autoLimit: boolean;
@@ -592,6 +593,9 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
     return null;
   }
   return {
+    ...(typeof plan.flowId === 'string' && plan.flowId.trim()
+      ? { flowId: plan.flowId.trim() }
+      : {}),
     outcomeMode: plan.outcomeMode,
     noFollowup: plan.noFollowup === true,
     autoLimit: plan.autoLimit === true,

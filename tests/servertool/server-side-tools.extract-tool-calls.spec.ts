@@ -60,7 +60,7 @@ describe('server-side-tools: extractToolCalls', () => {
     } as any)).toThrow(/tool_call missing required id/i);
   });
 
-  test('assigns canonical ids for internal servertools at extraction source', () => {
+  test('assigns canonical ids for allowed internal servertools at extraction source', () => {
     const calls = extractToolCalls({
       choices: [
         {
@@ -70,18 +70,18 @@ describe('server-side-tools: extractToolCalls', () => {
               {
                 type: 'function',
                 function: {
-                  name: 'clock',
-                  arguments: JSON.stringify({ action: 'list', items: [], taskId: '' })
+                  name: 'continue_execution',
+                  arguments: JSON.stringify({ summary: 'keep going' })
                 }
               }
             ]
           }
         }
       ]
-    } as any, 'req-clock-source-id');
+    } as any, 'req-continue-source-id');
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.name).toBe('clock');
+    expect(calls[0]?.name).toBe('continue_execution');
     expect(calls[0]?.id).toMatch(/^call_[a-f0-9]{24}$/);
   });
 

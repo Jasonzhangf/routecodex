@@ -286,9 +286,26 @@ fn build_exec_command(tool_name: &str, input: &Value) -> Result<String, Serverto
     }
     let input_json =
         serde_json::to_string(input).map_err(|_| ServertoolOutcomeError::InvalidField("input"))?;
-    let command = format!("routecodex servertool run {tool_name} --input-json '{input_json}'");
+    let command = format!(
+        "routecodex servertool run {tool_name} --input-json {}",
+        quote_posix_single_argument(&input_json)
+    );
     validate_no_denied_cli_marker(&command)?;
     Ok(command)
+}
+
+pub fn quote_posix_single_argument(raw: &str) -> String {
+    let mut quoted = String::with_capacity(raw.len() + 2);
+    quoted.push('\'');
+    for ch in raw.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
 }
 
 fn validate_no_denied_cli_marker(command: &str) -> Result<(), ServertoolOutcomeError> {
@@ -459,6 +476,25 @@ mod tests {
         assert_eq!(
             plan.exec_command,
             "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
+        );
+    }
+
+    #[test]
+    fn client_exec_projection_shell_quotes_json_apostrophes() {
+        let plan = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "servertool_fixture".to_string(),
+                flow_id: None,
+                input: json!({"value":"can't stop"}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect("fixture projection plan");
+        assert_eq!(
+            plan.exec_command,
+            "routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'"
         );
     }
 

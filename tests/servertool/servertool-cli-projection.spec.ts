@@ -15,10 +15,17 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
         schemaGuidance: { requiredFields: ['stopreason'] },
       };
     }
+    if (input.toolName === 'servertool_fixture' && input.input?.value === "can't stop") {
+      return {
+        toolName: 'servertool_fixture',
+        flowId: input.flowId,
+        execCommand: "routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'",
+      };
+    }
     return {
       toolName: input.toolName,
       flowId: input.flowId,
-      execCommand: `routecodex servertool run ${input.toolName} --input-json '${JSON.stringify(input.input)}'`,
+      execCommand: "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'",
     };
   },
   buildClientVisibleProjectionShellWithNative: (input: any) => ({
@@ -125,5 +132,27 @@ describe('servertool CLI projection', () => {
       requestId: 'req_tool_1'
     });
     expect((projection as any)[['tick', 'et'].join('')]).toBeUndefined();
+  });
+
+  it('uses native CLI command quoting for apostrophes in JSON input', () => {
+    const projection = buildServertoolCliProjectionForToolCall({
+      options: {
+        chatResponse: {},
+        adapterContext: {} as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_tool_quote',
+        providerProtocol: 'openai-responses'
+      },
+      toolCall: {
+        id: 'call_model_quote',
+        name: 'servertool_fixture',
+        arguments: '{"value":"can\'t stop"}'
+      }
+    });
+
+    const toolCall = (projection.chatResponse as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+
+    expect(command).toBe("routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'");
   });
 });

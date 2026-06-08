@@ -104,6 +104,20 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
   };
 }
 
+function readStopMessageCliProjection(result: Awaited<ReturnType<typeof runServerToolOrchestration>>): string {
+  expect(result.executed).toBe(true);
+  expect(result.flowId).toBe("stop_message_flow");
+  const choice = (result.chat.choices as any[] | undefined)?.[0];
+  expect(choice?.finish_reason).toBe("tool_calls");
+  const toolCall = choice?.message?.tool_calls?.[0];
+  expect(toolCall?.function?.name).toBe("exec_command");
+  const args = JSON.parse(String(toolCall?.function?.arguments ?? "{}")) as { cmd?: string };
+  const cmd = String(args.cmd ?? "");
+  expect(cmd).toContain("routecodex servertool run stop_message_auto");
+  expect(cmd).toContain("--input-json");
+  return cmd;
+}
+
 describe("stop_message_flow reentry", () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -186,14 +200,10 @@ describe("stop_message_flow reentry", () => {
     expect(result.executed).toBe(true);
     expect(result.flowId).toBe("stop_message_flow");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    const followupBody = reenterPipeline.mock.calls[0]?.[0]?.body as Record<string, unknown>;
-    expect((followupBody.tools as any[])?.[0]?.function?.name).toBe("exec_command");
-    const messages = followupBody.messages as Array<Record<string, unknown>>;
-    expect(messages[0]).toEqual({ role: "user", content: "start" });
-    expect(messages.at(-1)?.role).toBe("user");
-    expect(String(messages.at(-1)?.content)).toContain("当前用户目标是什么");
-    expect(String(messages.at(-1)?.content)).toContain("JSON 对象");
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    const cmd = readStopMessageCliProjection(result);
+    expect(cmd).toContain("当前用户目标");
+    expect(cmd).toContain("JSON 对象");
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
@@ -233,7 +243,7 @@ describe("stop_message_flow reentry", () => {
     expect(result.executed).toBe(false);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
   });
 
   test("non-goal stopless default counts missing schema stops", async () => {
@@ -282,7 +292,8 @@ describe("stop_message_flow reentry", () => {
     expect(exhausted.executed).toBe(true);
     expect(exhausted.flowId).toBe("stop_message_flow");
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    readStopMessageCliProjection(exhausted);
   });
 
   test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
@@ -340,12 +351,12 @@ describe("stop_message_flow reentry", () => {
 
     expect(exhausted.executed).toBe(true);
     expect(exhausted.flowId).toBe("stop_message_flow");
-    const finalText = JSON.stringify(reenterPipeline.mock.calls[2]?.[0]?.body ?? {});
+    const finalText = decodeURIComponent(readStopMessageCliProjection(exhausted));
     expect(finalText).toContain("你已经提供 next_step");
-    expect(finalText).toContain('\\"next_step\\":\\"继续测试\\"');
+    expect(finalText).toContain("继续测试");
     expect(finalText).toContain("后续排查顺序");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    expect(reenterPipeline).not.toHaveBeenCalled();
   });
 
   test("stopless writes learned note only when schema allows final stop", async () => {
