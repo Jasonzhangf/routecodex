@@ -1179,6 +1179,27 @@ export class RouteCodexHttpServer {
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
         }
+        if (directResult.requiresHubRelay === true) {
+          const relayMetadata: Record<string, unknown> = {
+            ...(nextInput.metadata ?? {}),
+            ...(directResult.preselectedRoute
+              ? { __routecodexPreselectedRoute: directResult.preselectedRoute }
+              : {}),
+          };
+          this.logStage('router-direct.relay', input.requestId, {
+            reason: directResult.reason,
+            providerKey: typeof directResult.preselectedRoute?.target?.providerKey === 'string'
+              ? directResult.preselectedRoute.target.providerKey
+              : undefined,
+            routeName: typeof directResult.preselectedRoute?.decision?.routeName === 'string'
+              ? directResult.preselectedRoute.decision.routeName
+              : undefined,
+          });
+          return await this.executePipeline({
+            ...nextInput,
+            metadata: relayMetadata,
+          });
+        }
         this.logStage('router-direct.failed_no_relay', input.requestId, {
           reason: directResult.reason,
         });

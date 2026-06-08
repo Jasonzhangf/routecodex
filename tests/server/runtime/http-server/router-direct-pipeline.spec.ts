@@ -205,6 +205,7 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(false);
       expect((result as any).reason).toContain('protocol mismatch');
+      expect((result as any).requiresHubRelay).toBe(true);
       expect(anthropicHandle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
@@ -332,6 +333,7 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(false);
       expect((result as any).reason).toContain('protocol mismatch');
+      expect((result as any).requiresHubRelay).toBe(true);
     });
 
     it('uses direct for Windsurf responses when protocols match', async () => {
