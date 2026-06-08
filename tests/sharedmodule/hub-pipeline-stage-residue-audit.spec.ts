@@ -532,6 +532,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('__responses_payload_snapshot');
   });
 
+  it('responses retention registry wrapper must fail fast on native errors', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'optional-native-call-helper', pattern: /function\s+callNative\s*\(/ },
+      { label: 'native-disabled-silent-undefined', pattern: /isNativeDisabledByEnv\(\)\)\s+return undefined/ },
+      { label: 'missing-native-silent-undefined', pattern: /if\s*\(!fn\)\s+return undefined/ },
+      { label: 'native-throw-silent-undefined', pattern: /catch\s*\{\s*return undefined;\s*\}/ },
+      { label: 'bad-json-silent-undefined', pattern: /catch\s*\{\s*return undefined;\s*\}/ },
+    ]);
+
+    expect(source).toContain('callNativeRequired');
+    expect(source).toContain('failNative');
+    expect(findings).toEqual([]);
+  });
+
   it('runtime source outside response-mappers must not import response mapper residue', () => {
     const sourceRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src');
     const findings: string[] = [];

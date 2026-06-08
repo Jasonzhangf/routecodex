@@ -585,6 +585,16 @@ pub fn consume_responses_passthrough_by_aliases_json(
 mod tests {
     use super::*;
 
+    fn empty_entry(last_touched_at: Instant) -> RegistryEntry {
+        RegistryEntry {
+            last_touched_at,
+            reasoning: None,
+            output_text: None,
+            payload_snapshot: None,
+            passthrough_payload: None,
+        }
+    }
+
     #[test]
     fn test_register_and_consume_reasoning() {
         let reasoning = ResponsesReasoningPayload {
@@ -616,5 +626,42 @@ mod tests {
         let ids = serde_json::to_string(&["alias1", "alias2"]).unwrap();
         let result = consume_responses_payload_snapshot_by_aliases_json(ids).unwrap();
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_registry_prune_removes_stale_entries_by_ttl() {
+        let mut reg = Registry::new();
+        let now = Instant::now();
+        reg.entries.insert(
+            "stale".to_string(),
+            empty_entry(now - Duration::from_millis(DEFAULT_TTL_MS + 1)),
+        );
+        reg.entries.insert(
+            "fresh".to_string(),
+            empty_entry(now - Duration::from_millis(DEFAULT_TTL_MS - 1)),
+        );
+
+        reg.prune(now);
+
+        assert!(!reg.entries.contains_key("stale"));
+        assert!(reg.entries.contains_key("fresh"));
+    }
+
+    #[test]
+    fn test_registry_prune_caps_entries_by_oldest_touch_time() {
+        let mut reg = Registry::new();
+        let now = Instant::now();
+        for index in 0..=DEFAULT_MAX_ENTRIES {
+            reg.entries.insert(
+                format!("entry-{index}"),
+                empty_entry(now - Duration::from_millis(index as u64)),
+            );
+        }
+
+        reg.prune(now);
+
+        assert_eq!(reg.entries.len(), DEFAULT_MAX_ENTRIES);
+        assert!(!reg.entries.contains_key(&format!("entry-{DEFAULT_MAX_ENTRIES}")));
+        assert!(reg.entries.contains_key("entry-0"));
     }
 }
