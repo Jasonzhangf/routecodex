@@ -158,10 +158,145 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> napi:
         .map_err(|error| napi::Error::from_reason(format!("serialize effect plan failed: {error}")))
 }
 
+fn read_bool(record: &Map<String, Value>, key: &str) -> bool {
+    record.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn read_optional_trimmed_string(record: &Map<String, Value>, key: &str) -> Option<String> {
+    record
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn build_servertool_runtime_error(
+    message: &str,
+    code: &str,
+    request_id: Option<String>,
+    reason: Option<String>,
+) -> Value {
+    let mut details = Map::new();
+    if let Some(request_id) = request_id {
+        details.insert("requestId".to_string(), Value::String(request_id));
+    }
+    if let Some(reason) = reason {
+        details.insert("reason".to_string(), Value::String(reason));
+    }
+    json!({
+        "message": message,
+        "code": code,
+        "category": "INTERNAL_ERROR",
+        "details": Value::Object(details),
+    })
+}
+
+pub fn plan_provider_response_servertool_runtime_actions(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline servertoolRuntimeAction planner missing input".to_string()
+    })?;
+    let actions = record
+        .get("servertoolRuntimeActions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "Rust HubPipeline servertoolRuntimeAction planner missing actions".to_string()
+        })?;
+    let has_provider_invoker = read_bool(record, "providerInvoker");
+    let has_reenter_pipeline = read_bool(record, "reenterPipeline");
+    let has_client_inject_dispatch = read_bool(record, "clientInjectDispatch");
+    let has_any_runtime_executor =
+        has_provider_invoker || has_reenter_pipeline || has_client_inject_dispatch;
+    let mut execution_plans: Vec<Value> = Vec::new();
+
+    for action in actions {
+        let action_record = action.as_object().ok_or_else(|| {
+            "Rust HubPipeline servertoolRuntimeAction returned unsupported action".to_string()
+        })?;
+        let request_id = read_optional_trimmed_string(action_record, "requestId");
+        let reason = read_optional_trimmed_string(action_record, "reason")
+            .or_else(|| Some("unknown".to_string()));
+        let payload = action_record
+            .get("payload")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                "Rust HubPipeline servertoolRuntimeAction missing chat-process payload".to_string()
+            })?;
+        match action_record.get("action").and_then(Value::as_str) {
+            Some("requireReenterPipeline") => {
+                if !has_reenter_pipeline {
+                    return Ok(json!({
+                        "executionPlans": [],
+                        "error": build_servertool_runtime_error(
+                            "[servertool] followup requires reenter pipeline",
+                            "SERVERTOOL_FOLLOWUP_FAILED",
+                            request_id,
+                            reason,
+                        )
+                    }));
+                }
+                execution_plans.push(json!({
+                    "payload": payload,
+                    "projectionStage": "HubRespChatProcess03Governed",
+                    "allowFollowup": true,
+                }));
+            }
+            Some("requireRuntimeExecutor") => {
+                if !has_any_runtime_executor {
+                    return Ok(json!({
+                        "executionPlans": [],
+                        "error": build_servertool_runtime_error(
+                            "Rust HubPipeline servertoolRuntimeAction requires runtime executor",
+                            "SERVERTOOL_HANDLER_FAILED",
+                            request_id,
+                            reason,
+                        )
+                    }));
+                }
+                execution_plans.push(json!({
+                    "payload": payload,
+                    "projectionStage": "HubRespChatProcess03Governed",
+                    "allowFollowup": false,
+                }));
+            }
+            _ => {
+                return Err(
+                    "Rust HubPipeline servertoolRuntimeAction returned unsupported action"
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    Ok(json!({
+        "executionPlans": execution_plans,
+        "error": Value::Null,
+    }))
+}
+
+pub fn plan_provider_response_servertool_runtime_actions_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid servertoolRuntimeAction planner JSON: {error}"
+        ))
+    })?;
+    let output = plan_provider_response_servertool_runtime_actions(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize servertoolRuntimeAction planner failed: {error}"
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::normalize_provider_response_effect_plan;
-    use serde_json::json;
+    use super::{
+        normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
+    };
+    use serde_json::{json, Value};
 
     #[test]
     fn normalizes_provider_response_effect_plan() {
@@ -216,5 +351,81 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.contains("unsupported effect kind"));
+    }
+
+    #[test]
+    fn plans_servertool_runtime_action_execution_in_rust() {
+        let output = plan_provider_response_servertool_runtime_actions(&json!({
+            "servertoolRuntimeActions": [{
+                "action": "requireRuntimeExecutor",
+                "requestId": "req-1",
+                "reason": "tool_call_dispatch",
+                "payload": { "choices": [] }
+            }],
+            "providerInvoker": true,
+            "reenterPipeline": false,
+            "clientInjectDispatch": false
+        }))
+        .unwrap();
+        assert_eq!(output["error"], Value::Null);
+        assert_eq!(
+            output["executionPlans"][0]["projectionStage"],
+            json!("HubRespChatProcess03Governed")
+        );
+        assert_eq!(output["executionPlans"][0]["allowFollowup"], json!(false));
+    }
+
+    #[test]
+    fn plans_missing_reenter_pipeline_as_explicit_error() {
+        let output = plan_provider_response_servertool_runtime_actions(&json!({
+            "servertoolRuntimeActions": [{
+                "action": "requireReenterPipeline",
+                "requestId": "req-1",
+                "reason": "web_search_followup",
+                "payload": { "choices": [] }
+            }],
+            "providerInvoker": true,
+            "reenterPipeline": false,
+            "clientInjectDispatch": false
+        }))
+        .unwrap();
+        assert_eq!(output["executionPlans"], json!([]));
+        assert_eq!(output["error"]["code"], json!("SERVERTOOL_FOLLOWUP_FAILED"));
+        assert_eq!(output["error"]["details"]["requestId"], json!("req-1"));
+        assert_eq!(
+            output["error"]["details"]["reason"],
+            json!("web_search_followup")
+        );
+    }
+
+    #[test]
+    fn plans_missing_runtime_executor_as_explicit_error() {
+        let output = plan_provider_response_servertool_runtime_actions(&json!({
+            "servertoolRuntimeActions": [{
+                "action": "requireRuntimeExecutor",
+                "requestId": "req-2",
+                "payload": { "choices": [] }
+            }],
+            "providerInvoker": false,
+            "reenterPipeline": false,
+            "clientInjectDispatch": false
+        }))
+        .unwrap();
+        assert_eq!(output["executionPlans"], json!([]));
+        assert_eq!(output["error"]["code"], json!("SERVERTOOL_HANDLER_FAILED"));
+        assert_eq!(output["error"]["details"]["reason"], json!("unknown"));
+    }
+
+    #[test]
+    fn rejects_unsupported_servertool_runtime_action() {
+        let error = plan_provider_response_servertool_runtime_actions(&json!({
+            "servertoolRuntimeActions": [{
+                "action": "runInTypescript",
+                "payload": { "choices": [] }
+            }],
+            "providerInvoker": true
+        }))
+        .unwrap_err();
+        assert!(error.contains("unsupported action"));
     }
 }

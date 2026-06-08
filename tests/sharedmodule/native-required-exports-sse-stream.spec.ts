@@ -16,6 +16,7 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('extractDecodeStatsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('resolveSseTimeoutOptionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('buildRespInboundSseErrorDescriptorJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('planProviderResponseServertoolRuntimeActionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runReqOutboundStage3CompatJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runRespInboundStage3CompatJson');
     expect(new Set(REQUIRED_NATIVE_HOTPATH_EXPORTS).size).toBe(REQUIRED_NATIVE_HOTPATH_EXPORTS.length);

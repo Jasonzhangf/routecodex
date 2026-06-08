@@ -199,8 +199,10 @@ verification:
   - feature_id: hub.response_post_servertool_client_projection
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
@@ -211,7 +213,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - TS provider-response remains native invocation glue; 03->04 post-servertool projection and Responses client payload decisions stay in Rust.
+      - TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust.
 
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high

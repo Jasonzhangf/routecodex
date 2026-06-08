@@ -1,6 +1,7 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
+import type { ProviderProtocolErrorCode } from '../../conversion/provider-protocol-error.js';
 
 type HubPipelineInput = {
   requestId: string;
@@ -49,6 +50,31 @@ export type ProviderResponseRuntimeEffectPlan = {
   runtimeStateWrite?: Record<string, unknown> | null;
   servertoolRuntimeActions: Array<Record<string, unknown>>;
 };
+
+export type ProviderResponseServertoolRuntimeExecutionPlan = {
+  payload: Record<string, unknown>;
+  projectionStage: 'HubRespChatProcess03Governed';
+  allowFollowup: boolean;
+};
+
+export type ProviderResponseServertoolRuntimeErrorDescriptor = {
+  message: string;
+  code: ProviderProtocolErrorCode;
+  category: 'INTERNAL_ERROR';
+  details: Record<string, unknown>;
+};
+
+export type ProviderResponseServertoolRuntimeActionPlan = {
+  executionPlans: ProviderResponseServertoolRuntimeExecutionPlan[];
+  error?: ProviderResponseServertoolRuntimeErrorDescriptor | null;
+};
+
+function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
+  if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
+    return value;
+  }
+  return null;
+}
 
 const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
 const nonBlockingProtocolLogState = new Map<string, number>();
@@ -291,6 +317,72 @@ function parseProviderResponseRuntimeEffectPlan(raw: string): ProviderResponseRu
   };
 }
 
+function parseProviderResponseServertoolRuntimeActionPlan(
+  raw: string
+): ProviderResponseServertoolRuntimeActionPlan | null {
+  const parsed = parseJson('parseProviderResponseServertoolRuntimeActionPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  if (!Array.isArray(row.executionPlans)) {
+    return null;
+  }
+  const executionPlans: ProviderResponseServertoolRuntimeExecutionPlan[] = [];
+  for (const entry of row.executionPlans) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return null;
+    }
+    const item = entry as Record<string, unknown>;
+    if (!item.payload || typeof item.payload !== 'object' || Array.isArray(item.payload)) {
+      return null;
+    }
+    if (item.projectionStage !== 'HubRespChatProcess03Governed') {
+      return null;
+    }
+    if (typeof item.allowFollowup !== 'boolean') {
+      return null;
+    }
+    executionPlans.push({
+      payload: item.payload as Record<string, unknown>,
+      projectionStage: item.projectionStage,
+      allowFollowup: item.allowFollowup
+    });
+  }
+  let error: ProviderResponseServertoolRuntimeErrorDescriptor | null | undefined;
+  if (row.error === null || row.error === undefined) {
+    error = null;
+  } else if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
+    const errorRecord = row.error as Record<string, unknown>;
+    if (
+      typeof errorRecord.message !== 'string'
+      || typeof errorRecord.code !== 'string'
+      || errorRecord.category !== 'INTERNAL_ERROR'
+      || !errorRecord.details
+      || typeof errorRecord.details !== 'object'
+      || Array.isArray(errorRecord.details)
+    ) {
+      return null;
+    }
+    const code = readServertoolRuntimeErrorCode(errorRecord.code);
+    if (!code) {
+      return null;
+    }
+    error = {
+      message: errorRecord.message,
+      code,
+      category: errorRecord.category,
+      details: errorRecord.details as Record<string, unknown>
+    };
+  } else {
+    return null;
+  }
+  return {
+    executionPlans,
+    error
+  };
+}
+
 export function normalizeProviderResponseEffectPlanWithNative(
   effectPlan: { effects: Array<Record<string, unknown>> }
 ): ProviderResponseRuntimeEffectPlan {
@@ -298,6 +390,18 @@ export function normalizeProviderResponseEffectPlanWithNative(
   const fail = (reason?: string) => failNativeRequired<ProviderResponseRuntimeEffectPlan>(capability, reason);
   const raw = callNativeJsonString(capability, effectPlan);
   return parseProviderResponseRuntimeEffectPlan(raw) ?? fail('invalid payload');
+}
+
+export function planProviderResponseServertoolRuntimeActionsWithNative(input: {
+  servertoolRuntimeActions: Array<Record<string, unknown>>;
+  providerInvoker: boolean;
+  reenterPipeline: boolean;
+  clientInjectDispatch: boolean;
+}): ProviderResponseServertoolRuntimeActionPlan {
+  const capability = 'planProviderResponseServertoolRuntimeActionsJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderResponseServertoolRuntimeActionPlan>(capability, reason);
+  const raw = callNativeJsonString(capability, input);
+  return parseProviderResponseServertoolRuntimeActionPlan(raw) ?? fail('invalid payload');
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

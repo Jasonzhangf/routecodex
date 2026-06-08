@@ -328,3 +328,24 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 - Physically deleted `reasoning-tool-parser.ts`.
 - Added `tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts` to require the helper shell to stay deleted and to verify the native text-markup owner still exposes `extractToolCallsFromReasoningTextWithNative`.
 - Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` to include the deletion gate.
+
+## 2026-06-09 Slice: Provider Response Servertool Runtime Action Planner
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` still interpreted Rust `servertoolRuntimeAction` payloads in TS:
+  - Branching on `requireReenterPipeline` and `requireRuntimeExecutor`.
+  - Deciding missing runtime executor errors.
+  - Owning `SERVERTOOL_FOLLOWUP_FAILED` / `SERVERTOOL_HANDLER_FAILED` descriptors and unsupported-action handling.
+- The live IO callback execution must remain in TS, but the response-side action plan and error descriptor are Hub response semantics and belong to Rust.
+
+### Implementation Result
+
+- Added Rust owner `plan_provider_response_servertool_runtime_actions` in `hub_pipeline_lib/effect_plan.rs`.
+- Added native export `planProviderResponseServertoolRuntimeActionsJson`.
+- Kept TS `provider-response.ts` as native invocation plus IO callback glue:
+  - It passes runtime action payloads and executor availability into Rust.
+  - It executes returned `executionPlans` through `runServertoolResponseStageOrchestrationShell`.
+  - It throws `ProviderProtocolError` only from Rust-provided error descriptors.
+- Added residue gate coverage blocking TS action branching, TS missing-executor descriptors, unsupported-action ownership, and TS chat payload reader revival.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` under `hub.response_post_servertool_client_projection`.

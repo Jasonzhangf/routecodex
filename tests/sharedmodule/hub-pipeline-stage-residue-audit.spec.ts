@@ -415,10 +415,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('executeProviderResponseNativeOutboundEffects');
     expect(source).toContain('runtimeStateWrite');
     expect(source).toContain('servertoolRuntimeAction');
+    expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(source).toContain('executeProviderResponseNativeServertoolEffects');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
     expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);');
-    expect(source).toContain('requireReenterPipeline');
     expect(source).not.toContain('shouldRunProviderResponseRustHubPipeline');
     expect(source).not.toContain('if (nativeResponsePlan)');
     expect(source).not.toContain('return false;');
@@ -437,6 +437,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('runtime.servertool');
     expect(source).not.toContain('runtime.serverToolFollowup');
     expect(source).not.toContain('effectPlan.effects.length !== 1');
+    const servertoolRuntimeActionFindings = collectMatches(source, [
+      { label: 'ts-servertool-action-reenter-branch', pattern: /effect\.action\s*===\s*['"]requireReenterPipeline['"]/ },
+      { label: 'ts-servertool-action-runtime-branch', pattern: /effect\.action\s*===\s*['"]requireRuntimeExecutor['"]/ },
+      { label: 'ts-servertool-missing-reenter-error-owner', pattern: /SERVERTOOL_FOLLOWUP_FAILED/ },
+      { label: 'ts-servertool-missing-runtime-error-owner', pattern: /SERVERTOOL_HANDLER_FAILED/ },
+      { label: 'ts-servertool-unsupported-action-owner', pattern: /unsupported action/ },
+      { label: 'ts-servertool-action-payload-reader', pattern: /function\s+readServertoolRuntimeActionChatPayload\s*\(/ },
+    ]);
+    expect(servertoolRuntimeActionFindings).toEqual([]);
   });
 
   it('provider response SSE marker materialization must stay Rust-owned', () => {

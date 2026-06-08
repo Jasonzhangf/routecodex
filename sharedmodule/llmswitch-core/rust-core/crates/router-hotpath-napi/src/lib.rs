@@ -823,6 +823,15 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> NapiR
     hub_pipeline_lib::effect_plan::normalize_provider_response_effect_plan_json(input_json)
 }
 
+#[napi(js_name = "planProviderResponseServertoolRuntimeActionsJson")]
+pub fn plan_provider_response_servertool_runtime_actions_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::plan_provider_response_servertool_runtime_actions_json(
+        input_json,
+    )
+}
+
 #[napi(js_name = "planSseStreamEffectJson")]
 pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {
     hub_resp_outbound_sse_stream::plan_sse_stream_effect_json(input_json)

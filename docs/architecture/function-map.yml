@@ -340,17 +340,16 @@ owners:
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active
-    summary: Post-servertool HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection for client Responses payloads
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
+    summary: Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubRespChatProcess03Governed
       - HubRespOutbound04ClientSemantic
     canonical_builders:
+      - plan_provider_response_servertool_runtime_actions
       - project_post_servertool_hub_resp_outbound_04_client_semantic
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -368,7 +367,7 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - Post-servertool projection decisions belong to Rust; TS provider-response may only pass payload, entry endpoint, request id, and same-request response semantics into native.
+      - Post-servertool runtime action planning, missing-executor error descriptors, and client projection decisions belong to Rust; TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors.
 
   - feature_id: hub.response_provider_sse_materialization
     status: active
