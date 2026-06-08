@@ -58,29 +58,32 @@ describe('servertool CLI command', () => {
     });
   });
 
-  it('fails fast for unsupported dispatcher executor', async () => {
-    const output: string[] = [];
-    const errors: string[] = [];
-    const exits: number[] = [];
-    const program = new Command();
-    program.exitOverride();
-    createServertoolCommand(program, {
-      log: (line) => output.push(line),
-      error: (line) => errors.push(line),
-      exit: (code) => {
-        exits.push(code);
-        throw new Error(`exit ${code}`);
-      }
-    });
+  it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
+    'fails fast for non client-exec servertool %s',
+    async (toolName) => {
+      const output: string[] = [];
+      const errors: string[] = [];
+      const exits: number[] = [];
+      const program = new Command();
+      program.exitOverride();
+      createServertoolCommand(program, {
+        log: (line) => output.push(line),
+        error: (line) => errors.push(line),
+        exit: (code) => {
+          exits.push(code);
+          throw new Error(`exit ${code}`);
+        }
+      });
 
-    await expect(
-      program.parseAsync(['node', 'routecodex', 'servertool', 'run', 'web_search', '--input-json', '{"query":"x"}'])
-    ).rejects.toThrow('exit 1');
+      await expect(
+        program.parseAsync(['node', 'routecodex', 'servertool', 'run', toolName, '--input-json', '{"query":"x"}'])
+      ).rejects.toThrow('exit 1');
 
-    expect(output).toEqual([]);
-    expect(errors[0]).toContain('SERVERTOOL_UNSUPPORTED_TOOL: web_search');
-    expect(exits).toEqual([1]);
-  });
+      expect(output).toEqual([]);
+      expect(errors[0]).toContain(`SERVERTOOL_UNSUPPORTED_TOOL: ${toolName}`);
+      expect(exits).toEqual([1]);
+    }
+  );
 
   it('runs servertool_fixture through the standalone Rust binary', async () => {
     const output: string[] = [];
@@ -116,7 +119,37 @@ describe('servertool CLI command', () => {
     });
   });
 
-  it('fails fast when CLI input contains old restoration markers', async () => {
+  it('fails fast for fake_exec tool name', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        exits.push(code);
+        throw new Error(`exit ${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'servertool', 'run', 'fake_exec', '--input-json', '{"value":1}'])
+    ).rejects.toThrow('exit 1');
+
+    expect(output).toEqual([]);
+    expect(errors[0]).toContain('SERVERTOOL_DENIED_TOOL: fake_exec');
+    expect(exits).toEqual([1]);
+  });
+
+  it.each([
+    ['--ticket abc', '--ticket'],
+    ['stcli_123', 'stcli_'],
+    ['rcc_cli_123', 'rcc_cli_'],
+    ['old_cli_123', 'old_cli_'],
+    ['old_cli_result_123', 'old_cli_']
+  ])('fails fast when CLI input contains denied marker %s', async (rawValue, expectedMarker) => {
     const output: string[] = [];
     const errors: string[] = [];
     const exits: number[] = [];
@@ -139,12 +172,12 @@ describe('servertool CLI command', () => {
         'run',
         'servertool_fixture',
         '--input-json',
-        '{"value":"old_cli_result_123"}'
+        JSON.stringify({ value: rawValue })
       ])
     ).rejects.toThrow('exit 1');
 
     expect(output).toEqual([]);
-    expect(errors[0]).toContain('SERVERTOOL_DENIED_CLI_MARKER: old_cli_');
+    expect(errors[0]).toContain(`SERVERTOOL_DENIED_CLI_MARKER: ${expectedMarker}`);
     expect(exits).toEqual([1]);
   });
 
