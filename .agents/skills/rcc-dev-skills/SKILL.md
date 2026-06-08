@@ -133,6 +133,7 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
    - `~/.rcc/config.<provider>.toml`（如 `config.windsurf.toml`）
 3. 只有在需要核对运行时合并结果时，才把 `~/config/merged-config.<port>.json` 当作派生快照；它不是首要真源。
 4. 若本次任务暴露出 agent 先查错配置源，必须先纠正到 `~/.rcc`，再继续分析 provider/token/router 问题。
+5. ProviderForwarder 配置排障：forwarder target 必须同时满足 TS provider 加载和 Rust target 解析；`providerId` 用于 `buildVirtualRouterInputV2` 收集 provider configs，`providerKey` 用于 Rust `ForwarderTarget` 真实目标校验。`routecodex config validate` 可能漏过 forwarder schema，启动错误必须用 materialized/bootstrap 或真实 `routecodex restart --config ~/.rcc/config.toml --port <port>` 验证。
 
 ## Provider 自动重试 (Auto-Retry) 配置（2026-05-27）
 
@@ -2036,6 +2037,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 端口级 forwarder 排查先看 sample `client-request.json` 的 `metadata.allowedProviders`：若 routing target 是 `fwd.*` 但 allowlist 只有 `fwd` 而没有 forwarder 内真实 provider（如 `sdfv/llmgate/asxs/cc`），根因在 HTTP router port allowlist 构造，不在 Rust priority selection。修点是 `extractProviderKeysForRoutingGroup()` 展开 `virtualrouter.forwarders.*.targets`。
 - llmgate/free-gpt-5.5 `EMPTY_ASSISTANT_RESPONSE` 若样本是 `/v1/responses completed + output=[]`，先核对 provider-request 是否真正是 upstream SSE：`Accept:text/event-stream` 且 body `stream:true`。`responses.streaming="always"` 是 provider upstream 传输策略，不能被 client `stream:false` 覆盖；修点在 `ResponsesProvider`，不是 response contract 或路由 fallback。
 - `verify:llmswitch-rustification-audit` 若只报 `topDir=native nonNativeLoc` 增长，先 diff baseline/current 的 `prodTsFiles` 分类，定位具体 native 文件；对真实 native binding manifest/wrapper 应补明确 `native-router-hotpath` / NAPI binding contract marker 或收缩 TS 逻辑，禁止直接放宽 baseline 掩盖新增 TS runtime。
+- VR TS 残留 closeout：旧 source/dist VR TS runtime path 和旧 wrapper path 不得在 source/script/test/doc/fixture 中以活路径文本残留；只允许 `verify-vr-no-ts-runtime` 内部分段构造旧路径作为复活 gate。`src/native/router-hotpath/native-virtual-router-*.ts` / `virtual-router-contracts.ts` 是 live native bridge/contracts，不按旧 VR runtime 残留删除；旧 classifier/features/report scripts/tests 应物理删除或迁到 Rust/blackbox owner。
+- Servertool bootstrap replay closeout：followup requestId builder 必须走 `buildFollowupRequestIdWithNative`，禁止在 `backend-route-bootstrap-replay-block.ts` 复活 TS trim/default/suffix 拼接；`verify:servertool-rust-only` 已有 gate 锁 `backend-route-bootstrap-replay-native-request-id-owner`。
 
 ## 2026-06-08 provider auth reroute / 10000 loopback 精华
 

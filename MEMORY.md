@@ -2445,3 +2445,23 @@ Tags: virtual-router, rustification, no-ts-runtime, native-owner, architecture-g
 - For RouteCodex `/v1/responses`, OpenAI SDK/provider runtime appends `/responses` to baseURL; with this baseline the upstream provider URL is `https://one.1token.xyz/responses`, matching the 1token tutorial screenshot.
 - Verified live on 5555: after `routecodex restart --port 5555`, `curl http://127.0.0.1:5555/v1/responses` with `model=1token.gpt-5.5` returned HTTP 200 and output text `pong`; provider-request snapshot URL was `https://one.1token.xyz/responses`, provider-response status 200.
 Tags: 1token, responses-provider, baseurl, auth, 5555, 2026-06-08
+
+## 2026-06-08 Virtual Router TS residue full cleanup
+- Old VR TS runtime path text has been removed from active source/script/test/package runtime references. Docs may still mention old deleted paths as historical facts or forbidden-path map entries.
+- The resurrection-gate old-path knowledge is internal to `scripts/architecture/verify-vr-no-ts-runtime.mjs`, where paths are constructed to enforce the no-resurrection gate. The gate also blocks known stale TS classifier/features/report residue files.
+- Deleted stale TS classifier/features/report scripts/tests rather than preserving TS equivalents; classification/features remain Rust-owned under `virtual_router_engine`.
+- Native host bridge/contracts under `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-*.ts` and `virtual-router-contracts.ts` remain live binding surface and must not be treated as old VR runtime residue.
+- Verified: active old runtime references are absent while remaining old-path grep hits are historical docs/function-map forbidden paths; `npm run verify:vr-no-ts-runtime`, `npm run verify:repo-sanity`, `npm run verify:llmswitch-rustification-audit`, `npm run verify:architecture-ci`, `npx tsc --noEmit --pretty false`, `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture`, and `git diff --check` all passed.
+Tags: virtual-router, ts-residue-cleanup, rust-owner, no-ts-runtime, architecture-gate, 2026-06-08
+
+## 2026-06-08 Servertool bootstrap replay requestId Rust owner
+- `backend-route-bootstrap-replay-block.ts` no longer owns followup requestId trim/default/suffix concatenation; it calls native `buildFollowupRequestIdWithNative(baseRequestId, suffix ?? null)`.
+- `scripts/verify-servertool-rust-only.mjs` gates `backend-route-bootstrap-replay-native-request-id-owner` and rejects old TS requestId-builder snippets in bootstrap replay.
+- Verification passed before commit `86352e170`: `npm run jest:run -- --runTestsByPath tests/servertool/followup-bootstrap-replay.spec.ts --runInBand --forceExit`; `npm run verify:servertool-rust-only`; `cargo test -p followup-core --lib -- --nocapture` (14 passed); targeted `git diff --check`.
+Tags: servertool, bootstrap-replay, followup-request-id, rust-owner, native-bridge, 2026-06-08
+
+## 2026-06-08 ProviderForwarder config contract
+- Runtime forwarder targets in `/Users/fanzhang/.rcc/config.toml` must include real `providerKey` values (`providerId.keyAlias.modelId`) because Rust `ForwarderTarget` requires `providerKey` and validates it against the provider registry.
+- Keep `providerId` alongside `providerKey` in forwarder targets until the TS config builder is changed, because `buildVirtualRouterInputV2` uses `providerId` to load provider configs referenced only by forwarders. `routecodex config validate` can pass while Rust startup fails, so verify with materialized bootstrap or real restart.
+- Current recheck: real `providerKey` entries exist for GPT/MiniMax forwarders, `routecodex config validate --config ~/.rcc/config.toml` PASS, and 5520/5555 `/health` returned `ready:true,pipelineReady:true`.
+Tags: forwarder, virtual-router, config, providerKey, providerId, startup, 2026-06-08

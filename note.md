@@ -16800,3 +16800,35 @@ Phase E: TS fallback 物理删除
 - Updated active docs/gates to point VR runtime ownership at Rust `virtual_router_engine`, while preserving historical deletion docs as former TS-path facts rather than pretending Rust files were deleted.
 - Verification PASS: `npm run verify:vr-no-ts-runtime`; `npm run verify:architecture-ci`; `npm run verify:repo-sanity`; `npx tsc --noEmit --pretty false`; `RUST_TEST_THREADS=1 cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture --test-threads=1` (247 passed); `git diff --check`.
 - Boundary: remaining `sharedmodule/llmswitch-core/scripts/tests/*` matrix scripts that import old dist VR runtime paths were not folded into this deletion slice because several are still wired by `run-matrix-ci.mjs` and require separate migration to native/Rust blackbox equivalents.
+
+## 2026-06-08 1token baseURL final recheck
+- User asked to test 1token baseURL and add `/v1` only if wrong. Final config remains `/Users/fanzhang/.rcc/provider/1token/config.v2.toml` with `baseURL = "https://one.1token.xyz"` and auth `${CRS_OAI_KEY1}`.
+- Correct discriminator is Responses runtime path, not `/models`: direct POST to `https://one.1token.xyz/responses` returned HTTP 200 object `response` with output `pong`; `https://one.1token.xyz/v1/responses` also returned 200, so `/v1` is accepted but not required.
+- RouteCodex config evidence: `routecodex config validate --config ~/.rcc/config.toml` PASS; `routecodex provider inspect 1token` reports root baseURL; materialized config loader reports `baseURL=https://one.1token.xyz`.
+- Runtime caution: 5520 smoke with `model=1token.gpt-5.5` returned `PROVIDER_NOT_AVAILABLE`, but latest provider-request sample showed it routed to `https://sdfv.cn/v1/responses`, so that failure does not prove 1token baseURL is wrong.
+
+## 2026-06-08 VR TS residue full closeout final
+- Removed old VR TS runtime path residue from active source/script/test/package runtime references. The same grep across `docs` still shows intentional historical/deleted-path and function-map forbidden-path references, not live imports.
+- Removed stale TS classifier/features/report scripts and tests instead of reviving old TS classifier code; Rust `virtual_router_engine` remains classifier/features owner.
+- `scripts/architecture/verify-vr-no-ts-runtime.mjs` owns the active resurrection gate and constructs old paths internally; it also scans sharedmodule tests and known stale residue files. Historical docs may still name old paths as former/deleted locations.
+- Verification PASS: `npm run verify:vr-no-ts-runtime`; `npm run verify:repo-sanity`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:architecture-ci`; `npx tsc --noEmit --pretty false`; `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture` (247 passed); `git diff --check`.
+- Boundary: live native host bridge/contracts under `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-*.ts` and `virtual-router-contracts.ts` remain intentional binding surface, not old VR runtime residue.
+
+## 2026-06-08 14:34 router-token 1token model miss
+- User-provided log line with `req_1780900450947_dd1e4739` is a normal streaming `gpt-5.5` request selected by VR to `sdfv.key1.gpt-5.4-mini`; the failing request is a separate same-second non-stream request `openai-responses-router-token.gpt-5.5-20260608T143411713-318639-522`.
+- Error sample truth: `~/.rcc/diag/error-openai-responses-router-token.gpt-5.5-20260608T143411713-318639-522.json` has request body `{"model":"1token.gpt-5.5","input":"只回复 pong","stream":false}` and fails inside `VirtualRouterEngine.route` with `All providers unavailable for model 1token.gpt-5.5`.
+- Current `~/.rcc/config.toml` 5520 routing groups target `sdfv.*`, `llmgate*`, `asxs.*`, `cc.*`; they do not include `1token.key1.gpt-5.5`, so provider-qualified model `1token.gpt-5.5` on 5520 has no available target. 5555 uses forwarder `fwd.gpt.gpt-5.5`, which includes `1token.key1.gpt-5.5`.
+- Live repro on ready `0.90.3003`: `curl 5520 /v1/responses` with `model=1token.gpt-5.5` returns `PROVIDER_NOT_AVAILABLE`; same endpoint with `model=gpt-5.5` returns HTTP 200 and output `pong`. Config validate PASS.
+
+## 2026-06-08 servertool bootstrap replay request-id owner closeout
+- Removed local TS followup requestId construction from `sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts`; bootstrap transparent replay now calls Rust-owned native `buildFollowupRequestIdWithNative`, matching mainline followup requestId ownership.
+- Added `tests/servertool/followup-bootstrap-replay.spec.ts`, mocking native requestId builder to return a sentinel and proving `maybeRunTransparentBootstrapReplay` passes that native-built requestId into both policy shadow and `reenterPipeline`.
+- Tightened `scripts/verify-servertool-rust-only.mjs`: bootstrap replay must contain `buildFollowupRequestIdWithNative`, and restored TS trim/default suffix builder semantics fail the gate.
+- Verification PASS before commit `86352e170`: focused Jest `tests/servertool/followup-bootstrap-replay.spec.ts`; `npm run verify:servertool-rust-only`; `cargo test -p followup-core --lib -- --nocapture` (14 passed); `npx tsc --noEmit --pretty false`; targeted `git diff --check`.
+- Boundary: goal remains active; this only closes bootstrap replay requestId TS owner. Remaining larger TS semantic owners include backend-route runtime/response/preflight and loop-state semantics.
+
+## 2026-06-08 forwarder config startup fix
+- User startup failure: Rust `VirtualRouterEngine.initialize` rejected `fwd.gpt.gpt-5.4-mini` with missing `providerKey`, then rejected `fwd.minimax.MiniMax-M2.7` with unknown `minimax.key1.MiniMax-M2.7`.
+- Root cause: `~/.rcc/config.toml` forwarder targets only had `providerId`; Rust `ForwarderTarget` requires real `providerKey`. After adding only `providerKey`, TS `buildVirtualRouterInputV2` did not load MiniMax providers because it still uses `providerId` to collect forwarder provider configs. Current config must carry both: `providerId` for provider config loading, `providerKey` for Rust forwarder target resolution.
+- Fix applied in `~/.rcc/config.toml`: all GPT/MiniMax forwarder targets now include explicit real provider keys such as `1token.key1.gpt-5.5`, `mini27.key1.MiniMax-M2.7`, and `minimax.key1.MiniMax-M3`; MiniMax forwarder weights use the same real providerKey strings.
+- Current recheck PASS: `rg` confirms forwarder `providerKey` entries in `~/.rcc/config.toml`; `routecodex config validate --config ~/.rcc/config.toml`; `curl http://127.0.0.1:5520/health`; `curl http://127.0.0.1:5555/health`.
