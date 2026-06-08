@@ -182,9 +182,10 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
+      - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
     integration:
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
-      - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
+      - sharedmodule/llmswitch-core/scripts/tests/loop-rt-responses.mjs
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
       - npm run verify:hub-response-responses-chat-projection

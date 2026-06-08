@@ -267,6 +267,37 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 - PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
 - PASS: `npm run verify:function-map-compile-gate`
 
+## 2026-06-09 Slice: Provider Response Converter Projection Fallback Deletion
+
+### Audit Result
+
+- `src/server/runtime/http-server/executor/provider-response-converter.ts` still had response-side semantic residue after bridge conversion:
+  - Provider-specific `/v1/responses` bridge bypass for one provider family.
+  - TS `hasChatToolCalls` and `hasResponsesFunctionCalls` shape predicates.
+  - A post-bridge rebuild path that called `buildResponsesPayloadFromChatWithNative` when converted Responses output lacked function calls.
+- This kept a TS decision point that could override the Rust bridge/native response projection after the canonical converter had already run.
+
+### Implementation Result
+
+- Deleted the provider-specific bridge bypass.
+- Deleted `hasChatToolCalls` and `hasResponsesFunctionCalls`.
+- Deleted the post-bridge Responses rebuild branch.
+- Kept the converter as bridge invocation, native tool argument normalization, servertool orchestration glue, timing, and HTTP/SSE wrapper handling.
+- Added `tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts` to block provider-specific response bridge branches and TS post-bridge projection fallback from returning.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` for the new gate.
+
+### Verification Evidence
+
+- PASS: `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts --runInBand --no-cache --forceExit`
+- PASS: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts --runInBand --no-cache --forceExit`
+- PASS: `npm run jest:run -- --runTestsByPath tests/sharedmodule/provider-response-rust-plan.spec.ts --runInBand --no-cache --forceExit`
+- PASS: `npx tsc --noEmit --pretty false`
+- PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- PASS: `cargo test -p router-hotpath-napi build_responses_payload_from_chat --lib -- --nocapture`
+- PASS: `npm run verify:function-map-required-tests`
+- PASS: `npm run verify:function-map-paths`
+- PASS: `npm run verify:function-map-forbidden-mentions`
+
 ## 2026-06-09 Slice: Responses Response Utils Zero-Consumer Wrapper Deletion
 
 ### Audit Result

@@ -91,10 +91,6 @@ type NativeRespSemanticsModule = {
     responsesPayload: unknown,
     toolsRaw: unknown[]
   ) => Record<string, unknown>;
-  buildResponsesPayloadFromChatWithNative?: (
-    payload: unknown,
-    context: Record<string, unknown>
-  ) => Record<string, unknown>;
 };
 
 let nativeRespSemanticsModulePromise: Promise<NativeRespSemanticsModule> | null = null;
@@ -120,18 +116,6 @@ async function normalizeResponsesToolCallArgumentsForClientWithNative(
   return fn(responsesPayload, toolsRaw);
 }
 
-
-async function buildResponsesPayloadFromChatWithNative(
-  payload: unknown,
-  context: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  const mod = await loadNativeRespSemanticsModule();
-  const fn = mod.buildResponsesPayloadFromChatWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] buildResponsesPayloadFromChatWithNative not available');
-  }
-  return fn(payload, context);
-}
 
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -377,27 +361,6 @@ async function normalizeResponsesToolCallsViaRustSsot(args: {
   return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
 }
 
-
-function hasChatToolCalls(payload: unknown): boolean {
-  const body = asFlatRecord(payload);
-  const choices = Array.isArray(body?.choices) ? body.choices : [];
-  return choices.some((choice) => {
-    const choiceRecord = asFlatRecord(choice);
-    const message = asFlatRecord(choiceRecord?.message);
-    return Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-  });
-}
-
-function hasResponsesFunctionCalls(payload: unknown): boolean {
-  const body = asFlatRecord(payload);
-  const output = Array.isArray(body?.output) ? body.output : [];
-  if (output.some((item) => asFlatRecord(item)?.type === 'function_call')) {
-    return true;
-  }
-  const requiredAction = asFlatRecord(body?.required_action);
-  const submitToolOutputs = asFlatRecord(requiredAction?.submit_tool_outputs);
-  return Array.isArray(submitToolOutputs?.tool_calls) && submitToolOutputs.tool_calls.length > 0;
-}
 
 function persistGoalValidationLedger(args: {
   adapterContext: Record<string, unknown>;
@@ -923,29 +886,6 @@ export async function convertProviderResponseIfNeeded(
         }
       };
     })();
-    if (
-      (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
-      && options.providerFamily === 'windsurf'
-      && hasChatToolCalls(bridgeProviderResponse)
-    ) {
-      const directBody = await buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
-        requestId: options.requestId,
-        toolsRaw: readClientToolsRawForResponsesNormalization({
-          adapterContext,
-          requestSemantics: effectiveRequestSemantics,
-          entryOriginRequest: options.entryOriginRequest
-        })
-      });
-      logPipelineStage('convert.bridge.windsurf_native_chat_direct', options.requestId, {
-        entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol: options.providerProtocol
-      });
-      return attachTimingBreakdown({
-        ...options.response,
-        body: directBody
-      });
-    }
-
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: options.providerProtocol,
       providerResponse: bridgeProviderResponse,
@@ -977,20 +917,6 @@ export async function convertProviderResponseIfNeeded(
         entryOriginRequest: options.entryOriginRequest,
         entryEndpoint: options.entryEndpoint || entry
       });
-      if (
-        (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
-        && hasChatToolCalls(bridgeProviderResponse)
-        && !hasResponsesFunctionCalls(converted.body)
-      ) {
-        converted.body = await buildResponsesPayloadFromChatWithNative(bridgeProviderResponse, {
-          requestId: options.requestId,
-          toolsRaw: readClientToolsRawForResponsesNormalization({
-            adapterContext,
-            requestSemantics: effectiveRequestSemantics,
-            entryOriginRequest: options.entryOriginRequest
-          })
-        });
-      }
     }
     if (converted.__sse_responses) {
       const usage = converted.body
