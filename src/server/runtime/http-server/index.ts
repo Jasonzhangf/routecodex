@@ -1590,6 +1590,7 @@ export class RouteCodexHttpServer {
       return {
         used: false,
         reason: directOutcome.reason,
+        ...(directOutcome.requiresHubRelay === true ? { requiresHubRelay: true as const } : {}),
         preselectedRoute: {
           target,
           decision: routingDecision,

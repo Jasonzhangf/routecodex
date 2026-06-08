@@ -1,5 +1,41 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-08 5555 cross-protocol relay live verification
+
+- Root cause owner stayed in `src/server/runtime/http-server/index.ts`: `executeRouterDirectPipelineForPort()` dropped `directOutcome.requiresHubRelay` when returning `used:false`, so outer router-direct entry could not see the relay contract and wrongly threw `router-direct failed without relay`.
+- Source fix is one owner-point propagation only: `if (!directOutcome.used)` now returns `...(directOutcome.requiresHubRelay === true ? { requiresHubRelay: true as const } : {})`.
+- Live process truth is global install ` /opt/homebrew/lib/node_modules/routecodex/dist/...`, not repo source. Verified live dist also contains both required pieces:
+  - top-level relay branch `if (directResult.requiresHubRelay === true) { ... executePipeline(...) }`
+  - inner propagation `...(directOutcome.requiresHubRelay === true ? { requiresHubRelay: true } : {})`
+- Live verification after `routecodex restart --port 5555`:
+  - `22:47:56` `curl http://127.0.0.1:5555/health` returned `{\"status\":\"ok\",\"ready\":true,\"pipelineReady\":true,\"version\":\"0.90.3008\"}`.
+  - Fresh forced-search request `openai-responses-router-gpt-5.5-20260608T224809941-321056-2939` hit `search/gateway-priority-5555-weighted-search -> minimax.key1.MiniMax-M3` and completed 200; no new `router-direct failed without relay`.
+  - Fresh mixed-protocol hits also completed successfully:
+    - `openai-responses-mini27.key1-MiniMax-M2.7-20260608T224915467-321062-2945`
+    - `openai-responses-minimonth.key1-MiniMax-M2.7-20260608T224936961-321065-2948`
+    - `openai-responses-minimonth.key1-MiniMax-M2.7-20260608T225028362-321075-2958`
+  - Corresponding log lines show `search/gateway-priority-5555-weighted-search -> mini27/minimonth` followed by `completed (status=200, finish_reason=tool_calls)`; no new `router-direct.failed_no_relay` or `protocol mismatch` line for those request ids.
+- Remaining boundary: current log view did not print an explicit `router-direct.relay` stage line for these successful requests, but the prior fatal symptom (`failed_no_relay` on cross-protocol 5555 hits) is gone in live traffic and the mixed-protocol targets now complete through the normal pipeline.
+
+## 2026-06-08 5555 image multimodal/vision VR routing
+
+- Evidence path: 5555 samples under `~/.rcc/codex-samples/openai-responses/ports/5555` showed current-turn image payloads can be preserved in provider requests, while `[Image #N]` often appears in history; distinguish latest user media from historical placeholders before concluding payload crop.
+- Root cause refined in Rust VR: image requests on `multimodal` route were filtering only `supportsMultimodal`, excluding vision-only targets. Direct model media fallback also did not inspect `fwd.*` real targets, so a text direct model could remain selected even when a visual target existed behind ProviderForwarder.
+- Fix direction: `selection.rs` uses visual capability (`multimodal` OR `vision`) for image-only multimodal/default routing, while remote video still requires `multimodal`. `direct_model.rs` now receives `ForwarderRegistry` and checks forwarder real targets before deciding whether a direct media request must fall back to routed visual targets.
+- Verified gates: `cargo test -p router-hotpath-napi image_direct_model_falls_back_when_visual_target_is_forwarder --lib -- --nocapture`; `image_request_keeps_vision_only_target_in_multimodal_route`; `image_request_prefers_multimodal_route_over_search_continuation`; `image_request_uses_vision_route_when_multimodal_route_missing`; `image_request_uses_vision_route_when_multimodal_pool_has_no_visual_target`; `remote_video_direct_model_requires_multimodal_not_vision`; `startup_import_allows_persisted_cooldown_provider_through_selection`.
+- Remaining: no live 5555 smoke has been run after this code change in the current checkout; do not claim runtime completion until rebuilt/restarted/probed.
+
+## 2026-06-08 verification standard correction
+
+- User correction: validation standard must be live/runtime-first, not unit-test-only.
+- Action taken: updated `.agents/skills/rcc-dev-skills/SKILL.md` to require at least one real-entry smoke / live runtime probe with actual port/request/response evidence before claiming verification complete.
+- Project memory updated in `MEMORY.md` to preserve the rule.
+
+## 2026-06-08 Hub/VR function-map build gate
+
+- Review finding: existing function-map gates passed only when explicitly invoked; `build` / `build:min` did not run map gates, so "map not updated => compile fails" was false.
+- Fix direction in progress: wire `verify:function-map-compile-gate` into both build scripts, add wiring self-gate, and register `vr.provider_forwarder_runtime` owner for ProviderForwarder load/select/status/startup-reprobe semantics.
+
 ## 2026-06-08 5520 free provider forwarder routing
 
 - User requirement: 5520 must group `1token` / `llmgate` / `sdfv` as one free forwarder pool with round-robin, then use paid providers such as `asxs` / `cc` as later targets for thinking/coding/longcontext routes.
@@ -7,6 +43,24 @@
 - Runtime builder fix: `src/config/virtual-router-builder.ts` now resolves forwarder config-state `providerId/modelId` into Rust-required real `providerKey` at bootstrap time and fails fast if provider/model/auth alias is missing or non-unique. `dist/config/virtual-router-builder.js` was patched because normal `tsc`/build is blocked by unrelated executor type errors.
 - Verification: `npm run jest:run -- --runTestsByPath tests/config/virtual-router-builder.forwarder-10000.spec.ts tests/red-tests/forwarder_bootstrap_must_surface.test.ts --runInBand --forceExit` passed; dist bootstrap script confirmed 5520 route targets and forwarder target expansion; `routecodex config validate --config ~/.rcc/config.toml` returned `rc=0` and SHA256 `changed=no`; `rg 'providerKey\s*=|\.key1\.' ~/.rcc/config.toml` has no matches; `git diff --check` passed.
 - Not performed: no restart/stop/start of port 5520. Current running process may still hold old in-memory config/code until explicitly reloaded or restarted.
+
+## 2026-06-08 5520 cooldown live verification / diagnostics mismatch
+
+- Live evidence on port 5520 after restart:
+  - `22:05:07` real request first-hit `tools/gateway-priority-5520-priority-tools -> sdfv.key1.gpt-5.4-mini`
+  - later requests could first-hit non-sdfv (`22:05:12` tools -> `llmgate`, reroute -> `1token`)
+  - but generic recoverable failures on `llmgate` still need dedicated confirmation before claiming cooldown closed.
+- Critical observability correction:
+  - `/_routecodex/diagnostics/virtual-router` previously read `options.getHubPipeline()` without routing-policy-group context, so a request to port 5520 could inspect the default pipeline instead of the 5520 group pipeline.
+  - Fixed in `src/server/runtime/http-server/routes.ts` by resolving current `req.socket.localPort` -> matched port config -> `routingPolicyGroup` -> `getHubPipeline(group)`.
+- Current root-cause hypothesis remains narrowed to the runtime binding/ingress layer for generic recoverable cooldown validation, not route-pool alternative suppression.
+
+## 2026-06-08 5520 cooldown owner point收敛
+
+- Live 进程运行的是全局安装包 `/opt/homebrew/lib/node_modules/routecodex/dist/...`，此前 repo 源码修复未真正进入 5520 进程。
+- 新收敛出的唯一 owner 点是 `src/providers/core/runtime/provider-failure-policy-impl.ts:isProviderFailureHealthNeutral`。
+- 该函数此前把 `PROVIDER_TRAFFIC_SATURATED` / `rate_limit_exceeded` 显式判成 `health-neutral=true`，导致 429 饱和错误只触发请求内切换，不进入 VR cooldown 计数。
+- 已同步移除 source 与 live global dist 中这条豁免；后续只接受 5520 重启 + 实流量 + diagnostics/log 证明为完成。
 
 ### 2026-06-08 correction: forwarder provider target expands all auth keys
 
@@ -199,6 +253,13 @@
 
 - Evidence: 5555 provider samples with only textual `[Image #1]` are insufficient alone because matching client-request snapshots were absent and the marker can come from old conversation history. Real image samples with `data:image` / `input_image` / `image_url` exist under `~/.rcc/codex-samples/openai-responses/port-5555` and must be compared node-by-node before blaming config.
 - Root cause found in code: Rust `req_outbound_stage3_compat` inferred latest media stripping from only the currently selected target capability metadata. That violates provider-switch semantics because outbound does not know whether a multimodal or vision reroute target is still available.
+
+## 2026-06-08 5520 cooldown live verification
+
+- Baseline before restart/live probe: `/Users/fanzhang/.rcc/sessions/127.0.0.1_5520/provider-health.json` did not exist, despite prior live `503/500` evidence in `~/.rcc/logs/server-5520.log`.
+- Working diff confirms Rust cooldown ingress owner changed in `router-hotpath-napi/src/virtual_router_engine/engine/events.rs`: `event_affects_health()` now ignores `routePool` alternatives and only honors explicit `affectsHealth=false`.
+- Regression test exists in the same file: `route_pool_alternatives_do_not_suppress_health_cooldown_accounting`.
+- Live verification still pending: must restart `5520`, send real requests, and confirm repeated provider failures now materialize cooldown state under `~/.rcc/sessions/127.0.0.1_5520/provider-health.json`.
 - Fix: removed req_outbound latest-turn media stripping based on selected target metadata. `strip_historical_media` remains for historical/context media only; current-turn chat/responses image payloads must survive provider error handling and reroute. Latest image placeholdering, if ever needed, must be driven by explicit VR policy after proving no multimodal target and no vision route exist, not by single-target outbound inference.
 - Verification PASS: `cargo test -p router-hotpath-napi image_request --lib -- --nocapture` (3 tests); `cargo test -p router-hotpath-napi image_attachment --lib -- --nocapture` (5 tests); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; `npx tsc --noEmit --pretty false`.
 - Boundary: do not fix this by changing config. Routing must choose multimodal/vision-capable targets for image requests; only if no multimodal target and no vision route exists may the latest image be placeholdered.
@@ -16911,3 +16972,36 @@ Phase E: TS fallback 物理删除
 - Root trace: `ResponsesProvider.sendDirectSsePassthroughRequest` accepts upstream HTTP 200 SSE and returns `{status:200,__sse_responses}` without pre-reading `event:error` / `response.failed`, unlike `OpenAiResponsesSdkTransport` which already maps early 200-SSE rate-limit frames to retryable provider 429.
 - Required fix boundary: provider runtime direct SSE path must pre-read early SSE frames, preserve normal streams by replaying buffered bytes, and throw recoverable provider error for `rate_limit_error` / concurrency so router-direct ErrorErr chain can switch provider. No payload cleanup, no relay.
 - 2026-06-08 review correction: the empty-reply continue Rust/NAPI/TS half-chain was removed from the current servertool followup runtime-action/runtime-metadata commit scope. The earlier local tests were insufficient for a full feature commit because the live consumer/registration/verification scope was a separate feature slice. Current commit should contain no `empty_reply_continue_contract`, no `planEmptyReply*` native exports, and no `handlers/empty-reply-continue.ts`.
+
+## 2026-06-08 Hub/Responses shared projection Rust owner
+
+- Review finding: `responses-response-utils.ts` still owned response-side semantic restore: unwrap `response/data`, bridge `response_inbound` actions, passthrough snapshot registration, and Responses payload snapshot retention.
+- Fix direction: Rust `shared_responses_response_utils.rs` now owns full Responses-to-Chat projection through `build_chat_response_from_responses_full`; TS wrapper is JSON serialize/parse + native required-export call only.
+- Gate additions: `hub.response_responses_chat_projection` added to function/verification maps, with `verify:hub-response-responses-chat-projection`; residue audit blocks TS bridge/registry/snapshot restore helpers from returning.
+- Verification PASS: `cargo test -p router-hotpath-napi build_chat_response_from_responses --lib -- --nocapture`; `cargo test -p router-hotpath-napi responses_response --lib -- --nocapture`; `npm run verify:hub-response-responses-chat-projection`; `npm run verify:function-map-compile-gate`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --forceExit`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-08 Hub response provider SSE materialization Rust owner
+
+- Current response closeout slice: `provider-response.ts` still had TS-owned SSE marker/bodyText/raw classification and stream-read error descriptor semantics before calling Rust Hub response pipeline.
+- Boundary decision: TS may inspect/read Node `Readable` handles as IO glue, but Rust `hub_resp_inbound_format_parse.rs` must own marker materialization (`mode=sse`, `sse_passthrough`, marker-only `clientStream`) and explicit read-error descriptor fields.
+- Implemented native owner candidates: `materialize_provider_response_sse_payload` and `build_provider_sse_stream_read_error_descriptor`; TS wrapper now calls native after optional stream byte read.
+
+## 2026-06-08 VR architecture compliance closeout
+- VR direct `provider.model` media mismatch root cause: old `should_fallback_direct_model_for_media`/route-change helper let explicit direct model fall through to relay/vision routing when media capability was missing. Fixed owner is Rust `virtual_router_engine/routing/direct_model.rs` + `engine/route.rs`: return `CONFIG_ERROR` via `direct_model_media_requirement_error`, no route rewrite.
+- VR fallback terminology is now locked by `verify:vr-no-fallback-semantics`: Rust decision/diagnostics use `routeChanged`, default reason uses `default:route-selected`, TS contract/log only mirror native fields.
+- Function-map gate evidence: `verify:function-map-compile-gate` failed until `hub.response_provider_sse_materialization` had source anchor, canonical builder bridge markers, and npm-script required gate; after fixes, function-map and `verify:architecture-ci` passed.
+Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 2026-06-08
+
+## 2026-06-08 22:38 CST router-direct cross-protocol failed_no_relay storm
+- Live symptom from 5555: `/v1/responses` routed to `anthropic-messages` / `openai-chat` providers, then router-direct logged `failed_no_relay` with `protocol mismatch`, causing repeated request failures instead of Hub relay conversion.
+- Root cause: `executePortAwarePipeline` treated any router-direct miss under `sameProtocolBehavior=direct` as fatal. But `router-direct-pipeline.ts` contract says direct is only same-protocol; cross-protocol miss must be a dispatch decision to Hub relay, not a final provider error.
+- Fix: `RouterDirectSkipped` now carries structured `requiresHubRelay`; protocol mismatch sets it, and `executePortAwarePipeline` relays through `executePipeline` with the preselected VR target in `__routecodexPreselectedRoute`, avoiding reselect storm and preserving the selected provider for Hub conversion.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts tests/server/runtime/http-server/error-pipeline-contract.spec.ts tests/server/runtime/http-server/router-direct-cross-protocol-relay.spec.ts --runInBand --no-cache --forceExit`; `npx tsc --noEmit --pretty false --skipLibCheck`; `git diff --check` for touched files.
+- Build/live install blocked by unrelated dirty deletion: `npm run build:min` fails because `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs` still declares `mod windsurf_tool_history_projection;` while that source file is currently deleted by another worktree slice. Current running 5555 health reports installed version `0.90.3008`, so it has not consumed this source fix yet.
+
+## 2026-06-08 5520/5555 temporary llmgate removal
+- Runtime config truth edited: `~/.rcc/config.toml`.
+- Removed `llmgate` from GPT forwarder targets `fwd.gpt.gpt-5.5` and `fwd.gpt.gpt-5.4-mini`; these forwarders are used by 5520 and 5555 routing groups.
+- Checked ordinary 5520/5555 route targets: no direct `llmgate.*` target existed; routes only referenced `fwd.gpt.*`, `asxs.*`, `cc.*`, `fwd.minimax.*`, minimax/mini27/minimonth/mimo pools.
+- Verification: `rg -n "llmgate" ~/.rcc/config.toml` returned no matches; `routecodex config validate --config ~/.rcc/config.toml` passed.
+- Did not delete global provider file `~/.rcc/provider/llmgate/config.v2.toml`; this task only removed 5520/5555 scheduling references.
