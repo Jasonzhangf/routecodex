@@ -354,6 +354,12 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     '"name": "exec_command"'
   );
+  assertContains(
+    'cli-projection-additional-tool-guard',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+    rustCliContract,
+    'classify_servertool_outcome(function_name).is_some()'
+  );
   assertContains('cli-projection-thin-wrapper', CLI_PROJECTION, cliProjection, 'buildClientVisibleProjectionShellWithNative');
   if (cliProjection.includes("name: 'exec_command'") || cliProjection.includes('"name": "exec_command"')) {
     fail('cli-projection-command-contract', 'cli-projection.ts must not build exec_command tool call shape in TS');

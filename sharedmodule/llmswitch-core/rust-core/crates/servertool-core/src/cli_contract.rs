@@ -1,6 +1,6 @@
 use crate::outcome_contract::{
-    is_client_exec_cli_projection, is_denied_cli_projection, quote_posix_single_argument,
-    DENIED_CLI_MARKERS,
+    classify_servertool_outcome, is_client_exec_cli_projection, is_denied_cli_projection,
+    quote_posix_single_argument, DENIED_CLI_MARKERS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -422,6 +422,11 @@ pub fn build_client_visible_projection_shell(
         if is_denied_cli_projection(function_name) {
             return Err(ServertoolCliError::DeniedTool(function_name.to_string()));
         }
+        if classify_servertool_outcome(function_name).is_some() {
+            return Err(ServertoolCliError::UnsupportedTool(
+                function_name.to_string(),
+            ));
+        }
         validate_no_denied_cli_marker(
             &serde_json::to_string(&tool_call)
                 .map_err(|_| ServertoolCliError::InvalidField("additionalToolCalls"))?,
@@ -710,6 +715,38 @@ mod tests {
         assert_eq!(calls[0]["function"]["name"], "exec_command");
         assert_eq!(calls[1]["id"], "call_exec_command_1");
         assert_eq!(calls[1]["function"]["name"], "exec_command");
+    }
+
+    #[test]
+    fn client_visible_projection_shell_rejects_additional_servertool_calls() {
+        let native_projection = build_client_exec_cli_projection_output(
+            "servertool_fixture",
+            "servertool_cli_projection",
+            json!({"value":1}),
+            0,
+            0,
+        )
+        .expect("fixture projection output");
+        let err =
+            build_client_visible_projection_shell(ServertoolClientVisibleProjectionShellInput {
+                request_id: "req_mixed_projection".to_string(),
+                client_call_id: "call_servertool_cli_fixture_1".to_string(),
+                native_projection,
+                reasoning_text: "servertool fixture projection".to_string(),
+                additional_tool_calls: vec![json!({
+                    "id": "call_web_search_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "arguments": "{}"
+                    }
+                })],
+            })
+            .expect_err("additional registered servertool must not be client-visible");
+        assert_eq!(
+            err,
+            ServertoolCliError::UnsupportedTool("web_search".to_string())
+        );
     }
 
     #[test]
