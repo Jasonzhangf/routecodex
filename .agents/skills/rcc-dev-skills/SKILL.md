@@ -81,6 +81,8 @@ ServerReqInbound01 -> HubReqInbound02 -> HubReqChatProcess03 -> VrRoute04
 
 遇到 provider 502/503/524/429、死打同一 provider、cooldown 不生效、direct path 无 `[provider-switch]` 时，先按 `AGENTS.md` 的“标准错误链契约图”定位，禁止在现场调用点补第二套策略。
 
+错误本身与错误风暴必须拆开处理：错误本身按唯一协议/路由/Provider/error-chain owner 修复或 fail-fast 暴露；错误风暴只治理重复触发、重复投递、重复日志、client reconnect 放大与 session backoff，不得把原始错误改写成 empty reply、成功响应、relay fallback 或 payload sanitizer。先判定第一个错误在哪个契约节点发生，再判定风暴是否由客户端重连、请求内 retry、provider-switch、日志双上报或 session storm backoff 缺口放大。
+
 ```text
 ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
   -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected
