@@ -7,7 +7,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-fn parse_lenient_string(value: &str) -> Value {
+pub(crate) fn parse_lenient_string(value: &str) -> Value {
     let s0 = value.trim();
     if s0.is_empty() {
         return Value::Object(Map::new());
@@ -43,10 +43,10 @@ fn parse_lenient_string(value: &str) -> Value {
     let unquoted_key_pattern =
         Regex::new(r#"([{,\s])([A-Za-z_][A-Za-z0-9_-]*)\s*:"#).expect("valid key quote pattern");
     let quoted = single_quote_pattern
-        .replace_all(candidate.as_str(), r#"\"$1\""#)
+        .replace_all(candidate.as_str(), r#""$1""#)
         .to_string();
     let normalized = unquoted_key_pattern
-        .replace_all(quoted.as_str(), r#"$1\"$2\":"#)
+        .replace_all(quoted.as_str(), r#"$1"$2":"#)
         .to_string();
     if let Ok(parsed) = serde_json::from_str::<Value>(normalized.as_str()) {
         return parsed;
@@ -380,12 +380,10 @@ pub(crate) fn unwrap_ran_transcript_shape(raw: &str) -> Option<String> {
         if is_transcript_collapsed_placeholder(line) {
             continue;
         }
-        match transcript_tree_marker(line) {
-            Some('└') => {}
-            Some('│') | Some('├') => continue,
-            _ => {}
-        }
-        let stripped = strip_box_drawing_prefix(line).trim().to_string();
+        let stripped = match transcript_tree_marker(line) {
+            Some(_) => strip_box_drawing_prefix(line).trim().to_string(),
+            None => line.trim().to_string(),
+        };
         if stripped.is_empty() || stripped.eq_ignore_ascii_case("(ctrl + t to view transcript)") {
             continue;
         }

@@ -6,7 +6,8 @@ use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{
-    normalize_tool_result_text, normalize_tool_result_value, repair_arguments_to_string,
+    normalize_tool_result_text, normalize_tool_result_value, parse_lenient_string,
+    repair_arguments_to_string,
 };
 
 use super::history::can_allow_terminal_pending_tool_calls;
@@ -1237,7 +1238,10 @@ pub(crate) fn extract_reasoning_segments_from_text(
 pub(crate) fn validate_tool_arguments(
     input: ValidateToolArgumentsInput,
 ) -> ValidateToolArgumentsOutput {
-    let repaired = repair_arguments_to_string(&input.args);
+    let repaired = match &input.args {
+        Value::String(raw) => repair_arguments_to_string(&parse_lenient_string(raw)),
+        other => repair_arguments_to_string(other),
+    };
     match serde_json::from_str::<Value>(&repaired) {
         Ok(_) => ValidateToolArgumentsOutput {
             repaired,

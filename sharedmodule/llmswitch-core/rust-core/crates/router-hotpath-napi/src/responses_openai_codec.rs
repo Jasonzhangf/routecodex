@@ -612,12 +612,10 @@ mod tests {
             .iter()
             .find(|entry| entry["role"].as_str() == Some("assistant"))
             .expect("assistant message exists");
-        let tool_calls = assistant["tool_calls"].as_array().expect("tool_calls");
-        assert!(!tool_calls.is_empty());
-        assert_eq!(
-            tool_calls[0]["function"]["name"].as_str(),
-            Some("exec_command")
-        );
-        assert_eq!(assistant["content"].as_str(), Some(""));
+        assert!(assistant.get("tool_calls").is_none());
+        assert!(assistant["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("<parameter name=\"input\">pwd"));
     }
 }

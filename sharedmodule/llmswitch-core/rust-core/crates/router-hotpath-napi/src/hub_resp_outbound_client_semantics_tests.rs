@@ -1871,7 +1871,7 @@ fn build_responses_payload_emits_both_when_reasoning_and_content_differ() {
     assert_eq!(messages.len(), 1, "should emit message");
 }
 
-// P0: reasoning-only with text summary -> both reasoning and message emitted
+// P0: reasoning-only with text summary -> reasoning item only, no empty message
 #[test]
 fn build_responses_payload_only_reasoning_with_summary_emits_both() {
     let payload = serde_json::json!({
@@ -1896,12 +1896,11 @@ fn build_responses_payload_only_reasoning_with_summary_emits_both() {
     let items = result["output"].as_array().expect("output array");
     let reasoning: Vec<_> = items.iter().filter(|i| i["type"] == "reasoning").collect();
     let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
-    // reasoning.summary present = has_text_reasoning = true -> message emitted
     assert_eq!(reasoning.len(), 1, "should emit reasoning item");
     assert_eq!(
         messages.len(),
-        1,
-        "reasoning with text summary should emit message too"
+        0,
+        "reasoning-only should not emit an empty message"
     );
 }
 

@@ -39,13 +39,15 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
             messages
         } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+            let allow_output_only_resume_tool_result =
+                is_output_only_resume_tool_result(payload, input_items.as_slice());
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
                 input: drop_stale_orphan_responses_tool_outputs(payload, input_items),
                 tools: tools.clone(),
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
-                allow_orphan_tool_result: Some(false),
+                allow_orphan_tool_result: Some(allow_output_only_resume_tool_result),
             })?
             .messages
         } else if let Some(input_text) = payload
@@ -277,6 +279,13 @@ fn is_responses_function_call_item(value: &Value) -> bool {
     matches!(ty.as_str(), "function_call" | "tool_call")
 }
 
+fn is_output_only_resume_tool_result(payload: &Map<String, Value>, input_items: &[Value]) -> bool {
+    read_trimmed_string(payload.get("previous_response_id")).is_some()
+        && input_items
+            .iter()
+            .all(|entry| !entry.is_object() || is_responses_tool_output_item(entry))
+}
+
 fn drop_stale_orphan_responses_tool_outputs(
     payload: &Map<String, Value>,
     input_items: Vec<Value>,
@@ -284,13 +293,7 @@ fn drop_stale_orphan_responses_tool_outputs(
     if input_items.iter().any(is_responses_function_call_item) {
         return input_items;
     }
-    let has_previous_response_id =
-        read_trimmed_string(payload.get("previous_response_id")).is_some();
-    let is_output_only_resume = has_previous_response_id
-        && input_items
-            .iter()
-            .all(|entry| !entry.is_object() || is_responses_tool_output_item(entry));
-    if is_output_only_resume {
+    if is_output_only_resume_tool_result(payload, input_items.as_slice()) {
         return input_items;
     }
     input_items
@@ -365,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_standardization_rejects_output_only_orphan_tool_result_even_with_previous_response_id(
+    fn responses_standardization_allows_output_only_orphan_tool_result_with_previous_response_id(
     ) {
         let input = json!({
             "payload": {
@@ -385,8 +388,14 @@ mod tests {
             }
         });
 
-        let err = coerce_standardized_request_from_payload(&input).unwrap_err();
-        assert!(err.contains("orphan_tool_result"));
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let standardized = output.get("standardizedRequest").unwrap();
+        assert_eq!(standardized["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(standardized["messages"][0]["role"], json!("tool"));
+        assert_eq!(
+            standardized["messages"][0]["tool_call_id"],
+            json!("call_function_snr978zyv21w_1")
+        );
     }
 
     #[test]

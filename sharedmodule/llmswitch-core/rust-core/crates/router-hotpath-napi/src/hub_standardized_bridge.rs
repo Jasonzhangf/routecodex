@@ -1003,7 +1003,9 @@ mod tests {
             .expect("arguments text");
         let args: Value = serde_json::from_str(args_text).expect("arguments json");
         assert_eq!(args["cmd"], "pnpm test");
-        assert_eq!(args["command"], "pnpm test");
+        assert_eq!(args["args"]["command"], "pnpm test");
+        assert_eq!(args["cwd"], "/repo");
+        assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/repo");
     }
 

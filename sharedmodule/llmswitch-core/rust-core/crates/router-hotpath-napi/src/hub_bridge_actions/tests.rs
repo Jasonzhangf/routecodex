@@ -1746,8 +1746,17 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
         allow_orphan_tool_result: None,
     };
 
-    let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
-    assert!(error.contains("dangling_tool_call"));
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 1);
+    assert_eq!(
+        output.messages[0].get("role").and_then(Value::as_str),
+        Some("assistant")
+    );
+    assert!(output.messages[0]
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .contains("<parameter name=\"input\">pwd"));
 }
 
 #[test]

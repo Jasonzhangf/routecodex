@@ -1415,8 +1415,12 @@ fn is_windsurf_rcc_text_tool_result(turn: &Value, native_tool_names: &HashSet<St
     if read_trimmed_string(row.get("type")).unwrap_or_default() != "function_call_output" {
         return false;
     }
-    let name = lookup_name(&read_trimmed_string(row.get("name")).unwrap_or_default());
-    !name.is_empty() && !native_tool_names.contains(&name)
+    let raw_name = read_trimmed_string(row.get("name")).unwrap_or_default();
+    let canonical_name = lookup_name(&raw_name);
+    !raw_name.is_empty()
+        && !native_tool_names.contains(&raw_name)
+        && !canonical_name.is_empty()
+        && !native_tool_names.contains(&canonical_name)
 }
 
 fn build_cascade_history_turn_text(
@@ -1753,8 +1757,45 @@ fn build_cascade_prompt(input: WindsurfCascadePromptInput) -> Result<String, Str
     if !completed_rcc_tool_call_reminder.trim().is_empty() {
         prefix_parts.push(completed_rcc_tool_call_reminder);
     }
+    let native_tool_names: HashSet<String> = input
+        .windsurf_native_tool_names
+        .iter()
+        .map(|name| lookup_name(name))
+        .collect();
+    let latest_user_index = find_latest_non_empty_user_index(&input.semantic_conversation);
+    let latest_tail_text =
+        extract_latest_cascade_user_text(&input.semantic_conversation, &[], &native_tool_names)?;
     let convo: Vec<Value> = input
         .semantic_conversation
+        .iter()
+        .enumerate()
+        .filter_map(|(index, turn)| {
+            let row = turn.as_object()?;
+            let turn_type = read_trimmed_string(row.get("type")).unwrap_or_default();
+            if !matches!(
+                turn_type.as_str(),
+                "user" | "assistant" | "function_call_output"
+            ) {
+                return None;
+            }
+            if turn_type == "function_call_output"
+                && latest_user_index
+                    .map(|latest| index > latest)
+                    .unwrap_or(false)
+                && !is_windsurf_rcc_text_tool_result(turn, &native_tool_names)
+            {
+                return None;
+            }
+            let mut next = turn.clone();
+            if turn_type == "user" && Some(index) == latest_user_index {
+                if let Some(next_row) = next.as_object_mut() {
+                    next_row.insert("text".to_string(), Value::String(latest_tail_text.clone()));
+                }
+            }
+            Some(next)
+        })
+        .collect();
+    let convo: Vec<Value> = convo
         .iter()
         .filter(|turn| {
             let Some(row) = turn.as_object() else {
@@ -2780,6 +2821,37 @@ mod tests {
                 .unwrap()
                 < prompt.find("Continue.").unwrap()
         );
+    }
+
+    #[test]
+    fn build_cascade_prompt_keeps_rcc_result_after_latest_user_when_native_result_is_tail() {
+        let prompt = build_cascade_prompt(WindsurfCascadePromptInput {
+            messages: vec![],
+            semantic_conversation: vec![
+                json!({"type":"user","text":"Run command, then patch."}),
+                json!({"type":"assistant","text":"","tool_calls":[{"call_id":"native:run_command:3","name":"run_command","arguments":{"command_line":"pwd"}}]}),
+                json!({"type":"function_call_output","call_id":"native:run_command:3","name":"run_command","output":"/repo\n"}),
+                json!({"type":"function_call_output","call_id":"call_patch","name":"apply_patch","output":"patch applied"}),
+            ],
+            rcc_text_tools: vec![json!({"type":"function","function":{"name":"apply_patch"}})],
+            rcc_guidance: String::new(),
+            rcc_pending_reminder: String::new(),
+            max_history_bytes: 100_000,
+            windsurf_native_tool_names: vec!["run_command".to_string()],
+        }).expect("prompt");
+
+        let latest_human = prompt
+            .split("<human>\n")
+            .last()
+            .and_then(|segment| segment.split("\n</human>").next())
+            .map(|segment| segment.to_string())
+            .expect("latest human");
+
+        assert!(latest_human.contains("Run command, then patch."));
+        assert!(latest_human.contains("/repo"));
+        assert!(!latest_human.contains("patch applied"));
+        assert!(prompt.contains("<|RCC|tool_result id=\"call_patch\" name=\"apply_patch\">"));
+        assert!(prompt.contains("patch applied"));
     }
 
     #[test]
