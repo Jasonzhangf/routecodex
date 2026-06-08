@@ -69,7 +69,6 @@ export interface RouterDirectResult {
 export interface RouterDirectSkipped {
   used: false;
   reason: string;
-  requiresHubRelay?: true;
   preselectedRoute?: {
     target: Record<string, unknown>;
     decision?: Record<string, unknown>;
@@ -115,7 +114,6 @@ export async function executeRouterDirectPipeline(
     return {
       used: false,
       reason: `protocol mismatch: inbound=${inboundProtocol}, provider=${providerProtocol}`,
-      requiresHubRelay: true,
     };
   }
 

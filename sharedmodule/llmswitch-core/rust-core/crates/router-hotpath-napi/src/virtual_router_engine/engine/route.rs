@@ -31,6 +31,15 @@ use crate::virtual_router_engine::routing_state_store::{
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
+fn read_router_direct_inbound_protocol(metadata: &Value) -> Option<String> {
+    metadata
+        .get("routerDirectInboundProtocol")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -453,6 +462,7 @@ impl VirtualRouterEngineCore {
         }
 
         let bound_alias_prefix: Option<String> = None;
+        let router_direct_inbound_protocol = read_router_direct_inbound_protocol(metadata);
 
         let direct_model =
             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
@@ -487,7 +497,14 @@ impl VirtualRouterEngineCore {
                 let mut eligible: Vec<String> = Vec::new();
                 for key in candidate_keys {
                     if let Some(profile) = self.provider_registry.get(&key) {
-                        if profile.model_id.as_deref() == Some(&model_id) {
+                        if profile.model_id.as_deref() == Some(&model_id)
+                            && router_direct_inbound_protocol
+                                .as_deref()
+                                .map(|protocol| {
+                                    self.provider_registry.provider_protocol_matches(&key, protocol)
+                                })
+                                .unwrap_or(true)
+                        {
                             eligible.push(key);
                         }
                     }
@@ -938,6 +955,52 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("route_hint:search"));
+    }
+
+    #[test]
+    fn router_direct_direct_model_rejects_cross_protocol_target() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "routing": {
+                "default": [{
+                    "id": "default-pool",
+                    "priority": 100,
+                    "targets": ["mini27.key1.MiniMax-M2.7"]
+                }]
+            },
+            "providers": {
+                "mini27.key1.MiniMax-M2.7": {
+                    "providerKey": "mini27.key1.MiniMax-M2.7",
+                    "providerType": "openai",
+                    "providerProtocol": "openai-chat",
+                    "modelId": "MiniMax-M2.7",
+                    "enabled": true
+                }
+            }
+        });
+        core.initialize(&config).expect("init should succeed");
+        let request = json!({
+            "model": "mini27.MiniMax-M2.7",
+            "input": [
+                { "role": "user", "content": [{ "type": "input_text", "text": "hello" }] }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/responses",
+            "routerDirectInboundProtocol": "openai-responses",
+            "requestId": "test-router-direct-direct-model-protocol"
+        });
+
+        let error = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect_err("router-direct direct_model must not select cross-protocol target");
+
+        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
+        assert!(error.contains("All providers unavailable for model mini27.MiniMax-M2.7"));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::virtual_router_engine::profile_utils::{normalize_capability_list, rea
 pub(crate) struct ProviderProfile {
     pub provider_key: String,
     pub provider_type: String,
+    pub provider_protocol: String,
     pub enabled: bool,
     pub outbound_profile: Option<String>,
     pub compatibility_profile: Option<String>,
@@ -70,6 +71,17 @@ impl ProviderRegistry {
             .as_ref()
             .and_then(|model_capabilities| model_capabilities.get(&model_id))
             .map(|capabilities| capabilities.iter().any(|item| item == capability))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn provider_protocol_matches(&self, provider_key: &str, protocol: &str) -> bool {
+        let expected = protocol.trim();
+        if expected.is_empty() {
+            return true;
+        }
+        self.providers
+            .get(provider_key)
+            .map(|profile| profile.provider_protocol == expected)
             .unwrap_or(false)
     }
 
@@ -207,6 +219,12 @@ impl ProviderRegistry {
         if provider_type.is_empty() {
             return None;
         }
+        let provider_protocol = map
+            .get("providerProtocol")
+            .and_then(|v| v.as_str())
+            .or_else(|| map.get("outboundProfile").and_then(|v| v.as_str()))
+            .map(|v| normalize_provider_protocol(v, &provider_type))
+            .unwrap_or_else(|| normalize_provider_protocol("", &provider_type));
         let enabled = map.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
         let model_id = map
             .get("modelId")
@@ -259,6 +277,7 @@ impl ProviderRegistry {
         let common_keys: &[&str] = &[
             "providerKey",
             "providerType",
+            "providerProtocol",
             "enabled",
             "modelId",
             "runtimeKey",
@@ -289,6 +308,7 @@ impl ProviderRegistry {
         Some(ProviderProfile {
             provider_key,
             provider_type,
+            provider_protocol,
             enabled,
             outbound_profile,
             compatibility_profile,
@@ -346,6 +366,22 @@ mod tests {
         });
         registry.load(providers.as_object().unwrap());
         assert!(!registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
+    }
+
+    #[test]
+    fn provider_protocol_field_overrides_provider_type_protocol_inference() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "responses.key1.gpt-5": {
+                "providerKey": "responses.key1.gpt-5",
+                "providerType": "openai",
+                "providerProtocol": "openai-responses",
+                "modelId": "gpt-5"
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert!(registry.provider_protocol_matches("responses.key1.gpt-5", "openai-responses"));
+        assert!(!registry.provider_protocol_matches("responses.key1.gpt-5", "openai-chat"));
     }
 
     #[test]
@@ -421,6 +457,29 @@ pub(crate) fn derive_model_id(provider_key: &str) -> String {
         return remainder.trim().to_string();
     }
     "".to_string()
+}
+
+fn normalize_provider_protocol(outbound_profile: &str, provider_type: &str) -> String {
+    let outbound = outbound_profile.trim().to_lowercase();
+    match outbound.as_str() {
+        "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => {
+            return outbound;
+        }
+        "openai" | "chat" => return "openai-chat".to_string(),
+        "responses" => return "openai-responses".to_string(),
+        "anthropic" | "claude" => return "anthropic-messages".to_string(),
+        "gemini" => return "gemini-chat".to_string(),
+        _ => {}
+    }
+    match provider_type.trim().to_lowercase().as_str() {
+        "responses" | "openai-responses" => "openai-responses".to_string(),
+        "anthropic" | "claude" => "anthropic-messages".to_string(),
+        "gemini" => "gemini-chat".to_string(),
+        "openai" | "glm" | "qwen" | "deepseek" | "lmstudio" | "mock" | "" => {
+            "openai-chat".to_string()
+        }
+        _ => "openai-chat".to_string(),
+    }
 }
 
 fn read_model_capabilities_map(value: Option<&Value>) -> Option<HashMap<String, Vec<String>>> {

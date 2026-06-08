@@ -78,6 +78,7 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     copy_non_empty_string(source, &mut control, "__shadowCompareForcedProviderKey");
     copy_non_empty_string(source, &mut control, "__routecodexRetryProviderKey");
     copy_non_empty_string(source, &mut control, "routeHint");
+    copy_non_empty_string(source, &mut control, "routerDirectInboundProtocol");
     copy_non_empty_string(source, &mut control, "routecodexRoutingPolicyGroup");
     copy_non_empty_string(source, &mut control, "routecodexPortMode");
     copy_non_empty_string(source, &mut control, "routecodexPortBinding");
@@ -240,11 +241,16 @@ mod tests {
             "__shadowCompareForcedProviderKey": " p2.key3.model ",
             "__routecodexRetryProviderKey": " p3.key4.model ",
             "routeHint": " tools ",
+            "routerDirectInboundProtocol": " openai-responses ",
             "routecodexRoutingPolicyGroup": " coding ",
             "providerProtocol": "openai-chat",
             "metadata": {"mustNotNest": true}
         }));
         assert_eq!(carrier.get_string("routeHint").as_deref(), Some("tools"));
+        assert_eq!(
+            carrier.get_string("routerDirectInboundProtocol").as_deref(),
+            Some("openai-responses")
+        );
         assert_eq!(
             carrier.control().get("allowedProviders"),
             Some(&json!(["p1.key1"]))

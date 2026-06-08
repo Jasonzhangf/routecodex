@@ -348,6 +348,7 @@ fn meta_carrier_contracts() -> Vec<MetaCarrierContract> {
                 "disabledProviderKeyAliases",
                 "__shadowCompareForcedProviderKey",
                 "__routecodexRetryProviderKey",
+                "routerDirectInboundProtocol",
                 "routecodexRoutingPolicyGroup",
                 "routecodexLocalPort",
                 "routecodexPortMode",

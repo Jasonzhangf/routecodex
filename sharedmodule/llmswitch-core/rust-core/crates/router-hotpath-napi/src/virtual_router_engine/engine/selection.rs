@@ -54,6 +54,15 @@ fn read_forwarder_sticky_session_id(metadata: &Value) -> Option<String> {
     None
 }
 
+fn read_router_direct_inbound_protocol(metadata: &Value) -> Option<String> {
+    metadata
+        .get("routerDirectInboundProtocol")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
 fn pool_matches_route_policy_group(
     pool: &crate::virtual_router_engine::routing::RoutePoolTier,
     requested_group: Option<&str>,
@@ -173,10 +182,16 @@ fn apply_non_availability_filters(
     excluded_keys: &HashSet<String>,
     server_tool_required: bool,
     bound_alias_prefix: Option<&str>,
+    router_direct_inbound_protocol: Option<&str>,
 ) -> Vec<String> {
     let mut scoped: Vec<String> =
         filter_candidates_by_state(candidates, routing_state, provider_registry)
             .into_iter()
+            .filter(|key| {
+                router_direct_inbound_protocol
+                    .map(|protocol| provider_registry.provider_protocol_matches(key, protocol))
+                    .unwrap_or(true)
+            })
             .filter(|key| {
                 provider_registry
                     .get(key)
@@ -203,6 +218,23 @@ fn apply_non_availability_filters(
         }
     }
     scoped
+}
+
+fn filter_router_direct_protocol(
+    provider_registry: &ProviderRegistry,
+    candidates: Vec<String>,
+    router_direct_inbound_protocol: Option<&str>,
+) -> Vec<String> {
+    let Some(protocol) = router_direct_inbound_protocol
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return candidates;
+    };
+    candidates
+        .into_iter()
+        .filter(|key| provider_registry.provider_protocol_matches(key, protocol))
+        .collect()
 }
 
 impl VirtualRouterEngineCore {
@@ -284,15 +316,21 @@ impl VirtualRouterEngineCore {
             .collect();
         let server_tool_required = metadata_requires_servertool(metadata);
         let forwarder_sticky_session_id = read_forwarder_sticky_session_id(metadata);
+        let router_direct_inbound_protocol = read_router_direct_inbound_protocol(metadata);
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let available = self.apply_standard_filters(
+                let mut available = self.apply_standard_filters(
                     env,
                     &resolved.keys,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
+                );
+                available = filter_router_direct_protocol(
+                    &self.provider_registry,
+                    available,
+                    router_direct_inbound_protocol.as_deref(),
                 );
                 if let Some(forced_key) = available.into_iter().next() {
                     self.consume_persisted_503_reprobe_for_selected_provider(&forced_key);
@@ -336,12 +374,17 @@ impl VirtualRouterEngineCore {
                         score_prefer_candidate(right, target, &self.provider_registry);
                     right_score.cmp(&left_score)
                 });
-                let available = self.apply_standard_filters(
+                let mut available = self.apply_standard_filters(
                     env,
                     &ordered_candidates,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
+                );
+                available = filter_router_direct_protocol(
+                    &self.provider_registry,
+                    available,
+                    router_direct_inbound_protocol.as_deref(),
                 );
                 if !available.is_empty() {
                     let route_key_for_lb = format!(
@@ -499,6 +542,7 @@ impl VirtualRouterEngineCore {
                         key,
                         &excluded_keys,
                         forwarder_sticky_session_id.as_deref(),
+                        router_direct_inbound_protocol.as_deref(),
                         &mut unavailable_route_pools,
                         &route_name,
                         &pool.id,
@@ -519,6 +563,7 @@ impl VirtualRouterEngineCore {
                     &excluded_keys,
                     server_tool_required,
                     bound_alias_prefix,
+                    router_direct_inbound_protocol.as_deref(),
                 );
                 let mut available = self.apply_standard_filters(
                     env,
@@ -526,6 +571,11 @@ impl VirtualRouterEngineCore {
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
+                );
+                available = filter_router_direct_protocol(
+                    &self.provider_registry,
+                    available,
+                    router_direct_inbound_protocol.as_deref(),
                 );
                 if let Some(prefix) = bound_alias_prefix {
                     let alias_candidates: Vec<String> = available
@@ -709,6 +759,7 @@ impl VirtualRouterEngineCore {
         key: &str,
         excluded_keys: &HashSet<String>,
         forwarder_sticky_session_id: Option<&str>,
+        router_direct_inbound_protocol: Option<&str>,
         unavailable_route_pools: &mut Vec<Value>,
         route_name: &str,
         pool_id: &str,
@@ -728,6 +779,12 @@ impl VirtualRouterEngineCore {
         let now = now_ms();
         for target in &cloned_targets {
             let available = !target.disabled
+                && router_direct_inbound_protocol
+                    .map(|protocol| {
+                        self.provider_registry
+                            .provider_protocol_matches(&target.provider_key, protocol)
+                    })
+                    .unwrap_or(true)
                 && !excluded_keys.contains(&target.provider_key)
                 && (self.is_provider_available(env, &target.provider_key)
                     || self
@@ -2045,6 +2102,146 @@ mod tests {
             .expect("invalid routing instruction must not empty the route pool");
 
         assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn router_direct_filters_route_pool_to_inbound_protocol() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "chat.key1.chat-model".to_string(),
+            json!({
+                "providerKey": "chat.key1.chat-model",
+                "providerType": "openai",
+                "outboundProfile": "openai-chat",
+                "modelId": "chat-model",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "anthropic.key1.claude".to_string(),
+            json!({
+                "providerKey": "anthropic.key1.claude",
+                "providerType": "anthropic",
+                "outboundProfile": "anthropic-messages",
+                "modelId": "claude",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "responses.key1.gpt-5".to_string(),
+            json!({
+                "providerKey": "responses.key1.gpt-5",
+                "providerType": "responses",
+                "outboundProfile": "openai-responses",
+                "modelId": "gpt-5",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([(
+            "search".to_string(),
+            Value::Array(vec![json!({
+                "id": "gateway-priority-5555-search",
+                "priority": 100,
+                "mode": "priority",
+                "targets": [
+                    "chat.key1.chat-model",
+                    "anthropic.key1.claude",
+                    "responses.key1.gpt-5"
+                ]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let selected = core
+            .select_provider(
+                "search",
+                &json!({
+                    "routerDirectInboundProtocol": "openai-responses"
+                }),
+                &ClassificationResult {
+                    route_name: "search".to_string(),
+                    confidence: 1.0,
+                    reasoning: "search".to_string(),
+                    candidates: vec!["search".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("router-direct must select a protocol-compatible target");
+
+        assert_eq!(selected.provider_key, "responses.key1.gpt-5");
+    }
+
+    #[test]
+    fn router_direct_fails_when_route_pool_has_no_inbound_protocol_match() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "chat.key1.chat-model".to_string(),
+            json!({
+                "providerKey": "chat.key1.chat-model",
+                "providerType": "openai",
+                "outboundProfile": "openai-chat",
+                "modelId": "chat-model",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "anthropic.key1.claude".to_string(),
+            json!({
+                "providerKey": "anthropic.key1.claude",
+                "providerType": "anthropic",
+                "outboundProfile": "anthropic-messages",
+                "modelId": "claude",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([(
+            "search".to_string(),
+            Value::Array(vec![json!({
+                "id": "gateway-priority-5555-search",
+                "priority": 100,
+                "mode": "priority",
+                "targets": [
+                    "chat.key1.chat-model",
+                    "anthropic.key1.claude"
+                ]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let error = core
+            .select_provider(
+                "search",
+                &json!({
+                    "routerDirectInboundProtocol": "openai-responses"
+                }),
+                &ClassificationResult {
+                    route_name: "search".to_string(),
+                    confidence: 1.0,
+                    reasoning: "search".to_string(),
+                    candidates: vec!["search".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect_err("router-direct must not select a cross-protocol target");
+
+        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
+        assert!(error.contains("No available providers after applying routing instructions"));
     }
 
     #[test]

@@ -233,12 +233,6 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
     }
   }
 
-  if (!isStageLoggingEnabled() && !releaseSummaryStage) {
-    return;
-  }
-
-  const verbose = isStageVerboseEnabled();
-
   const explicitElapsedMs = (
     releaseSummaryTrackedScope
     && (level === 'success' || level === 'error')
@@ -250,11 +244,18 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const scopeElapsedMs = finalizeScopeStageElapsedMs(requestId, scope, level, explicitElapsedMs);
   const effectiveElapsedMs = explicitElapsedMs ?? scopeElapsedMs;
 
+  if (!isStageLoggingEnabled() && !releaseSummaryStage) {
+    return;
+  }
+
+  const verbose = isStageVerboseEnabled();
+
   if (!shouldLogStage(stage, scope, level, verbose, timingEnabled, releaseSummaryStage)) {
     return;
   }
 
-  const showDetail = !releaseSummaryStage && (verbose || level === 'error');
+  const showDetail = shouldShowReleaseSummaryDetails(stage)
+    || (!releaseSummaryStage && (verbose || level === 'error'));
   const providerLabel = showDetail && typeof details?.providerLabel === 'string' ? details?.providerLabel : undefined;
   const finishReason = readStageFinishReason(details);
   const detailPayload = showDetail
@@ -584,7 +585,20 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
     || normalized === 'hub.response.completed'
     || normalized === 'response.completed'
     || normalized === 'provider.send.completed'
-    || normalized === 'router-direct.send.completed';
+    || normalized === 'router-direct.send.completed'
+    || normalized === 'request.session_storm_backoff.recorded'
+    || normalized === 'request.session_storm_backoff_wait'
+    || normalized === 'request.session_storm_backoff_wait.completed';
+}
+
+function shouldShowReleaseSummaryDetails(stage: string): boolean {
+  if (resolveRuntimeBuildMode() !== 'release') {
+    return false;
+  }
+  const normalized = stage.trim().toLowerCase();
+  return normalized === 'request.session_storm_backoff.recorded'
+    || normalized === 'request.session_storm_backoff_wait'
+    || normalized === 'request.session_storm_backoff_wait.completed';
 }
 
 function shouldTrackTimingBreakdownScope(stage: string): boolean {

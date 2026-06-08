@@ -234,6 +234,16 @@ function buildRouterDirectFailureError(reason: unknown): Error {
   return new Error(`router-direct failed without relay: ${message}`);
 }
 
+function shouldRecordRouterDirectStorm(error: unknown, readableMessage?: string): boolean {
+  if (isSessionStormBackoffCandidate(error)) {
+    return true;
+  }
+  if (!readableMessage) {
+    return false;
+  }
+  return isSessionStormBackoffCandidate(new Error(readableMessage));
+}
+
 export class RouteCodexHttpServer {
   private app: Application;
   private server?: Server;
@@ -1217,45 +1227,21 @@ export class RouteCodexHttpServer {
             source: 'router-direct',
           });
         }
-        const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
+        let directResult: RouterDirectOutcome;
+        try {
+          directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
+        } catch (error) {
+          this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, error);
+          throw error;
+        }
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
-        }
-        if (directResult.requiresHubRelay === true) {
-          const relayMetadata: Record<string, unknown> = {
-            ...(nextInput.metadata ?? {}),
-            ...(directResult.preselectedRoute
-              ? { __routecodexPreselectedRoute: directResult.preselectedRoute }
-              : {}),
-          };
-          this.logStage('router-direct.relay', input.requestId, {
-            reason: directResult.reason,
-            providerKey: typeof directResult.preselectedRoute?.target?.providerKey === 'string'
-              ? directResult.preselectedRoute.target.providerKey
-              : undefined,
-            routeName: typeof directResult.preselectedRoute?.decision?.routeName === 'string'
-              ? directResult.preselectedRoute.decision.routeName
-              : undefined,
-          });
-          return await this.executePipeline({
-            ...nextInput,
-            metadata: relayMetadata,
-          });
         }
         this.logStage('router-direct.failed_no_relay', input.requestId, {
           reason: directResult.reason,
         });
         const directError = buildRouterDirectFailureError(directResult.reason);
-        if (isSessionStormBackoffCandidate(directError)) {
-          for (const scope of routerDirectStormScopes) {
-            const backoffMs = consumeSessionStormBackoffMs(scope, directError);
-            this.logStage('request.session_storm_backoff.recorded', input.requestId, {
-              scope,
-              backoffMs,
-              source: 'router-direct',
-            });
-          }
-        }
+        this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, directError);
         throw directError;
       }
       return await this.executePipeline(nextInput);
@@ -1345,6 +1331,7 @@ export class RouteCodexHttpServer {
       path: input.entryEndpoint,
       headers: input.headers as Record<string, string | string[] | undefined>,
     });
+    metadataForHub.routerDirectInboundProtocol = inboundProtocol;
     const directPayloadDecision = evaluateDirectRouteDecision({
       payload: rawDirectPayload,
       inboundProtocol,
@@ -1643,7 +1630,6 @@ export class RouteCodexHttpServer {
       return {
         used: false,
         reason: directOutcome.reason,
-        ...(directOutcome.requiresHubRelay === true ? { requiresHubRelay: true as const } : {}),
         preselectedRoute: {
           target,
           decision: routingDecision,
@@ -1661,6 +1647,25 @@ export class RouteCodexHttpServer {
       providerPayload,
       pipelineMetadata: metadataForHub,
     };
+  }
+
+  private recordRouterDirectStormBackoff(
+    requestId: string,
+    scopes: string[],
+    error: unknown,
+    readableMessage?: string,
+  ): void {
+    if (!shouldRecordRouterDirectStorm(error, readableMessage)) {
+      return;
+    }
+    for (const scope of scopes) {
+      const backoffMs = consumeSessionStormBackoffMs(scope, error);
+      this.logStage('request.session_storm_backoff.recorded', requestId, {
+        scope,
+        backoffMs,
+        source: 'router-direct',
+      });
+    }
   }
 
   /**

@@ -79,6 +79,45 @@ describe('stage logger release summary mode', () => {
     expect(String(logSpy.mock.calls[0]?.[0] ?? '')).toContain('[router-direct.send][req_router_direct] completed total=150ms');
   });
 
+  it('prints session storm backoff observability events in release mode', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../src/server/utils/stage-logger.js');
+
+    logPipelineStage('request.session_storm_backoff.recorded', 'req_storm_1', {
+      scope: 'session:storm',
+      backoffMs: 1000,
+      source: 'router-direct',
+    });
+    logPipelineStage('request.session_storm_backoff_wait', 'req_storm_2', {
+      scope: 'session:storm',
+      waitMs: 1000,
+      source: 'router-direct',
+    });
+    logPipelineStage('request.session_storm_backoff_wait.completed', 'req_storm_2', {
+      scope: 'session:storm',
+      waitMs: 1000,
+      source: 'router-direct',
+    });
+
+    expect(logSpy).toHaveBeenCalledTimes(3);
+    const recorded = String(logSpy.mock.calls[0]?.[0] ?? '');
+    const wait = String(logSpy.mock.calls[1]?.[0] ?? '');
+    const completed = String(logSpy.mock.calls[2]?.[0] ?? '');
+    expect(recorded).toContain('[request.session_storm_backoff][req_storm_1] recorded');
+    expect(recorded).toContain('"scope":"session:storm"');
+    expect(recorded).toContain('"backoffMs":1000');
+    expect(wait).toContain('[request][req_storm_2] session_storm_backoff_wait');
+    expect(wait).toContain('"waitMs":1000');
+    expect(completed).toContain('[request.session_storm_backoff_wait][req_storm_2] completed');
+    expect(completed).toContain('"source":"router-direct"');
+  });
+
   it('moves tracked scope timings when request id is rebound', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
     process.env.ROUTECODEX_USAGE_TIMING = '1';
