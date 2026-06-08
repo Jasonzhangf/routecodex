@@ -2428,3 +2428,10 @@ Tags: error-chain, ErrorErr05, provider-switch, router-direct, auth-failure, 555
 - LMStudio response compat harvests Responses `output` tool tokens before chat governance so profile-local output-token shape is not lost.
 - Verified: `cargo test -p router-hotpath-napi req_outbound_stage3_compat::tests --lib -- --nocapture` passed 130/130 on 2026-06-08.
 Tags: req_outbound_stage3_compat, qwen, qwenchat, deepseek-web, lmstudio, rust-owner, 2026-06-08
+
+## 2026-06-08 Virtual Router no-TS runtime closeout
+- VR runtime owner is now Rust under `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`; `sharedmodule/llmswitch-core/src/router/virtual-router` is physically absent and `npm run verify:vr-no-ts-runtime` reports `VR production TS files: 0`.
+- Production imports of old `src/router/virtual-router` / `dist/router/virtual-router` runtime paths are blocked by the no-TS gate and architecture/function-map gates. Current grep residue for those paths is docs, fixtures, or analysis scripts, not production runtime imports.
+- `native-router-hotpath-required-exports.ts` is the required-export manifest consumed by `native-router-hotpath-loader.ts`; keep an explicit `native-router-hotpath` binding marker there so `llmswitch-rustification-audit` classifies the manifest as native-linked instead of false-counting native manifest growth as non-native TS runtime.
+- Verified final gates: full Rust lib `RUSTFLAGS='-Awarnings' cargo test -p router-hotpath-napi --lib -- --nocapture` passed 1576/1576 with 1 ignored; VR focused `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture` passed 247/247; `npm run verify:vr-no-ts-runtime`, `npm run verify:architecture-ci`, `npm run verify:llmswitch-rustification-audit`, `npx tsc --noEmit --pretty false`, `npm run build:min`, and `git diff --check` all passed.
+Tags: virtual-router, rustification, no-ts-runtime, native-owner, architecture-gate, 2026-06-08
