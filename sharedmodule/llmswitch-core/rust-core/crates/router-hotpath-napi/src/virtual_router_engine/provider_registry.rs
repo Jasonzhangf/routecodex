@@ -1,5 +1,7 @@
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+use crate::virtual_router_engine::profile_utils::{normalize_capability_list, read_context_tokens};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderProfile {
@@ -237,8 +239,8 @@ impl ProviderRegistry {
             .map(|v| v.to_string());
         let responses_config = map.get("responsesConfig").cloned();
         let streaming = map.get("streaming").cloned();
-        let model_capabilities = normalize_model_capabilities(map.get("modelCapabilities"));
-        let max_context_tokens = read_context_tokens(map);
+        let model_capabilities = read_model_capabilities_map(map.get("modelCapabilities"));
+        let max_context_tokens = read_context_tokens(Some(map));
         let server_tools_disabled = map
             .get("serverToolsDisabled")
             .and_then(|v| v.as_bool())
@@ -303,32 +305,6 @@ impl ProviderRegistry {
             provider_specific_config,
         })
     }
-}
-
-fn read_context_tokens(map: &Map<String, Value>) -> Option<i64> {
-    let mut best: Option<i64> = None;
-    for key in [
-        "maxContext",
-        "max_context",
-        "contextWindow",
-        "context_window",
-        "maxContextTokens",
-        "max_context_tokens",
-        "contextTokens",
-        "context_tokens",
-    ] {
-        let value = map.get(key).and_then(|raw| match raw {
-            Value::Number(number) => number
-                .as_i64()
-                .or_else(|| number.as_f64().map(|v| v as i64)),
-            Value::String(text) => text.trim().parse::<f64>().ok().map(|v| v as i64),
-            _ => None,
-        });
-        if let Some(value) = value.filter(|value| *value > 0) {
-            best = Some(best.map_or(value, |current| current.max(value)));
-        }
-    }
-    best
 }
 
 #[cfg(test)]
@@ -447,7 +423,7 @@ pub(crate) fn derive_model_id(provider_key: &str) -> String {
     "".to_string()
 }
 
-fn normalize_model_capabilities(value: Option<&Value>) -> Option<HashMap<String, Vec<String>>> {
+fn read_model_capabilities_map(value: Option<&Value>) -> Option<HashMap<String, Vec<String>>> {
     let Some(map) = value.and_then(|v| v.as_object()) else {
         return None;
     };
@@ -457,34 +433,7 @@ fn normalize_model_capabilities(value: Option<&Value>) -> Option<HashMap<String,
         if normalized_model.is_empty() {
             continue;
         }
-        let caps = caps_value
-            .as_array()
-            .map(|arr| {
-                let mut seen: HashSet<String> = HashSet::new();
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .map(|raw| raw.trim().to_lowercase())
-                    .filter_map(|normalized| {
-                        if normalized.is_empty() {
-                            return None;
-                        }
-                        let mapped = match normalized.as_str() {
-                            "vision" => "vision".to_string(),
-                            "websearch" | "web-search" => "web_search".to_string(),
-                            "websearch-direct" | "web_search_direct" | "web-search-direct" => {
-                                "web_search_direct".to_string()
-                            }
-                            _ => normalized,
-                        };
-                        if seen.insert(mapped.clone()) {
-                            Some(mapped)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_default();
+        let caps = normalize_capability_list(caps_value, None);
         if !caps.is_empty() {
             out.insert(normalized_model.to_string(), caps);
         }

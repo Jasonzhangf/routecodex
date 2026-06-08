@@ -342,28 +342,7 @@ fn event_affects_health(event: &Value) -> bool {
     ) {
         return false;
     }
-    // Rule 3a/3c: if the route pool has a strict alternative candidate,
-    // the error should NOT mutate VR health state.
-    let provider_key = resolve_provider_key(event).unwrap_or_default();
-    if provider_key.is_empty() {
-        return true;
-    }
-    let pool = match event.get("routePool").and_then(|v| v.as_array()) {
-        Some(arr) if arr.len() > 1 => arr,
-        _ => return true,
-    };
-    let excluded: Vec<&str> = event
-        .get("excludedProviderKeys")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-        .unwrap_or_default();
-    let has_alternative = pool.iter().any(|candidate| {
-        candidate
-            .as_str()
-            .map(|s| s != provider_key && !excluded.contains(&s))
-            .unwrap_or(false)
-    });
-    !has_alternative
+    true
 }
 
 fn resolve_provider_key(event: &Value) -> Option<String> {
@@ -967,6 +946,44 @@ mod tests {
 
         let state = provider_state(&core, "test.key1.model-a");
         assert_eq!(state.failure_count, 1);
+    }
+
+    #[test]
+    fn route_pool_alternatives_do_not_suppress_health_cooldown_accounting() {
+        let provider_key = "test.key1.model-a";
+        let backup_key = "test.key1.model-b";
+        let mut core =
+            build_test_core_with_providers(&[(provider_key, "gpt-test"), (backup_key, "gpt-test")]);
+        let mk = |request_id: &str| {
+            json!({
+                "code": "HTTP_500",
+                "message": "upstream internal error",
+                "stage": "provider.send",
+                "status": 500,
+                "runtime": {
+                    "requestId": request_id,
+                    "providerKey": provider_key
+                },
+                "routePool": [provider_key, backup_key],
+                "excludedProviderKeys": [],
+                "details": {
+                    "errorClassification": "recoverable",
+                    "routePoolSize": 2
+                }
+            })
+        };
+
+        core.handle_provider_error(&mk("req-pool-a1"));
+        core.handle_provider_error(&mk("req-pool-a2"));
+        core.handle_provider_error(&mk("req-pool-a3"));
+
+        let state = provider_state(&core, provider_key);
+        assert_eq!(state.state, "tripped");
+        let ttl = state.cooldown_expires_at.expect("cooldown expiry") - now_ms();
+        assert!(
+            ttl > 29 * 60_000 && ttl <= 31 * 60_000,
+            "routePool alternatives must not block ~30m cooldown, ttl={ttl}"
+        );
     }
 
     #[test]

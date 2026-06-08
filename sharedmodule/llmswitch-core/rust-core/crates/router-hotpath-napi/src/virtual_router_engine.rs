@@ -12,6 +12,7 @@ pub(crate) mod instructions;
 mod load_balancer;
 mod message_utils;
 mod napi_proxy;
+mod profile_utils;
 pub(crate) mod provider_bootstrap;
 mod provider_registry;
 pub(crate) mod provider_runtime_ingress;

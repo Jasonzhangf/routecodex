@@ -28,7 +28,7 @@ describe('request-executor provider health impact', () => {
         errorCode: 'HTTP_502',
         reason: 'upstream bad gateway'
       },
-      requestId: 'req-pool-alternative-health-neutral',
+      requestId: 'req-pool-alternative-health-impact',
       providerKey: 'provider.a',
       providerId: 'provider-a',
       providerType: 'openai',
@@ -39,8 +39,8 @@ describe('request-executor provider health impact', () => {
       attempt: 1,
       maxAttempts: 3,
       stage: 'provider.send',
-      logicalRequestChainKey: 'logical-pool-alternative-health-neutral',
-      logicalChainRetryLimitStageRequestId: 'logical-pool-alternative-health-neutral',
+      logicalRequestChainKey: 'logical-pool-alternative-health-impact',
+      logicalChainRetryLimitStageRequestId: 'logical-pool-alternative-health-impact',
       routePool: ['provider.a', 'provider.b'],
       excludedProviderKeys,
       recordAttempt: () => undefined,
@@ -52,9 +52,10 @@ describe('request-executor provider health impact', () => {
       expect.objectContaining({
         stage: 'provider.send',
         recoverable: true,
+        affectsHealth: true,
         routePool: ['provider.a', 'provider.b'],
         runtime: expect.objectContaining({
-          requestId: 'req-pool-alternative-health-neutral',
+          requestId: 'req-pool-alternative-health-impact',
           providerKey: 'provider.a'
         })
       })
@@ -98,6 +99,7 @@ describe('request-executor provider health impact', () => {
       expect.objectContaining({
         stage: 'provider.send',
         recoverable: true,
+        affectsHealth: true,
         routePool: ['provider.a'],
         runtime: expect.objectContaining({
           requestId: 'req-singleton-health-impact',

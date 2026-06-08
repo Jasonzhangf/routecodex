@@ -131,7 +131,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       metadata: args.metadata,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys,
-      affectsHealthOverride: retryExecutionPlan.requestLocalTransient ? false : undefined,
       extraDetails: {
         ...(args.extraDetails ?? {}),
         routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0

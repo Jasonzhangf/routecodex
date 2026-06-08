@@ -9,6 +9,9 @@ use std::path::PathBuf;
 
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
+use crate::virtual_router_engine::profile_utils::{
+    build_runtime_key, normalize_capability_list, normalize_positive_integer, read_context_tokens,
+};
 
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS: i64 = 8192;
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
@@ -18,6 +21,16 @@ const CLAUDE_CODE_DEFAULT_X_APP: &str = "claude-cli";
 const CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA: &str = "claude-code";
 const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &["qwen"];
 const PROVIDER_LEVEL_POOL_ALIAS: &str = "pool";
+const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
+    "text",
+    "reasoning",
+    "multimodal",
+    "vision",
+    "video",
+    "thinking",
+    "web_search",
+    "web_search_direct",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -812,7 +825,7 @@ fn normalize_provider(
             .and_then(|record| record.get("enabled"))
             .and_then(Value::as_bool)
             == Some(false);
-    let model_capabilities = normalize_model_capabilities(provider);
+    let model_capabilities = normalize_provider_model_capabilities(provider);
 
     Ok(NormalizedProvider {
         provider_type: provider_type.clone(),
@@ -2563,28 +2576,6 @@ fn normalize_model_output_tokens(
     )
 }
 
-fn read_context_tokens(record: Option<&Map<String, Value>>) -> Option<i64> {
-    let Some(record) = record else {
-        return None;
-    };
-    let mut best: Option<i64> = None;
-    for key in [
-        "maxContext",
-        "max_context",
-        "contextWindow",
-        "context_window",
-        "maxContextTokens",
-        "max_context_tokens",
-        "contextTokens",
-        "context_tokens",
-    ] {
-        if let Some(value) = normalize_positive_integer(record.get(key)) {
-            best = Some(best.map_or(value, |current| current.max(value)));
-        }
-    }
-    best
-}
-
 fn read_output_tokens(record: Option<&Map<String, Value>>) -> Option<i64> {
     let Some(record) = record else {
         return None;
@@ -2604,18 +2595,7 @@ fn read_output_tokens(record: Option<&Map<String, Value>>) -> Option<i64> {
     None
 }
 
-fn normalize_positive_integer(value: Option<&Value>) -> Option<i64> {
-    match value {
-        Some(Value::Number(number)) => number
-            .as_i64()
-            .or_else(|| number.as_f64().map(|v| v as i64)),
-        Some(Value::String(raw)) => raw.trim().parse::<f64>().ok().map(|v| v as i64),
-        _ => None,
-    }
-    .filter(|value| *value > 0)
-}
-
-fn normalize_model_capabilities(
+fn normalize_provider_model_capabilities(
     provider: &Map<String, Value>,
 ) -> Option<BTreeMap<String, Vec<String>>> {
     let mut result = BTreeMap::new();
@@ -2623,38 +2603,10 @@ fn normalize_model_capabilities(
         let Some(capabilities) = model.get("capabilities").and_then(Value::as_array) else {
             return;
         };
-        let mut valid = Vec::new();
-        let mut seen = HashSet::new();
-        for cap in capabilities {
-            let normalized = cap
-                .as_str()
-                .map(|value| value.trim().to_lowercase())
-                .unwrap_or_default();
-            let mapped = match normalized.as_str() {
-                "multimodal" => "multimodal".to_string(),
-                "vision" => "vision".to_string(),
-                "websearch" | "web-search" => "web_search".to_string(),
-                "websearch-direct" | "web_search_direct" | "web-search-direct" => {
-                    "web_search_direct".to_string()
-                }
-                _ => normalized,
-            };
-            if [
-                "text",
-                "reasoning",
-                "multimodal",
-                "vision",
-                "video",
-                "thinking",
-                "web_search",
-                "web_search_direct",
-            ]
-            .contains(&mapped.as_str())
-                && seen.insert(mapped.clone())
-            {
-                valid.push(mapped);
-            }
-        }
+        let valid = normalize_capability_list(
+            &Value::Array(capabilities.clone()),
+            Some(MODEL_CAPABILITY_ALLOWLIST),
+        );
         if !valid.is_empty() {
             result.insert(model_id, valid);
         }
@@ -3118,10 +3070,6 @@ fn parse_target_key(target_key: &str) -> Option<ParsedTargetKey> {
         key_alias: remainder[..second_dot].to_string(),
         model_id: remainder[second_dot + 1..].to_string(),
     })
-}
-
-fn build_runtime_key(provider_id: &str, key_alias: &str) -> String {
-    format!("{}.{}", provider_id, key_alias)
 }
 
 fn normalize_enabled(value: Option<&Value>) -> Option<bool> {

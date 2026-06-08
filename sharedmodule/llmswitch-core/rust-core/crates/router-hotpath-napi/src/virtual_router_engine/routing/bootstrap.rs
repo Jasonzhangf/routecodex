@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::load_balancer::LoadBalancingPolicy;
+use crate::virtual_router_engine::profile_utils::build_runtime_key;
 
 use super::config::RoutePoolTier;
 use super::utils::{
@@ -920,10 +921,6 @@ fn split_model_priority(raw: &str) -> (String, i64) {
         }
     }
     (value.to_string(), 100)
-}
-
-fn build_runtime_key(provider_id: &str, key_alias: &str) -> String {
-    format!("{}.{}", provider_id, key_alias)
 }
 
 #[cfg(test)]
