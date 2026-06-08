@@ -4,7 +4,7 @@ import type {
   VirtualRouterProvidersConfig,
   VirtualRouterRoutingConfig
 } from './virtual-router-types.js';
-import { loadProviderConfigsV2 } from './provider-v2-loader.js';
+import { loadProviderConfigsV2, type ProviderConfigV2 } from './provider-v2-loader.js';
 import { isRecord } from '../utils/common-utils.js';
 
 
@@ -156,6 +156,8 @@ export type BuildVirtualRouterInputV2Options = {
   includeAllRoutingPolicyGroups?: boolean;
 };
 
+type ProviderConfigMap = Record<string, ProviderConfigV2>;
+
 function extractRoutingFromUserConfig(
   userConfig: UnknownRecord,
   options?: BuildVirtualRouterInputV2Options,
@@ -219,7 +221,7 @@ export async function buildVirtualRouterInputV2(
     referencedProviderIds.add(providerId);
   }
 
-  // 收集 forwarder 引用 + forwarder 定义，并补全 forwarder targets 引用的 real provider id
+  // 收集 forwarder 引用 + forwarder 定义。配置态禁止要求用户写 auth key。
   const referencedForwarderIds = resolveReferencedForwarderIdsFromRouting(routing);
   const forwardersSource = extractForwardersFromUserConfig(userConfig);
   if (forwardersSource) {
@@ -233,13 +235,13 @@ export async function buildVirtualRouterInputV2(
         throw new Error(`[forwarder-config] routing references unknown forwarder '${refId}'`);
       }
     }
-    // 收集 forwarder targets 引用的 real provider id
+    // 收集 forwarder targets 引用的 provider id。
     for (const fwdNode of Object.values(forwardersSource)) {
       const targets = Array.isArray((fwdNode as UnknownRecord).targets)
         ? ((fwdNode as UnknownRecord).targets as Array<UnknownRecord>)
         : [];
       for (const t of targets) {
-        const providerId = pickString(t.providerId) ?? pickString(t.providerKey);
+        const providerId = pickString(t.providerId) ?? parseProviderIdFromProviderKeyForLegacyConfig(pickString(t.providerKey));
         if (providerId) {
             referencedProviderIds.add(providerId);
         }
@@ -262,14 +264,17 @@ export async function buildVirtualRouterInputV2(
     providers,
     routing,
     ...(forwardersSource && Object.keys(forwardersSource).length
-      ? { forwarders: normalizeForwardersForNative(forwardersSource) }
+      ? { forwarders: normalizeForwardersForNative(forwardersSource, providerConfigs) }
       : {}),
     ...(applyPatch ? { applyPatch } : {})
   };
   return input;
 }
 
-function normalizeForwardersForNative(source: Record<string, UnknownRecord>): Record<string, UnknownRecord> {
+function normalizeForwardersForNative(
+  source: Record<string, UnknownRecord>,
+  providerConfigs: ProviderConfigMap,
+): Record<string, UnknownRecord> {
   const out: Record<string, UnknownRecord> = {};
   for (const [id, raw] of Object.entries(source)) {
     const entry: UnknownRecord = { ...raw };
@@ -294,17 +299,138 @@ function normalizeForwardersForNative(source: Record<string, UnknownRecord>): Re
     if (Array.isArray(entry.targets)) {
       entry.targets = entry.targets
         .filter((target): target is UnknownRecord => isRecord(target))
-        .map((target) => {
-          const providerKey = pickString(target.providerKey);
-          return {
+        .flatMap((target) => {
+          const providerKeys = resolveForwarderTargetProviderKeys({
+            forwarderId: id,
+            forwarderModelId: modelId,
+            target,
+            providerConfigs,
+          });
+          return providerKeys.map((providerKey) => ({
             ...target,
-            ...(providerKey ? { providerKey } : {})
-          };
+            providerKey,
+            disabled: target.disabled === true
+          }));
         });
     }
     out[id] = entry;
   }
   return out;
+}
+
+function resolveForwarderTargetProviderKeys(options: {
+  forwarderId: string;
+  forwarderModelId?: string;
+  target: UnknownRecord;
+  providerConfigs: ProviderConfigMap;
+}): string[] {
+  const explicitProviderKey = pickString(options.target.providerKey);
+  if (explicitProviderKey) {
+    return [explicitProviderKey];
+  }
+
+  const providerId = pickString(options.target.providerId) ?? pickString(options.target.provider);
+  if (!providerId) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target requires providerId`);
+  }
+  const providerConfig = options.providerConfigs[providerId];
+  if (!providerConfig) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target providerId '${providerId}' is not configured`);
+  }
+  const modelId = pickString(options.target.modelId)
+    ?? pickString(options.target.model)
+    ?? options.forwarderModelId;
+  if (!modelId) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' requires modelId or forwarder model`);
+  }
+  if (!providerDeclaresModel(providerConfig.provider, modelId)) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' does not declare model '${modelId}'`);
+  }
+  const aliases = providerAuthAliases(providerConfig.provider);
+  if (aliases.length === 0) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' has no auth aliases`);
+  }
+  return aliases.map((alias) => `${providerId}.${alias}.${modelId}`);
+}
+
+function providerAuthAliases(provider: UnknownRecord): string[] {
+  const auth = isRecord(provider.auth) ? (provider.auth as UnknownRecord) : {};
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  const add = (alias?: string) => {
+    const base = alias?.trim() || `key${seen.size + 1}`;
+    let normalized = base;
+    let index = 1;
+    while (seen.has(normalized)) {
+      normalized = `${base}_${index}`;
+      index += 1;
+    }
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      aliases.push(normalized);
+    }
+  };
+
+  if (Array.isArray(auth.entries)) {
+    for (const entry of auth.entries) {
+      if (isRecord(entry)) {
+        add(pickString(entry.alias));
+      }
+    }
+  }
+  if (Array.isArray(auth.keys)) {
+    for (const entry of auth.keys) {
+      if (isRecord(entry)) {
+        add(pickString(entry.alias));
+      } else if (typeof entry === 'string' && entry.trim()) {
+        add(undefined);
+      }
+    }
+  } else if (isRecord(auth.keys)) {
+    for (const alias of Object.keys(auth.keys)) {
+      add(alias);
+    }
+  }
+  if (aliases.length === 0 && (pickString(provider.apiKey) || pickString(auth.apiKey) || pickString(auth.value))) {
+    add(undefined);
+  }
+  return aliases;
+}
+
+function providerDeclaresModel(provider: UnknownRecord, modelId: string): boolean {
+  const models = provider.models;
+  if (Array.isArray(models)) {
+    return models.some((model) => {
+      if (!isRecord(model)) {
+        return false;
+      }
+      if (pickString(model.id) === modelId) {
+        return true;
+      }
+      const aliases = Array.isArray(model.aliases) ? model.aliases : [];
+      return aliases.some((alias) => typeof alias === 'string' && alias.trim() === modelId);
+    });
+  }
+  if (isRecord(models)) {
+    if (Object.prototype.hasOwnProperty.call(models, modelId)) {
+      return true;
+    }
+    return Object.values(models).some((model) => {
+      if (!isRecord(model) || !Array.isArray(model.aliases)) {
+        return false;
+      }
+      return model.aliases.some((alias) => typeof alias === 'string' && alias.trim() === modelId);
+    });
+  }
+  const defaultModel = pickString(provider.defaultModel) ?? pickString(provider.modelId) ?? pickString(provider.model);
+  return defaultModel === modelId;
+}
+
+function parseProviderIdFromProviderKeyForLegacyConfig(providerKey?: string): string | undefined {
+  if (!providerKey) {
+    return undefined;
+  }
+  return providerKey.split('.', 1)[0]?.trim() || undefined;
 }
 
 function pickString(value: unknown): string | undefined {

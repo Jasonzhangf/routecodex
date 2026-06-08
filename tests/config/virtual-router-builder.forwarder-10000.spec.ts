@@ -45,30 +45,24 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     const gpt55 = fwds['fwd.gpt.gpt-5.5'] as {
       strategy?: string;
       stickyKey?: string;
-      targets: Array<{ providerId?: string; providerKey?: string; priority?: number }>;
+      targets: Array<{ providerId?: string; providerKey?: string; modelId?: string; priority?: number }>;
     };
     expect(gpt55.strategy).toBe('round-robin');
     expect(gpt55.stickyKey).toBe('none');
-    expect(gpt55.targets.map((t) => [t.providerId, t.providerKey, t.priority])).toEqual([
-      ['1token', '1token.key1.gpt-5.5', undefined],
-      ['sdfv', 'sdfv.key1.gpt-5.5', undefined],
-      ['llmgate', 'llmgate.key1.free-gpt-5.5', undefined],
+    expect(gpt55.targets.map((t) => [t.providerId, t.providerKey, t.modelId, t.priority])).toEqual([
+      ['1token', '1token.key1.gpt-5.5', undefined, undefined],
+      ['sdfv', 'sdfv.key1.gpt-5.5', undefined, undefined],
+      ['llmgate', 'llmgate.key1.free-gpt-5.5', 'free-gpt-5.5', undefined],
     ]);
 
     const m27 = fwds['fwd.minimax.MiniMax-M2.7'] as {
-      targets: Array<{ provider?: string; providerId?: string; providerKey?: string; model?: string; priority?: number }>;
-      weights?: Record<string, number>;
+      targets: Array<{ provider?: string; providerId?: string; providerKey?: string; model?: string; weight?: number }>;
     };
-    expect(m27.targets.map((t) => [t.providerId ?? t.provider, t.providerKey]).sort()).toEqual([
-      ['mini27', 'mini27.key1.MiniMax-M2.7'],
-      ['minimax', 'minimax.key1.MiniMax-M2.7'],
-      ['minimonth', 'minimonth.key1.MiniMax-M2.7'],
+    expect(m27.targets.map((t) => [t.providerId ?? t.provider, t.providerKey, t.weight]).sort()).toEqual([
+      ['mini27', 'mini27.key1.MiniMax-M2.7', 3],
+      ['minimax', 'minimax.key1.MiniMax-M2.7', 5],
+      ['minimonth', 'minimonth.key1.MiniMax-M2.7', 2],
     ]);
-    expect(m27.weights).toMatchObject({
-      'minimax': 5,
-      'mini27': 3,
-      'minimonth': 2,
-    });
 
     const m3 = fwds['fwd.minimax.MiniMax-M3'] as {
       targets: Array<{ provider?: string; providerId?: string; providerKey?: string; model?: string }>;
@@ -78,13 +72,30 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     expect((m3 as any).modelId ?? m3.targets[0]?.model).toBe('MiniMax-M3');
   });
 
-  skipUnless('5520 routing contains NO forwarder targets (forwarder NOT enabled on 5520)', async () => {
+  skipUnless('5520 GPT routes use free GPT forwarders before paid providers', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
-    const all = collectTargets(input.routing);
-    const fwdLeak = all.filter((t) => t.startsWith('fwd.'));
-    expect(fwdLeak).toEqual([]);
+    for (const routeName of ['coding', 'tools', 'search', 'web_search', 'multimodal']) {
+      expect(routeTargets(input.routing, routeName)).toEqual([
+        'fwd.gpt.gpt-5.4-mini',
+        'asxs.gpt-5.4-mini',
+        'cc.gpt-5.4-mini',
+      ]);
+    }
+    for (const routeName of ['thinking', 'longcontext', 'default']) {
+      expect(routeTargets(input.routing, routeName)).toEqual([
+        'fwd.gpt.gpt-5.5',
+        'asxs.gpt-5.5',
+        'cc.gpt-5.5',
+      ]);
+    }
+  });
+
+  skipUnless('live config keeps forwarder targets providerId/modelId only', () => {
+    const raw = readFileSync(LIVE_CONFIG, 'utf8');
+    expect(raw).not.toMatch(/providerKey\s*=/);
+    expect(raw).not.toMatch(/\.key1\./);
   });
 
   skipUnless('5555 GPT routes use GPT forwarder target', async () => {

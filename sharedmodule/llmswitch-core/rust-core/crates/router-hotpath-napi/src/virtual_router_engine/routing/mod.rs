@@ -13,8 +13,9 @@ pub(crate) use bootstrap::{bootstrap_virtual_router_routing_json, NormalizedRout
 #[allow(unused_imports)]
 pub(crate) use config::{
     build_route_queue, default_pool_supports_capability, filter_pools_by_capability,
-    filter_pools_by_visual_capability, parse_routing, route_has_targets, RoutePoolTier,
-    RoutingPools,
+    filter_pools_by_capability_with_forwarders, filter_pools_by_visual_capability,
+    filter_pools_by_visual_capability_with_forwarders, parse_routing, route_has_targets,
+    RoutePoolTier, RoutingPools,
 };
 #[allow(unused_imports)]
 pub(crate) use direct_model::{

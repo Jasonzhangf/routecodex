@@ -12,6 +12,22 @@ async function createTempDir(prefix: string): Promise<string> {
   return base;
 }
 
+function routeTargets(routing: Record<string, unknown>, routeName: string): string[] {
+  const value = routing[routeName];
+  const pools = Array.isArray(value) ? value : value ? [value] : [];
+  const out: string[] = [];
+  for (const pool of pools) {
+    if (!pool || typeof pool !== 'object') continue;
+    const targets = (pool as Record<string, unknown>).targets;
+    if (Array.isArray(targets)) {
+      for (const target of targets) {
+        if (typeof target === 'string') out.push(target);
+      }
+    }
+  }
+  return out;
+}
+
 describe('ProviderConfig v2 loader', () => {
   const originalEnv = {
     RCC_HOME: process.env.RCC_HOME,
@@ -227,7 +243,16 @@ describe('buildVirtualRouterInputV2', () => {
         `${JSON.stringify({
           version: '2.0.0',
           providerId,
-          provider: { type: 'anthropic', baseURL: `https://${providerId}.example.test` }
+          provider: {
+            type: 'anthropic',
+            baseURL: `https://${providerId}.example.test`,
+            auth: {
+              entries: [{ alias: 'key1', apiKey: 'test-key' }]
+            },
+            models: {
+              'MiniMax-M3': { capabilities: ['tools', 'multimodal'] }
+            }
+          }
         }, null, 2)}\n`,
         'utf8'
       );
@@ -270,12 +295,134 @@ describe('buildVirtualRouterInputV2', () => {
           forwarderId: 'fwd.minimax.MiniMax-M3',
           modelId: 'MiniMax-M3',
           targets: expect.arrayContaining([
-            expect.objectContaining({ providerKey: 'minimax' }),
-            expect.objectContaining({ providerKey: 'mini27' })
+            expect.objectContaining({ providerKey: 'minimax.key1.MiniMax-M3' }),
+            expect.objectContaining({ providerKey: 'mini27.key1.MiniMax-M3' })
           ])
         })
       })
     );
+  });
+
+  it('materializes providerId-only multimodal forwarder targets into real provider keys', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'media');
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'media',
+        provider: {
+          id: 'media',
+          type: 'openai',
+          baseURL: 'https://media.example.test/v1',
+          auth: {
+            entries: [{ alias: 'key1', apiKey: 'test-key' }]
+          },
+          models: {
+            'gpt-5.4-mini': { capabilities: ['text', 'multimodal'] }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const input = await buildVirtualRouterInputV2({
+      virtualrouter: {
+        forwarders: {
+          'fwd.gpt.gpt-5.4-mini': {
+            protocol: 'openai',
+            model: 'gpt-5.4-mini',
+            resolutionMode: 'model-first',
+            strategy: 'round-robin',
+            stickyKey: 'none',
+            targets: [{ providerId: 'media' }]
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              multimodal: [
+                {
+                  id: 'multimodal-forwarder',
+                  targets: ['fwd.gpt.gpt-5.4-mini']
+                }
+              ],
+              default: [
+                {
+                  id: 'default-text',
+                  targets: ['media.key1.gpt-5.4-mini']
+                }
+              ]
+            }
+          }
+        }
+      }
+    }, root);
+
+    const forwarders = input.forwarders as Record<string, any>;
+    expect(forwarders['fwd.gpt.gpt-5.4-mini'].targets).toEqual([
+      expect.objectContaining({
+        providerId: 'media',
+        providerKey: 'media.key1.gpt-5.4-mini'
+      })
+    ]);
+    expect((input.providers.media.models as any)['gpt-5.4-mini'].capabilities).toContain('multimodal');
+  });
+
+  it('expands one forwarder provider target into all provider auth keys', async () => {
+    const root = await createTempDir('provider-v2-');
+    const providerDir = path.join(root, 'freepool');
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      `${JSON.stringify({
+        version: '2.0.0',
+        providerId: 'freepool',
+        provider: {
+          id: 'freepool',
+          type: 'openai',
+          baseURL: 'https://freepool.example.test/v1',
+          auth: {
+            entries: [
+              { alias: 'key1', apiKey: 'test-key-1' },
+              { alias: 'key2', apiKey: 'test-key-2' }
+            ]
+          },
+          models: {
+            'gpt-5.5': { capabilities: ['text', 'thinking', 'longcontext'] }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const input = await buildVirtualRouterInputV2({
+      virtualrouter: {
+        forwarders: {
+          'fwd.gpt.gpt-5.5': {
+            protocol: 'openai',
+            model: 'gpt-5.5',
+            strategy: 'weighted',
+            targets: [{ providerId: 'freepool', weight: 3 }]
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              thinking: [{ id: 'thinking-forwarder', targets: ['fwd.gpt.gpt-5.5'] }]
+            }
+          }
+        }
+      }
+    }, root);
+
+    expect(routeTargets(input.routing, 'thinking')).toEqual(['fwd.gpt.gpt-5.5']);
+    const forwarders = input.forwarders as Record<string, any>;
+    expect(forwarders['fwd.gpt.gpt-5.5'].targets).toEqual([
+      expect.objectContaining({ providerId: 'freepool', providerKey: 'freepool.key1.gpt-5.5', weight: 3 }),
+      expect.objectContaining({ providerId: 'freepool', providerKey: 'freepool.key2.gpt-5.5', weight: 3 })
+    ]);
   });
 
 

@@ -3,6 +3,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 use super::super::features::RoutingFeatures;
+use super::super::forwarder::ForwarderRegistry;
 use super::super::load_balancer::LoadBalancingPolicy;
 use super::super::provider_registry::ProviderRegistry;
 
@@ -186,6 +187,15 @@ pub(crate) fn filter_pools_by_capability(
     provider_registry: &ProviderRegistry,
     capability: &str,
 ) -> Vec<RoutePoolTier> {
+    filter_pools_by_capability_with_forwarders(pools, provider_registry, None, capability)
+}
+
+pub(crate) fn filter_pools_by_capability_with_forwarders(
+    pools: &[RoutePoolTier],
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
+    capability: &str,
+) -> Vec<RoutePoolTier> {
     let mut out = Vec::new();
     for pool in pools {
         if pool.targets.is_empty() {
@@ -196,10 +206,19 @@ pub(crate) fn filter_pools_by_capability(
             .iter()
             .filter(|key| {
                 if capability == "web_search" {
-                    return provider_registry.has_capability(key, "web_search")
-                        || provider_registry.has_capability(key, "web_search_direct");
+                    return target_has_capability(
+                        key,
+                        provider_registry,
+                        forwarder_registry,
+                        "web_search",
+                    ) || target_has_capability(
+                        key,
+                        provider_registry,
+                        forwarder_registry,
+                        "web_search_direct",
+                    );
                 }
-                provider_registry.has_capability(key, capability)
+                target_has_capability(key, provider_registry, forwarder_registry, capability)
             })
             .cloned()
             .collect();
@@ -217,6 +236,14 @@ pub(crate) fn filter_pools_by_visual_capability(
     pools: &[RoutePoolTier],
     provider_registry: &ProviderRegistry,
 ) -> Vec<RoutePoolTier> {
+    filter_pools_by_visual_capability_with_forwarders(pools, provider_registry, None)
+}
+
+pub(crate) fn filter_pools_by_visual_capability_with_forwarders(
+    pools: &[RoutePoolTier],
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
+) -> Vec<RoutePoolTier> {
     let mut out = Vec::new();
     for pool in pools {
         if pool.targets.is_empty() {
@@ -226,8 +253,7 @@ pub(crate) fn filter_pools_by_visual_capability(
             .targets
             .iter()
             .filter(|key| {
-                provider_registry.has_capability(key, "multimodal")
-                    || provider_registry.has_capability(key, "vision")
+                target_has_visual_capability(key, provider_registry, forwarder_registry)
             })
             .cloned()
             .collect();
@@ -239,6 +265,37 @@ pub(crate) fn filter_pools_by_visual_capability(
         out.push(next);
     }
     out
+}
+
+fn target_has_capability(
+    key: &str,
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
+    capability: &str,
+) -> bool {
+    if provider_registry.has_capability(key, capability) {
+        return true;
+    }
+    let Some(forwarder_registry) = forwarder_registry else {
+        return false;
+    };
+    let Some(forwarder) = forwarder_registry.get(key) else {
+        return false;
+    };
+    forwarder
+        .targets
+        .iter()
+        .filter(|target| !target.disabled)
+        .any(|target| provider_registry.has_capability(&target.provider_key, capability))
+}
+
+fn target_has_visual_capability(
+    key: &str,
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&ForwarderRegistry>,
+) -> bool {
+    target_has_capability(key, provider_registry, forwarder_registry, "multimodal")
+        || target_has_capability(key, provider_registry, forwarder_registry, "vision")
 }
 
 pub(crate) fn default_pool_supports_capability(

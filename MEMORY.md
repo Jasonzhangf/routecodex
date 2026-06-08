@@ -2465,3 +2465,11 @@ Tags: servertool, bootstrap-replay, followup-request-id, rust-owner, native-brid
 - Keep `providerId` alongside `providerKey` in forwarder targets until the TS config builder is changed, because `buildVirtualRouterInputV2` uses `providerId` to load provider configs referenced only by forwarders. `routecodex config validate` can pass while Rust startup fails, so verify with materialized bootstrap or real restart.
 - Current recheck: real `providerKey` entries exist for GPT/MiniMax forwarders, `routecodex config validate --config ~/.rcc/config.toml` PASS, and 5520/5555 `/health` returned `ready:true,pipelineReady:true`.
 Tags: forwarder, virtual-router, config, providerKey, providerId, startup, 2026-06-08
+
+## 2026-06-08 ProviderForwarder config-state correction
+- Supersedes the earlier same-day providerKey-in-config workaround: `/Users/fanzhang/.rcc/config.toml` forwarder targets must stay as config-state `providerId` plus optional `modelId`; do not write `providerKey` / `.key1.` literals into runtime config to satisfy Rust bootstrap.
+- `src/config/virtual-router-builder.ts` is the bootstrap materialization owner: it expands each `{ providerId, modelId? }` forwarder target into real Rust `providerKey` targets for every auth alias and preserves `priority`, `weight`, and `disabled`.
+- Rust Virtual Router capability filtering must be forwarder-aware. For image requests, keep a forwarder route target if any enabled real target supports `multimodal` or `vision`; only drop/placeholder latest images when no multimodal target and no vision route exist.
+- Error handling boundary: upstream 429/concurrency from early Responses SSE must become a retryable provider error and enter ErrorErr05 request-local switch; ErrorHandlingCenter is only ErrorErr06 client projection and must not decide retry/reroute.
+- Verification in current worktree: focused Rust image-forwarder capability test and focused Jest forwarder/multimodal/retry plan tests passed before commit; broader verification must still be run for final commit.
+Tags: forwarder, config-state, providerKey-materialization, virtual-router, multimodal, vision, request-local-retry, 2026-06-08

@@ -17,8 +17,9 @@ use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
-    extract_key_alias, extract_provider_id, filter_candidates_by_state, filter_pools_by_capability,
-    filter_pools_by_visual_capability, resolve_instruction_target, route_has_targets,
+    extract_key_alias, extract_provider_id, filter_candidates_by_state,
+    filter_pools_by_capability_with_forwarders, filter_pools_by_visual_capability_with_forwarders,
+    resolve_instruction_target, route_has_targets,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
@@ -413,13 +414,22 @@ impl VirtualRouterEngineCore {
                 && route_name == DEFAULT_ROUTE
                 && select_default_pool_for_web_search
             {
-                pools = filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
+                pools = filter_pools_by_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                    "web_search",
+                );
             }
             if web_search_route_requested
                 && (route_name == "web_search" || route_name == DEFAULT_ROUTE)
             {
-                let capability_filtered =
-                    filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
+                let capability_filtered = filter_pools_by_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                    "web_search",
+                );
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 }
@@ -427,8 +437,12 @@ impl VirtualRouterEngineCore {
             if multimodal_route_requested
                 && (route_name == "multimodal" || route_name == DEFAULT_ROUTE)
             {
-                let capability_filtered =
-                    filter_pools_by_capability(&pools, &self.provider_registry, "multimodal");
+                let capability_filtered = filter_pools_by_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                    "multimodal",
+                );
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else if select_default_pool_for_multimodal && route_name == "multimodal" {
@@ -436,8 +450,11 @@ impl VirtualRouterEngineCore {
                 }
             }
             if multimodal_route_requested && route_name == "vision" {
-                let capability_filtered =
-                    filter_pools_by_visual_capability(&pools, &self.provider_registry);
+                let capability_filtered = filter_pools_by_visual_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                );
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else {
@@ -1740,6 +1757,97 @@ mod tests {
             selected.pool,
             vec!["fwd.gpt.gpt-5.5", "backup.key1.backup-model"]
         );
+    }
+
+    #[test]
+    fn image_request_keeps_multimodal_forwarder_during_capability_filter() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "media.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "media.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text", "multimodal"]
+                }
+            }),
+        );
+        providers.insert(
+            "text.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "text.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.gpt.gpt-5.4-mini".to_string(),
+            json!({
+                "forwarderId": "fwd.gpt.gpt-5.4-mini",
+                "protocol": "openai",
+                "modelId": "gpt-5.4-mini",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "targets": [
+                    {"providerKey": "media.key1.gpt-5.4-mini", "priority": 1, "disabled": false},
+                    {"providerKey": "text.key1.gpt-5.4-mini", "priority": 2, "disabled": false}
+                ],
+                "stickyKey": "none"
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+
+        let routing = Map::from_iter([(
+            "multimodal".to_string(),
+            Value::Array(vec![json!({
+                "id": "multimodal-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.gpt.gpt-5.4-mini"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "default".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["default".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "default",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should keep multimodal forwarder");
+
+        assert_eq!(selected.provider_key, "media.key1.gpt-5.4-mini");
+        assert_eq!(selected.route_used, "multimodal");
     }
 
     #[test]

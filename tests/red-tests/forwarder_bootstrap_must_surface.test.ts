@@ -49,30 +49,25 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
     ]);
   });
 
-  it('live config.toml 5520 group must NOT require forwarder (5520 禁用 forwarder)', async () => {
+  it('live config.toml 5520 group must use free GPT forwarders before paid providers', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
     const input = await buildVirtualRouterInputV2(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_priority_5520' },
     );
-    const fwds = (input as unknown as { forwarders?: Record<string, unknown> }).forwarders;
-    // 5520 不引用 fwd，bootstrap 不应带 forwarders 段（或者只带 10000 group 用的）
-    // — 但因为 5520 没引用 fwd，referencedForwarderIds 为空，normalize 仍会保留
-    // 全部定义（设计如此，forwarders 段是全 VR 共享资源池）。
-    // 因此这里只断言：5520 routing 内不含 fwd target。
-    const all: string[] = [];
-    for (const v of Object.values(input.routing)) {
-      const arr = Array.isArray(v) ? v : [v];
-      for (const it of arr) {
-        if (it && typeof it === 'object') {
-          const e = it as Record<string, unknown>;
-          if (Array.isArray(e.targets)) for (const t of e.targets) if (typeof t === 'string') all.push(t);
-          if (typeof e.target === 'string') all.push(e.target);
-        }
-      }
+    for (const routeName of ['coding', 'tools', 'search', 'web_search', 'multimodal']) {
+      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.gpt.gpt-5.4-mini', 'asxs.gpt-5.4-mini', 'cc.gpt-5.4-mini']);
     }
-    expect(all.filter((t) => t.startsWith('fwd.'))).toEqual([]);
+    for (const routeName of ['thinking', 'longcontext', 'default']) {
+      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.gpt.gpt-5.5', 'asxs.gpt-5.5', 'cc.gpt-5.5']);
+    }
+  });
+
+  it('live config.toml must not contain providerKey/key alias targets', () => {
+    const raw = readFileSync(LIVE_CONFIG, 'utf8');
+    expect(raw).not.toMatch(/providerKey\s*=/);
+    expect(raw).not.toMatch(/\.key1\./);
   });
 
   it('live config.toml 5555 group must use GPT forwarder for GPT routes', async () => {
