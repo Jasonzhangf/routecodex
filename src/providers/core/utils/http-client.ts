@@ -9,7 +9,7 @@ import type {
   ReadableStreamDefaultReader
 } from 'node:stream/web';
 import type { ProviderError } from '../api/provider-types.js';
-import { DEFAULT_TIMEOUTS } from '../../../constants/index.js';
+import { DEFAULT_PROVIDER, DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 
 /**
  * HTTP请求配置
@@ -140,6 +140,78 @@ const logHttpClientNonBlockingError = (
   }
 };
 
+const isHttpSendTraceEnabled = (): boolean => {
+  const raw = String(
+    process.env.ROUTECODEX_HTTP_SEND_TRACE ||
+    process.env.RCC_HTTP_SEND_TRACE ||
+    ''
+  ).trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'trace';
+};
+
+const safeUrlSummary = (url: string): Record<string, unknown> => {
+  try {
+    const parsed = new URL(url);
+    return {
+      protocol: parsed.protocol,
+      host: parsed.host,
+      path: parsed.pathname
+    };
+  } catch {
+    return { urlKind: /^https?:\/\//i.test(url) ? 'absolute-invalid' : 'relative' };
+  }
+};
+
+const buildPostStreamTrace = (
+  url: string,
+  data: unknown,
+  extra: Record<string, unknown>
+): Record<string, unknown> => {
+  let bodyBytes = 0;
+  let model: unknown;
+  let stream: unknown;
+  let inputLen: unknown;
+  let toolsLen: unknown;
+  try {
+    const bodyText = data !== undefined ? JSON.stringify(data) : '';
+    bodyBytes = Buffer.byteLength(bodyText);
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const body = data as Record<string, unknown>;
+      model = typeof body.model === 'string' ? body.model : undefined;
+      stream = typeof body.stream === 'boolean' ? body.stream : undefined;
+      inputLen = Array.isArray(body.input) ? body.input.length : undefined;
+      toolsLen = Array.isArray(body.tools) ? body.tools.length : undefined;
+    }
+  } catch {
+    bodyBytes = -1;
+  }
+  return {
+    ...safeUrlSummary(url),
+    bodyBytes,
+    ...(model !== undefined ? { model } : {}),
+    ...(stream !== undefined ? { stream } : {}),
+    ...(inputLen !== undefined ? { inputLen } : {}),
+    ...(toolsLen !== undefined ? { toolsLen } : {}),
+    ...extra
+  };
+};
+
+const logHttpSendTrace = (
+  stage: string,
+  url: string,
+  data: unknown,
+  extra: Record<string, unknown>
+): void => {
+  if (!isHttpSendTraceEnabled()) {
+    return;
+  }
+  try {
+    console.warn(`[http-client.postStream.${stage}] ${JSON.stringify(buildPostStreamTrace(url, data, extra))}`);
+  } catch {
+    // trace must never affect transport
+  }
+};
+
 export class HttpClient {
   private config: HttpClientConfig;
   private defaultConfig: Required<HttpClientConfig>;
@@ -221,7 +293,15 @@ export class HttpClient {
       ? overrideHeaders
       : Number.isFinite(cfgHeaders) && cfgHeaders > 0
       ? cfgHeaders
-      : Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_HEADERS_CAP_MS, timeout);
+      : Math.min(DEFAULT_PROVIDER.STREAM_HEADERS_TIMEOUT_MS, timeout);
+    const startedAt = Date.now();
+    logHttpSendTrace('start', fullUrl, data, {
+      timeoutMs: timeout,
+      idleTimeoutMs,
+      headersTimeoutMs,
+      configuredHeadersTimeoutMs: Number.isFinite(cfgHeaders) ? cfgHeaders : null,
+      overrideHeadersTimeoutMs: Number.isFinite(overrideHeaders) ? overrideHeaders : null
+    });
     const abortWithReason = (reason: string) => {
       try {
         const err = Object.assign(new Error(reason), { code: reason, name: 'AbortError' });
@@ -244,6 +324,11 @@ export class HttpClient {
       };
 
       const response = await fetch(fullUrl, fetchOptions);
+      logHttpSendTrace('headers', fullUrl, data, {
+        elapsedMs: Date.now() - startedAt,
+        status: response.status,
+        ok: response.ok
+      });
       clearTimeout(headersTimeoutId);
       clearTimeout(timeoutId);
       if (!response.ok) {
@@ -311,6 +396,14 @@ export class HttpClient {
       clearTimeout(timeoutId);
       clearTimeout(headersTimeoutId);
       detachExternalAbort();
+      logHttpSendTrace('error', fullUrl, data, {
+        elapsedMs: Date.now() - startedAt,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorCode: typeof (error as { code?: unknown })?.code === 'string'
+          ? (error as { code: string }).code
+          : undefined
+      });
       throw this.createProviderError(error);
     }
   }

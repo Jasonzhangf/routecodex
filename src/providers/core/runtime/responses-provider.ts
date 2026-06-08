@@ -5,6 +5,8 @@
  * 在 /v1/responses 入口下一律走上游 /responses 并使用 SSE（Accept: text/event-stream）。
  */
 
+import { Readable } from 'node:stream';
+
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -38,6 +40,10 @@ import {
   type ResponsesStreamingMode,
   type SubmitToolOutputsPayload
 } from './responses-provider-helpers.js';
+import {
+  buildResponsesSseProviderError,
+  inspectResponsesSseBlockForProviderRateLimit
+} from './responses-sse-error-guard.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesSseConverter = {
@@ -48,6 +54,59 @@ type ResponsesSseConverter = {
     contentIdleTimeoutMs?: number;
   }): Promise<unknown>;
 };
+
+async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const bufferedChunks: Buffer[] = [];
+  let bufferedText = '';
+  let sawSemanticFrame = false;
+
+  while (!sawSemanticFrame) {
+    const next = await iterator.next();
+    if (next.done) {
+      break;
+    }
+    const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+    bufferedChunks.push(chunk);
+    bufferedText += chunk.toString('utf8');
+    const parts = bufferedText.split(/\r?\n\r?\n/);
+    bufferedText = parts.pop() ?? '';
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed.startsWith(':')) {
+        continue;
+      }
+      const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
+      if (rateLimitPayload) {
+        if (typeof iterator.return === 'function') {
+          await iterator.return().catch(() => undefined);
+        }
+        throw buildResponsesSseProviderError(rateLimitPayload);
+      }
+      sawSemanticFrame = true;
+      break;
+    }
+    const bufferedSize = bufferedChunks.reduce((total, item) => total + item.byteLength, 0);
+    if (bufferedSize > 64 * 1024) {
+      break;
+    }
+  }
+
+  async function* replayAndRead(): AsyncGenerator<Buffer> {
+    for (const chunk of bufferedChunks) {
+      yield chunk;
+    }
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) {
+        break;
+      }
+      yield Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+    }
+  }
+
+  return Readable.from(replayAndRead());
+}
 
 // feature_id: responses.direct_tool_shape_contract
 
@@ -272,8 +331,10 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: 'text/event-stream'
     });
 
+    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream);
+
     const streamForHost = shouldCaptureProviderStreamSnapshots()
-      ? attachProviderSseSnapshotStream(stream, {
+      ? attachProviderSseSnapshotStream(preparedStream, {
         requestId: context.requestId,
         headers,
         url: targetUrl,
@@ -282,7 +343,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         providerKey: context.providerKey,
         providerId: context.providerId
       })
-      : stream;
+      : preparedStream;
 
     await this.snapshotPhase(
       'provider-response',

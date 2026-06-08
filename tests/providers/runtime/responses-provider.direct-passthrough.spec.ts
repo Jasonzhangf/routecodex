@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+
 import { describe, expect, jest, test } from '@jest/globals';
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -186,5 +188,158 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.tool_choice).toBe('auto');
     expect(capturedBody.instructions).toBe('keep-original-instructions');
     expect(capturedBody.metadata).toBeUndefined();
+  });
+
+  test('maps direct HTTP 200 SSE response.failed concurrency to retryable provider error', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-sse-rate-limit',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.failed\n',
+        `data: ${JSON.stringify({
+          type: 'response.failed',
+          response: {
+            status: 'failed',
+            error: {
+              code: 'rate_limit_error',
+              message: 'Concurrency limit exceeded for user, please retry later'
+            }
+          }
+        })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 429,
+      status: 429,
+      code: 'PROVIDER_TRAFFIC_SATURATED',
+      upstreamCode: 'rate_limit_error',
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.http'
+    });
+  });
+
+  test('maps CRLF direct HTTP 200 SSE response.failed concurrency to retryable provider error', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-sse-rate-limit-crlf',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.failed\r\n',
+        `data: ${JSON.stringify({
+          type: 'response.failed',
+          response: {
+            status: 'failed',
+            error: {
+              code: 'rate_limit_error',
+              message: 'Concurrency limit exceeded for user, please retry later'
+            }
+          }
+        })}\r\n\r\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 429,
+      status: 429,
+      code: 'PROVIDER_TRAFFIC_SATURATED',
+      upstreamCode: 'rate_limit_error',
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.http'
+    });
+  });
+
+  test('replays direct HTTP 200 SSE normal frames after pre-read', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-sse-normal',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.created\n',
+        `data: ${JSON.stringify({ type: 'response.created', response: { id: 'resp_ok', status: 'in_progress' } })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_ok', status: 'completed' } })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    const result = await provider.sendRequestInternal(inbound);
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.__sse_responses) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+    expect(text).toContain('event: response.created');
+    expect(text).toContain('event: response.completed');
+    expect(text).toContain('resp_ok');
   });
 });

@@ -66,6 +66,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
+  extraDetails?: Record<string, unknown>;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<RequestExecutorProviderFailurePlan> {
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
@@ -132,6 +133,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       excludedProviderKeys: args.excludedProviderKeys,
       affectsHealthOverride: retryExecutionPlan.requestLocalTransient ? false : undefined,
       extraDetails: {
+        ...(args.extraDetails ?? {}),
         routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
       }
     });

@@ -81,12 +81,12 @@ describe('Error Pipeline contract', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('router-direct.send.error');
-    expect(source).toContain('reportRequestExecutorProviderError');
+    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).toContain('router-direct.retry.requested');
+    expect(source).toContain('executeRouterDirectPipelineForPort(portConfig, input, retryState');
     expect(source).toContain("source: 'router-direct'");
     expect(source).toContain('router-direct.failed_no_relay');
     expect(source).not.toContain('router-direct.retry.standard_pipeline');
-    expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
-    expect(source).not.toContain('providerFailurePlan.retryExecutionPlan');
     expect(source).not.toContain("reason: 'router-direct-provider-failure-standard-retry'");
     expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
