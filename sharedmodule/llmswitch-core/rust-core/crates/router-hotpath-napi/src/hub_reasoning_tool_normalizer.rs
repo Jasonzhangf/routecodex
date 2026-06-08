@@ -7,8 +7,8 @@ use crate::shared_tool_mapping::{
     read_routecodex_tool_name_hint_from_args,
 };
 use crate::shared_tooling::{
-    extract_rcc_tool_call_fence_segments, is_structured_apply_patch_payload,
-    normalize_xml_scalar_text, repair_arguments_to_string, value_to_string,
+    is_structured_apply_patch_payload, normalize_xml_scalar_text, repair_arguments_to_string,
+    value_to_string,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -1763,6 +1763,9 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
             .filter(|v| !v.is_empty())
             .filter(|v| is_routecodex_explicit_tool_name_candidate(v.as_str()));
         if name.is_none() {
+            name = read_routecodex_tool_name_hint_from_args(Some(args_source));
+        }
+        if name.is_none() {
             name = name_hint
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty());
@@ -1971,12 +1974,8 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
         }
     }
 
-    for inner in extract_rcc_tool_call_fence_segments(text) {
-        push(inner.as_str());
-    }
-
     let heredoc_json_pattern = cached_regex(
-        r"(?ims)^\s*<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS_JSON\s*$",
+        r"(?ims)^\s*(?:[•*-]\s*)?<<\s*RCC_TOOL_CALLS_JSON\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS_JSON\s*$",
     );
     for caps in heredoc_json_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
@@ -1985,7 +1984,7 @@ fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {
     }
 
     let heredoc_pattern =
-        cached_regex(r"(?ims)^\s*<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS\s*$");
+        cached_regex(r"(?ims)^\s*(?:[•*-]\s*)?<<\s*RCC_TOOL_CALLS\s*$([\s\S]*?)^\s*RCC_TOOL_CALLS\s*$");
     for caps in heredoc_pattern.captures_iter(text) {
         if let Some(inner) = caps.get(1) {
             push(inner.as_str());
@@ -2018,11 +2017,93 @@ fn collect_explicit_tool_calls_json_candidates(text: &str) -> Vec<String> {
         push_candidate(trimmed);
     }
 
+    for candidate in collect_embedded_explicit_tool_calls_json_candidates(text) {
+        push_candidate(candidate.as_str());
+    }
+
     for candidate in collect_sentinel_tool_calls_candidates(text) {
         push_candidate(candidate.as_str());
     }
 
     candidates
+}
+
+fn collect_embedded_explicit_tool_calls_json_candidates(text: &str) -> Vec<String> {
+    if !text.contains("tool_calls") || text.contains("RCC_TOOL_CALLS") {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |raw: &str| {
+        let candidate = raw.trim().to_string();
+        if candidate.contains("tool_calls") && seen.insert(candidate.clone()) {
+            out.push(candidate);
+        }
+    };
+
+    for (start, _) in text.match_indices('{') {
+        if let Some((_, candidate)) = extract_balanced_json_object_at(text, start) {
+            push(candidate.as_str());
+            continue;
+        }
+        if text[start..].contains("tool_calls") {
+            let repaired = repair_truncated_explicit_tool_calls_candidate(&text[start..]);
+            push(repaired.as_str());
+            break;
+        }
+    }
+
+    out
+}
+
+fn repair_truncated_explicit_tool_calls_candidate(raw: &str) -> String {
+    let mut repaired = raw.trim().to_string();
+    if repaired.is_empty() {
+        return repaired;
+    }
+
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut closers: Vec<char> = Vec::new();
+    for ch in repaired.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+        match ch {
+            '{' => closers.push('}'),
+            '[' => closers.push(']'),
+            '}' | ']' => {
+                if closers.last().copied() == Some(ch) {
+                    closers.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if escaped {
+        repaired.push(' ');
+    }
+    if in_string {
+        repaired.push('"');
+    }
+    while let Some(closer) = closers.pop() {
+        repaired.push(closer);
+    }
+
+    repaired
 }
 
 fn has_structured_or_nested_tool_name(row: &Map<String, Value>) -> bool {
