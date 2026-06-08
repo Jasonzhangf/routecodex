@@ -35,7 +35,7 @@ const ERROR_POLICY_SOURCE_GLOBS = [
   'src/server/runtime/http-server/executor',
   'src/server/runtime/http-server/router-direct-pipeline.ts',
   'src/server/runtime/http-server/provider-direct-pipeline.ts',
-  'sharedmodule/llmswitch-core/src/router/virtual-router'
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine'
 ];
 
 function listFiles(rootRel: string): string[] {

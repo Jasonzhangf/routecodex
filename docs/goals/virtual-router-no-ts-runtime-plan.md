@@ -6,13 +6,13 @@ Eliminate the TypeScript runtime and wrapper layer from Virtual Router. The fina
 
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/`
 
-This plan is stricter than the current thin-shell policy. Current docs and gates still allow `sharedmodule/llmswitch-core/src/router/virtual-router/**` as a TS bridge; this goal changes that contract.
+This plan is stricter than the previous thin-shell policy. The former TS VR runtime root is now a deleted path; this goal locks Rust `virtual_router_engine` as the only runtime owner.
 
 ## Acceptance Criteria
 
-1. No production TypeScript file remains under `sharedmodule/llmswitch-core/src/router/virtual-router/**`, except temporary test fixtures or generated type declarations explicitly proven non-runtime and scheduled for deletion.
-2. No production source imports `sharedmodule/llmswitch-core/src/router/virtual-router/**` or `sharedmodule/llmswitch-core/dist/router/virtual-router/**` as a runtime path.
-3. `engine-selection/native-*.ts` is physically deleted or replaced by a generated non-authoritative binding artifact that is not a hand-written runtime wrapper.
+1. No production TypeScript file remains under the former TS VR runtime root.
+2. No production source imports the former source or dist VR TS runtime path.
+3. Former VR wrapper TS helpers are physically deleted or replaced by generated non-authoritative binding artifacts that are not hand-written runtime wrappers.
 4. `docs/architecture/function-map.yml` no longer lists the TS VR directory as an allowed runtime path for `vr.*` features.
 5. Architecture gates fail if a new VR TS runtime file, wrapper, or import is added.
 6. Existing VR behavior remains green through Rust tests, native parity tests, and blackbox routing tests.
@@ -49,8 +49,8 @@ This plan is stricter than the current thin-shell policy. Current docs and gates
 
 ## Current Evidence Baseline
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router` currently has production TS runtime files.
-- `sharedmodule/llmswitch-core/src/native/router-hotpath` is the largest wrapper surface and must not remain as hand-written TS.
+- At goal start, the former TS VR runtime root still had production runtime files.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath` is the native host binding surface; VR runtime semantics must not live there.
 - Rust VR truth already exists for route selection, routing bootstrap, provider bootstrap/registry, routing state store, health/quota, instructions, direct model, and NAPI proxy under `virtual_router_engine`.
 - Existing docs currently permit TS thin shells:
   - `docs/ARCHITECTURE.md`
@@ -78,7 +78,7 @@ Work:
 3. Gate rules must scan both `src` and `dist` runtime imports.
 4. Gate must fail on:
    - production TS files under VR runtime path,
-   - hand-written `engine-selection/native-*.ts`,
+   - hand-written former VR wrapper TS helpers,
    - imports from deleted VR TS runtime paths,
    - function-map allowed paths that re-allow VR TS.
 
@@ -99,8 +99,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/*.ts`
+- former TS bootstrap files under the deleted VR runtime root
 - matching dist artifacts
 
 Work:
@@ -134,8 +133,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-logging.ts`
+- former TS engine facade and logging helper under the deleted VR runtime root
 - matching dist artifacts
 
 Work:
@@ -161,7 +159,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/provider-registry.ts`
+- former TS provider registry under the deleted VR runtime root
 - direct tests importing the TS registry must be moved to Rust or to blackbox runtime API tests.
 
 Work:
@@ -186,15 +184,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/**`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/routing-stop-message-state-codec.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/routing-pre-command-state-codec.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-state-sync.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-markers.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/stop-message-file-resolver.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/pre-command-file-resolver.ts`
+- former TS routing state, routing instruction, stop-message, and pre-command files under the deleted VR runtime root
 
 Work:
 
@@ -220,7 +210,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`
+- former TS provider-runtime ingress file under the deleted VR runtime root
 
 Work:
 
@@ -272,8 +262,8 @@ Verification:
 
 Files:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/**`
-- `sharedmodule/llmswitch-core/dist/router/virtual-router/**`
+- former source-side VR TS runtime root
+- former dist-side VR TS runtime root
 - tests and scripts importing deleted paths
 - docs and plans referencing TS VR owners
 
@@ -286,7 +276,7 @@ Work:
 
 Verification:
 
-- `find sharedmodule/llmswitch-core/src/router/virtual-router -type f` returns no production TS runtime files.
+- former source-side VR TS runtime root returns no production TS runtime files.
 - `rg "router/virtual-router" src sharedmodule scripts tests docs -g "*.ts" -g "*.mjs" -g "*.md" -g "*.yml"` shows only allowed docs/tests references.
 - `npm run verify:vr-no-ts-runtime`
 - `npm run verify:architecture-ci`

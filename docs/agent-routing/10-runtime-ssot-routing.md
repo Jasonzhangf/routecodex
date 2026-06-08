@@ -82,7 +82,7 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` → resp_process 工具治理主入口
 - `sharedmodule/llmswitch-core/src/conversion/hub/process/*.ts` → 编排层薄壳，仅允许条件分支调度
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts` → 非 VR runtime 的 native host 绑定层，100% 薄壳，不含业务逻辑
-- `sharedmodule/llmswitch-core/src/router/virtual-router/**` → VR runtime/wrapper TS 禁止复活；VR runtime 唯一真源为 Rust `virtual_router_engine`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/**` → VR runtime 唯一真源；former source-side VR TS runtime root 禁止复活
 
 ## 权威文档索引
 - `docs/ARCHITECTURE.md`

@@ -114,7 +114,6 @@ describe('clock heartbeat feature removal gate', () => {
     const roots = [
       'src/server/runtime/http-server/executor',
       'sharedmodule/llmswitch-core/src/conversion/shared',
-      'sharedmodule/llmswitch-core/src/router/virtual-router',
       'sharedmodule/llmswitch-core/src/servertool',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine',

@@ -8,17 +8,17 @@
 
 ### Step 0.1：删除 10 个零引用 TS 文件
 
-**改什么**：删除以下文件
-- `src/router/virtual-router/load-balancer.ts`（185 行）
-- `src/router/virtual-router/health-weighted.ts`（92 行）
-- `src/router/virtual-router/context-advisor.ts`（91 行）
-- `src/router/virtual-router/context-weighted.ts`（82 行）
-- `src/router/virtual-router/success-center.ts`（75 行）
-- `src/router/virtual-router/stop-message-stage-template-files.ts`（86 行）
-- `src/router/virtual-router/default-thinking-keywords.ts`（13 行）
-- `src/router/virtual-router/routing-stop-message-parser.ts`（8 行）
-- `src/router/virtual-router/routing-pre-command-parser.ts`（102 行）
-- `src/router/virtual-router/message-utils.ts`（250 行）
+**改什么**：删除 former TS VR runtime root 下的以下零引用文件
+- `load-balancer.ts`（185 行）
+- `health-weighted.ts`（92 行）
+- `context-advisor.ts`（91 行）
+- `context-weighted.ts`（82 行）
+- `success-center.ts`（75 行）
+- `stop-message-stage-template-files.ts`（86 行）
+- `default-thinking-keywords.ts`（13 行）
+- `routing-stop-message-parser.ts`（8 行）
+- `routing-pre-command-parser.ts`（102 行）
+- `message-utils.ts`（250 行）
 
 **为什么改**：grep 确认 0 引用，属于死代码，违反 AGENTS.md 第 10 条（冗余代码物理移除）
 
@@ -31,8 +31,8 @@
 ### Step 0.2：确认 token-file-scanner.ts 和 token-estimator.ts 死代码
 
 **改什么**：检查引用，如确认死代码则删除
-- `src/router/virtual-router/token-file-scanner.ts`（131 行，0 引用，2026-06-07 Phase 8F-4 已删）
-- `src/router/virtual-router/token-estimator.ts`（21 行，0 引用）
+- former TS VR `token-file-scanner.ts`（131 行，0 引用，2026-06-07 Phase 8F-4 已删）
+- former TS VR `token-estimator.ts`（21 行，0 引用）
 
 **为什么改**：grep 确认 0 引用
 

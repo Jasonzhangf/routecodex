@@ -9,7 +9,7 @@
 ---
 
 ## 范围
-- Virtual Router：`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+- Virtual Router：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/**`
 - Hub（P0 仅审计+最小修正）：`sharedmodule/llmswitch-core/src/conversion/hub/**`
 - Rust 真源对照：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/**`
 
@@ -25,7 +25,7 @@
   - 期望：无输出。
 
 ### A2. 删除 edge-stage fallbackProtocol/fallbackPayload
-- 文件：`virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.ts`
+- 文件：former VR wrapper edge-stage TS helper（已删除，语义归 Rust/native contract）
 - 动作：缺 `format/payload` 时直接 invalid + fail-fast。
 - 验收：
   - `grep -rn "fallbackProtocol\|fallbackPayload" .../virtual-router`
@@ -67,7 +67,7 @@
 2. `npm run jest:run -- --runTestsByPath tests/servertool/virtual-router-context-fallback.spec.ts tests/servertool/virtual-router-longcontext-fallback.spec.ts tests/sharedmodule/virtual-router-hit-log.spec.ts`
 
 ## 审计命令
-- `grep -rn "fallbackProtocol\|fallbackPayload\|tryForceSingleProviderDecisionWhenPoolExhausted\|applyRoutingInstructions" sharedmodule/llmswitch-core/src/router/virtual-router --include="*.ts" --include="*.d.ts" || true`
+- `grep -rn "fallbackProtocol\|fallbackPayload\|tryForceSingleProviderDecisionWhenPoolExhausted\|applyRoutingInstructions" sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine --include="*.rs" --include="*.d.ts" || true`
 
 ## 构建验证
 - `npm run build:min`

@@ -2,7 +2,7 @@
 
 审计日期：2026-05-31
 
-## 一、TS engine-selection/native-*.ts 审计（80 文件）
+## 一、Former VR wrapper TS helper audit（80 文件）
 
 ### 结论：**全部合规，零违规**
 
@@ -280,7 +280,7 @@
 ```
 HTTP Server (TS)
   -> engine.ts (TS 编排入口)
-    -> engine-selection/native-virtual-router-engine-proxy.ts (TS 薄壳)
+    -> native virtual router engine proxy bridge (TS 薄壳)
       -> napi_proxy.rs (Rust NAPI adapter)
         -> engine/core.rs -> engine/route.rs -> engine/selection.rs (Rust 语义真源)
           -> routing/bootstrap.rs (Rust routing 归一化)

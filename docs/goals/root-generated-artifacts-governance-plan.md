@@ -98,7 +98,7 @@ Phase 1: stop new root clutter
 - Remove local npm-prefix assumptions that create `bin/` and `lib/` under the repo.
 - Fix `.git/info/exclude` or document that local `webui/` exclusion is invalid for this repo.
 
-Status on 2026-06-08: path helper and pack/install path migration are complete; `webui/` local exclude hazard is corrected locally and `webui/` is source; `scripts/tool-classification-report.ts` and `scripts/analyze-tools-fileops.mjs` now default tracked report output to `docs/reports/`.
+Status on 2026-06-08: path helper and pack/install path migration are complete; `webui/` local exclude hazard is corrected locally and `webui/` is source; `scripts/analyze-tools-fileops.mjs` now defaults tracked report output to `docs/reports/`. The old `scripts/tool-classification-report.ts` helper was removed after VR classification moved to Rust-only ownership.
 
 Phase 2: migrate legacy tracked clutter
 

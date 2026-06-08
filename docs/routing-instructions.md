@@ -399,7 +399,7 @@ routecodex daemon status routing --server <server-id>
 
 ## 参考实现
 
-- 解析逻辑：`sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.ts`
-- 类型定义：`sharedmodule/llmswitch-core/src/router/virtual-router/types.ts`
-- 集成位置：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+- 解析逻辑：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/parse.rs`
+- 类型定义：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs`，TS 只保留 `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` 绑定契约
+- 集成位置：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine`
 - Daemon 接口：`src/daemon/`（待实现）

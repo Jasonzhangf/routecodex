@@ -160,17 +160,17 @@ Phase 8F-3 timing wrapper deletion proof: `hub-stage-timing-measure-blocks.ts` h
 
 Phase 8F-4 virtual router bootstrap helper deletion proof: five legacy TS bootstrap helper files had no live source/test import, no public barrel export, and no same-name generated shadow artifacts. Their responsibilities are already owned by native bootstrap entries (`bootstrapVirtualRouterProvidersJson`, `bootstrapVirtualRouterProviderProfilesJson`, `bootstrapVirtualRouterConfigMetaJson`), Rust `virtual_router_engine/provider_bootstrap.rs`, and the active auth token scanner under `src/providers/auth/token-scanner/`.
 
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/auth-utils.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/claude-code-helpers.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/config-normalizers.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/web-search-config.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/token-file-scanner.ts`.
+- Deleted former TS bootstrap `auth-utils.ts` helper.
+- Deleted former TS bootstrap `claude-code-helpers.ts` helper.
+- Deleted former TS bootstrap `config-normalizers.ts` helper.
+- Deleted former TS bootstrap `web-search-config.ts` helper.
+- Deleted former TS `token-file-scanner.ts` helper.
 - Red test now fails if any of these legacy bootstrap helper residues reappear.
 
 Phase 8F-5 virtual router engine helper deletion proof: two TS engine helper files had no live source/test import and no same-name generated shadow artifacts. Their routing-state and selection semantics now live in Rust Virtual Router/native routing owners; `VirtualRouterEngine` does not import these helpers.
 
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine/route-analytics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/metadata.ts`.
+- Deleted former TS engine `route-analytics.ts` helper.
+- Deleted former TS routing-state `metadata.ts` helper.
 - Red test now fails if either legacy engine helper residue reappears.
 
 Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had no live source/test import and no dynamic bridge importer. The native capabilities they referenced remain locked by `native-router-hotpath-required-exports.ts`; the live request filter wrapper is `native-chat-request-filter-semantics.ts`, not the deleted governed-filter residue.
@@ -186,7 +186,7 @@ Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had
 
 Phase 8F-7 Hub/VR side-by-side emit cleanup proof: current `sharedmodule/llmswitch-core/tsconfig.json` emits to `dist`, and `.gitignore` marks `sharedmodule/llmswitch-core/src/**/*.js`, `.d.ts`, and `.js.map` as generated artifacts. Therefore side-by-side emit files under Hub Pipeline and Virtual Router source truth dirs are stale local artifacts, not runtime source truth.
 
-- Deleted 193 ignored generated artifacts under `sharedmodule/llmswitch-core/src/conversion/hub` and `sharedmodule/llmswitch-core/src/router/virtual-router`.
+- Deleted 193 ignored generated artifacts under `sharedmodule/llmswitch-core/src/conversion/hub` and the former source-side VR TS runtime root.
 - Deletion script refused non-ignored candidates before unlinking; only git-ignored `.js`, `.d.ts`, and `.js.map` files were removed.
 - Red test now fails if either source truth dir contains side-by-side `.js`, `.d.ts`, or `.js.map` artifacts.
 - This cleanup changes no tracked runtime source and does not change provider wire payload or client response semantics.

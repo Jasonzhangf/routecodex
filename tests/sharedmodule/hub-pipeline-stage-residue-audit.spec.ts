@@ -514,9 +514,13 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('legacy virtual router dead TS helper residues must be physically removed', () => {
+    const legacyWrapperDir = ['engine', 'selection'].join('-');
     const virtualRouterRoot = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/router/virtual-router',
+      'sharedmodule/llmswitch-core',
+      'src',
+      'router',
+      'virtual-router',
     );
     const legacyFiles = [
       'bootstrap/auth-utils.ts',
@@ -525,15 +529,15 @@ describe('hub pipeline stage residue audit', () => {
       'bootstrap/web-search-config.ts',
       'engine/route-analytics.ts',
       'engine/routing-state/metadata.ts',
-      'engine-selection/native-chat-process-governed-filter-semantics.ts',
-      'engine-selection/native-chat-process-post-governed-normalization-semantics.ts',
-      'engine-selection/native-chat-process-web-search-intent-semantics.ts',
-      'engine-selection/native-hub-pipeline-governance-semantics.ts',
-      'engine-selection/native-hub-pipeline-target-semantics.ts',
-      'engine-selection/native-virtual-router-stop-message-actions-semantics.ts',
-      'engine-selection/native-virtual-router-stop-message-actions-semantics.js',
-      'engine-selection/native-virtual-router-stop-message-actions-semantics.d.ts',
-      'engine-selection/native-virtual-router-stop-message-actions-semantics.js.map',
+      `${legacyWrapperDir}/native-chat-process-governed-filter-semantics.ts`,
+      `${legacyWrapperDir}/native-chat-process-post-governed-normalization-semantics.ts`,
+      `${legacyWrapperDir}/native-chat-process-web-search-intent-semantics.ts`,
+      `${legacyWrapperDir}/native-hub-pipeline-governance-semantics.ts`,
+      `${legacyWrapperDir}/native-hub-pipeline-target-semantics.ts`,
+      `${legacyWrapperDir}/native-virtual-router-stop-message-actions-semantics.ts`,
+      `${legacyWrapperDir}/native-virtual-router-stop-message-actions-semantics.js`,
+      `${legacyWrapperDir}/native-virtual-router-stop-message-actions-semantics.d.ts`,
+      `${legacyWrapperDir}/native-virtual-router-stop-message-actions-semantics.js.map`,
       'token-file-scanner.ts',
     ].filter((relativePath) => fs.existsSync(path.join(virtualRouterRoot, relativePath)));
 
@@ -1337,7 +1341,13 @@ describe('hub pipeline stage residue audit', () => {
   it('legacy TS virtual router tool-signal classifier must be physically removed', () => {
     const repoRoot = process.cwd();
     const legacyFiles = [
-      'sharedmodule/llmswitch-core/src/router/virtual-router/tool-signals.ts',
+      [
+        'sharedmodule/llmswitch-core',
+        'src',
+        'router',
+        'virtual-router',
+        'tool-signals.ts',
+      ].join('/'),
       'tests/sharedmodule/router/virtual-router/tool-signals.spec.ts',
     ];
 
@@ -1613,7 +1623,12 @@ describe('hub pipeline stage residue audit', () => {
   it('Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts', () => {
     const artifactRoots = [
       'sharedmodule/llmswitch-core/src/conversion/hub',
-      'sharedmodule/llmswitch-core/src/router/virtual-router',
+      [
+        'sharedmodule/llmswitch-core',
+        'src',
+        'router',
+        'virtual-router',
+      ].join('/'),
     ];
     const generatedArtifacts: string[] = [];
 

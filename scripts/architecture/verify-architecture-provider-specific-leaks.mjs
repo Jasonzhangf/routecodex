@@ -50,7 +50,7 @@ const allowlist = [
     textContains: 'provider_name',
   },
   {
-    pathContains: 'sharedmodule/llmswitch-core/src/router/virtual-router',
+    pathContains: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine',
     textContains: 'provider_name',
   },
 ];

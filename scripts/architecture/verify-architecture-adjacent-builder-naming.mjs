@@ -4,7 +4,7 @@ import path from 'node:path';
 const root = process.cwd();
 const targetRoots = [
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types',
-  'sharedmodule/llmswitch-core/src/router/virtual-router',
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine',
   'src/providers/core/runtime',
   'src/server/runtime/http-server/executor',
   'src/server/utils',

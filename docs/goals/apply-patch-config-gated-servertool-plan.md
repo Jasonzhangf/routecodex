@@ -114,9 +114,9 @@ config -> runtimeMetadata -> Hub request governance + servertool dispatch + resp
   - 把 top-level `servertool.apply_patch.mode` 传入 virtual router/runtime config。
 - `src/config/toml-commented-template.ts`
   - 增加默认示例。
-- `sharedmodule/llmswitch-core/src/router/virtual-router/types.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts`
   - 声明 `applyPatch.mode`。
-- `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs`
   - 规范化 mode 并送入 native bootstrap。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs`
   - Rust 侧默认值与非法值 fail-fast。

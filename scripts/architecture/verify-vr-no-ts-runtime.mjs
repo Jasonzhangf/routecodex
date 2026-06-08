@@ -2,12 +2,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const srcVrRoot = 'sharedmodule/llmswitch-core/src/router/virtual-router';
-const distVrRoot = 'sharedmodule/llmswitch-core/dist/router/virtual-router';
-const oldWrapperPath = 'router/virtual-router/engine-selection';
+const sourceVrSegments = ['sharedmodule/llmswitch-core', 'src', 'router', 'virtual-router'];
+const distVrSegments = ['sharedmodule/llmswitch-core', 'dist', 'router', 'virtual-router'];
+const srcVrRoot = sourceVrSegments.join('/');
+const distVrRoot = distVrSegments.join('/');
+const oldWrapperPath = ['router', 'virtual-router', 'engine-selection'].join('/');
+const oldRuntimePathFragments = ['', '../', '../../', '../../../', '../../../../'].flatMap((prefix) => [
+  `${prefix}${srcVrRoot}`,
+  `${prefix}${distVrRoot}`,
+]);
+const oldClassifierResidueFiles = [
+  'scripts/analyze-routing-classifier.mjs',
+  'scripts/analyze-thinking-keywords.mjs',
+  'scripts/tool-classification-report.ts',
+  'sharedmodule/llmswitch-core/tests/hub/chat-envelope-validator-native.test.ts',
+  'sharedmodule/llmswitch-core/tests/router/vision-route-detection.test.ts',
+  'sharedmodule/llmswitch-core/tests/router/thinking-tools-route-priority.test.ts',
+  'sharedmodule/llmswitch-core/tests/router/longcontext-responses-context-route.test.ts',
+  'sharedmodule/llmswitch-core/tests/router/tool-semantics-route-classification.test.ts',
+  'sharedmodule/llmswitch-core/tests/router/web-search-intent-route.test.ts',
+  'tests/sharedmodule/router/virtual-router/classifier.spec.ts',
+  'tests/sharedmodule/virtual-router-web-search-intent.spec.ts',
+];
 
 const scanRoots = [
   'sharedmodule/llmswitch-core/src',
+  'sharedmodule/llmswitch-core/tests',
   'src',
   'tests',
   'scripts',
@@ -74,11 +94,27 @@ function isAllowedTextReference(relFile, line) {
   return line.includes('forbidden') || line.includes('forbid') || line.includes('禁止') || line.includes('deleted') || line.includes('delete');
 }
 
+function isProductionReferenceFile(relFile) {
+  return (
+    relFile.startsWith('sharedmodule/llmswitch-core/src/')
+    || relFile.startsWith('src/')
+    || relFile.startsWith('scripts/')
+    || relFile.startsWith('tests/')
+    || relFile === 'package.json'
+  );
+}
+
 const failures = [];
 
 const vrProdTsFiles = listVrProdTsFiles();
 if (vrProdTsFiles.length > 0) {
   failures.push(`production TS remains under ${srcVrRoot}: ${vrProdTsFiles.join(', ')}`);
+}
+
+for (const residueFile of oldClassifierResidueFiles) {
+  if (exists(residueFile)) {
+    failures.push(`old TS VR classifier/features residue file exists: ${residueFile}`);
+  }
 }
 
 if (exists(`${srcVrRoot}/engine-selection`)) {
@@ -97,6 +133,14 @@ for (const file of scanRoots.flatMap(listFiles)) {
     if (!line.includes(oldWrapperPath)) return;
     if (isAllowedTextReference(relFile, line)) return;
     failures.push(`${relFile}:${index + 1}: old VR wrapper path reference: ${line.trim()}`);
+  });
+  if (!isProductionReferenceFile(relFile)) {
+    continue;
+  }
+  lines.forEach((line, index) => {
+    if (!oldRuntimePathFragments.some((fragment) => line.includes(fragment))) return;
+    if (isAllowedTextReference(relFile, line)) return;
+    failures.push(`${relFile}:${index + 1}: old VR runtime path reference: ${line.trim()}`);
   });
 }
 

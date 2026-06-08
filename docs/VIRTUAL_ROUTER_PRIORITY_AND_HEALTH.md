@@ -150,7 +150,7 @@ If enabled (`loadBalancing.healthWeighted.enabled=true`) and `quotaView` provide
 
 Defaults live in:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/health-weighted.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health_weighted.rs`
 
 Key knobs (configurable under `loadBalancing.healthWeighted`):
 

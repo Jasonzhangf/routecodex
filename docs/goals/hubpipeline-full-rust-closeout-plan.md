@@ -17,7 +17,7 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/process/**`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/**`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/**`
 - `src/server/runtime/http-server/**`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/**`
 

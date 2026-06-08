@@ -21,7 +21,7 @@
 
 ### 仍在 TS 的关键残留
 1. **状态副本逻辑（优先级最高）**
-   - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/state.ts`
+   - former TS routing-instructions state file under the deleted VR runtime root
    - 该文件仍有 `applyRoutingInstructions`，与 Rust `apply_routing_instructions` 语义重叠。
    - 现状证据：`grep -rn "applyRoutingInstructions"` 显示仅该定义与测试引用；Rust 侧在 `route.rs` 已直接调用。
 
@@ -54,7 +54,7 @@
 该结构符合“函数库 -> blocks -> orchestration”。
 
 ### TS 端
-- `engine-selection/native-*.ts` 主要是语义桥与 native 调用封装，方向正确（薄壳）。
+- Former VR wrapper TS helpers were bridge wrappers; current VR runtime truth is Rust/native.
 - 但存在体积偏大文件（如 `native-chat-process-servertool-orchestration-semantics.ts`、`native-compat-action-semantics.ts`），建议继续拆分。
 
 ---
@@ -64,7 +64,7 @@
 ## 发现项
 
 1. **疑似 fallback 违例（应移除）**
-   - 文件：`src/router/virtual-router/engine.ts`
+   - 文件：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs`
    - 方法：`tryForceSingleProviderDecisionWhenPoolExhausted`
    - 行为：当池耗尽且仅单 provider 时，强行回填决策，可能绕过指令过滤。
    - 结论：与 no-fallback 约束冲突，建议删除并直接抛错（fail-fast）。
@@ -82,22 +82,22 @@
 ## 静默失败检查
 - `sticky-session-store.ts` catch 后会 `emitStickyStoreError -> reportProviderErrorToRouterPolicy`，属于“有显式上报”，非静默吞错。
 - `provider-runtime-ingress.ts` catch 后 `console.warn`，有显式日志。
-- `engine-selection` 大多数 native 调用错误走 `failNativeRequired`，符合 fail-fast。
+- Former VR wrapper helpers mostly routed native errors through `failNativeRequired`; current VR runtime truth is Rust/native.
 
 ---
 
 ## 证据清单（命令与观察）
 
 - TS / Rust 目标文件定位：
-  - `ls sharedmodule/llmswitch-core/src/router/virtual-router/`
+  - inspect the former source-side VR TS runtime root only as a deleted-path guard
   - `ls sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/`
 - 重复语义核查：
   - `grep -rn "applyRoutingInstructions" sharedmodule/llmswitch-core/src/ --include="*.ts"`
   - `grep -rn "apply_routing_instructions" .../virtual_router_engine/`
 - fallback 扫描：
-  - `grep -rn "fallback" sharedmodule/llmswitch-core/src/router/virtual-router/ --include="*.ts"`
+  - `grep -rn "fallback" sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/ --include="*.rs"`
 - catch/静默失败扫描：
-  - `grep -rn "catch\s*(" sharedmodule/llmswitch-core/src/router/virtual-router/ --include="*.ts"`
+  - `grep -rn "catch\s*(" sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/ --include="*.rs"`
 - 文件体积检查：
   - `wc -l .../virtual-router/**/*.ts`
 

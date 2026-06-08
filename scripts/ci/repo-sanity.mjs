@@ -212,11 +212,6 @@ function checkRootWriteSources() {
       message: 'scripts/install-global.sh must not use root .install-pack for in-place builds',
     },
     {
-      path: 'scripts/tool-classification-report.ts',
-      forbidden: /path\.join\(process\.cwd\(\),\s*['"]reports['"]/,
-      message: 'scripts/tool-classification-report.ts must write reports under docs/reports',
-    },
-    {
       path: 'scripts/analyze-tools-fileops.mjs',
       forbidden: /path\.join\(process\.cwd\(\),\s*['"]reports['"]/,
       message: 'scripts/analyze-tools-fileops.mjs must write reports under docs/reports',

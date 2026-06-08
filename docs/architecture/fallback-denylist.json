@@ -1,7 +1,6 @@
 {
   "targetRoots": [
     "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src",
-    "sharedmodule/llmswitch-core/src/router/virtual-router",
     "src/providers/core/runtime",
     "src/server/runtime/http-server/executor"
   ],
