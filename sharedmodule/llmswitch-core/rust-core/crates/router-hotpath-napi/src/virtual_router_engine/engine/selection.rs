@@ -705,21 +705,31 @@ impl VirtualRouterEngineCore {
             .unwrap_or_default();
         let mut available_real_keys: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        let now = now_ms();
         for target in &cloned_targets {
-            if !target.disabled
+            let available = !target.disabled
                 && !excluded_keys.contains(&target.provider_key)
-                && self.is_provider_available(env, &target.provider_key)
-            {
+                && (self.is_provider_available(env, &target.provider_key)
+                    || self
+                        .health_manager
+                        .has_persisted_503_reprobe_available(&target.provider_key, now));
+            if available {
                 available_real_keys.insert(target.provider_key.clone());
             }
         }
 
-        match self.forwarder_registry.select(
+        let selected = self.forwarder_registry.select(
             key,
             &mut self.load_balancer,
             |provider_key: &str| available_real_keys.contains(provider_key),
             forwarder_sticky_session_id,
-        ) {
+        );
+        if let Ok(real) = &selected {
+            let _ = self
+                .health_manager
+                .consume_persisted_503_reprobe_if_available(real, now);
+        }
+        match selected {
             Ok(real) => Some(real),
             Err(e)
                 if e == crate::virtual_router_engine::forwarder::ERR_FORWARDER_NO_AVAILABLE_TARGET =>
@@ -1137,7 +1147,7 @@ fn collect_recoverable_cooldown_for_key(
     }
 }
 
-fn quota_state_blocks_provider(state: &ProviderQuotaState, now_ms: i64) -> bool {
+pub(crate) fn quota_state_blocks_provider(state: &ProviderQuotaState, now_ms: i64) -> bool {
     if state
         .blacklist_until
         .map(|until| until > now_ms)
@@ -2731,6 +2741,210 @@ mod tests {
             assert_eq!(
                 selected.provider_key, provider_key,
                 "persisted cooldown provider should be allowed on startup first request"
+            );
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn startup_import_allows_persisted_cooldown_forwarder_target_through_selection() {
+        use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("rcc-startup-forwarder-health-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let mut core = VirtualRouterEngineCore::new();
+            let config = json!({
+                "providers": {
+                    "1token.key1.gpt-5.5": {
+                        "providerKey": "1token.key1.gpt-5.5",
+                        "providerType": "responses",
+                        "modelId": "gpt-5.5",
+                        "enabled": true
+                    },
+                    "sdfv.key1.gpt-5.5": {
+                        "providerKey": "sdfv.key1.gpt-5.5",
+                        "providerType": "responses",
+                        "modelId": "gpt-5.5",
+                        "enabled": true
+                    },
+                    "llmgate.key1.free-gpt-5.5": {
+                        "providerKey": "llmgate.key1.free-gpt-5.5",
+                        "providerType": "responses",
+                        "modelId": "free-gpt-5.5",
+                        "enabled": true
+                    }
+                },
+                "forwarders": {
+                    "fwd.gpt.gpt-5.5": {
+                        "forwarderId": "fwd.gpt.gpt-5.5",
+                        "protocol": "openai",
+                        "modelId": "gpt-5.5",
+                        "resolutionMode": "model-first",
+                        "strategy": "round-robin",
+                        "targets": [
+                            { "providerKey": "sdfv.key1.gpt-5.5", "disabled": false },
+                            { "providerKey": "1token.key1.gpt-5.5", "disabled": false },
+                            { "providerKey": "llmgate.key1.free-gpt-5.5", "disabled": false }
+                        ],
+                        "stickyKey": "none"
+                    }
+                },
+                "routing": {
+                    "thinking": [{
+                        "id": "test-thinking",
+                        "priority": 100,
+                        "mode": "priority",
+                        "targets": ["fwd.gpt.gpt-5.5"]
+                    }]
+                }
+            });
+
+            let health_state = json!({
+                "version": 1,
+                "providerCooldowns": [{
+                    "providerKey": "sdfv.key1.gpt-5.5",
+                    "reason": "__http_503_daily_cooldown__",
+                    "cooldownExpiresAt": now_ms() + 86_400_000
+                }]
+            });
+            let health_path = temp_dir.join("provider-health.json");
+            fs::write(&health_path, serde_json::to_string(&health_state).unwrap()).unwrap();
+
+            core.initialize(&config).unwrap();
+
+            let classification = ClassificationResult {
+                route_name: "thinking".to_string(),
+                confidence: 1.0,
+                reasoning: "test".to_string(),
+                candidates: vec!["thinking".to_string()],
+            };
+            let features = RoutingFeatures::default();
+            let routing_state = RoutingInstructionState::default();
+
+            let selected = core
+                .select_provider(
+                    "thinking",
+                    &json!({}),
+                    &classification,
+                    &features,
+                    &routing_state,
+                    None,
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                )
+                .expect("selection should succeed");
+            assert_eq!(
+                selected.provider_key, "sdfv.key1.gpt-5.5",
+                "forwarder target with startup persisted cooldown must receive one reprobe hit"
+            );
+        });
+
+        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn forwarder_does_not_consume_unselected_persisted_reprobe_target() {
+        use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir =
+            std::env::temp_dir().join(format!("rcc-forwarder-reprobe-unselected-{unique}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        with_session_dir_override(temp_dir.to_str(), || {
+            let mut core = VirtualRouterEngineCore::new();
+            let config = json!({
+                "providers": {
+                    "healthy.key1.gpt-test": {
+                        "providerKey": "healthy.key1.gpt-test",
+                        "providerType": "responses",
+                        "modelId": "gpt-test",
+                        "enabled": true
+                    },
+                    "cooldown.key1.gpt-test": {
+                        "providerKey": "cooldown.key1.gpt-test",
+                        "providerType": "responses",
+                        "modelId": "gpt-test",
+                        "enabled": true
+                    }
+                },
+                "forwarders": {
+                    "fwd.gpt.gpt-test": {
+                        "forwarderId": "fwd.gpt.gpt-test",
+                        "protocol": "openai",
+                        "modelId": "gpt-test",
+                        "resolutionMode": "model-first",
+                        "strategy": "priority",
+                        "targets": [
+                            { "providerKey": "healthy.key1.gpt-test", "priority": 1, "disabled": false },
+                            { "providerKey": "cooldown.key1.gpt-test", "priority": 10, "disabled": false }
+                        ],
+                        "stickyKey": "none"
+                    }
+                },
+                "routing": {
+                    "thinking": [{
+                        "id": "test-thinking",
+                        "priority": 100,
+                        "mode": "priority",
+                        "targets": ["fwd.gpt.gpt-test"]
+                    }]
+                }
+            });
+
+            let health_state = json!({
+                "version": 1,
+                "providerCooldowns": [{
+                    "providerKey": "cooldown.key1.gpt-test",
+                    "reason": "__http_503_daily_cooldown__",
+                    "cooldownExpiresAt": now_ms() + 86_400_000
+                }]
+            });
+            let health_path = temp_dir.join("provider-health.json");
+            fs::write(&health_path, serde_json::to_string(&health_state).unwrap()).unwrap();
+
+            core.initialize(&config).unwrap();
+
+            let classification = ClassificationResult {
+                route_name: "thinking".to_string(),
+                confidence: 1.0,
+                reasoning: "test".to_string(),
+                candidates: vec!["thinking".to_string()],
+            };
+            let features = RoutingFeatures::default();
+            let routing_state = RoutingInstructionState::default();
+
+            let selected = core
+                .select_provider(
+                    "thinking",
+                    &json!({}),
+                    &classification,
+                    &features,
+                    &routing_state,
+                    None,
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                )
+                .expect("selection should succeed");
+            assert_eq!(selected.provider_key, "healthy.key1.gpt-test");
+            assert!(
+                core.health_manager
+                    .has_persisted_503_reprobe_available("cooldown.key1.gpt-test", now_ms()),
+                "unselected forwarder target must keep its one-shot persisted cooldown reprobe"
             );
         });
 

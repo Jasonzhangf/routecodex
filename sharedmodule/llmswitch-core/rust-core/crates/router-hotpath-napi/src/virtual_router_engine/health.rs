@@ -371,6 +371,27 @@ impl ProviderHealthManager {
         true
     }
 
+    pub(crate) fn has_persisted_503_reprobe_available(
+        &self,
+        provider_key: &str,
+        now_ms: i64,
+    ) -> bool {
+        let canonical = Self::canonicalize_provider_key(provider_key);
+        let Some(state) = self.states.get(&canonical) else {
+            return false;
+        };
+        if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
+            return false;
+        }
+        if !state.persisted_503_reprobe_available {
+            return false;
+        }
+        state
+            .cooldown_expires_at
+            .map(|expiry| expiry > now_ms)
+            .unwrap_or(false)
+    }
+
     pub(crate) fn describe_state(&self, provider_key: &str) -> Option<Value> {
         let canonical = Self::canonicalize_provider_key(provider_key);
         let state = self.states.get(&canonical)?;

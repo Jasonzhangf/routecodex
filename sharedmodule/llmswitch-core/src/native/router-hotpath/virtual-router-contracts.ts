@@ -628,6 +628,31 @@ export interface RoutingStatusSnapshot {
   health: ProviderHealthState[];
   quota?: ProviderQuotaState[];
   quotaHostSnapshot?: ProviderQuotaHostSnapshotState[];
+  forwarders?: ForwarderStatusState[];
+}
+
+export interface ForwarderStatusState {
+  forwarderId: string;
+  protocol: string;
+  modelId: string;
+  strategy: string;
+  stickyKey: string;
+  targets: ForwarderTargetStatusState[];
+}
+
+export interface ForwarderTargetStatusState {
+  providerKey: string;
+  disabled: boolean;
+  providerRegistered: boolean;
+  providerEnabled: boolean;
+  runtimeKey?: string;
+  concurrencyBusyRemainingMs?: number;
+  quotaBlocker?: ProviderQuotaState;
+  quotaBlocks: boolean;
+  healthState?: Record<string, unknown>;
+  healthCooldownRemainingMs?: number;
+  persisted503ReprobeAvailable?: boolean;
+  available: boolean;
 }
 
 export interface ProviderHealthState {

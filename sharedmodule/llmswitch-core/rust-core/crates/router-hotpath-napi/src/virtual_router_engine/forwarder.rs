@@ -182,6 +182,12 @@ impl ForwarderRegistry {
         self.entries.keys().cloned().collect()
     }
 
+    pub(crate) fn list_entries(&self) -> Vec<ForwarderEntry> {
+        let mut entries = self.entries.values().cloned().collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.forwarder_id.cmp(&right.forwarder_id));
+        entries
+    }
+
     /// model-first 解析
     pub(crate) fn resolve_by_model(&self, protocol: &str, model: &str) -> Option<&ForwarderEntry> {
         let id = self

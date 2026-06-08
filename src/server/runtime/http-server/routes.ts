@@ -8,7 +8,7 @@ import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-ut
 import type { ServerConfigV2 } from './types.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
-import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
+import { isLocalRequest, registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import { registerSessionClientRoutes } from './session-client-routes.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
@@ -26,6 +26,25 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
   } catch {
     // Never throw from non-blocking logging.
   }
+}
+
+function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
+  if (!hubPipeline || typeof hubPipeline !== 'object') {
+    return null;
+  }
+  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown }).getVirtualRouter;
+  if (typeof getVirtualRouter !== 'function') {
+    return null;
+  }
+  const virtualRouter = getVirtualRouter.call(hubPipeline);
+  if (!virtualRouter || typeof virtualRouter !== 'object') {
+    return null;
+  }
+  const getStatus = (virtualRouter as { getStatus?: () => unknown }).getStatus;
+  if (typeof getStatus !== 'function') {
+    return null;
+  }
+  return getStatus.call(virtualRouter);
 }
 
 interface RouteOptions {
@@ -312,6 +331,25 @@ export function registerHttpRoutes(options: RouteOptions): void {
 
   app.get('/config', (_req: Request, res: Response) => {
     res.status(200).json({ httpserver: { host: config.server.host, port: config.server.port }, merged: false });
+  });
+
+  app.get('/_routecodex/diagnostics/virtual-router', (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    try {
+      const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+      const virtualRouter = readVirtualRouterRuntimeStatus(hubPipeline);
+      res.status(200).json({
+        ok: true,
+        serverId: typeof options.getServerId === 'function' ? options.getServerId() : `${config.server.host}:${config.server.port}`,
+        virtualRouter
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'virtual_router_diagnostics_failed' } });
+    }
   });
 
   const listModels = async (req: Request, res: Response) => {
