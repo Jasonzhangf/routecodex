@@ -17,7 +17,9 @@ import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import type {
   RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState
+  BlockingRecoverableRouteHoldState,
+  RequestLocalProviderRetryState,
+  RequestLocalTransientRetryTracker
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderSendFailureArgs = {
@@ -42,6 +44,7 @@ type RequestExecutorProviderSendFailureArgs = {
   logicalRequestChainKey: string;
   routePoolForAttempt?: string[];
   excludedProviderKeys: Set<string>;
+  transientRetryTracker?: RequestLocalTransientRetryTracker;
   recordAttempt: (args: { error: boolean }) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: {
@@ -55,7 +58,7 @@ type RequestExecutorProviderSendFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
-    switchAction: 'exclude_and_reroute';
+    switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -88,6 +91,7 @@ export type RequestExecutorProviderSendFailureResult = {
   lastError: unknown;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
@@ -256,32 +260,6 @@ export async function processProviderSendFailure(
     typeof retryError.statusCode === 'number'
       ? retryError.statusCode
       : extractStatusCodeFromError(args.error);
-  if (
-    args.providerTransportBackoffKey
-    && shouldApplyProviderTransportBackoff({
-      error: args.error,
-      retryError,
-      stage: 'provider.send'
-    })
-  ) {
-    const providerBackoffMs = args.consumeProviderTransportBackoffMs(args.providerTransportBackoffKey, {
-      error: args.error,
-      statusCode: status
-    });
-    args.logStage('provider.transport_backoff.recorded', args.requestId, {
-      providerKey: args.providerKey,
-      runtimeKey: args.runtimeKey,
-      backoffKey: args.providerTransportBackoffKey,
-      backoffMs: providerBackoffMs,
-      consecutive: peekProviderTransportBackoffConsecutiveForTests(args.providerTransportBackoffKey),
-      reason: retryError.reason,
-      errorCode: retryError.errorCode,
-      upstreamCode: retryError.upstreamCode,
-      statusCode: status,
-      attempt: args.attempt
-    });
-  }
-
   const promptTooLong = isPromptTooLongError(args.error);
   const forcedRouteHint = promptTooLong && args.forcedRouteHint !== 'longcontext'
     ? 'longcontext'
@@ -317,6 +295,7 @@ export async function processProviderSendFailure(
     contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status,
+    transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     metadata: args.metadata,
     logNonBlockingError: args.logNonBlockingError
@@ -328,6 +307,32 @@ export async function processProviderSendFailure(
   if (!providerFailurePlan.retryTelemetryPlan) {
     throw args.error;
   }
+  if (
+    !retryExecutionPlan.requestLocalTransient
+    && args.providerTransportBackoffKey
+    && shouldApplyProviderTransportBackoff({
+      error: args.error,
+      retryError,
+      stage: 'provider.send'
+    })
+  ) {
+    const providerBackoffMs = args.consumeProviderTransportBackoffMs(args.providerTransportBackoffKey, {
+      error: args.error,
+      statusCode: status
+    });
+    args.logStage('provider.transport_backoff.recorded', args.requestId, {
+      providerKey: args.providerKey,
+      runtimeKey: args.runtimeKey,
+      backoffKey: args.providerTransportBackoffKey,
+      backoffMs: providerBackoffMs,
+      consecutive: peekProviderTransportBackoffConsecutiveForTests(args.providerTransportBackoffKey),
+      reason: retryError.reason,
+      errorCode: retryError.errorCode,
+      upstreamCode: retryError.upstreamCode,
+      statusCode: status,
+      attempt: args.attempt
+    });
+  }
 
   const blockingRecoverableRouteHoldState =
     retryExecutionPlan.blockingRecoverable
@@ -337,7 +342,7 @@ export async function processProviderSendFailure(
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        preserveSameProviderRetry: false,
+        preserveSameProviderRetry: retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once',
         routePoolForSameProviderRetry: undefined
       }
       : null;
@@ -357,6 +362,7 @@ export async function processProviderSendFailure(
     lastError: args.error,
     blockingRecoverableRouteHoldState,
     allowBlockingRecoverableRetryBeyondAttemptBudget,
+    requestLocalProviderRetryState: providerFailurePlan.requestLocalProviderRetryState,
     forcedRouteHint,
     contextOverflowRetries,
     cumulativeExternalLatencyMs

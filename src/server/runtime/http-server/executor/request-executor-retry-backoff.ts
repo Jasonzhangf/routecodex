@@ -27,6 +27,7 @@ export async function resolveProviderRetryBackoffPlan(args: {
   attempt: number;
   forceProviderScopedBackoff?: boolean;
   forceAttemptScopedBackoff?: boolean;
+  requestLocal?: boolean;
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryBackoffPlan> {
@@ -41,6 +42,21 @@ export async function resolveProviderRetryBackoffPlan(args: {
     retryAction: 'reroute_explicit_alternative'
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
+  if (args.requestLocal) {
+    const retryBackoffMs =
+      args.retryError.statusCode === 429 || args.retryError.errorCode === 'HTTP_429' || args.retryError.upstreamCode === 'HTTP_429'
+        ? 0
+        : await waitBeforeRetry(args.error, {
+            attempt: args.attempt,
+            signal: args.abortSignal
+          });
+    return {
+      blockingRecoverable,
+      retryBackoffMs,
+      recoverableBackoffMs: retryBackoffMs,
+      backoffScope: 'attempt'
+    };
+  }
   if (actionPlan.backoff.scope === 'attempt') {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,

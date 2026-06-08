@@ -1,11 +1,13 @@
 import type {
-  BlockingRecoverableRouteHoldState
+  BlockingRecoverableRouteHoldState,
+  RequestLocalProviderRetryState
 } from './request-executor-error-types.js';
 
 export type RequestExecutorFailureState = {
   lastError: unknown;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
@@ -17,13 +19,15 @@ export function applyResolveFailureState(
     lastError: unknown;
     blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
     allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+    requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   }
 ): RequestExecutorFailureState {
   return {
     ...state,
     lastError: failure.lastError,
     blockingRecoverableRouteHoldState: failure.blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget
+    allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget,
+    requestLocalProviderRetryState: failure.requestLocalProviderRetryState
   };
 }
 
@@ -33,6 +37,7 @@ export function applySendFailureState(
     lastError: unknown;
     blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
     allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+    requestLocalProviderRetryState?: RequestLocalProviderRetryState;
     forcedRouteHint?: string;
     contextOverflowRetries: number;
     cumulativeExternalLatencyMs: number;
@@ -43,6 +48,7 @@ export function applySendFailureState(
     lastError: failure.lastError,
     blockingRecoverableRouteHoldState: failure.blockingRecoverableRouteHoldState,
     allowBlockingRecoverableRetryBeyondAttemptBudget: failure.allowBlockingRecoverableRetryBeyondAttemptBudget,
+    requestLocalProviderRetryState: failure.requestLocalProviderRetryState,
     forcedRouteHint: failure.forcedRouteHint,
     contextOverflowRetries: failure.contextOverflowRetries,
     cumulativeExternalLatencyMs: failure.cumulativeExternalLatencyMs

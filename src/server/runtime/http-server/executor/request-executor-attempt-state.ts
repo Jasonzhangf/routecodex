@@ -20,6 +20,7 @@ export function prepareRequestExecutorAttemptState(args: {
   attempt: number;
   initialMetadata: Record<string, unknown>;
   excludedProviderKeys: Set<string>;
+  retryProviderKey?: string;
   inboundClientHeaders: Record<string, string> | undefined;
   clientRequestId: string;
   forcedRouteHint?: string;
@@ -43,6 +44,12 @@ export function prepareRequestExecutorAttemptState(args: {
 
   if (args.forcedRouteHint) {
     metadataForAttempt.routeHint = args.forcedRouteHint;
+  }
+  if (args.retryProviderKey) {
+    metadataForAttempt.__routecodexRetryProviderKey = args.retryProviderKey;
+    delete metadataForAttempt.excludedProviderKeys;
+  } else if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
+    delete metadataForAttempt.__routecodexRetryProviderKey;
   }
 
   const loggerRecord =

@@ -2,6 +2,7 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderFailurePlan,
+  RequestLocalTransientRetryTracker,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 import type {
@@ -62,6 +63,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   maxContextOverflowRetries?: number;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
   logNonBlockingError: LogNonBlockingError;
@@ -104,6 +106,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status: args.status,
     forceExcludeCurrentProviderOnRetry,
+    transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -127,6 +130,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       metadata: args.metadata,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys,
+      affectsHealthOverride: retryExecutionPlan.requestLocalTransient ? false : undefined,
       extraDetails: {
         routePoolSize: Array.isArray(args.routePool) ? args.routePool.length : 0
       }
@@ -156,9 +160,19 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
         maxContextOverflowRetries: args.maxContextOverflowRetries
       })
       : undefined;
+  const requestLocalProviderRetryState =
+    retryExecutionPlan.requestLocalTransient && retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan
+      ? {
+        switchAction: retryExecutionPlan.retrySwitchPlan.switchAction,
+        ...(retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once' && args.providerKey
+          ? { retryProviderKey: args.providerKey }
+          : {})
+      }
+      : undefined;
   return {
     reportPlan,
     retryExecutionPlan,
+    ...(requestLocalProviderRetryState ? { requestLocalProviderRetryState } : {}),
     ...(retryTelemetryPlan ? { retryTelemetryPlan } : {})
   };
 }

@@ -22,6 +22,7 @@ import {
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderErrorStage,
+  RequestLocalTransientRetryTracker,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
@@ -63,6 +64,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   maxContextOverflowRetries?: number;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
@@ -104,8 +106,15 @@ export async function resolveProviderRetryExecutionPlan(args: {
           attempt: args.attempt,
           promptTooLong: Boolean(args.promptTooLong),
           routePool: args.routePool,
-          excludedProviderKeys: args.excludedProviderKeys
+          excludedProviderKeys: args.excludedProviderKeys,
+          retryError: args.retryError,
+          transientRetryTracker: args.transientRetryTracker
         });
+  const requestLocalTransient =
+    classification === 'recoverable'
+    && !hostContractFailure
+    && !args.forceExcludeCurrentProviderOnRetry
+    && !args.promptTooLong;
 
   const holdOnLastAvailable429 = isLastAvailableProvider429({
     providerKey: args.providerKey,
@@ -143,6 +152,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: keepTerminalExclusion,
+      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
@@ -177,6 +187,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: true,
       blockingRecoverable: false,
       excludedCurrentProvider: true,
+      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: retryBackoffPlan.retryBackoffMs,
       recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
@@ -196,18 +207,14 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: false,
+      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
     };
   }
 
-  const retryExcludedCurrentProvider =
-    exclusionPlan.excludedCurrentProvider ||
-    applyRetryExclusionForCurrentProvider({
-      providerKey: args.providerKey,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
+  const retryExcludedCurrentProvider = exclusionPlan.excludedCurrentProvider;
 
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
     error: args.error,
@@ -218,6 +225,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     attempt: args.attempt,
     forceProviderScopedBackoff: retryExcludedCurrentProvider,
     forceAttemptScopedBackoff: hostContractFailure && !retryExcludedCurrentProvider,
+    requestLocal: requestLocalTransient,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -247,6 +255,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
+      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
@@ -256,6 +265,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
+    requestLocalTransient,
     holdOnLastAvailable429,
     retryBackoffMs: retryBackoffPlan.retryBackoffMs,
     recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,

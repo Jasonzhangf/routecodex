@@ -4,7 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PassThrough } from 'node:stream';
 
-import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
+import { sendPipelineResponse } from '../../../src/server/handlers/handler-response-utils.js';
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<http.Server>((resolve) => {
@@ -32,8 +32,7 @@ function findSseDataByType(text: string, type: string): Record<string, unknown> 
 describe('responses-handler stream closed before completed regression', () => {
   it('repairs terminal Responses SSE frames with a response id when upstream emits output item then closes', async () => {
     const app = express();
-    app.use(express.json());
-    app.post('/v1/responses', async (req, res) => {
+    app.get('/v1/responses', async (_req, res) => {
       const upstream = new PassThrough();
       setTimeout(() => {
         upstream.write('event: response.output_item.done\n');
@@ -53,30 +52,29 @@ describe('responses-handler stream closed before completed regression', () => {
         upstream.end();
       }, 10);
 
-      await handleResponses(req as any, res as any, {
-        executePipeline: async () => ({
+      await sendPipelineResponse(
+        res as any,
+        {
           status: 200,
           headers: {},
           body: {
             __sse_responses: upstream
+          },
+          metadata: {
+            outboundStream: true,
+            stream: true
           }
-        }),
-        errorHandling: null
-      });
+        } as any,
+        'req_repair_terminal_probe',
+        { entryEndpoint: '/v1/responses' }
+      );
     });
 
     await withServer(app, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/v1/responses`, {
-        method: 'POST',
         headers: {
-          'content-type': 'application/json',
           accept: 'text/event-stream'
-        },
-        body: JSON.stringify({
-          model: 'gpt-5.3-codex',
-          stream: true,
-          input: 'Reply with OK only.'
-        })
+        }
       });
       const text = await response.text();
       const completedEvent = findSseDataByType(text, 'response.completed');
@@ -94,8 +92,7 @@ describe('responses-handler stream closed before completed regression', () => {
 
   it('surfaces started-stream failure as explicit SSE error when upstream closes before response.completed', async () => {
     const app = express();
-    app.use(express.json());
-    app.post('/v1/responses', async (req, res) => {
+    app.get('/v1/responses', async (_req, res) => {
       const upstream = new PassThrough();
       setTimeout(() => {
         upstream.write('event: response.created\n');
@@ -116,30 +113,29 @@ describe('responses-handler stream closed before completed regression', () => {
         upstream.end();
       }, 10);
 
-      await handleResponses(req as any, res as any, {
-        executePipeline: async () => ({
+      await sendPipelineResponse(
+        res as any,
+        {
           status: 200,
           headers: {},
           body: {
             __sse_responses: upstream
+          },
+          metadata: {
+            outboundStream: true,
+            stream: true
           }
-        }),
-        errorHandling: null
-      });
+        } as any,
+        'req_stream_closed_started',
+        { entryEndpoint: '/v1/responses' }
+      );
     });
 
     await withServer(app, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/v1/responses`, {
-        method: 'POST',
         headers: {
-          'content-type': 'application/json',
           accept: 'text/event-stream'
-        },
-        body: JSON.stringify({
-          model: 'gpt-5.3-codex',
-          stream: true,
-          input: 'Reply with OK only.'
-        })
+        }
       });
       const text = await response.text();
 
@@ -150,6 +146,63 @@ describe('responses-handler stream closed before completed regression', () => {
       expect(text).toContain('event: error');
       expect(text).toContain('"code":"upstream_stream_incomplete"');
       expect(text).toContain('stream closed before response.completed');
+    });
+  });
+
+  it('treats upstream response.failed as terminal and does not append stream-incomplete error', async () => {
+    const app = express();
+    app.get('/v1/responses', async (_req, res) => {
+      const upstream = new PassThrough();
+      setTimeout(() => {
+        upstream.write('event: response.failed\n');
+        upstream.write(
+          `data: ${JSON.stringify({
+            type: 'response.failed',
+            response: {
+              id: 'resp_failed_terminal_1',
+              object: 'response',
+              status: 'failed',
+              error: {
+                code: 'rate_limit_error',
+                message: 'Concurrency limit exceeded for user, please retry later'
+              }
+            }
+          })}\n\n`
+        );
+        upstream.end();
+      }, 10);
+
+      await sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: upstream
+          },
+          metadata: {
+            outboundStream: true,
+            stream: true
+          }
+        } as any,
+        'req_response_failed_terminal',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        headers: {
+          accept: 'text/event-stream'
+        }
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('event: response.failed');
+      expect(text).toContain('rate_limit_error');
+      expect(text).not.toContain('upstream_stream_incomplete');
+      expect(text).not.toContain('stream closed before response.completed');
     });
   });
 });

@@ -113,4 +113,106 @@ describe('OpenAiResponsesSdkTransport', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('surfaces early upstream Responses SSE concurrency errors as retryable provider 429', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = (async () => {
+      const body = [
+        ': keepalive',
+        '',
+        'event: error',
+        `data: ${JSON.stringify({
+          type: 'error',
+          code: 'rate_limit_error',
+          message: 'Concurrency limit exceeded for user, please retry later'
+        })}`,
+        '',
+        'event: response.failed',
+        `data: ${JSON.stringify({
+          type: 'response.failed',
+          response: {
+            status: 'failed',
+            error: {
+              code: 'rate_limit_error',
+              message: 'Concurrency limit exceeded for user, please retry later'
+            }
+          }
+        })}`,
+        ''
+      ].join('\n');
+      return new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      });
+    }) as typeof fetch;
+
+    try {
+      const transport = new OpenAiResponsesSdkTransport();
+      await expect(transport.executePreparedRequest(
+        {
+          endpoint: '/v1/responses',
+          headers: {
+            authorization: 'Bearer test-key',
+            'content-type': 'application/json'
+          },
+          targetUrl: 'https://example.com/v1/responses',
+          body: {
+            model: 'gpt-5.5',
+            input: 'hello'
+          },
+          wantsSse: true
+        },
+        { requestId: 'req_stream_error' } as any
+      )).rejects.toMatchObject({
+        statusCode: 429,
+        code: 'PROVIDER_TRAFFIC_SATURATED',
+        upstreamCode: 'rate_limit_error',
+        retryable: true,
+        requestExecutorProviderErrorStage: 'provider.http'
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('replays buffered normal SSE frames when no early upstream error is present', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = (async () => new Response('event: response.created\n' +
+      `data: ${JSON.stringify({ type: 'response.created', response: { id: 'resp_buffered', status: 'in_progress' } })}\n\n` +
+      'event: response.completed\n' +
+      `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_buffered', status: 'completed' } })}\n\n`, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' }
+    })) as typeof fetch;
+
+    try {
+      const transport = new OpenAiResponsesSdkTransport();
+      const response = await transport.executePreparedRequest(
+        {
+          endpoint: '/v1/responses',
+          headers: {
+            authorization: 'Bearer test-key',
+            'content-type': 'application/json'
+          },
+          targetUrl: 'https://example.com/v1/responses',
+          body: {
+            model: 'gpt-5.5',
+            input: 'hello'
+          },
+          wantsSse: true
+        },
+        { requestId: 'req_stream_success' } as any
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of (response as any).__sse_responses) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const text = Buffer.concat(chunks).toString('utf8');
+      expect(text).toContain('event: response.created');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('resp_buffered');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

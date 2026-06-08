@@ -1722,7 +1722,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
-  it('excludes failed same-runtime provider keys on PROVIDER_TRAFFIC_SATURATED retry', async () => {
+  it('excludes only the current provider on PROVIDER_TRAFFIC_SATURATED retry', async () => {
     const saturatedError = Object.assign(new Error('provider traffic wait exceeded soft timeout'), {
       statusCode: 429,
       code: 'PROVIDER_TRAFFIC_SATURATED',
@@ -1818,7 +1818,129 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const excluded = Array.isArray(secondCallMetadata.excludedProviderKeys)
       ? secondCallMetadata.excludedProviderKeys as string[]
       : [];
-    expect(excluded).toEqual(['tab.key1', 'tab.key1.alt']);
+    expect(excluded).toEqual(['tab.key1']);
+  });
+
+  it('retries the same provider once for a transient recoverable error before switching provider', async () => {
+    const transientError = Object.assign(new Error('HTTP 502: transient upstream'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      retryable: true
+    });
+    const providerACalls: number[] = [];
+    const providerBCalls: number[] = [];
+    const providerAHandle = createRuntimeHandle(async () => {
+      providerACalls.push(providerACalls.length + 1);
+      throw transientError;
+    });
+    const providerBHandle = createRuntimeHandle(async () => {
+      providerBCalls.push(providerBCalls.length + 1);
+      return { ok: true };
+    });
+    const providerAResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key1',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'tools',
+        pool: ['tab.key1', 'tab.key2']
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const providerBResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key2',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'tools',
+        pool: ['tab.key1', 'tab.key2']
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn(async (input: PipelineExecutionInput) => {
+        const metadata = input.metadata && typeof input.metadata === 'object'
+          ? input.metadata as Record<string, unknown>
+          : {};
+        if (metadata.__routecodexRetryProviderKey === 'tab.key1') {
+          return providerAResult;
+        }
+        const excluded = Array.isArray(metadata.excludedProviderKeys)
+          ? metadata.excludedProviderKeys
+          : [];
+        return excluded.includes('tab.key1') ? providerBResult : providerAResult;
+      })
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn((providerKey?: string) => {
+        if (providerKey === 'tab.key1') return 'runtime:one';
+        if (providerKey === 'tab.key2') return 'runtime:two';
+        return undefined;
+      }),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? providerAHandle : providerBHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage,
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    stubConvertProviderResponse();
+    const request: PipelineExecutionInput = {
+      requestId: 'req_same_provider_once_then_switch',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+
+    expect(response).toBeDefined();
+    expect(providerACalls).toHaveLength(2);
+    expect(providerBCalls).toHaveLength(1);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(3);
+    expect((fakePipeline.execute as jest.Mock).mock.calls[1][0].metadata).toEqual(expect.objectContaining({
+      __routecodexRetryProviderKey: 'tab.key1'
+    }));
+    expect((fakePipeline.execute as jest.Mock).mock.calls[1][0].metadata).not.toHaveProperty('excludedProviderKeys');
+    expect((fakePipeline.execute as jest.Mock).mock.calls[2][0].metadata).toEqual(expect.objectContaining({
+      excludedProviderKeys: ['tab.key1']
+    }));
+    expect((fakePipeline.execute as jest.Mock).mock.calls[2][0].metadata).not.toHaveProperty('__routecodexRetryProviderKey');
+    const stages = logStage.mock.calls.map((call) => call[0]);
+    expect(stages).not.toContain('provider.transport_backoff.recorded');
+    expect(stages).not.toContain('server.global_error_backoff_wait');
   });
 
   it('uses short soft wait timeout for web provider traffic acquire', async () => {

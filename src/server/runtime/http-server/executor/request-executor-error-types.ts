@@ -26,7 +26,7 @@ export type ProviderRetryBackoffPlan = {
   backoffScope: 'provider' | 'recoverable' | 'attempt';
 };
 
-export type ProviderRetrySwitchAction = 'exclude_and_reroute';
+export type ProviderRetrySwitchAction = 'exclude_and_reroute' | 'retry_same_provider_once';
 
 export type ProviderRetryBackoffScope = ProviderRetryBackoffPlan['backoffScope'];
 
@@ -41,6 +41,13 @@ export type ProviderRetryExclusionPlan = {
   excludedCurrentProvider: boolean;
 };
 
+export type RequestLocalTransientRetryTracker = {
+  observe(args: {
+    providerKey?: string;
+    retryError: RetryErrorSnapshot;
+  }): number;
+};
+
 export type ProviderRetryEligibilityPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
@@ -50,6 +57,7 @@ export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
   excludedCurrentProvider: boolean;
+  requestLocalTransient: boolean;
   holdOnLastAvailable429: boolean;
   retryBackoffMs: number;
   recoverableBackoffMs: number;
@@ -96,6 +104,7 @@ export type RequestExecutorProviderErrorReportPlan = {
 export type RequestExecutorProviderFailurePlan = {
   reportPlan: RequestExecutorProviderErrorReportPlan;
   retryExecutionPlan: ProviderRetryExecutionPlan;
+  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   retryTelemetryPlan?: ProviderRetryTelemetryPlan;
 };
 
@@ -107,6 +116,11 @@ export type BlockingRecoverableRouteHoldState = {
   explicitSingletonPool: boolean;
   preserveSameProviderRetry?: boolean;
   routePoolForSameProviderRetry?: string[];
+};
+
+export type RequestLocalProviderRetryState = {
+  switchAction?: ProviderRetrySwitchAction;
+  retryProviderKey?: string;
 };
 
 export type ProviderErrorStageLogger = (
@@ -135,4 +149,5 @@ export type ReportRequestExecutorProviderErrorArgs = {
   metadata?: Record<string, unknown>;
   routePool?: string[];
   excludedProviderKeys?: Set<string>;
+  affectsHealthOverride?: boolean;
 };

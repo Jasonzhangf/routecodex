@@ -6,8 +6,7 @@ import {
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   readString,
-  normalizeCodeKey,
-  normalizeRuntimeKey
+  normalizeCodeKey
 } from './request-executor-error-shared.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 import {
@@ -17,7 +16,9 @@ import type {
   ProviderRetryEligibilityPlan,
   ProviderRetryExclusionPlan,
   ProviderRetryExecutionPlan,
+  ProviderRetrySwitchAction,
   ProviderRetrySwitchPlan,
+  RequestLocalTransientRetryTracker,
   RequestExecutorProviderErrorClassification,
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
@@ -58,13 +59,6 @@ function hasExplicitAlternativeRouteCandidate(args: {
   return hasAlternativeRouteCandidate(args);
 }
 
-function resolveRuntimeKeyForProvider(
-  runtimeManager: RuntimeManager,
-  providerKey: string
-): string | undefined {
-  return normalizeRuntimeKey(runtimeManager.resolveRuntimeKey(providerKey));
-}
-
 export function applyRetryExclusionForCurrentProvider(args: {
   providerKey?: string;
   excludedProviderKeys: Set<string>;
@@ -89,15 +83,29 @@ function isProviderTrafficSaturatedRetryError(args: {
   return args.status === 429 && code === 'PROVIDER_TRAFFIC_SATURATED';
 }
 
+function isImmediateProviderSwitch429(args: {
+  status?: number;
+  error: unknown;
+}): boolean {
+  const code = normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code);
+  const upstreamCode = normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode);
+  return args.status === 429
+    || code === 'HTTP_429'
+    || upstreamCode === 'HTTP_429'
+    || isProviderTrafficSaturatedRetryError(args);
+}
+
 export function resolveProviderRetryExclusionPlan(args: {
   providerKey?: string;
   status?: number;
   error: unknown;
+  retryError?: RetryErrorSnapshot;
   classification?: RequestExecutorProviderErrorClassification;
   attempt?: number;
   promptTooLong: boolean;
   routePool?: string[];
   excludedProviderKeys: Set<string>;
+  transientRetryTracker?: RequestLocalTransientRetryTracker;
 }): ProviderRetryExclusionPlan {
   const providerKey = readString(args.providerKey);
   if (!providerKey) {
@@ -111,6 +119,25 @@ export function resolveProviderRetryExclusionPlan(args: {
     routePool: args.routePool,
     excludedProviderKeys: args.excludedProviderKeys
   });
+
+  const isImmediate429 = isImmediateProviderSwitch429({ status: args.status, error: args.error });
+  if (
+    args.classification === 'recoverable'
+    && !args.promptTooLong
+    && !isImmediate429
+    && args.retryError
+    && args.transientRetryTracker
+  ) {
+    const sameProviderErrorCount = args.transientRetryTracker.observe({
+      providerKey,
+      retryError: args.retryError
+    });
+    if (sameProviderErrorCount <= 1) {
+      return {
+        excludedCurrentProvider: false
+      };
+    }
+  }
 
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
@@ -134,38 +161,6 @@ export function resolveProviderRetryExclusionPlan(args: {
   return {
     excludedCurrentProvider: false
   };
-}
-
-function excludeProvidersSharingRuntimeFromRoutePool(args: {
-  routePool: string[];
-  runtimeKey: string;
-  runtimeManager: RuntimeManager;
-  excludedProviderKeys: Set<string>;
-}): string[] {
-  const currentRuntimeKey = normalizeRuntimeKey(args.runtimeKey);
-  if (!currentRuntimeKey) {
-    return [];
-  }
-  const added: string[] = [];
-  for (const providerKey of args.routePool) {
-    if (typeof providerKey !== 'string') {
-      continue;
-    }
-    const normalizedProviderKey = providerKey.trim();
-    if (!normalizedProviderKey) {
-      continue;
-    }
-    const candidateRuntimeKey = resolveRuntimeKeyForProvider(args.runtimeManager, normalizedProviderKey);
-    if (candidateRuntimeKey !== currentRuntimeKey) {
-      continue;
-    }
-    if (args.excludedProviderKeys.has(normalizedProviderKey)) {
-      continue;
-    }
-    args.excludedProviderKeys.add(normalizedProviderKey);
-    added.push(normalizedProviderKey);
-  }
-  return added;
 }
 
 export function isLastAvailableProvider429(args: {
@@ -245,33 +240,18 @@ export function buildProviderRetrySwitchPlan(args: {
   retryError?: RetryErrorSnapshot;
   backoffScope: ProviderRetryExecutionPlan['backoffScope'];
 }): ProviderRetrySwitchPlan {
-  const switchAction = 'exclude_and_reroute';
-  let runtimeScopeExcluded: string[] = [];
-  const isProviderTrafficSaturated =
-    args.retryError?.errorCode === 'PROVIDER_TRAFFIC_SATURATED'
-    || (typeof (args.error as { code?: unknown } | undefined)?.code === 'string'
-      && (args.error as { code?: string }).code === 'PROVIDER_TRAFFIC_SATURATED');
-  if (
-    !args.promptTooLong
-    && args.excludedCurrentProvider
-    && isProviderTrafficSaturated
-    && Array.isArray(args.routePool)
-    && args.routePool.length > 0
-    && args.runtimeManager
-  ) {
-    runtimeScopeExcluded = excludeProvidersSharingRuntimeFromRoutePool({
-      routePool: args.routePool,
-      runtimeKey: args.runtimeKey ?? '',
-      runtimeManager: args.runtimeManager,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
-  }
+  const switchAction: ProviderRetrySwitchAction = args.excludedCurrentProvider
+    ? 'exclude_and_reroute'
+    : 'retry_same_provider_once';
+  const runtimeScopeExcluded: string[] = [];
   return {
     switchAction,
-    decisionLabel: describeProviderFailureDecision({
-      action: 'reroute_explicit_alternative',
-      backoffScope: args.backoffScope ?? 'attempt'
-    }),
+    decisionLabel: switchAction === 'retry_same_provider_once'
+      ? 'recoverable_backoff_same_provider'
+      : describeProviderFailureDecision({
+          action: 'reroute_explicit_alternative',
+          backoffScope: args.backoffScope ?? 'attempt'
+        }),
     runtimeScopeExcluded,
     runtimeScopeExcludedCount: runtimeScopeExcluded.length
   };

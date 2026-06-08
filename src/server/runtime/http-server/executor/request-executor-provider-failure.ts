@@ -202,7 +202,10 @@ export async function reportRequestExecutorProviderError(
       dependencies: args.dependencies as ModuleDependencies,
       statusCode,
       recoverable: outcome.recoverable,
-      affectsHealth: outcome.affectsHealth,
+      affectsHealth:
+        typeof args.affectsHealthOverride === 'boolean'
+          ? args.affectsHealthOverride
+          : outcome.affectsHealth,
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
         ? Array.from(args.excludedProviderKeys)

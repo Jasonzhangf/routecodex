@@ -206,6 +206,7 @@ import type {
   ProviderRetryTelemetryPlan,
   RequestExecutorProviderFailurePlan,
   RequestExecutorProviderErrorStage,
+  RequestLocalProviderRetryState,
   RetryErrorSnapshot
 } from './executor/request-executor-error-types.js';
 import {
@@ -245,6 +246,9 @@ import {
   hasNonEmptyToolCalls,
   hasOutputFunctionCalls
 } from './executor/request-executor-response-inspect.js';
+import {
+  createRequestLocalTransientRetryTracker
+} from './executor/request-executor-transient-retry-tracker.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -449,7 +453,7 @@ export class HubRequestExecutor implements RequestExecutor {
     errorCode?: string;
     upstreamCode?: string;
     upstreamStatus?: number;
-    switchAction: 'exclude_and_reroute';
+    switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -557,6 +561,9 @@ export class HubRequestExecutor implements RequestExecutor {
         let cumulativeExternalLatencyMs = 0;
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
+        let retryProviderKeyForNextAttempt: string | undefined;
+        let requestLocalProviderRetryState: RequestLocalProviderRetryState | undefined;
+        const transientRetryTracker = createRequestLocalTransientRetryTracker();
 
         while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget) {
         attempt += 1;
@@ -572,11 +579,14 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt,
           initialMetadata,
           excludedProviderKeys,
+          retryProviderKey: retryProviderKeyForNextAttempt,
           inboundClientHeaders,
           clientRequestId,
           forcedRouteHint,
           throwIfClientAbortSignalAborted
         });
+        retryProviderKeyForNextAttempt = undefined;
+        requestLocalProviderRetryState = undefined;
         const hubStartedAtMs = Date.now();
         logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
@@ -697,6 +707,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logicalRequestChainKey,
             routePoolForAttempt,
             excludedProviderKeys,
+            transientRetryTracker,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -718,7 +729,13 @@ export class HubRequestExecutor implements RequestExecutor {
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
-          metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
+          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
+          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
+          if (!requestLocalProviderRetryState) {
+            metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
+          } else {
+            delete metadataForAttempt.excludedProviderKeys;
+          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -1249,6 +1266,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logicalRequestChainKey,
             routePoolForAttempt,
             excludedProviderKeys,
+            transientRetryTracker,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1289,7 +1307,9 @@ export class HubRequestExecutor implements RequestExecutor {
           forcedRouteHint = failureState.forcedRouteHint;
           contextOverflowRetries = failureState.contextOverflowRetries;
           cumulativeExternalLatencyMs = failureState.cumulativeExternalLatencyMs;
-          if (target.providerKey) {
+          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
+          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
+          if (target.providerKey && !requestLocalProviderRetryState) {
             const scopedErrorCode = resolveScopedBackoffErrorCode(error);
             const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
             const pendingScopedWaitMs = peekScopedErrorBackoffWaitMs(scopedBackoffKey);
@@ -1306,7 +1326,11 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             recordScopedErrorBackoff(scopedBackoffKey);
           }
-          metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
+          if (!requestLocalProviderRetryState) {
+            metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
+          } else {
+            delete metadataForAttempt.excludedProviderKeys;
+          }
           retryAfterProviderFailure = true;
         } finally {
           if (trafficPermit) {

@@ -156,7 +156,7 @@ type SseTerminalWatch = {
   sawDoneChunk?: boolean;
   requiresResponsesTerminalEvent?: boolean;
   terminalSource?: string;
-  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled';
+  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled' | 'response.failed';
 };
 
 
@@ -896,6 +896,9 @@ function updateSseTerminalTrackerFromChunk(
       eventName === 'response.completed'
       || eventName === 'response.done'
       || eventName === 'response.required_action'
+      || eventName === 'response.failed'
+      || eventName === 'response.error'
+      || eventName === 'response.cancelled'
     ) {
       terminalWatch.pendingTerminalEvent = eventName;
     }
@@ -918,6 +921,9 @@ function updateSseTerminalTrackerFromChunk(
         parsedType === 'response.completed'
         || parsedType === 'response.done'
         || parsedType === 'response.required_action'
+        || parsedType === 'response.failed'
+        || parsedType === 'response.error'
+        || parsedType === 'response.cancelled'
       ) {
         terminalWatch.pendingTerminalEvent = parsedType as SseTerminalWatch['pendingTerminalEvent'];
       }
@@ -932,7 +938,7 @@ function updateSseTerminalTrackerFromChunk(
       if (parsedType === 'response.done') {
         terminalWatch.sawResponsesDoneEvent = true;
       }
-      const trueTerminal = parsedType === 'response.completed' || parsedType === 'response.done' || parsedType === 'response.error' || parsedType === 'response.cancelled';
+      const trueTerminal = parsedType === 'response.completed' || parsedType === 'response.done' || parsedType === 'response.error' || parsedType === 'response.cancelled' || parsedType === 'response.failed';
       if (trueTerminal) {
         finishTracker.seenTerminalEvent = true;
         terminalWatch.sawTerminalChunk = true;
@@ -951,7 +957,7 @@ function updateSseTerminalTrackerFromChunk(
     const eventName = lines
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
-      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action');
+      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action' || name === 'response.failed' || name === 'response.error' || name === 'response.cancelled');
     const effectiveTerminalEvent = (eventName ?? terminalWatch.pendingTerminalEvent ?? undefined) as string | undefined;
     if (!effectiveTerminalEvent) {
       continue;
@@ -978,7 +984,7 @@ function updateSseTerminalTrackerFromChunk(
     if (effectiveTerminalEvent === 'response.done') {
       terminalWatch.sawResponsesDoneEvent = true;
     }
-    const trueTerminal2 = effectiveTerminalEvent === 'response.completed' || effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled';
+    const trueTerminal2 = effectiveTerminalEvent === 'response.completed' || effectiveTerminalEvent === 'response.done' || effectiveTerminalEvent === 'response.error' || effectiveTerminalEvent === 'response.cancelled' || effectiveTerminalEvent === 'response.failed';
     if (trueTerminal2) {
       finishTracker.seenTerminalEvent = true;
       terminalWatch.sawTerminalChunk = true;

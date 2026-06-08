@@ -8,7 +8,9 @@ import {
 } from './request-executor-provider-failure-plan.js';
 import type {
   RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState
+  BlockingRecoverableRouteHoldState,
+  RequestLocalProviderRetryState,
+  RequestLocalTransientRetryTracker
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderResolveFailureArgs = {
@@ -26,6 +28,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   logicalRequestChainKey: string;
   routePoolForAttempt?: string[];
   excludedProviderKeys: Set<string>;
+  transientRetryTracker?: RequestLocalTransientRetryTracker;
   recordAttempt: (args: { error: boolean }) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: {
@@ -39,7 +42,7 @@ type RequestExecutorProviderResolveFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
-    switchAction: 'exclude_and_reroute';
+    switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -56,6 +59,7 @@ export type RequestExecutorProviderResolveFailureResult = {
   lastError: unknown;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
+  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
 };
 
 export async function processProviderResolveFailure(
@@ -93,6 +97,7 @@ export async function processProviderResolveFailure(
     recordAttempt: args.recordAttempt,
     logStage: args.logStage,
     routeHint: args.forcedRouteHint,
+    transientRetryTracker: args.transientRetryTracker,
     forceExcludeCurrentProviderOnRetry: true,
     abortSignal: args.abortSignal,
     metadata: args.metadata,
@@ -114,7 +119,7 @@ export async function processProviderResolveFailure(
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        preserveSameProviderRetry: false,
+        preserveSameProviderRetry: retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once',
         routePoolForSameProviderRetry: undefined
       }
       : null;
@@ -133,6 +138,7 @@ export async function processProviderResolveFailure(
   return {
     lastError: args.error,
     blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget
+    allowBlockingRecoverableRetryBeyondAttemptBudget,
+    requestLocalProviderRetryState: providerFailurePlan.requestLocalProviderRetryState
   };
 }

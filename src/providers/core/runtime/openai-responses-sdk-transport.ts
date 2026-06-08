@@ -110,6 +110,36 @@ function buildInvalidJsonError(responseText: string): Error & {
   return error;
 }
 
+function buildResponsesSseProviderError(args: {
+  message: string;
+  code?: string;
+}): Error & {
+  statusCode: number;
+  status: number;
+  code: string;
+  upstreamCode?: string;
+  retryable: boolean;
+  requestExecutorProviderErrorStage: string;
+} {
+  const error = new Error(args.message) as Error & {
+    statusCode: number;
+    status: number;
+    code: string;
+    upstreamCode?: string;
+    retryable: boolean;
+    requestExecutorProviderErrorStage: string;
+  };
+  error.statusCode = 429;
+  error.status = 429;
+  error.code = 'PROVIDER_TRAFFIC_SATURATED';
+  if (args.code) {
+    error.upstreamCode = args.code;
+  }
+  error.retryable = true;
+  error.requestExecutorProviderErrorStage = 'provider.http';
+  return error;
+}
+
 function normalizeOpenAiSdkError(error: unknown): never {
   const record = asRecord(error);
   const status = typeof record.status === 'number' ? record.status : typeof record.statusCode === 'number' ? record.statusCode : undefined;
@@ -118,6 +148,119 @@ function normalizeOpenAiSdkError(error: unknown): never {
     throw buildHttpError(status, message);
   }
   throw error instanceof Error ? error : new Error(String(error));
+}
+
+function parseResponsesSseFrame(block: string): { eventName?: string; data?: UnknownRecord } {
+  const lines = block.split(/\r?\n/);
+  const eventName = lines
+    .filter((line) => line.startsWith('event:'))
+    .map((line) => line.slice('event:'.length).trim())
+    .find(Boolean);
+  const dataText = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trim())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return { eventName };
+  }
+  try {
+    const data = JSON.parse(dataText) as unknown;
+    return {
+      eventName,
+      data: asRecord(data)
+    };
+  } catch {
+    return { eventName };
+  }
+}
+
+function readErrorPayload(data: UnknownRecord | undefined): { code?: string; message?: string } {
+  if (!data) {
+    return {};
+  }
+  const nestedError = asRecord(data.error);
+  const response = asRecord(data.response);
+  const responseError = asRecord(response.error);
+  return {
+    code: pickString(data.code) ?? pickString(nestedError.code) ?? pickString(responseError.code),
+    message: pickString(data.message) ?? pickString(nestedError.message) ?? pickString(responseError.message)
+  };
+}
+
+function isResponsesSseRateLimitLike(args: { code?: string; message?: string }): boolean {
+  const code = (args.code ?? '').trim().toLowerCase();
+  const message = (args.message ?? '').trim().toLowerCase();
+  return code === 'rate_limit_error'
+    || code === 'provider_traffic_saturated'
+    || code === 'http_429'
+    || message.includes('concurrency limit exceeded')
+    || message.includes('rate limit')
+    || message.includes('too many requests');
+}
+
+async function prepareResponsesSseStream(response: Response): Promise<Readable> {
+  if (!response.body) {
+    throw buildHttpError(502, 'missing upstream SSE body');
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const bufferedChunks: Uint8Array[] = [];
+  let bufferedText = '';
+  let sawSemanticFrame = false;
+
+  while (!sawSemanticFrame) {
+    const read = await reader.read();
+    if (read.done) {
+      break;
+    }
+    bufferedChunks.push(read.value);
+    bufferedText += decoder.decode(read.value, { stream: true });
+    const parts = bufferedText.split(/\n\n/);
+    bufferedText = parts.pop() ?? '';
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed.startsWith(':')) {
+        continue;
+      }
+      const parsed = parseResponsesSseFrame(part);
+      const payload = readErrorPayload(parsed.data);
+      const type = pickString(parsed.data?.type);
+      if (
+        parsed.eventName === 'error'
+        || parsed.eventName === 'response.failed'
+        || type === 'error'
+        || type === 'response.failed'
+      ) {
+        if (isResponsesSseRateLimitLike(payload)) {
+          await reader.cancel().catch(() => undefined);
+          throw buildResponsesSseProviderError({
+            message: payload.message ?? 'upstream Responses SSE rate limit error',
+            code: payload.code
+          });
+        }
+      }
+      sawSemanticFrame = true;
+      break;
+    }
+    if (bufferedChunks.reduce((total, chunk) => total + chunk.byteLength, 0) > 64 * 1024) {
+      break;
+    }
+  }
+
+  async function* replayAndRead(): AsyncGenerator<Uint8Array> {
+    for (const chunk of bufferedChunks) {
+      yield chunk;
+    }
+    while (true) {
+      const read = await reader.read();
+      if (read.done) {
+        break;
+      }
+      yield read.value;
+    }
+  }
+
+  return Readable.from(replayAndRead());
 }
 
 export class OpenAiResponsesSdkTransport {
@@ -154,11 +297,9 @@ export class OpenAiResponsesSdkTransport {
 
     const responseHeaders = responseHeadersToRecord(response.headers);
     if (requestInfo.wantsSse) {
-      if (!response.body) {
-        throw buildHttpError(502, 'missing upstream SSE body');
-      }
+      const sseStream = await prepareResponsesSseStream(response);
       return {
-        __sse_responses: Readable.fromWeb(response.body as never),
+        __sse_responses: sseStream,
         ...(responseHeaders ? { headers: responseHeaders } : {})
       };
     }
