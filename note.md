@@ -1,5 +1,11 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-08 ~/.rcc/config.toml parse fix
+
+- Root cause: `/Users/fanzhang/.rcc/config.toml` line 308 had malformed inline table syntax in `loadBalancing.weights` (`" llmgate.free-gpt-5.5" = 10  = 10`), which caused `TOMLDecodeError: Unclosed inline table`.
+- Fix: removed the duplicated `= 10`, leaving a valid weighted map entry.
+- Verification: `python3 - <<'PY' ... tomllib.loads(...)` returned `TOML_OK`; `timeout 20 routecodex start --snap` loaded `/Users/fanzhang/.rcc/config.toml`, started ports `5520/5555/10000`, then exited only because the timeout sent `SIGTERM`.
+
 ## 2026-06-08 note.md consolidation index
 - Scope: this pass adds a safe topic map and promotes only facts re-verified against current code/tests. Raw history remains below for evidence; no broad deletion.
 - `~/.rcc` / root generated cleanup: promoted to `MEMORY.md` top entries `cleanup` / `root-layout`; raw note retained as evidence.
@@ -16392,3 +16398,23 @@ Phase E: TS fallback 物理删除
 - Blocker fixed: quota resetAt fixtures used `2026-05-28`, which is expired on 2026-06-08 and makes hydrated cooldown appear as immediate out-of-pool state; moved fixture resetAt to `2026-12-28`.
 - Blackbox contract aligned: provider 503 now reports once, enters ErrorErr05 switch/reroute, and selects backup; tests assert `primaryHits=1` before restart and one passive reprobe after restart, not the old three-hit provider-internal threshold.
 - Verification PASS in this review: focused quota/request-executor Jest 7 suites / 22 tests; focused ingress/error Jest 5 suites / 15 tests; `npm run verify:provider-failure-ban-blackbox`; `npx tsc --noEmit --pretty false`; `npm run verify:repo-sanity`; `git diff --check && git diff --cached --check`; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`.
+
+## 2026-06-08 5520 priority route leaked to asxs context audit
+- 5520 `~/.rcc/config.toml` truth: `gateway_priority_5520` routes are `mode = "priority"` with order `sdfv > llmgate key1 > llmgate key2 > asxs > cc`; `longcontext` target order matches the comment.
+- Log evidence: `~/.rcc/logs/server-5520.log` around 08:19-08:22 shows ~179k token longcontext requests selected `llmgate.key1`, while ~208k-231k token longcontext/search requests selected `asxs.crsa`; nearby small thinking/tools/search traffic still selected llmgate, so this was not llmgate globally dead. Sdfv did return HTTP_503 on later small thinking/tools attempts and then switched to llmgate.
+- Root cause evidence: Rust VR `selection.rs` applies availability filters, then for any `longcontext_candidate_active` call it classifies available candidates into safe/risky/overflow by `estimated_tokens / max_context_tokens` and replaces the candidate list with the non-empty safest class before applying `mode = "priority"`. `core.rs` default `context_warn_ratio` is 0.9. Thus priority is only within the selected context safety class, not across the original target list.
+- Config issue found: `sdfv`, `llmgate`, and `cc` GPT model `maxContext` were 256000 while `asxs` was 900000. User decided all GPT providers should be 900k. Updated `~/.rcc/provider/{sdfv,llmgate,cc}/config.v2.toml` GPT model `maxContext` to 900000; all four GPT providers now have `maxInFlight = 8` and GPT model `maxContext = 900000` by TOML parse. Runtime still needs service reload/restart before this config is active.
+
+## 2026-06-08 VR token estimator native closeout
+- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/token-counter.ts` and `token-estimator.ts`; callers now use `src/native/router-hotpath/native-virtual-router-runtime.ts`, backed by Rust `virtual_router_engine::features::estimate_request_tokens_payload_json`.
+- Important fix: Rust estimator must parse stringified structured `message.content` before estimating, and media content parts (`input_image`/`input_video`/`image_url`/`video_url`/data image/video) count as 0 for message content. This preserves routing intent without counting base64 payload bytes or trimming real payload.
+- `verify:vr-no-ts-runtime` now fails on 18 remaining production VR TS files instead of the previous 20; `token-counter.ts` and `token-estimator.ts` are no longer in the failure list.
+- Removed ignored dist residues `sharedmodule/llmswitch-core/dist/router/virtual-router/token-counter.{js,d.ts}` and `token-estimator.{js,d.ts}` after `.gitignore dist/` evidence; post-clean residue search for old token paths returns no source hits.
+- Verification PASS: `cargo test -p router-hotpath-napi estimate_tokens --lib -- --nocapture` (5 tests); `node scripts/build-native-hotpath.mjs` in llmswitch-core; `npm run build -- --pretty false` in llmswitch-core; `npx tsc --noEmit --pretty false`; sharedmodule Jest `tests/router/token-counter-media-ignore.test.ts` (5 tests); root servertool context route Jest (2 suites / 7 tests); `npm run verify:llmswitch-rustification-audit`; `npm run verify:architecture-ci`; `npm run build:min`; `git diff --check`. Expected RED retained: `npm run verify:vr-no-ts-runtime` on 18 remaining VR TS files.
+
+## 2026-06-08 priority longcontext order preservation
+- Rust VR selection now preserves original target order for priority longcontext pools when candidates are safe or risky. Context safety may still exclude hard-overflow candidates when `context_hard_limit` is true, but it must not reorder priority pools by moving safest providers ahead of earlier configured targets.
+- Regression covered by `priority_longcontext_preserves_target_order_when_context_fits`; a 240k-token longcontext request with priority targets `[primary.risky, secondary.risky, safe.large]` selects `primary.risky`, not later `safe.large`.
+- Verification PASS: `cargo test -p router-hotpath-napi priority_longcontext_preserves_target_order_when_context_fits --lib -- --nocapture`; `cargo test -p router-hotpath-napi virtual_router_engine::engine::selection --lib` (19 tests); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; `npx tsc --noEmit --pretty false`; `npm run build:min`; `npm run install:global`.
+- Deploy/live evidence: installed `routecodex`/`rcc` version `0.90.2990`; native artifact exists at `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`, plus repo `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`; `routecodex restart --port 5520` succeeded; `curl http://127.0.0.1:5520/health` returned `ready=true`, `pipelineReady=true`, `version=0.90.2990`.
+- Live route evidence after restart: `~/.rcc/logs/server-5520.log` at `08:45:56` shows `longcontext/gateway-priority-5520-priority-longcontext -> sdfv.key1.gpt-5.5.gpt-5.5 reason=longcontext:token-threshold|tools:tool-request-detected`; nearby usage shows ~202k input token search/longcontext-threshold requests also selecting first-priority `sdfv`, not `asxs`.

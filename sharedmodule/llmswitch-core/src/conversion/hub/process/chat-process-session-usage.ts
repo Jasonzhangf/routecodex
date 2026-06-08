@@ -5,7 +5,7 @@ import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../../router/virtual-router/routing-state-store.js';
-import { countRequestTokens } from '../../../router/virtual-router/token-counter.js';
+import { countRequestTokens } from '../../../native/router-hotpath/native-virtual-router-runtime.js';
 
 type UsageLike = {
   inputTokens?: number;

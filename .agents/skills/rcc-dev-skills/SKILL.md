@@ -2025,3 +2025,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Phase E TS fallback deletion：`stop-message-counter.ts` 的 `resolveDefaultSnapshot` / fallback branch 已物理删除；`tryNativeBudget` catch 改为 throw `SERVERTOOL_NATIVE_BUDGET_FAILED`；`applyStopMessageFinishReasonBudget` 无 TS fallback。
 - Rust 测试总数：servertool-core 54 + servertool-cli 3 + stop-message-core 42 = 99 tests ALL PASS。
 - 覆盖边界：Rust unit test 已覆盖分类/projection/gate/schema；HTTP blackbox 整链路（拦截→exec→exec result→改名→schema 注入）需要完整 server 启动，当前未覆盖。
+
+## 2026-06-08 VR media token estimate / priority longcontext 精华
+
+- VR token estimate 只能影响路由估算，不得裁剪/改写真实 payload。Rust owner 是 `virtual_router_engine::features`; stringified structured `message.content` 必须先解析，image/video/base64 payload 在 message content 估算中应忽略，避免图片请求被错误推入 longcontext 或非多模态路线。
+- priority longcontext 的上下文安全分类只能过滤不可用/硬溢出目标，不能重排原始 priority target 顺序；若日志显示 priority 路由命中后置大窗口 provider，先查 `maxContextTokens` 与 selection context classification，不要改配置当作唯一修复。

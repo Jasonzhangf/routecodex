@@ -98,11 +98,19 @@ fn normalize_provider_error_event(event: &Value) -> Value {
     insert_if_present(&mut out, "recoverable", event.get("recoverable"));
     insert_if_present(&mut out, "affectsHealth", event.get("affectsHealth"));
     insert_if_present(&mut out, "fatal", event.get("fatal"));
-    insert_if_present(&mut out, "cooldownOverrideMs", event.get("cooldownOverrideMs"));
+    insert_if_present(
+        &mut out,
+        "cooldownOverrideMs",
+        event.get("cooldownOverrideMs"),
+    );
     insert_if_present(&mut out, "quotaScope", event.get("quotaScope"));
     insert_if_present(&mut out, "quotaReason", event.get("quotaReason"));
     insert_if_present(&mut out, "resetAt", event.get("resetAt"));
-    insert_if_present(&mut out, "errorClassification", event.get("errorClassification"));
+    insert_if_present(
+        &mut out,
+        "errorClassification",
+        event.get("errorClassification"),
+    );
     insert_if_present(&mut out, "routePool", event.get("routePool"));
     insert_if_present(
         &mut out,
@@ -121,7 +129,10 @@ fn normalize_provider_error_event(event: &Value) -> Value {
 fn normalize_provider_success_event(event: &Value) -> Value {
     let timestamp = read_i64(event.get("timestamp")).unwrap_or_else(super::time_utils::now_ms);
     let mut out = serde_json::Map::new();
-    out.insert("runtime".to_string(), normalize_object(event.get("runtime")));
+    out.insert(
+        "runtime".to_string(),
+        normalize_object(event.get("runtime")),
+    );
     out.insert(
         "timestamp".to_string(),
         Value::Number(serde_json::Number::from(timestamp)),
@@ -156,7 +167,9 @@ fn read_string(value: Option<&Value>) -> Option<String> {
 
 fn read_i64(value: Option<&Value>) -> Option<i64> {
     match value {
-        Some(Value::Number(number)) => number.as_i64().or_else(|| number.as_u64().map(|n| n as i64)),
+        Some(Value::Number(number)) => number
+            .as_i64()
+            .or_else(|| number.as_u64().map(|n| n as i64)),
         _ => None,
     }
     .filter(|value| *value > 0)

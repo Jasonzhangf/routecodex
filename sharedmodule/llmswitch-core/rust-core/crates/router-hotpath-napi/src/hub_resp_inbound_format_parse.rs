@@ -264,7 +264,11 @@ fn merge_response_object(target: &mut Map<String, Value>, response: &Map<String,
     }
 }
 
-fn output_item_matches(existing_obj: &Map<String, Value>, item_id: &Option<String>, call_id: &Option<String>) -> bool {
+fn output_item_matches(
+    existing_obj: &Map<String, Value>,
+    item_id: &Option<String>,
+    call_id: &Option<String>,
+) -> bool {
     item_id
         .as_ref()
         .zip(read_trimmed_string(existing_obj.get("id")).as_ref())
@@ -286,7 +290,11 @@ fn merge_output_item_value(existing: &Value, item: &Value) -> Value {
     Value::Object(merged)
 }
 
-fn record_response_output_item(target: &mut Map<String, Value>, item: &Value, merge_existing: bool) {
+fn record_response_output_item(
+    target: &mut Map<String, Value>,
+    item: &Value,
+    merge_existing: bool,
+) {
     let Some(item_obj) = item.as_object() else {
         return;
     };
@@ -388,8 +396,8 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
         if let Some(response_obj) = event_obj.get("response").and_then(Value::as_object) {
             merge_response_object(&mut response, response_obj);
         }
-        let is_output_item_added =
-            event_name == "response.output_item.added" || event_type == "response.output_item.added";
+        let is_output_item_added = event_name == "response.output_item.added"
+            || event_type == "response.output_item.added";
         let is_output_item_done =
             event_name == "response.output_item.done" || event_type == "response.output_item.done";
         if is_output_item_added || is_output_item_done {
@@ -397,7 +405,8 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
                 record_response_output_item(&mut response, item, is_output_item_done);
             }
         }
-        let is_function_call_arguments_delta = event_name == "response.function_call_arguments.delta"
+        let is_function_call_arguments_delta = event_name
+            == "response.function_call_arguments.delta"
             || event_type == "response.function_call_arguments.delta";
         let is_function_call_arguments_done = event_name == "response.function_call_arguments.done"
             || event_type == "response.function_call_arguments.done";
@@ -781,7 +790,10 @@ mod tests {
         let result = parse_resp_format_envelope(input).unwrap();
         assert_eq!(result.envelope.payload["id"], "resp_sse_call_1");
         assert_eq!(result.envelope.payload["status"], "completed");
-        assert_eq!(result.envelope.payload["output"][0]["type"], "function_call");
+        assert_eq!(
+            result.envelope.payload["output"][0]["type"],
+            "function_call"
+        );
         assert_eq!(result.envelope.payload["output"][0]["name"], "exec_command");
         assert_eq!(result.envelope.payload["output"][0]["status"], "completed");
         assert_eq!(

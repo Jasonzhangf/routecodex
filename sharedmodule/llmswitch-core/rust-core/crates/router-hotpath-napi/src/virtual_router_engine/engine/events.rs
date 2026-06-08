@@ -355,11 +355,7 @@ fn event_affects_health(event: &Value) -> bool {
     let excluded: Vec<&str> = event
         .get("excludedProviderKeys")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
         .unwrap_or_default();
     let has_alternative = pool.iter().any(|candidate| {
         candidate

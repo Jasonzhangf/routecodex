@@ -1504,19 +1504,32 @@ pub fn bootstrap_virtual_router_config_meta_json_bridge(
     )
 }
 
+#[napi(js_name = "estimateVirtualRouterRequestTokensJson")]
+pub fn estimate_virtual_router_request_tokens_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::features::estimate_request_tokens_payload_json(input_json)
+}
+
 #[napi(js_name = "reportProviderErrorToRouterPolicyJson")]
-pub fn report_provider_error_to_router_policy_json_bridge(event_json: String) -> NapiResult<String> {
-    let event_value: Value = serde_json::from_str(&event_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let normalized = virtual_router_engine::provider_runtime_ingress::report_provider_error(&event_value);
+pub fn report_provider_error_to_router_policy_json_bridge(
+    event_json: String,
+) -> NapiResult<String> {
+    let event_value: Value =
+        serde_json::from_str(&event_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let normalized =
+        virtual_router_engine::provider_runtime_ingress::report_provider_error(&event_value);
     serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi(js_name = "reportProviderSuccessToRouterPolicyJson")]
-pub fn report_provider_success_to_router_policy_json_bridge(event_json: String) -> NapiResult<String> {
-    let event_value: Value = serde_json::from_str(&event_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let normalized = virtual_router_engine::provider_runtime_ingress::report_provider_success(&event_value);
+pub fn report_provider_success_to_router_policy_json_bridge(
+    event_json: String,
+) -> NapiResult<String> {
+    let event_value: Value =
+        serde_json::from_str(&event_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let normalized =
+        virtual_router_engine::provider_runtime_ingress::report_provider_success(&event_value);
     serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

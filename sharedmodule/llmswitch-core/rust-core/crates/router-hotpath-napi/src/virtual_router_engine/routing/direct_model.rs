@@ -124,8 +124,8 @@ fn matching_route_keys(routing: &RoutingPools, route: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::config::parse_routing;
+    use super::*;
     use serde_json::{json, Map, Value};
 
     fn registry_with_text_and_vision_models() -> ProviderRegistry {
@@ -232,11 +232,7 @@ mod tests {
             &registry
         ));
         assert!(!should_fallback_direct_model_for_media(
-            "media",
-            "mm-model",
-            &features,
-            &routing,
-            &registry
+            "media", "mm-model", &features, &routing, &registry
         ));
     }
 }

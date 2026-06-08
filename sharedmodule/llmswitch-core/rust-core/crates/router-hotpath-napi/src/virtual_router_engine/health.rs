@@ -547,8 +547,7 @@ impl ProviderHealthManager {
         state.consecutive_http_429_failures = 0;
         state.state = "tripped".to_string();
         let cycle = state.http_429_cooldown_cycles;
-        state.cooldown_expires_at =
-            Some(now_ms + next_ladder_cooldown_ms(cycle));
+        state.cooldown_expires_at = Some(now_ms + next_ladder_cooldown_ms(cycle));
         state.http_429_cooldown_cycles += 1;
         Http429ControlOutcome::CooldownApplied
     }

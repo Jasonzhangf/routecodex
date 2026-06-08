@@ -154,7 +154,8 @@ fn extract_virtual_router_section(input: &Value) -> Map<String, Value> {
     let mut section = Map::new();
     section.insert(
         "providers".to_string(),
-        object_field(section_source, root, "providers").unwrap_or_else(|| Value::Object(Map::new())),
+        object_field(section_source, root, "providers")
+            .unwrap_or_else(|| Value::Object(Map::new())),
     );
     section.insert(
         "routing".to_string(),
@@ -183,7 +184,11 @@ fn extract_virtual_router_section(input: &Value) -> Map<String, Value> {
             section_source
                 .get("servertool")
                 .and_then(Value::as_object)
-                .and_then(|servertool| servertool.get("applyPatch").or_else(|| servertool.get("apply_patch")))
+                .and_then(|servertool| {
+                    servertool
+                        .get("applyPatch")
+                        .or_else(|| servertool.get("apply_patch"))
+                })
         })
         .or_else(|| root.get("applyPatch"))
         .or_else(|| root.get("apply_patch"))
@@ -193,7 +198,11 @@ fn extract_virtual_router_section(input: &Value) -> Map<String, Value> {
     section
 }
 
-fn object_field(section: &Map<String, Value>, root: &Map<String, Value>, key: &str) -> Option<Value> {
+fn object_field(
+    section: &Map<String, Value>,
+    root: &Map<String, Value>,
+    key: &str,
+) -> Option<Value> {
     section
         .get(key)
         .or_else(|| root.get(key))
@@ -202,8 +211,9 @@ fn object_field(section: &Map<String, Value>, root: &Map<String, Value>, key: &s
 }
 
 fn parse_object_payload(raw: String, label: &str) -> NapiResult<Map<String, Value>> {
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|error| napi::Error::from_reason(format!("{} returned invalid JSON: {}", label, error)))?;
+    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+        napi::Error::from_reason(format!("{} returned invalid JSON: {}", label, error))
+    })?;
     value
         .as_object()
         .cloned()
@@ -211,10 +221,9 @@ fn parse_object_payload(raw: String, label: &str) -> NapiResult<Map<String, Valu
 }
 
 fn require_field(payload: &Map<String, Value>, key: &str) -> NapiResult<Value> {
-    payload
-        .get(key)
-        .cloned()
-        .ok_or_else(|| napi::Error::from_reason(format!("virtual router bootstrap missing {}", key)))
+    payload.get(key).cloned().ok_or_else(|| {
+        napi::Error::from_reason(format!("virtual router bootstrap missing {}", key))
+    })
 }
 
 fn collect_routed_target_keys(
@@ -243,16 +252,20 @@ fn collect_forwarder_target_keys(
         return;
     };
     for forwarder in forwarder_map.values().filter_map(Value::as_object) {
-        let Some(model) = read_non_empty_string(forwarder.get("modelId").or_else(|| forwarder.get("model"))) else {
+        let Some(model) =
+            read_non_empty_string(forwarder.get("modelId").or_else(|| forwarder.get("model")))
+        else {
             continue;
         };
         let Some(targets) = forwarder.get("targets").and_then(Value::as_array) else {
             continue;
         };
         for target in targets.iter().filter_map(Value::as_object) {
-            let Some(provider_id) =
-                read_non_empty_string(target.get("providerId").or_else(|| target.get("providerKey")))
-            else {
+            let Some(provider_id) = read_non_empty_string(
+                target
+                    .get("providerId")
+                    .or_else(|| target.get("providerKey")),
+            ) else {
                 continue;
             };
             let Some(aliases) = alias_index.get(&provider_id).and_then(Value::as_array) else {

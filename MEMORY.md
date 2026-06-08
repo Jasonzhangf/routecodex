@@ -1,5 +1,11 @@
 # RouteCodex Memory
 
+- 2026-06-08: VR token estimation owner is Rust/native for the removed TS `src/router/virtual-router/token-counter.ts` and `token-estimator.ts`. The Rust estimator must parse stringified structured message content and omit image/video payload bytes from message content estimates; this is an internal routing estimate only and must never trim or rewrite the real transport payload. Verification: Rust `virtual_router_engine::features` 47 tests, sharedmodule token-counter media Jest 5 tests, native build, root tsc, and servertool context route Jest passed; `verify:vr-no-ts-runtime` still correctly RED on 18 remaining VR TS files.
+
+- 2026-06-08: Priority longcontext routing must preserve configured target order among context-safe or context-risky candidates. Context classification can filter hard-overflow candidates according to policy, but cannot reorder a priority pool by moving later "safer" providers ahead of earlier configured targets. Verification: Rust `priority_longcontext_preserves_target_order_when_context_fits` passed.
+
+- 2026-06-08: `~/.rcc/config.toml` parse failure traced to a malformed inline table in `virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext.loadBalancing.weights` (`" llmgate.free-gpt-5.5" = 10  = 10`). Removing the duplicated assignment restores TOML validity. Verification: `tomllib.loads` passes and `timeout 20 routecodex start --snap` loads the config, registers ports `5520/5555/10000`, and reaches normal startup before the timeout SIGTERM.
+
 - 2026-06-07: `~/.rcc` 清理边界已验证：`~/.rcc` 实际为 `/Volumes/extension/.rcc` 软链；`install/releases/.staging-routecodex-*` 是失败/未完成安装 staging，确认 `install/current` 不指向后可物理删除，本次把 `~/.rcc/install` 从约 78G 降到约 2.5G，`routecodex/rcc --version` 仍可执行。`diag`/`codex-samples` 是线上错误取证真源，不得整目录删除，只能按 TTL/采样/大文件策略收敛。仓库 ignored 清理边界：`tmp/`、`.install-pack/`、test-results、旧 `.tgz`、`.DS_Store`、src-side `.js.map` 可清；`dist/node_modules/vendor/target/models/samples` 需按开发/验证成本单独决策。
 
 Tags: cleanup, rcc-home, install-staging, diag-retention, generated-artifacts, 2026-06-07

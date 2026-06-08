@@ -1,5 +1,5 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/token-estimator.js';
+import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('virtual-router context routing fallback', () => {
   it('falls back to risky providers when safe providers are unavailable (e.g. 429 cooldown)', () => {
@@ -69,13 +69,8 @@ describe('virtual-router context routing fallback', () => {
     const first = engine.route(request, metadata);
     expect(first.target.providerKey).toBe(providerBig);
 
-    // Simulate rate limit (429) on the safe provider: it should become unavailable.
-    engine.handleProviderFailure({
-      providerKey: providerBig,
-      reason: 'rate_limit',
-      fatal: false,
-      statusCode: 429
-    });
+    // Simulate an already-applied provider cooldown: the risky provider remains routable.
+    engine.markProviderCooldown(providerBig, 5_000);
 
     const second = engine.route(request, metadata);
     expect(second.target.providerKey).toBe(providerSmall);

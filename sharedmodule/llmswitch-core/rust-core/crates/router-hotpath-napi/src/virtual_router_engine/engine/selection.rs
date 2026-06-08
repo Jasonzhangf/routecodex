@@ -146,6 +146,18 @@ fn dedupe_candidate_order(candidates: Vec<String>) -> Vec<String> {
     out
 }
 
+fn preserve_priority_context_candidates(
+    available: &[String],
+    safe_context: &[String],
+    risky_context: &[String],
+) -> Vec<String> {
+    available
+        .iter()
+        .filter(|key| safe_context.contains(key) || risky_context.contains(key))
+        .cloned()
+        .collect()
+}
+
 fn metadata_requires_servertool(metadata: &Value) -> bool {
     metadata
         .get("serverToolRequired")
@@ -161,23 +173,24 @@ fn apply_non_availability_filters(
     server_tool_required: bool,
     bound_alias_prefix: Option<&str>,
 ) -> Vec<String> {
-    let mut scoped: Vec<String> = filter_candidates_by_state(candidates, routing_state, provider_registry)
-        .into_iter()
-        .filter(|key| {
-            provider_registry
-                .get(key)
-                .map(|profile| profile.enabled)
-                .unwrap_or(false)
-        })
-        .filter(|key| !excluded_keys.contains(key))
-        .filter(|key| {
-            !server_tool_required
-                || provider_registry
+    let mut scoped: Vec<String> =
+        filter_candidates_by_state(candidates, routing_state, provider_registry)
+            .into_iter()
+            .filter(|key| {
+                provider_registry
                     .get(key)
-                    .map(|profile| !profile.server_tools_disabled)
-                    .unwrap_or(true)
-        })
-        .collect();
+                    .map(|profile| profile.enabled)
+                    .unwrap_or(false)
+            })
+            .filter(|key| !excluded_keys.contains(key))
+            .filter(|key| {
+                !server_tool_required
+                    || provider_registry
+                        .get(key)
+                        .map(|profile| !profile.server_tools_disabled)
+                        .unwrap_or(true)
+            })
+            .collect();
     if let Some(prefix) = bound_alias_prefix {
         let alias_candidates: Vec<String> = scoped
             .iter()
@@ -469,6 +482,8 @@ impl VirtualRouterEngineCore {
                         available = alias_candidates;
                     }
                 }
+                let tier_load_balancing =
+                    resolve_tier_load_balancing(&pool, self.load_balancer.policy());
                 if longcontext_candidate_active {
                     let (safe_context, risky_context, overflow_context) =
                         classify_context_candidates(
@@ -477,7 +492,20 @@ impl VirtualRouterEngineCore {
                             features.estimated_tokens,
                             self.context_warn_ratio,
                         );
-                    if !safe_context.is_empty() {
+                    if tier_load_balancing.strategy == "priority" {
+                        let priority_candidates = preserve_priority_context_candidates(
+                            &available,
+                            &safe_context,
+                            &risky_context,
+                        );
+                        if !priority_candidates.is_empty() {
+                            available = priority_candidates;
+                        } else if self.context_hard_limit {
+                            continue;
+                        } else if !overflow_context.is_empty() {
+                            available = overflow_context;
+                        }
+                    } else if !safe_context.is_empty() {
                         available = safe_context;
                     } else if !risky_context.is_empty() {
                         available = risky_context;
@@ -514,8 +542,6 @@ impl VirtualRouterEngineCore {
                     }
                     continue;
                 }
-                let tier_load_balancing =
-                    resolve_tier_load_balancing(&pool, self.load_balancer.policy());
                 let route_key_for_lb = route_name.to_string();
                 let (ordered_group_ids, grouped_candidates) =
                     build_primary_target_groups(&available, &self.provider_registry);
@@ -657,7 +683,8 @@ impl VirtualRouterEngineCore {
 
         if let Some(selection) = default_floor_selection {
             return Ok(selection.with_unavailable_providers(
-                (!unavailable_route_pools.is_empty()).then_some(Value::Array(unavailable_route_pools)),
+                (!unavailable_route_pools.is_empty())
+                    .then_some(Value::Array(unavailable_route_pools)),
             ));
         }
 
@@ -1754,22 +1781,110 @@ mod tests {
         };
         let result = core
             .select_provider(
-            "longcontext",
-            &json!({}),
-            &ClassificationResult {
-                route_name: "longcontext".to_string(),
-                confidence: 1.0,
-                reasoning: "longcontext:token-threshold".to_string(),
-                candidates: vec!["longcontext".to_string(), "default".to_string()],
-            },
-            &features,
-            &RoutingInstructionState::default(),
-            None,
-            unsafe { Env::from_raw(std::ptr::null_mut()) },
+                "longcontext",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "longcontext".to_string(),
+                    confidence: 1.0,
+                    reasoning: "longcontext:token-threshold".to_string(),
+                    candidates: vec!["longcontext".to_string(), "default".to_string()],
+                },
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
             )
             .expect("longcontext overflow must still give configured providers one attempt");
 
         assert_eq!(result.provider_key, "big.mimo-pro");
+        assert_eq!(result.route_used, "longcontext");
+    }
+
+    #[test]
+    fn priority_longcontext_preserves_target_order_when_context_fits() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "primary.risky".to_string(),
+            json!({
+                "providerKey": "primary.risky",
+                "providerType": "openai",
+                "modelId": "risky",
+                "enabled": true,
+                "maxContextTokens": 256000
+            }),
+        );
+        providers.insert(
+            "secondary.risky".to_string(),
+            json!({
+                "providerKey": "secondary.risky",
+                "providerType": "openai",
+                "modelId": "risky",
+                "enabled": true,
+                "maxContextTokens": 256000
+            }),
+        );
+        providers.insert(
+            "safe.large".to_string(),
+            json!({
+                "providerKey": "safe.large",
+                "providerType": "openai",
+                "modelId": "large",
+                "enabled": true,
+                "maxContextTokens": 900000
+            }),
+        );
+        core.provider_registry.load(&providers);
+        core.context_warn_ratio = 0.9;
+        core.context_hard_limit = false;
+
+        let routing = Map::from_iter([
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![json!({
+                    "id": "priority-longcontext",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["primary.risky", "secondary.risky", "safe.large"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["safe.large"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let features = RoutingFeatures {
+            estimated_tokens: 240000,
+            ..RoutingFeatures::default()
+        };
+        let result = core
+            .select_provider(
+                "longcontext",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "longcontext".to_string(),
+                    confidence: 1.0,
+                    reasoning: "longcontext:token-threshold".to_string(),
+                    candidates: vec!["longcontext".to_string(), "default".to_string()],
+                },
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("priority must not be reordered by context safety while target fits");
+
+        assert_eq!(result.provider_key, "primary.risky");
         assert_eq!(result.route_used, "longcontext");
     }
 

@@ -44,6 +44,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "bootstrapVirtualRouterRoutingJson",
   "bootstrapVirtualRouterProvidersJson",
   "bootstrapVirtualRouterProviderProfilesJson",
+  "estimateVirtualRouterRequestTokensJson",
   "reportProviderErrorToRouterPolicyJson",
   "reportProviderSuccessToRouterPolicyJson",
   "resetProviderRuntimeIngressForTestsJson",

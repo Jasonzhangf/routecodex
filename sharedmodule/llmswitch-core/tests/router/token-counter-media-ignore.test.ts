@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { countRequestTokens } from '../../src/router/virtual-router/token-counter.js';
+import { countRequestTokens } from '../../src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('token counter media payload handling', () => {
   test('does not count large input_image payload in content parts', () => {

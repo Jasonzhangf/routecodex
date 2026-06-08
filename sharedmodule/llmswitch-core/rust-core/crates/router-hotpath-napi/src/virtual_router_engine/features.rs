@@ -4,7 +4,6 @@ mod tools;
 use serde_json::{json, Value};
 
 use crate::virtual_router_engine::message_utils::{extract_message_text, get_latest_message_role};
-use crate::virtual_router_engine::routing::is_server_tool_followup_request;
 use media::analyze_media_attachments;
 use tools::{
     classify_tool_call_for_report, detect_coding_tool, detect_last_assistant_tool_category,
@@ -489,11 +488,26 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     }
 }
 
-fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
-    let mut total_chars: usize = latest_user_text.len();
+pub(crate) fn estimate_request_tokens_payload_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!("invalid token estimate input: {}", error))
+    })?;
+    let request = input.get("request").unwrap_or(&input);
+    let metadata = input.get("metadata").unwrap_or(&Value::Null);
+    let features = build_routing_features(request, metadata);
+    serde_json::to_string(&serde_json::json!({
+        "tokens": features.estimated_tokens.max(0)
+    }))
+    .map_err(|error| {
+        napi::Error::from_reason(format!("serialize token estimate output failed: {}", error))
+    })
+}
+
+fn estimate_request_tokens(request: &Value, _latest_user_text: &str) -> i64 {
+    let mut total_chars: usize = 0;
     if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {
         for msg in messages {
-            total_chars += extract_message_text(msg).len();
+            total_chars += estimate_message_text_chars(msg);
         }
     }
     let message_estimate = (total_chars as f64 / 4.0).ceil() as i64;
@@ -503,8 +517,8 @@ fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
     // while message-text extraction only sees plain text and underestimates context.
     // Use a structured estimation over core request carriers as a guardrail.
     let mut structured_chars: usize = 0;
-    if let Some(messages) = request.get("messages") {
-        structured_chars += estimate_structured_chars(messages);
+    if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {
+        structured_chars += estimate_messages_structured_chars(messages);
     }
     if let Some(input) = request.get("input") {
         structured_chars += estimate_structured_chars(input);
@@ -548,12 +562,85 @@ fn estimate_responses_context_tokens(request: &Value) -> i64 {
     (total_chars as f64 / 3.0).ceil() as i64
 }
 
+fn estimate_message_text_chars(message: &Value) -> usize {
+    let Some(content) = message.get("content") else {
+        return 0;
+    };
+    estimate_message_content_chars(content)
+}
+
+fn estimate_messages_structured_chars(messages: &[Value]) -> usize {
+    messages.iter().map(estimate_message_structured_chars).sum()
+}
+
+fn estimate_message_structured_chars(message: &Value) -> usize {
+    let Some(map) = message.as_object() else {
+        return estimate_structured_chars(message);
+    };
+    map.iter()
+        .filter_map(|(key, entry)| {
+            if key == "metadata" {
+                return None;
+            }
+            if key == "content" {
+                return Some(key.len() + estimate_message_content_chars(entry));
+            }
+            Some(key.len() + estimate_structured_chars(entry))
+        })
+        .sum()
+}
+
+fn estimate_message_content_chars(content: &Value) -> usize {
+    match content {
+        Value::String(text) => estimate_message_content_string_chars(text),
+        Value::Array(items) => items.iter().map(estimate_message_content_part_chars).sum(),
+        Value::Object(map) => estimate_message_content_object_chars(map),
+        _ => 0,
+    }
+}
+
+fn estimate_message_content_string_chars(raw: &str) -> usize {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if likely_json {
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return estimate_message_content_chars(&parsed);
+        }
+    }
+    raw.len()
+}
+
+fn estimate_message_content_part_chars(part: &Value) -> usize {
+    match part {
+        Value::String(text) => text.len(),
+        Value::Object(map) => estimate_message_content_object_chars(map),
+        _ => estimate_structured_chars(part),
+    }
+}
+
+fn estimate_message_content_object_chars(map: &serde_json::Map<String, Value>) -> usize {
+    if detect_media_kind(map).is_some() {
+        return 0;
+    }
+    if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+        return text.len();
+    }
+    if let Some(content) = map.get("content").and_then(|v| v.as_str()) {
+        return content.len();
+    }
+    estimate_structured_chars(&Value::Object(map.clone()))
+}
+
 fn estimate_structured_chars(value: &Value) -> usize {
     match value {
         Value::Null => 0,
         Value::Bool(v) => v.to_string().len(),
         Value::Number(v) => v.to_string().len(),
-        Value::String(v) => v.len(),
+        Value::String(v) => estimate_text_or_structured_chars(v),
         Value::Array(values) => values.iter().map(estimate_structured_chars).sum(),
         Value::Object(map) => {
             if detect_media_kind(map).is_some() {
@@ -569,6 +656,21 @@ fn estimate_structured_chars(value: &Value) -> usize {
                 .sum()
         }
     }
+}
+
+fn estimate_text_or_structured_chars(raw: &str) -> usize {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if likely_json {
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return estimate_structured_chars(&parsed);
+        }
+    }
+    raw.len()
 }
 
 fn detect_media_kind(map: &serde_json::Map<String, Value>) -> Option<&'static str> {
@@ -698,6 +800,78 @@ mod tests {
             features.estimated_tokens >= 180_000,
             "expected responses context payload to exceed longcontext threshold, got {}",
             features.estimated_tokens
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_omits_media_payloads_in_message_content_parts() {
+        let base_request = json!({
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image" }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+        let image_request = json!({
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image" },
+                        {
+                            "type": "input_image",
+                            "image_url": {
+                                "url": format!("data:image/png;base64,{}", "A".repeat(200_000))
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+        let base = build_routing_features(&base_request, &json!({})).estimated_tokens;
+        let actual = build_routing_features(&image_request, &json!({})).estimated_tokens;
+        assert!(
+            actual <= base + 8,
+            "expected media payload to be omitted from token estimate, base={base}, actual={actual}"
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_omits_media_payloads_in_stringified_structured_content() {
+        let base_request = json!({
+            "model": "gpt-4o",
+            "messages": [
+                { "role": "user", "content": "Summarize this clip" }
+            ],
+            "tools": []
+        });
+        let structured_content = serde_json::to_string(&json!([
+            { "type": "input_text", "text": "Summarize this clip" },
+            {
+                "type": "input_video",
+                "video_url": format!("data:video/mp4;base64,{}", "B".repeat(200_000))
+            }
+        ]))
+        .unwrap();
+        let video_request = json!({
+            "model": "gpt-4o",
+            "messages": [
+                { "role": "user", "content": structured_content }
+            ],
+            "tools": []
+        });
+        let base = build_routing_features(&base_request, &json!({})).estimated_tokens;
+        let actual = build_routing_features(&video_request, &json!({})).estimated_tokens;
+        assert!(
+            actual <= base + 12,
+            "expected stringified media payload to be omitted from token estimate, base={base}, actual={actual}"
         );
     }
 

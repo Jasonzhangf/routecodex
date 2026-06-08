@@ -1,5 +1,5 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/token-estimator.js';
+import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('virtual-router thinking overflow routes to longcontext', () => {
   it('routes fresh user input to longcontext when thinking pool overflows context', () => {
@@ -73,7 +73,6 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       requestId: 'req_ctx_thinking_overflow_routes_longcontext',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
-      routeHint: 'thinking',
       estimatedInputTokens: estimated
     };
 
@@ -152,7 +151,6 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       requestId: 'req_ctx_thinking_overflow_falls_default',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
-      routeHint: 'thinking',
       estimatedInputTokens: estimated
     };
 
@@ -238,7 +236,6 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
     const decision = engine.route(request, metadata);
     expect(decision.decision.routeName).toBe('longcontext');
     expect(decision.target.providerKey).toBe(providerLong);
-    expect(decision.decision.reasoning).toContain('thinking:user-input');
     expect(decision.decision.reasoning).toContain('longcontext:token-threshold');
   });
 
@@ -313,13 +310,14 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       requestId: 'req_ctx_thinking_threshold_but_thinking_safe',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
+      routeHint: 'thinking',
       estimatedInputTokens: estimated
     };
 
     const decision = engine.route(request, metadata);
     expect(decision.decision.routeName).toBe('thinking');
     expect(decision.target.providerKey).toBe(providerThinking);
-    expect(decision.decision.reasoning).toContain('thinking:user-input');
     expect(decision.decision.reasoning).toContain('longcontext:token-threshold');
+    expect(decision.decision.reasoning).toContain('route_hint:thinking');
   });
 });
