@@ -282,6 +282,7 @@ owners:
       - src/providers
       - src/server
       - sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts
     required_tests:
       - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts

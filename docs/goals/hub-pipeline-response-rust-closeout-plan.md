@@ -240,3 +240,29 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
 - `npm run verify:architecture-ci`
 - `npm run verify:servertool-rust-only`
+
+## 2026-06-09 Slice: Anthropic Response Helper Shell Deletion
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts` had no live runtime consumer.
+- The only source dependency was a type import from `response-runtime-anthropic.ts`; all reasoning/tool normalization semantics already route through the Rust full owners:
+  - `build_openai_chat_from_anthropic_message_full`
+  - `build_anthropic_response_from_chat_full`
+- Keeping the helper as a TS native wrapper shell created dead semantic surface and an old re-entry point for response normalization logic.
+
+### Implementation Result
+
+- Physically deleted `response-runtime-anthropic-helpers.ts`.
+- Moved the local `ToolAliasMap` type alias into `response-runtime-anthropic.ts`.
+- Updated the red test to require the legacy helper shell to stay deleted and the runtime file to use only full native projection entrypoints.
+- Added the deleted helper path to the Anthropic response projection forbidden paths in `docs/architecture/function-map.yml`.
+- Updated `docs/architecture/verification-map.yml` notes to lock the deletion boundary.
+
+### Verification Evidence
+
+- PASS: `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`
+- PASS: `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config sharedmodule/llmswitch-core/jest.config.cjs --runTestsByPath sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts --runInBand --no-cache --forceExit`
+- PASS: `npm run verify:hub-response-anthropic-native`
+- PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- PASS: `npm run verify:function-map-compile-gate`

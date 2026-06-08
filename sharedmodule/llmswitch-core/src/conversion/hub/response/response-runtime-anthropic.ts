@@ -3,7 +3,8 @@ import {
   buildAnthropicResponseFromChatFullWithNative,
   buildOpenAIChatFromAnthropicMessageFullWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import type { ToolAliasMap } from './response-runtime-anthropic-helpers.js';
+
+type ToolAliasMap = Record<string, string>;
 
 export interface AnthropicResponseOptions {
   aliasMap?: ToolAliasMap;
