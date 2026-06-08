@@ -31,14 +31,43 @@ fn has_declared_apply_patch_tool(payload: &Value) -> bool {
     false
 }
 
+fn find_responses_function_call_output_content_violation(payload: &Value) -> Option<String> {
+    let root = payload.as_object()?;
+    let input = root.get("input")?.as_array()?;
+    for (index, item) in input.iter().enumerate() {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) != Some("function_call_output") {
+            continue;
+        }
+        if row.contains_key("content") {
+            return Some(format!(
+                "openai-responses provider wire input[{}] function_call_output must not include content; use output only",
+                index
+            ));
+        }
+    }
+    None
+}
+
 fn evaluate_responses_direct_route_decision(
     payload: &Value,
     inbound_protocol: &str,
     apply_patch_mode: &str,
 ) -> Result<Value, String> {
     let _ = apply_patch_mode;
-    let _ = inbound_protocol;
     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
+    if inbound_protocol == "openai-responses" {
+        if let Some(reason) = find_responses_function_call_output_content_violation(payload) {
+            return Ok(serde_json::json!({
+                "providerWireValid": false,
+                "requiresHubRelay": false,
+                "reason": reason,
+                "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+            }));
+        }
+    }
     Ok(serde_json::json!({
         "providerWireValid": true,
         "requiresHubRelay": false,
@@ -126,6 +155,34 @@ mod responses_direct_route_decision_tests {
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);
         assert_eq!(decision["reason"], Value::Null);
+    }
+
+    #[test]
+    fn direct_decision_rejects_function_call_output_content_wire() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    { "role": "user", "content": [{ "type": "input_text", "text": "hello" }] },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "ok",
+                        "content": [{ "type": "output_text", "text": "illegal duplicate" }]
+                    }
+                ]
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("direct decision should produce explicit contract result");
+
+        assert_eq!(decision["providerWireValid"], false);
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert!(decision["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("function_call_output must not include content"));
     }
 }
 

@@ -16,6 +16,23 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       const directName = typeof row.name === 'string' ? row.name.trim() : '';
       return functionName === 'apply_patch' || directName === 'apply_patch';
     });
+    const violation = Array.isArray(input.payload.input)
+      ? input.payload.input.findIndex((item) => (
+        item &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        (item as Record<string, unknown>).type === 'function_call_output' &&
+        Object.prototype.hasOwnProperty.call(item, 'content')
+      ))
+      : -1;
+    if (input.inboundProtocol === 'openai-responses' && violation >= 0) {
+      return {
+        providerWireValid: false,
+        requiresHubRelay: false,
+        reason: `openai-responses provider wire input[${violation}] function_call_output must not include content; use output only`,
+        hasDeclaredApplyPatchTool,
+      };
+    }
     return {
       providerWireValid: true,
       requiresHubRelay: false,
@@ -210,7 +227,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('does not runtime-reject historical responses tool input content on direct', () => {
+  it('rejects historical responses tool output content on direct before provider transport', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -225,7 +242,7 @@ describe('direct-passthrough-payload', () => {
           },
         ],
       },
-    })).not.toThrow();
+    })).toThrow('function_call_output must not include content');
   });
 
   it('allows responses-native hosted tools without name', () => {

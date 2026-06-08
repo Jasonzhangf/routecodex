@@ -2,8 +2,9 @@ import type { ProviderFailureBackoffPlan, ProviderFailureBackoffScope } from './
 import {
   isProviderFailureNetworkTransportLike,
   extractProviderFailureStatusCode,
-  normalizeProviderFailureCodeKey
 } from './provider-failure-policy-impl.js';
+
+const PROVIDER_FAILURE_BACKOFF_MAX_CAP_MS = 3_000;
 
 export function resolveProviderFailureBackoffPlanBlock(args: {
   scope: ProviderFailureBackoffScope;
@@ -54,7 +55,7 @@ export function computeProviderFailureBackoffDelayMsBlock(args: {
   const step = Math.max(1, Math.floor(typeof stepRaw === 'number' && Number.isFinite(stepRaw) ? stepRaw : 1));
   const exponentialMs = Math.min(plan.maxMs, plan.baseMs * Math.pow(2, Math.max(0, step - 1)));
   const retryAfterMs = readRetryAfterHeaderMs(args.error, args.statusCode, plan.maxMs);
-  return Math.max(exponentialMs, retryAfterMs);
+  return Math.min(PROVIDER_FAILURE_BACKOFF_MAX_CAP_MS, Math.max(exponentialMs, retryAfterMs));
 }
 
 function resolveProviderFailureBackoffBaseMs(args: {
@@ -63,19 +64,6 @@ function resolveProviderFailureBackoffBaseMs(args: {
   statusCode?: number;
 }): number {
   const status = typeof args.statusCode === 'number' ? args.statusCode : extractProviderFailureStatusCode(args.error);
-  const providerErrorCode = normalizeProviderFailureCodeKey(
-    args.error && typeof args.error === 'object'
-      ? (args.error as { code?: unknown }).code
-      : undefined
-  );
-  const providerUpstreamCode = normalizeProviderFailureCodeKey(
-    args.error && typeof args.error === 'object'
-      ? (args.error as { upstreamCode?: unknown }).upstreamCode
-      : undefined
-  );
-  const isWindsurfStreamCanceled =
-    providerErrorCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || providerUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL';
   if (args.scope === 'recoverable') {
     if (status === 429) {
       return readPositiveIntFromEnv([
@@ -93,12 +81,6 @@ function resolveProviderFailureBackoffBaseMs(args: {
       'ROUTECODEX_429_BACKOFF_BASE_MS',
       'RCC_429_BACKOFF_BASE_MS'
     ], process.env.NODE_ENV === 'test' ? 200 : 1_000);
-  }
-  if (isWindsurfStreamCanceled) {
-    return readPositiveIntFromEnv([
-      'ROUTECODEX_WINDSURF_STREAM_CANCEL_BACKOFF_BASE_MS',
-      'RCC_WINDSURF_STREAM_CANCEL_BACKOFF_BASE_MS'
-    ], process.env.NODE_ENV === 'test' ? 1_000 : 3_000);
   }
   if (isProviderFailureNetworkTransportLike(args.error)) {
     return readPositiveIntFromEnv([
@@ -118,19 +100,6 @@ function resolveProviderFailureBackoffMaxMs(args: {
   statusCode?: number;
 }): number {
   const status = typeof args.statusCode === 'number' ? args.statusCode : extractProviderFailureStatusCode(args.error);
-  const providerErrorCode = normalizeProviderFailureCodeKey(
-    args.error && typeof args.error === 'object'
-      ? (args.error as { code?: unknown }).code
-      : undefined
-  );
-  const providerUpstreamCode = normalizeProviderFailureCodeKey(
-    args.error && typeof args.error === 'object'
-      ? (args.error as { upstreamCode?: unknown }).upstreamCode
-      : undefined
-  );
-  const isWindsurfStreamCanceled =
-    providerErrorCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || providerUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL';
   if (args.scope === 'recoverable') {
     if (status === 429) {
       return readPositiveIntFromEnv([
@@ -149,19 +118,13 @@ function resolveProviderFailureBackoffMaxMs(args: {
       'RCC_429_BACKOFF_MAX_MS'
     ], process.env.NODE_ENV === 'test' ? 800 : 30_000);
   }
-  if (isWindsurfStreamCanceled) {
-    return readPositiveIntFromEnv([
-      'ROUTECODEX_WINDSURF_STREAM_CANCEL_BACKOFF_MAX_MS',
-      'RCC_WINDSURF_STREAM_CANCEL_BACKOFF_MAX_MS'
-    ], process.env.NODE_ENV === 'test' ? 8_000 : 30_000);
-  }
   if (isProviderFailureNetworkTransportLike(args.error)) {
-    return readPositiveIntFromEnv([
+    return readCappedPositiveIntFromEnv([
       'ROUTECODEX_NETWORK_RETRY_BACKOFF_MAX_MS',
       'RCC_NETWORK_RETRY_BACKOFF_MAX_MS'
     ], 12_000);
   }
-  return readPositiveIntFromEnv([
+  return readCappedPositiveIntFromEnv([
     'ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS',
     'RCC_PROVIDER_RETRY_BACKOFF_MAX_MS'
   ], process.env.NODE_ENV === 'test' ? 15_000 : 60_000);
@@ -176,6 +139,10 @@ function readPositiveIntFromEnv(keys: string[], fallback: number): number {
     }
   }
   return fallback;
+}
+
+function readCappedPositiveIntFromEnv(keys: string[], fallback: number): number {
+  return Math.min(PROVIDER_FAILURE_BACKOFF_MAX_CAP_MS, readPositiveIntFromEnv(keys, fallback));
 }
 
 function readRetryAfterHeaderMs(error: unknown, statusCode: number | undefined, maxMs: number): number {

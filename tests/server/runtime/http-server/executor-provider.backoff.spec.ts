@@ -70,7 +70,7 @@ describe('executor-provider waitBeforeRetry', () => {
 
     expect(timerSpy).toHaveBeenCalled();
     const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(4000);
+    expect(delay).toBe(3000);
 
     jest.runOnlyPendingTimers();
     await pending;
@@ -88,7 +88,27 @@ describe('executor-provider waitBeforeRetry', () => {
 
     expect(timerSpy).toHaveBeenCalled();
     const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(6400);
+    expect(delay).toBe(3000);
+
+    jest.runOnlyPendingTimers();
+    await pending;
+    timerSpy.mockRestore();
+  });
+
+  it('caps generic provider backoff env overrides at 3s', async () => {
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '64000';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '8000';
+    jest.useFakeTimers();
+    const timerSpy = jest.spyOn(global, 'setTimeout');
+    const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
+      statusCode: 500
+    });
+
+    const pending = waitBeforeRetry(err, { attempt: 2 });
+
+    expect(timerSpy).toHaveBeenCalled();
+    const delay = timerSpy.mock.calls.at(-1)?.[1];
+    expect(delay).toBe(3000);
 
     jest.runOnlyPendingTimers();
     await pending;

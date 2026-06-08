@@ -48,9 +48,9 @@ export function evaluateDirectRouteDecision(args: {
 } {
   const nativeDecision = evaluateResponsesDirectRouteDecisionNative(args);
   return {
-    providerWireValid: true,
-    requiresHubRelay: false,
-    reason: undefined,
+    providerWireValid: nativeDecision.providerWireValid,
+    requiresHubRelay: nativeDecision.requiresHubRelay,
+    reason: nativeDecision.reason,
     hasDeclaredApplyPatchTool: nativeDecision.hasDeclaredApplyPatchTool,
   };
 }

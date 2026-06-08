@@ -60,6 +60,9 @@ import {
   evaluateDirectRouteDecision,
   resolveRawPayloadForDirect,
 } from './direct-passthrough-payload.js';
+import {
+  buildDirectPayloadContractError,
+} from './responses-direct-contract-error.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
@@ -1183,6 +1186,7 @@ export class RouteCodexHttpServer {
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
       ) {
+        const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         const directEntryDecision = evaluateDirectRouteDecision({
           payload:
             nextInput.body && typeof nextInput.body === 'object' && !Array.isArray(nextInput.body)
@@ -1195,12 +1199,22 @@ export class RouteCodexHttpServer {
           applyPatchMode: 'client',
         });
         if (!directEntryDecision.providerWireValid || directEntryDecision.requiresHubRelay) {
+          const detail = directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload');
           this.logStage('router-direct.skipped', input.requestId, {
             reason: directEntryDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
-            detail: directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
+            detail,
             mode: 'client',
           });
-          throw new Error(`router-direct requires provider-wire payload: ${directEntryDecision.reason ?? 'invalid_direct_payload'}`);
+          const contractError = buildDirectPayloadContractError(
+            `router-direct requires provider-wire payload: ${detail}`,
+            {
+              reason: directEntryDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
+              detail,
+              mode: 'client',
+            },
+          );
+          this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, contractError);
+          throw contractError;
         }
         this.logStage('router-direct.entry', input.requestId, {
           routingPolicyGroup: portConfig.routingPolicyGroup,
@@ -1209,7 +1223,6 @@ export class RouteCodexHttpServer {
             ? (input.body as Record<string, unknown>).model
             : undefined,
         });
-        const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         for (const scope of routerDirectStormScopes) {
           const waitMs = peekSessionStormBackoffWaitMs(scope);
           if (!(waitMs > 0)) {
@@ -1348,11 +1361,18 @@ export class RouteCodexHttpServer {
       inboundProtocol,
     });
     if (!directPayloadDecision.providerWireValid || directPayloadDecision.requiresHubRelay) {
+      const detail = directPayloadDecision.reason ?? (directPayloadDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload');
       this.logStage('router-direct.skipped', input.requestId, {
         reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
-        detail: directPayloadDecision.reason ?? (directPayloadDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
+        detail,
       });
-      return { used: false, reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire' };
+      throw buildDirectPayloadContractError(
+        `router-direct requires provider-wire payload: ${detail}`,
+        {
+          reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
+          detail,
+        },
+      );
     }
 
     let routeResult: {
@@ -1449,19 +1469,22 @@ export class RouteCodexHttpServer {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? '');
+      const reason = message.includes('Hub relay') || message.includes('hub_relay')
+        ? 'direct_payload_requires_hub_relay'
+        : 'direct_payload_not_provider_wire';
       this.logStage('router-direct.skipped', input.requestId, {
-        reason: message.includes('Hub relay') || message.includes('hub_relay')
-          ? 'direct_payload_requires_hub_relay'
-          : 'direct_payload_not_provider_wire',
+        reason,
         detail: message || 'invalid_direct_payload',
         stage: 'final_request_payload',
       });
-      return {
-        used: false,
-        reason: message.includes('Hub relay') || message.includes('hub_relay')
-          ? 'direct_payload_requires_hub_relay'
-          : 'direct_payload_not_provider_wire',
-      };
+      throw buildDirectPayloadContractError(
+        `router-direct requires provider-wire payload: ${message || 'invalid_direct_payload'}`,
+        {
+          reason,
+          detail: message || 'invalid_direct_payload',
+          stage: 'final_request_payload',
+        },
+      );
     }
     let capturedUsage: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
