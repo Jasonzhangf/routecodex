@@ -5,11 +5,10 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import { applyFollowupRuntimeMetadata } from './backend-route-runtime-block.js';
 import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
 import { extractCapturedChatSeed } from './backend-route-seed.js';
+import { buildFollowupRequestIdWithNative } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
-  const trimmedBase = typeof baseRequestId === 'string' && baseRequestId.trim() ? baseRequestId.trim() : 'servertool';
-  const trimmedSuffix = typeof suffix === 'string' && suffix.trim() ? suffix.trim() : ':followup';
-  return `${trimmedBase}${trimmedSuffix}`;
+  return buildFollowupRequestIdWithNative(baseRequestId, suffix ?? null);
 }
 
 export function createBootstrapPreflightFailedError(args: {

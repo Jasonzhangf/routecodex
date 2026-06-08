@@ -48,6 +48,7 @@ const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-g
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
 const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
 const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin-delta.ts`;
+const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
 const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard-block.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
@@ -919,6 +920,7 @@ function checkBackendRoutePolicyRustOwner() {
   }
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
+  const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
     TS_BACKEND_ROUTE_ORIGIN_DELTA,
@@ -936,6 +938,24 @@ function checkBackendRoutePolicyRustOwner() {
       fail(
         'backend-route-origin-delta-no-ts-seed-owner',
         `Forbidden TS origin seed semantic "${keyword}" found in backend-route-origin-delta.ts`
+      );
+    }
+  }
+  assertContains(
+    'backend-route-bootstrap-replay-native-request-id-owner',
+    TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY,
+    bootstrapReplayShell,
+    'buildFollowupRequestIdWithNative'
+  );
+  for (const keyword of [
+    "baseRequestId.trim() ? baseRequestId.trim() : 'servertool'",
+    "suffix.trim() ? suffix.trim() : ':followup'",
+    'return `${trimmedBase}${trimmedSuffix}`',
+  ]) {
+    if (bootstrapReplayShell.includes(keyword)) {
+      fail(
+        'backend-route-bootstrap-replay-no-ts-request-id-owner',
+        `Forbidden TS requestId builder semantic "${keyword}" found in backend-route-bootstrap-replay-block.ts`
       );
     }
   }
