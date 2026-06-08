@@ -47,6 +47,7 @@ const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
 const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
+const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin-delta.ts`;
 const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard-block.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
@@ -855,6 +856,12 @@ function checkBackendRoutePolicyRustOwner() {
     flowPolicyShell,
     'planServertoolFollowupRuntimeWithNative'
   );
+  if (flowPolicyShell.includes('function normalizeFlowId') || flowPolicyShell.includes('normalizeFlowId(')) {
+    fail(
+      'backend-route-flow-policy-no-ts-owner',
+      'backend-route-flow-policy.ts must not normalize flowId in TS; Rust plan_servertool_followup_runtime_json owns flow id normalization'
+    );
+  }
   assertContains(
     'backend-route-flow-policy-native-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`,
@@ -911,6 +918,27 @@ function checkBackendRoutePolicyRustOwner() {
     }
   }
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
+  const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
+  assertContains(
+    'backend-route-origin-delta-native-seed-owner',
+    TS_BACKEND_ROUTE_ORIGIN_DELTA,
+    originDeltaShell,
+    'extractCapturedChatSeed'
+  );
+  for (const keyword of [
+    'function cloneJson',
+    'JSON.parse(JSON.stringify',
+    'function normalizeSeed',
+    'seed.messages =',
+    'delete seed.model',
+  ]) {
+    if (originDeltaShell.includes(keyword)) {
+      fail(
+        'backend-route-origin-delta-no-ts-seed-owner',
+        `Forbidden TS origin seed semantic "${keyword}" found in backend-route-origin-delta.ts`
+      );
+    }
+  }
   for (const keyword of [
     'isNoFollowupFlowId',
     'isAutoLimitFlowId',

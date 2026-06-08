@@ -3,43 +3,16 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerToolFollowupInjectionPlan } from './types.js';
 import { loadOriginSnapshot } from './origin-request-store.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import { extractCapturedChatSeed } from './backend-route-seed.js';
 import {
   applyFollowupDeltaPlanWithNative,
-  extractAssistantFollowupMessageWithNative,
-  extractCapturedChatSeedWithNative
+  extractAssistantFollowupMessageWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export type FollowupOriginSeed = JsonObject;
 
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-}
-
-function normalizeSeed(value: Record<string, unknown> | null): FollowupOriginSeed | null {
-  const hasMessages = Array.isArray(value?.messages) && value.messages.length > 0;
-  const hasInput = typeof value?.input === 'string'
-    ? value.input.trim().length > 0
-    : Array.isArray(value?.input) && value.input.length > 0;
-  if (!value || (!hasMessages && !hasInput)) {
-    return null;
-  }
-  const seed = cloneJson(value) as JsonObject & { messages?: unknown };
-  if (typeof seed.model === 'string') {
-    const model = seed.model.trim();
-    if (model) {
-      seed.model = model;
-    } else {
-      delete seed.model;
-    }
-  }
-  if (hasMessages) {
-    seed.messages = cloneJson(value.messages as JsonObject[]);
-  }
-  return seed as FollowupOriginSeed;
 }
 
 export function extractAssistantFollowupMessage(finalChatResponse: JsonObject): JsonObject | null {
@@ -48,10 +21,10 @@ export function extractAssistantFollowupMessage(finalChatResponse: JsonObject): 
 
 export function loadFollowupOriginSeed(adapterContext: AdapterContext): FollowupOriginSeed | null {
   const record = asRecord(adapterContext);
-  const directSeed = normalizeSeed(record?.capturedEntryRequest as Record<string, unknown> | null)
-    ?? normalizeSeed(extractCapturedChatSeedWithNative(record?.capturedChatRequest ?? null));
+  const directSeed = extractCapturedChatSeed(record?.capturedEntryRequest ?? null)
+    ?? extractCapturedChatSeed(record?.capturedChatRequest ?? null);
   if (directSeed) {
-    return directSeed;
+    return directSeed as FollowupOriginSeed;
   }
   const scope = resolveServertoolPersistentScopeKey(adapterContext);
   if (!scope) {
@@ -61,12 +34,12 @@ export function loadFollowupOriginSeed(adapterContext: AdapterContext): Followup
   if (!snapshot) {
     return null;
   }
-  const capturedSeed = normalizeSeed(asRecord(snapshot.capturedEntryRequest) ?? null)
-    ?? normalizeSeed(extractCapturedChatSeedWithNative(snapshot.capturedChatRequest ?? null));
+  const capturedSeed = extractCapturedChatSeed(snapshot.capturedEntryRequest ?? null)
+    ?? extractCapturedChatSeed(snapshot.capturedChatRequest ?? null);
   if (capturedSeed) {
-    return capturedSeed;
+    return capturedSeed as FollowupOriginSeed;
   }
-  return normalizeSeed(snapshot as unknown as Record<string, unknown>);
+  return extractCapturedChatSeed(snapshot) as FollowupOriginSeed | null;
 }
 
 export function applyFollowupDeltaPlan(args: {

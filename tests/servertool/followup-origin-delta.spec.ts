@@ -1,6 +1,9 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { applyFollowupDeltaPlan } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.js';
+import {
+  applyFollowupDeltaPlan,
+  loadFollowupOriginSeed
+} from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.js';
 
 const SAMPLE_UPDATE_PATCH = '*** Begin Patch\n*** Update File: sample.txt\n@@\n- old\n+ new\n*** End Patch';
 const A_TS_UPDATE_PATCH = '*** Begin Patch\n*** Update File: a.ts\n@@\n- old\n+ new\n*** End Patch';
@@ -8,6 +11,28 @@ const TMP_A_ADD_PATCH = '*** Begin Patch\n*** Add File: tmp/a.txt\n+ a\n*** End 
 const TMP_B_ADD_PATCH = '*** Begin Patch\n*** Add File: tmp/b.txt\n+ b\n*** End Patch';
 
 describe('servertool followup origin clone delta', () => {
+  test('loads origin seed through native captured seed contract', () => {
+    const seed = loadFollowupOriginSeed({
+      capturedEntryRequest: {
+        model: ' gpt-test ',
+        messages: [{ role: 'user', content: 'continue' }]
+      }
+    } as any) as any;
+
+    expect(seed.model).toBe('gpt-test');
+    expect(seed.messages).toEqual([{ role: 'user', content: 'continue' }]);
+
+    const seedWithoutModel = loadFollowupOriginSeed({
+      capturedEntryRequest: {
+        model: '   ',
+        messages: [{ role: 'user', content: 'continue' }]
+      }
+    } as any) as any;
+
+    expect(seedWithoutModel.model).toBeUndefined();
+    expect(seedWithoutModel.messages).toEqual([{ role: 'user', content: 'continue' }]);
+  });
+
   test('clones origin request and appends canonical apply_patch result delta', () => {
     const originTool = {
       type: 'function',

@@ -15,6 +15,12 @@ describe('servertool followup flow policy', () => {
     expect(decision.seedLoopPayload).toBe(true);
   });
 
+  test('normalizes flow id inside Rust runtime plan', () => {
+    const decision = resolveFollowupFlowDecision('  stop_message_flow  ');
+    expect(decision.flowId).toBe('stop_message_flow');
+    expect(decision.seedLoopPayload).toBe(true);
+  });
+
   test('unknown flow uses the Rust default runtime plan', () => {
     const decision = resolveFollowupFlowDecision('unknown_flow');
     expect(decision.flowId).toBe('unknown_flow');
