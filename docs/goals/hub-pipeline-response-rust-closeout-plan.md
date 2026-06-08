@@ -266,3 +266,20 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 - PASS: `npm run verify:hub-response-anthropic-native`
 - PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
 - PASS: `npm run verify:function-map-compile-gate`
+
+## 2026-06-09 Slice: Responses Response Utils Zero-Consumer Wrapper Deletion
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts` still exported two response-side TS native wrapper functions:
+  - `collectToolCallsFromResponses`
+  - `resolveFinishReason`
+- `rg` found no live source, test, docs, or script consumer for either wrapper; matches were limited to the definitions themselves.
+- The underlying Rust owner remains `shared_responses_response_utils.rs`; the live shared Responses-to-Chat projection uses `buildChatResponseFromResponsesFullWithNative`.
+
+### Implementation Result
+
+- Physically deleted the two zero-consumer TS wrapper exports from `responses-response-utils.ts`.
+- Kept `buildChatResponseFromResponses` as full-native invocation and JSON parse glue.
+- Added `tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts` to prevent the old TS wrapper exports and native imports from returning.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` to include the new deletion gate.

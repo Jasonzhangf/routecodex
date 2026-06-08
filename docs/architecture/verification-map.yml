@@ -179,6 +179,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
     integration:
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
       - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
@@ -190,6 +191,7 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
+      - Zero-consumer TS wrappers for tool-call collection and finish-reason resolution must stay removed from the shared response utility file.
 
   - feature_id: hub.response_post_servertool_client_projection
     change_risk: high

@@ -322,6 +322,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/bridge-policies.ts
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
       - sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts
     required_gates:
@@ -330,6 +331,7 @@ owners:
     migration_target: rust
     notes:
       - TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust.
+      - Zero-consumer TS wrappers for `collectToolCallsFromResponses` and `resolveFinishReason` must remain physically deleted from the shared response utility surface.
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active

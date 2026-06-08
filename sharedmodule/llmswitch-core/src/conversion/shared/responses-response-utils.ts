@@ -1,16 +1,6 @@
 import {
-  buildChatResponseFromResponsesFullWithNative,
-  collectToolCallsFromResponsesWithNative,
-  resolveFinishReasonWithNative
+  buildChatResponseFromResponsesFullWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
-
-export function collectToolCallsFromResponses(response: Record<string, unknown>): Array<Record<string, unknown>> {
-  return collectToolCallsFromResponsesWithNative(response);
-}
-
-export function resolveFinishReason(response: Record<string, unknown>, toolCalls: Array<Record<string, unknown>>): string {
-  return resolveFinishReasonWithNative(response, toolCalls);
-}
 
 export function buildChatResponseFromResponses(payload: unknown): Record<string, unknown> | unknown {
   if (!payload || typeof payload !== 'object') return payload;
