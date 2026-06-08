@@ -10,10 +10,6 @@ use crate::responses_reasoning_registry::{
 pub(crate) struct BuildAnthropicFullInput {
     pub(crate) chat_response: String,
     pub(crate) alias_map: Option<String>,
-    pub(crate) responses_reasoning: Option<String>,
-    pub(crate) responses_output_text_meta: Option<String>,
-    pub(crate) responses_payload_snapshot: Option<String>,
-    pub(crate) responses_passthrough: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -132,6 +128,19 @@ fn normalize_shell_like_tool_input(tool_name: &str, input: &Value) -> Value {
     }
 }
 
+fn stringify_non_empty_json_field(source: &Value, field: &str) -> Option<String> {
+    let value = source.as_object()?.get(field)?;
+    if value.is_null() {
+        return None;
+    }
+    let serialized = serde_json::to_string(value).ok()?;
+    let trimmed = serialized.trim();
+    if trimmed.is_empty() || trimmed == "null" || trimmed == "undefined" {
+        return None;
+    }
+    Some(serialized)
+}
+
 pub(crate) fn build_anthropic_response_from_chat_full(
     input: BuildAnthropicFullInput,
 ) -> Result<BuildAnthropicFullOutput, String> {
@@ -171,28 +180,37 @@ pub(crate) fn build_anthropic_response_from_chat_full(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    if let (Some(reasoning), Some(id)) = (&input.responses_reasoning, &sanitized_id) {
+    let responses_reasoning =
+        stringify_non_empty_json_field(&chat_response, "__responses_reasoning");
+    let responses_output_text_meta =
+        stringify_non_empty_json_field(&chat_response, "__responses_output_text_meta");
+    let responses_payload_snapshot =
+        stringify_non_empty_json_field(&chat_response, "__responses_payload_snapshot");
+    let responses_passthrough =
+        stringify_non_empty_json_field(&chat_response, "__responses_passthrough");
+
+    if let (Some(reasoning), Some(id)) = (&responses_reasoning, &sanitized_id) {
         let t = reasoning.trim();
         if !t.is_empty() && t != "null" && t != "undefined" {
             let _ = register_responses_reasoning_json(id.clone(), Some(reasoning.clone()));
         }
     }
 
-    if let (Some(meta), Some(id)) = (&input.responses_output_text_meta, &sanitized_id) {
+    if let (Some(meta), Some(id)) = (&responses_output_text_meta, &sanitized_id) {
         let t = meta.trim();
         if !t.is_empty() && t != "null" && t != "undefined" {
             let _ = register_responses_output_text_meta_json(id.clone(), meta.clone());
         }
     }
 
-    if let (Some(snap), Some(id)) = (&input.responses_payload_snapshot, &sanitized_id) {
+    if let (Some(snap), Some(id)) = (&responses_payload_snapshot, &sanitized_id) {
         let t = snap.trim();
         if !t.is_empty() && t != "null" && t != "undefined" {
             let _ = register_responses_payload_snapshot_json(id.clone(), snap.clone(), Some(false));
         }
     }
 
-    if let (Some(passthrough), Some(id)) = (&input.responses_passthrough, &sanitized_id) {
+    if let (Some(passthrough), Some(id)) = (&responses_passthrough, &sanitized_id) {
         let t = passthrough.trim();
         if !t.is_empty() && t != "null" && t != "undefined" {
             let _ =
@@ -205,4 +223,87 @@ pub(crate) fn build_anthropic_response_from_chat_full(
         result,
         id: sanitized_id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn full_response_reads_responses_retention_carriers_from_chat_payload() {
+        let input = BuildAnthropicFullInput {
+            chat_response: json!({
+                "id": "chatcmpl_carrier",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "ok"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "__responses_reasoning": {
+                    "encrypted_content": "enc-carrier"
+                },
+                "__responses_output_text_meta": {
+                    "hasField": true,
+                    "value": "ok"
+                },
+                "__responses_payload_snapshot": {
+                    "id": "resp-carrier",
+                    "object": "response"
+                },
+                "__responses_passthrough": {
+                    "id": "resp-pass",
+                    "object": "response"
+                }
+            })
+            .to_string(),
+            alias_map: None,
+        };
+
+        let output = build_anthropic_response_from_chat_full(input).unwrap();
+        let id = output.id.expect("anthropic response id");
+        assert!(!id.trim().is_empty());
+
+        let reasoning = crate::responses_reasoning_registry::consume_responses_reasoning_json(
+            id.clone(),
+        )
+        .unwrap()
+        .expect("reasoning carrier");
+        assert_eq!(
+            serde_json::from_str::<Value>(&reasoning).unwrap()["encrypted_content"],
+            json!("enc-carrier")
+        );
+
+        let meta = crate::responses_reasoning_registry::consume_responses_output_text_meta_json(
+            id.clone(),
+        )
+        .unwrap()
+        .expect("output text meta");
+        assert_eq!(
+            serde_json::from_str::<Value>(&meta).unwrap()["hasField"],
+            json!(true)
+        );
+
+        let snapshot =
+            crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(id.clone())
+                .unwrap()
+                .expect("payload snapshot");
+        assert_eq!(
+            serde_json::from_str::<Value>(&snapshot).unwrap()["id"],
+            json!("resp-carrier")
+        );
+
+        let passthrough =
+            crate::responses_reasoning_registry::consume_responses_passthrough_json(id)
+                .unwrap()
+                .expect("passthrough carrier");
+        assert_eq!(
+            serde_json::from_str::<Value>(&passthrough).unwrap()["id"],
+            json!("resp-pass")
+        );
+    }
 }

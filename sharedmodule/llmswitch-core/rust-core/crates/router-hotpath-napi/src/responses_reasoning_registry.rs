@@ -33,6 +33,7 @@ pub struct ReasoningSegment {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResponsesOutputTextMeta {
+    #[serde(rename = "hasField")]
     #[serde(default)]
     pub has_field: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

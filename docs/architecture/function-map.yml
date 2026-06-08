@@ -270,6 +270,7 @@ owners:
       - HubRespOutbound04ClientSemantic
     canonical_builders:
       - build_openai_chat_from_anthropic_message_full
+      - build_anthropic_response_from_chat_full
       - build_openai_chat_response_from_anthropic_message
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks

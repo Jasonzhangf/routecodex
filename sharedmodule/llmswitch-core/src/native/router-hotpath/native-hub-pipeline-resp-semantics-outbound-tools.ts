@@ -417,10 +417,6 @@ export function evaluateResponsesHostPolicyWithNative(
 export interface BuildAnthropicFullInput {
   chat_response: string;
   alias_map?: string;
-  responses_reasoning?: string;
-  responses_output_text_meta?: string;
-  responses_payload_snapshot?: string;
-  responses_passthrough?: string;
 }
 
 export interface BuildOpenAIChatFromAnthropicMessageFullInput {

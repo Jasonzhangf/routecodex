@@ -504,6 +504,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('consumeResponsesPassthroughByAliases');
     expect(source).not.toContain('registerResponsesPayloadSnapshot');
     expect(source).not.toContain('registerResponsesPassthrough');
+    expect(source).not.toContain('__responses_reasoning');
+    expect(source).not.toContain('__responses_output_text_meta');
+    expect(source).not.toContain('__responses_payload_snapshot');
+    expect(source).not.toContain('__responses_passthrough');
   });
 
   it('responses response utils must not own response restore semantics in TS', () => {

@@ -23,18 +23,6 @@ export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options
   const input = {
     chat_response: JSON.stringify(chatResponse),
     alias_map: aliasMap ? JSON.stringify(aliasMap) : undefined,
-    responses_reasoning: (chatResponse as any)?.__responses_reasoning
-      ? JSON.stringify((chatResponse as any).__responses_reasoning)
-      : undefined,
-    responses_output_text_meta: (chatResponse as any)?.__responses_output_text_meta
-      ? JSON.stringify((chatResponse as any).__responses_output_text_meta)
-      : undefined,
-    responses_payload_snapshot: (chatResponse as any)?.__responses_payload_snapshot
-      ? JSON.stringify((chatResponse as any).__responses_payload_snapshot)
-      : undefined,
-    responses_passthrough: (chatResponse as any)?.__responses_passthrough
-      ? JSON.stringify((chatResponse as any).__responses_passthrough)
-      : undefined,
   };
   const output = buildAnthropicResponseFromChatFullWithNative(input);
   const parsed = JSON.parse(output);
