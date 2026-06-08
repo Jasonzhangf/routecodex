@@ -501,6 +501,18 @@ fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflo
         with_tool_calls["shouldFailEmptyContextOverflow"],
         Value::Bool(true)
     );
+    assert_eq!(with_tool_calls["shouldFailEmptyOutput"], Value::Bool(true));
+
+    let max_tokens_empty =
+        resolve_anthropic_chat_completion_outcome(Some("max_tokens"), 0, false);
+    assert_eq!(
+        max_tokens_empty["finishReason"],
+        Value::String("length".to_string())
+    );
+    assert_eq!(
+        max_tokens_empty["shouldFailEmptyOutput"],
+        Value::Bool(true)
+    );
 
     let without_tool_calls =
         resolve_anthropic_chat_completion_outcome(Some("model_context_window_exceeded"), 0, true);
@@ -510,6 +522,10 @@ fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflo
     );
     assert_eq!(
         without_tool_calls["shouldFailEmptyContextOverflow"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        without_tool_calls["shouldFailEmptyOutput"],
         Value::Bool(false)
     );
 }

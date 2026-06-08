@@ -47,8 +47,7 @@ export function resolveAnthropicStopReasonWithNative(
     const parsed = parseAnthropicStopReasonResolution(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    return fail(extractNativeErrorMessage(error));
   }
 }
 
@@ -422,6 +421,38 @@ export interface BuildAnthropicFullInput {
   responses_output_text_meta?: string;
   responses_payload_snapshot?: string;
   responses_passthrough?: string;
+}
+
+export interface BuildOpenAIChatFromAnthropicMessageFullInput {
+  payload: string;
+}
+
+export function buildOpenAIChatFromAnthropicMessageFullWithNative(
+  input: BuildOpenAIChatFromAnthropicMessageFullInput
+): string {
+  const capability = 'buildOpenaiChatFromAnthropicMessageFullJson';
+  const fail = (reason?: string) => failNative<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const inputJson = JSON.stringify(input);
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return raw as string;
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
 }
 
 export function buildAnthropicResponseFromChatFullWithNative(input: BuildAnthropicFullInput): string {

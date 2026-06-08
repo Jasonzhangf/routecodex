@@ -15,7 +15,7 @@ type RustQuotaHostSnapshotEntry = {
 };
 
 type RustQuotaHostMutator = {
-  getStatus?(): { quotaHostSnapshot?: unknown } | null;
+  getStatus?(): Record<string, unknown> | null;
   resetProviderQuota?(providerKey: string): unknown;
 };
 
@@ -61,6 +61,19 @@ function readRustQuotaHostSnapshotProviderKeys(mutator: RustQuotaHostMutator | n
   }
 }
 
+function readRustVirtualRouterStatus(mutator: RustQuotaHostMutator | null): Record<string, unknown> | null {
+  if (!mutator || typeof mutator.getStatus !== 'function') {
+    return null;
+  }
+  try {
+    const status = mutator.getStatus();
+    return status && typeof status === 'object' ? status : null;
+  } catch (error: unknown) {
+    logDaemonStatusNonBlockingError('readRustVirtualRouterStatus', error);
+    return null;
+  }
+}
+
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
@@ -94,6 +107,8 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
 
     const uptimeSec = process.uptime();
     const version = buildInfo?.version ? String(buildInfo.version) : String(process.env.ROUTECODEX_VERSION || 'dev');
+    const rustMutator = getRustQuotaHostMutator(options);
+    const virtualRouterStatus = readRustVirtualRouterStatus(rustMutator);
 
     res.status(200).json({
       ok: true,
@@ -103,7 +118,8 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
       manager: {
         active: Boolean(manager),
         modules
-      }
+      },
+      virtualRouter: virtualRouterStatus
     });
   });
 

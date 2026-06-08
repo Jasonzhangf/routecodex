@@ -1,5 +1,11 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-08 servertool state-key Rust owner slice
+
+- Continue active goal after user solved live `sdfv` routing. Do not pursue the interrupted VR ingress path in this slice.
+- Target: `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts::resolveStateKey` still owns request-chain/session/requestId/default ordering in TS. Move this to `servertool-core::persisted_lookup`, expose via native `resolveServertoolStateKeyWithNative`, and make TS a thin metadata-merge shell.
+- Verification target: Rust `servertool-core persisted_lookup` tests, NAPI bridge tests, `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`, focused stop-message-auto key tests, `npm run verify:servertool-rust-only`.
+
 ## 2026-06-08 5520 free provider forwarder routing
 
 - User requirement: 5520 must group `1token` / `llmgate` / `sdfv` as one free forwarder pool with round-robin, then use paid providers such as `asxs` / `cc` as later targets for thinking/coding/longcontext routes.
@@ -16911,3 +16917,53 @@ Phase E: TS fallback 物理删除
 - Root trace: `ResponsesProvider.sendDirectSsePassthroughRequest` accepts upstream HTTP 200 SSE and returns `{status:200,__sse_responses}` without pre-reading `event:error` / `response.failed`, unlike `OpenAiResponsesSdkTransport` which already maps early 200-SSE rate-limit frames to retryable provider 429.
 - Required fix boundary: provider runtime direct SSE path must pre-read early SSE frames, preserve normal streams by replaying buffered bytes, and throw recoverable provider error for `rate_limit_error` / concurrency so router-direct ErrorErr chain can switch provider. No payload cleanup, no relay.
 - 2026-06-08 review correction: the empty-reply continue Rust/NAPI/TS half-chain was removed from the current servertool followup runtime-action/runtime-metadata commit scope. The earlier local tests were insufficient for a full feature commit because the live consumer/registration/verification scope was a separate feature slice. Current commit should contain no `empty_reply_continue_contract`, no `planEmptyReply*` native exports, and no `handlers/empty-reply-continue.ts`.
+
+## 2026-06-08 17:xx CST servertool empty-reply continue Rust owner closeout
+- User correction: empty-reply auto-followup is not acceptable; it bypasses malformed request/response behavior.
+- Removed the whole branch: Rust contract, NAPI/native exports, TS handler, skeleton hook, tests, matrix entry, stop-message bypass flag.
+- New rule: empty assistant/empty response must be fixed at request/provider contract or fail-fast; never auto-continue via servertool.
+
+## 2026-06-08 router-direct request-local provider switch
+- User-corrected boundary: direct must not return recoverable provider errors directly to the client, but also must not "randomly switch"; it must consume the unified ErrorErr05 decision and reselect only through the same VR route/routingPolicyGroup. It still must not enter Hub Pipeline/relay or sanitize/rebuild direct payload.
+- Implementation in `src/server/runtime/http-server/index.ts`: router-direct now carries request-local retry state (`excludedProviderKeys`, optional `__routecodexRetryProviderKey`, transient same-error tracker) and consumes `resolveRequestExecutorProviderFailurePlan`. 429/concurrency excludes current provider for this request and re-calls direct VR selection; non-429 recoverable errors retry the same provider once, then exclude on repeat. `affectsHealthOverride=false` is applied by the shared plan for request-local transient behavior.
+- Safety locks: if same-provider retry is requested but VR selects a different provider, fail-fast; if exclude-and-reroute reselects an excluded provider or pool exhausts, rethrow the original provider error. No `executePipeline()`/standard executor bridge is used.
+- Verification PASS: `NODE_OPTIONS=--experimental-vm-modules npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts --runInBand --forceExit` (15 tests). New cases cover recoverable 429 direct switch and repeated 502 same-provider retry then VR-selected switch; both assert HubPipeline is not called.
+
+## 2026-06-08 5520 longcontext UPSTREAM_HEADERS_TIMEOUT root trace
+- User confirmed providers are reachable outside RouteCodex. Live `~/.rcc/log/config.toml/ports/5520/server-5520.log` supports this: nearby `1token` / `llmgate` tools/search requests completed in 7-37s, while large `gpt-5.5` thinking/longcontext requests repeatedly failed exactly after ~120s with `UPSTREAM_HEADERS_TIMEOUT`.
+- Root cause in server provider transport: `src/providers/core/utils/http-client.ts::postStream` ignored `DEFAULT_PROVIDER.STREAM_HEADERS_TIMEOUT_MS=900000` when no explicit stream headers timeout was configured and instead defaulted to `min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_HEADERS_CAP_MS=120000, timeout)`, so large direct SSE requests were aborted at 120s before upstream headers.
+- Fix: default stream headers timeout now uses `min(DEFAULT_PROVIDER.STREAM_HEADERS_TIMEOUT_MS, timeout)` while preserving explicit `streamHeadersTimeoutMs` / env overrides. This changes only provider HTTP transport timeout policy; no payload cleanup, no Hub/relay entry.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/provider/http-client-poststream-headers-timeout.spec.ts tests/providers/runtime/responses-provider.direct-passthrough.spec.ts --runInBand --forceExit` (7 passed) and `npx tsc --noEmit --pretty false`.
+- Sdfv scheduling evidence: current `~/.rcc/config.toml` fwd includes `1token`, `sdfv`, `llmgate`; `sdfv.key1` traffic state has no leases and cooldown 0. Need live restart/smoke to confirm current materialized forwarder selection uses `sdfv.key1.gpt-5.5` after the timeout fix.
+2026-06-08 19:03:22 +0800
+sdfv scheduling investigation: cleaned health/quota/traffic interference. Evidence: provider-health empty; server-scoped health missing; quota has no target providers; dynamic concurrency for 1token/sdfv/llmgate/asxs/cc all cooldown/backoff 0 and caps reset; restart 5520 OK. Post-clean logs still show fwd.gpt.gpt-5.5 selecting 1token/llmgate/asxs but no sdfv, so continue into forwarder expansion/VR filtering.
+
+## 2026-06-08 5520 send-chain trace continue
+- User clarified this is not a timeout tuning issue; investigate provider send chain. Evidence so far: provider-request snapshot for req_1780916726691_4oxpc8ysv version 0.90.3006 targets https://one.1token.xyz/responses, stream=true, model=gpt-5.5, inputLen=324, toolsLen=16, bodyBytes=1004619. Need prove fetch start/upload/header timing and effective URL/timeout without leaking auth/body.
+
+## 2026-06-08 5520 sdfv scheduling cleanup pass
+- User requested checking/clearing quota and health cooldown pools before deeper scheduling analysis. Rechecked 5520 live health OK (`/health` ready true, version 0.90.3007). Persistent health truth: `~/.rcc/sessions/provider-health.json` has `providerCooldowns: []`; `~/.rcc/sessions/127.0.0.1_5520/provider-health.json` is missing. Quota truth: `~/.rcc/quota/provider-quota.json` only mentions unrelated `quota.key1.gpt-test`; `quota-manager.json` has no 1token/sdfv/llmgate/asxs/cc mentions. Provider-traffic truth: `sdfv.key1`, `llmgate.key1`, `cc.key1`, and 5520 scoped llmgate/asxs/cc files have empty `leases`/`rpmEvents`; 5520 scoped sdfv/1token files are missing. Live logs still show 5520 forwarder selecting `1token`/`llmgate` but not `sdfv`, so after cleanup/restart continue into live VR availability/forwarder filtering.
+
+- 2026-06-08 19:xx live 5520 sdfv investigation: config has fwd.gpt targets 1token/sdfv/llmgate and sdfv provider file enabled. server log shows sdfv selected successfully at 14:33-14:41, but recent 17:24-19:30 virtual-router-hit/provider-switch only selects 1token/llmgate; no sdfv errors after 14:41 in targeted grep. Next verify restart/materialized target/health filter source.
+
+## 2026-06-08 5520 sdfv scheduling config/module check
+
+- Live process uses global modules file `/opt/homebrew/lib/node_modules/routecodex/config/modules.json`, and global/repo modules hashes match (`2f5093dd...`). `modules.json` contains module registry only; it has no `sdfv`, `fwd.gpt.gpt-5.5`, or `gateway_priority_5520`.
+- Global installed config materialization from `/Users/fanzhang/.rcc/config.toml` for `gateway_priority_5520` expands `fwd.gpt.gpt-5.5` to `1token.key1.gpt-5.5`, `sdfv.key1.gpt-5.5`, `llmgate.key1.free-gpt-5.5` and `fwd.gpt.gpt-5.4-mini` to `1token.key1.gpt-5.4-mini`, `sdfv.key1.gpt-5.4-mini`, `llmgate.key1.free-gpt-5.5`; all disabled=false.
+- Fresh native VR engine replay with the same global installed artifacts selects strict round-robin `1token -> sdfv -> llmgate` for 12 thinking requests, so generated config is not dropping sdfv.
+- Live logs show sdfv was heavily scheduled around 14:34-14:41, but recent 19:20+ logs show only 1token/llmgate; persistent health/quota/provider-traffic state files currently contain no target provider mentions. Remaining suspect is live runtime in-memory availability/filter state or provider failure/concurrency ingress.
+
+- 2026-06-08 forwarder trace: added gated Rust `RCC_FORWARDER_TRACE`/`ROUTECODEX_FORWARDER_TRACE` diagnostic in VR forwarder selection owner. It logs materialized target availability and reasons without changing routing. Focus: diagnose why live 5520 excludes sdfv after 14:41.
+
+## 2026-06-08 live 5520 forwarder trace follow-up
+- Continuing sdfv-not-selected investigation. Current code state: forwarder trace exists in Rust selection.rs, but quota_state_blocks_provider must remain pub(crate) because engine/status.rs imports it; private visibility breaks router-hotpath-napi build.
+
+## 2026-06-08 5520 forwarder startup cooldown reprobe fix
+- Verified root cause: normal provider candidate selection consumed startup persisted cooldown reprobe, but `resolve_forwarder_candidate_for_pool` filtered fwd real targets only through `is_provider_available`, so a forwarder target in cooldown never received the required post-restart one-shot hit.
+- Fix owner: Rust Virtual Router selection only. `resolve_forwarder_candidate_for_pool` now treats a target as selectable when `is_provider_available(...)` is true or `health_manager.consume_persisted_503_reprobe_if_available(...)` succeeds. No config key aliases, no relay, no payload cleanup/fallback.
+- Verification: focused Rust test `startup_import_allows_persisted_cooldown_forwarder_target_through_selection` passes; `cargo test -p router-hotpath-napi forwarder --lib -- --nocapture` passes 24/24; `npx tsc --noEmit --pretty false`, `node scripts/build-core.mjs`, `npm run install:global`, and `routecodex restart --port 5520` succeeded.
+- Live evidence: after restart, 5520 log contains `20:17:49 req=req_1780921068956_2925bd50 longcontext/gateway-priority-5520-priority-longcontext -> sdfv.key1.gpt-5.5.gpt-5.5`; diagnostics then show sdfv back in `__http_503_daily_cooldown__`, meaning the one-shot opportunity was consumed and subsequent unavailability is current provider failure/cooldown, not forwarder filtering.
+
+## 2026-06-08 20:30 CST servertool runtime stop-message state Rust owner
+- Continuing servertool rustification goal after sdfv scheduling was solved by another worker. Next slice: migrate `runtime-utils.ts::resolveRuntimeStopMessageState` from TS semantics to `servertool-core::persisted_lookup`.
+- Current TS owner still reads `runtime.stopMessageState`, `runtime.serverToolLoopState`, `flowId`, `maxRepeats`, `stopMessageUsed`, `stopMessageText`, and hardcoded default `继续执行`. These are stopless runtime state policy and must move to Rust with NAPI/native wrapper and rust-only gate.

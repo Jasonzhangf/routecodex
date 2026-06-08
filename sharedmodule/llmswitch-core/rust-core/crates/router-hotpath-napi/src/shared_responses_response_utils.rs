@@ -407,7 +407,7 @@ fn collect_reasoning_segments_impl(
     )
 }
 
-fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
+pub(crate) fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
     let Some(response) = unwrap_responses_response_impl(payload) else {
         return payload.clone();
     };

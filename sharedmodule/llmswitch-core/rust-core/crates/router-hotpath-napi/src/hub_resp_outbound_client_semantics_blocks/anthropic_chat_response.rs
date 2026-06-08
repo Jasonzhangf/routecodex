@@ -4,7 +4,24 @@ use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot, project_message_reasoning_text,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::provider_outcome::resolve_anthropic_chat_completion_outcome;
+use crate::responses_reasoning_registry::{
+    consume_responses_output_text_meta_json, consume_responses_passthrough_by_aliases_json,
+    consume_responses_payload_snapshot_by_aliases_json, consume_responses_reasoning_json,
+    register_responses_passthrough_json, register_responses_payload_snapshot_json,
+};
 use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_responses_response_utils::build_chat_response_from_responses_impl;
+
+#[derive(serde::Deserialize)]
+pub(crate) struct BuildOpenAiChatFromAnthropicMessageFullInput {
+    pub(crate) payload: String,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct BuildOpenAiChatFromAnthropicMessageFullOutput {
+    pub(crate) result: String,
+    pub(crate) id: Option<String>,
+}
 
 fn read_nonempty_string(value: Option<&Value>) -> Option<String> {
     let raw = value.and_then(Value::as_str)?;
@@ -60,6 +77,16 @@ fn join_text_segments(parts: &[String]) -> String {
     out
 }
 
+fn is_meaningful_reasoning_text(text: &str) -> bool {
+    text.trim().chars().any(|ch| ch.is_alphanumeric())
+}
+
+fn read_reasoning_signature(block_row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(block_row.get("signature"))
+        .or_else(|| read_trimmed_string(block_row.get("data")))
+        .or_else(|| read_trimmed_string(block_row.get("encrypted_content")))
+}
+
 fn normalize_usage(raw: Option<&Value>) -> Option<Value> {
     let row = raw.and_then(Value::as_object)?;
     let prompt_tokens = row
@@ -100,6 +127,8 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
 
     let mut text_parts: Vec<String> = Vec::new();
     let mut reasoning_parts: Vec<String> = Vec::new();
+    let mut reasoning_signature: Option<String> = None;
+    let mut redacted_reasoning: Option<String> = None;
     let mut tool_calls: Vec<Value> = Vec::new();
 
     for (index, block) in content.iter().enumerate() {
@@ -118,8 +147,14 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
             }
             "thinking" | "reasoning" | "redacted_thinking" => {
                 let text = flatten_text(block);
-                if !text.trim().is_empty() {
+                if is_meaningful_reasoning_text(text.as_str()) {
                     reasoning_parts.push(text);
+                }
+                if kind == "redacted_thinking" {
+                    redacted_reasoning = read_reasoning_signature(block_row).or(redacted_reasoning);
+                } else {
+                    reasoning_signature =
+                        read_reasoning_signature(block_row).or(reasoning_signature);
                 }
             }
             "tool_use" => {
@@ -161,7 +196,10 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
     if !tool_calls.is_empty() {
         message.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
     }
-    if let Some(reasoning) = build_message_reasoning_value(&[], &reasoning_parts, None) {
+    let encrypted_reasoning = redacted_reasoning.or(reasoning_signature);
+    if let Some(reasoning) =
+        build_message_reasoning_value(&[], &reasoning_parts, encrypted_reasoning.as_deref())
+    {
         if let Some(reasoning_text) = project_message_reasoning_text(&reasoning) {
             message.insert(
                 "reasoning_content".to_string(),
@@ -178,13 +216,18 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
         !visible_text.trim().is_empty() || !reasoning_parts.is_empty(),
     );
     if outcome
-        .get("shouldFailEmptyContextOverflow")
+        .get("shouldFailEmptyOutput")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return Err(
-            "Anthropic response ended with context overflow and no assistant output".to_string(),
-        );
+        let normalized = outcome
+            .get("normalized")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("empty_output");
+        return Err(format!(
+            "Anthropic response ended with {normalized} and no assistant output"
+        ));
     }
     let finish_reason = outcome
         .get("finishReason")
@@ -217,6 +260,199 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
         chat.insert("usage".to_string(), usage);
     }
     Ok(Value::Object(chat))
+}
+
+pub(crate) fn build_openai_chat_from_anthropic_message_full(
+    input: BuildOpenAiChatFromAnthropicMessageFullInput,
+) -> Result<BuildOpenAiChatFromAnthropicMessageFullOutput, String> {
+    let payload: Value = serde_json::from_str(&input.payload).map_err(|e| e.to_string())?;
+    let message_payload = unwrap_anthropic_message_payload(&payload);
+    let request_id =
+        read_trimmed_string(message_payload.get("id")).unwrap_or_else(|| "unknown".to_string());
+    let mut chat_response =
+        build_openai_chat_response_from_anthropic_message(message_payload, request_id.as_str())?;
+
+    let response_id = read_trimmed_string(chat_response.get("id"))
+        .or_else(|| read_trimmed_string(message_payload.get("id")));
+
+    if let Some(id) = response_id.as_deref() {
+        if let Some(reasoning_json) =
+            consume_responses_reasoning_json(id.to_string()).map_err(|e| e.to_string())?
+        {
+            let reasoning: Value =
+                serde_json::from_str(&reasoning_json).map_err(|e| e.to_string())?;
+            attach_reasoning_payload(&mut chat_response, reasoning);
+        } else {
+            attach_message_reasoning_as_responses_payload(&mut chat_response);
+        }
+
+        if let Some(meta_json) =
+            consume_responses_output_text_meta_json(id.to_string()).map_err(|e| e.to_string())?
+        {
+            let output_meta: Value = serde_json::from_str(&meta_json).map_err(|e| e.to_string())?;
+            if let Some(chat_obj) = chat_response.as_object_mut() {
+                chat_obj.insert("__responses_output_text_meta".to_string(), output_meta);
+            }
+        }
+    } else {
+        attach_message_reasoning_as_responses_payload(&mut chat_response);
+    }
+
+    let retention_aliases =
+        build_retention_aliases(response_id.as_deref(), message_payload, &payload);
+    let aliases_json = serde_json::to_string(&retention_aliases).map_err(|e| e.to_string())?;
+    if let Some(payload_snapshot_json) =
+        consume_responses_payload_snapshot_by_aliases_json(aliases_json.clone())
+            .map_err(|e| e.to_string())?
+    {
+        if let Some(id) = response_id.as_deref() {
+            register_responses_payload_snapshot_json(
+                id.to_string(),
+                payload_snapshot_json.clone(),
+                Some(false),
+            )
+            .map_err(|e| e.to_string())?;
+            let payload_snapshot: Value =
+                serde_json::from_str(&payload_snapshot_json).map_err(|e| e.to_string())?;
+            if let Some(chat_obj) = chat_response.as_object_mut() {
+                chat_obj.insert(
+                    "__responses_payload_snapshot".to_string(),
+                    payload_snapshot.clone(),
+                );
+                if chat_obj
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
+                {
+                    chat_obj.insert("request_id".to_string(), Value::String(id.to_string()));
+                }
+            }
+            restore_responses_semantics_from_snapshot(&mut chat_response, &payload_snapshot);
+        }
+    }
+
+    if let Some(passthrough_json) =
+        consume_responses_passthrough_by_aliases_json(aliases_json).map_err(|e| e.to_string())?
+    {
+        if let Some(id) = response_id.as_deref() {
+            register_responses_passthrough_json(
+                id.to_string(),
+                passthrough_json.clone(),
+                Some(false),
+            )
+            .map_err(|e| e.to_string())?;
+            let passthrough: Value =
+                serde_json::from_str(&passthrough_json).map_err(|e| e.to_string())?;
+            if let Some(chat_obj) = chat_response.as_object_mut() {
+                chat_obj.insert("__responses_passthrough".to_string(), passthrough);
+                if chat_obj
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
+                {
+                    chat_obj.insert("request_id".to_string(), Value::String(id.to_string()));
+                }
+            }
+        }
+    }
+
+    let result = serde_json::to_string(&chat_response).map_err(|e| e.to_string())?;
+    Ok(BuildOpenAiChatFromAnthropicMessageFullOutput {
+        result,
+        id: response_id,
+    })
+}
+
+fn unwrap_anthropic_message_payload(payload: &Value) -> &Value {
+    if let Some(record) = payload.get("data").and_then(Value::as_object) {
+        if record.get("content").and_then(Value::as_array).is_some()
+            || record.get("stop_reason").and_then(Value::as_str).is_some()
+            || record.get("role").and_then(Value::as_str).is_some()
+            || record.get("model").and_then(Value::as_str).is_some()
+            || record.get("id").and_then(Value::as_str).is_some()
+        {
+            return payload.get("data").unwrap_or(payload);
+        }
+    }
+    payload
+}
+
+fn build_retention_aliases(
+    response_id: Option<&str>,
+    message_payload: &Value,
+    original_payload: &Value,
+) -> Vec<Value> {
+    [
+        response_id.map(|value| Value::String(value.to_string())),
+        read_trimmed_string(message_payload.get("request_id")).map(Value::String),
+        read_trimmed_string(message_payload.get("id")).map(Value::String),
+        read_trimmed_string(original_payload.get("request_id")).map(Value::String),
+        read_trimmed_string(original_payload.get("id")).map(Value::String),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn attach_message_reasoning_as_responses_payload(chat_response: &mut Value) {
+    let Some(reasoning) = chat_response
+        .pointer("/choices/0/message/reasoning")
+        .filter(|value| value.is_object())
+        .cloned()
+    else {
+        return;
+    };
+    attach_reasoning_payload(chat_response, reasoning);
+}
+
+fn attach_reasoning_payload(chat_response: &mut Value, reasoning: Value) {
+    if let Some(chat_obj) = chat_response.as_object_mut() {
+        chat_obj.insert("__responses_reasoning".to_string(), reasoning.clone());
+    }
+    let Some(message_obj) = chat_response
+        .pointer_mut("/choices/0/message")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    message_obj.insert("reasoning".to_string(), reasoning);
+    normalize_message_reasoning_ssot(message_obj);
+}
+
+fn restore_responses_semantics_from_snapshot(chat_response: &mut Value, payload_snapshot: &Value) {
+    if !payload_snapshot.is_object() {
+        return;
+    }
+    let mut restored = build_chat_response_from_responses_impl(payload_snapshot);
+    strip_internal_continuation_request_id(&mut restored);
+    let Some(semantics) = restored
+        .get("semantics")
+        .filter(|value| value.is_object())
+        .cloned()
+    else {
+        return;
+    };
+    if let Some(chat_obj) = chat_response.as_object_mut() {
+        chat_obj.insert("semantics".to_string(), semantics);
+    }
+}
+
+fn strip_internal_continuation_request_id(chat: &mut Value) {
+    let Some(resume_from) = chat
+        .pointer_mut("/semantics/continuation/resumeFrom")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    if resume_from
+        .get("requestId")
+        .and_then(Value::as_str)
+        .is_some()
+    {
+        resume_from.remove("requestId");
+    }
 }
 
 fn materialize_anthropic_message_payload(payload: &Value) -> Result<Value, String> {
@@ -438,7 +674,11 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
 
 #[cfg(test)]
 mod tests {
-    use super::build_openai_chat_response_from_anthropic_message;
+    use super::{
+        build_openai_chat_from_anthropic_message_full,
+        build_openai_chat_response_from_anthropic_message,
+        BuildOpenAiChatFromAnthropicMessageFullInput,
+    };
     use serde_json::json;
 
     #[test]
@@ -519,5 +759,32 @@ mod tests {
         assert_eq!(tool_call["id"], "call_1");
         assert_eq!(tool_call["function"]["name"], "exec_command");
         assert_eq!(tool_call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    }
+
+    #[test]
+    fn builds_full_chat_response_from_wrapped_anthropic_message() {
+        let output = build_openai_chat_from_anthropic_message_full(
+            BuildOpenAiChatFromAnthropicMessageFullInput {
+                payload: json!({
+                    "request_id": "req_outer",
+                    "data": {
+                        "id": "msg_full",
+                        "role": "assistant",
+                        "model": "claude-test",
+                        "content": [
+                            { "type": "text", "text": "full native ok" }
+                        ],
+                        "stop_reason": "end_turn"
+                    }
+                })
+                .to_string(),
+            },
+        )
+        .expect("full anthropic message conversion");
+        let chat: serde_json::Value = serde_json::from_str(&output.result).expect("chat json");
+        assert_eq!(output.id.as_deref(), Some("msg_full"));
+        assert_eq!(chat["id"], "msg_full");
+        assert_eq!(chat["choices"][0]["message"]["content"], "full native ok");
+        assert_eq!(chat["choices"][0]["finish_reason"], "stop");
     }
 }

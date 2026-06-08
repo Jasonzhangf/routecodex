@@ -11,6 +11,13 @@ fn is_context_overflow_stop_reason(normalized_stop_reason: &str) -> bool {
     )
 }
 
+fn is_empty_output_terminal_stop_reason(normalized_stop_reason: &str) -> bool {
+    matches!(
+        normalized_stop_reason,
+        "max_tokens" | "model_context_window_exceeded" | "context_window_exceeded" | "context_length_exceeded"
+    )
+}
+
 fn map_anthropic_stop_reason_to_finish_reason(raw: Option<&str>) -> String {
     let normalized = normalize_anthropic_stop_reason_token(raw);
     match normalized.as_str() {
@@ -74,7 +81,8 @@ pub(crate) fn resolve_anthropic_chat_completion_outcome(
     } else {
         finish_reason_from_stop
     };
-    let should_fail_empty_context_overflow = is_context_overflow && !has_visible_assistant_output;
+    let should_fail_empty_output =
+        is_empty_output_terminal_stop_reason(normalized.as_str()) && !has_visible_assistant_output;
 
     Value::Object(Map::from_iter([
         ("normalized".to_string(), Value::String(normalized)),
@@ -85,7 +93,11 @@ pub(crate) fn resolve_anthropic_chat_completion_outcome(
         ),
         (
             "shouldFailEmptyContextOverflow".to_string(),
-            Value::Bool(should_fail_empty_context_overflow),
+            Value::Bool(is_context_overflow && should_fail_empty_output),
+        ),
+        (
+            "shouldFailEmptyOutput".to_string(),
+            Value::Bool(should_fail_empty_output),
         ),
     ]))
 }

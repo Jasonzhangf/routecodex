@@ -222,6 +222,40 @@ owners:
     notes:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
 
+  - feature_id: hub.response_anthropic_client_projection
+    status: active
+    summary: Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
+    canonical_types:
+      - ProviderRespInbound01Raw
+      - HubRespInbound02Parsed
+      - HubRespChatProcess03Governed
+      - HubRespOutbound04ClientSemantic
+    canonical_builders:
+      - build_openai_chat_from_anthropic_message_full
+      - build_openai_chat_response_from_anthropic_message
+      - build_chat_response_from_responses_impl
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+    forbidden_paths:
+      - src/providers
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts
+    required_gates:
+      - cargo test -p router-hotpath-napi anthropic --lib -- --nocapture
+      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+    migration_target: rust
+    notes:
+      - TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust.
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance

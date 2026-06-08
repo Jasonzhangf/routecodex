@@ -27,6 +27,7 @@ export {
 
 export {
   buildResponsesPayloadFromChatWithNative,
+  buildOpenAIChatFromAnthropicMessageFullWithNative,
   evaluateResponsesHostPolicyWithNative,
   looksLikeJsonStreamPrefixWithNative,
   normalizeResponsesToolCallArgumentsForClientWithNative,

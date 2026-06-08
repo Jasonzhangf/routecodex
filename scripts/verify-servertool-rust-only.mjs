@@ -170,11 +170,25 @@ function extractFunctionBlock(content, functionName) {
   }
   if (paramsEnd < 0) return '';
   let braceStart = -1;
+  let typeDepth = 0;
   for (let index = paramsEnd + 1; index < content.length; index += 1) {
     const char = content[index];
-    if (char === '{' && (content[index + 1] === '\n' || content[index + 1] === '\r')) {
+    if (char === '{') {
+      let prevIndex = index - 1;
+      while (prevIndex > paramsEnd && /\s/.test(content[prevIndex] ?? '')) {
+        prevIndex -= 1;
+      }
+      const prev = content[prevIndex] ?? '';
+      if (typeDepth > 0 || prev === ':') {
+        typeDepth += 1;
+        continue;
+      }
       braceStart = index;
       break;
+    }
+    if (char === '}') {
+      typeDepth = Math.max(0, typeDepth - 1);
+      continue;
     }
   }
   if (braceStart < 0) return '';
@@ -599,6 +613,60 @@ function checkStopMessagePersistedLookupRustOwner() {
     'planStopMessagePersistedLookupWithNative'
   );
   assertContains(
+    'stop-message-state-key-rust-owner',
+    RUST_SERVERTOOL_CORE_LOOKUP,
+    rustLookup,
+    'pub fn resolve_servertool_state_key'
+  );
+  assertContains(
+    'stop-message-state-key-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'resolveServertoolStateKeyWithNative'
+  );
+  assertContains(
+    'stop-message-state-key-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    readRequired(NATIVE_REQUIRED_EXPORTS),
+    'resolveServertoolStateKeyJson'
+  );
+  assertContains(
+    'stop-message-runtime-state-rust-owner',
+    RUST_SERVERTOOL_CORE_LOOKUP,
+    rustLookup,
+    'pub fn resolve_runtime_stop_message_state'
+  );
+  assertContains(
+    'stop-message-runtime-stage-rust-owner',
+    RUST_SERVERTOOL_CORE_LOOKUP,
+    rustLookup,
+    'pub fn read_runtime_stop_message_stage_mode'
+  );
+  assertContains(
+    'stop-message-runtime-state-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'resolveRuntimeStopMessageStateWithNative'
+  );
+  assertContains(
+    'stop-message-runtime-stage-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'readRuntimeStopMessageStageModeWithNative'
+  );
+  assertContains(
+    'stop-message-runtime-state-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    readRequired(NATIVE_REQUIRED_EXPORTS),
+    'resolveRuntimeStopMessageStateJson'
+  );
+  assertContains(
+    'stop-message-runtime-stage-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    readRequired(NATIVE_REQUIRED_EXPORTS),
+    'readRuntimeStopMessageStageModeJson'
+  );
+  assertContains(
     'stop-message-persisted-lookup-bridge',
     STOP_MESSAGE_RUNTIME_UTILS,
     runtimeUtils,
@@ -666,6 +734,69 @@ function checkStopMessagePersistedLookupRustOwner() {
         fail(
           'stop-message-persisted-lookup-no-ts-owner',
           `Forbidden TS persisted lookup owner "${keyword}" found in ${file.replace(`${ROOT}/`, '')}`
+        );
+      }
+    }
+  }
+
+  const resolveStateKeyBlock = extractFunctionBlock(runtimeUtils, 'resolveStateKey');
+  assertContains(
+    'stop-message-state-key-thin-shell',
+    STOP_MESSAGE_RUNTIME_UTILS,
+    resolveStateKeyBlock,
+    'resolveServertoolStateKeyWithNative'
+  );
+  for (const keyword of [
+    'continuationScope',
+    'stickyScope',
+    'resolveStopMessageSessionScope(',
+    "metadata.requestId",
+    "'default'",
+  ]) {
+    if (resolveStateKeyBlock.includes(keyword)) {
+      fail(
+        'stop-message-state-key-no-ts-owner',
+        `Forbidden TS state-key semantic "${keyword}" found in resolveStateKey`
+      );
+    }
+  }
+
+  const runtimeStateBlock = extractFunctionBlock(runtimeUtils, 'resolveRuntimeStopMessageState');
+  assertContains(
+    'stop-message-runtime-state-thin-shell',
+    STOP_MESSAGE_RUNTIME_UTILS,
+    runtimeStateBlock,
+    'resolveRuntimeStopMessageStateWithNative'
+  );
+  const runtimeStageBlock = extractFunctionBlock(runtimeUtils, 'readRuntimeStopMessageStageMode');
+  assertContains(
+    'stop-message-runtime-stage-thin-shell',
+    STOP_MESSAGE_RUNTIME_UTILS,
+    runtimeStageBlock,
+    'readRuntimeStopMessageStageModeWithNative'
+  );
+  for (const [blockName, block] of [
+    ['resolveRuntimeStopMessageState', runtimeStateBlock],
+    ['readRuntimeStopMessageStageMode', runtimeStageBlock],
+  ]) {
+    for (const keyword of [
+      'resolveStopMessageSnapshot',
+      'serverToolLoopState',
+      'stopMessageState',
+      'stopMessageUsed',
+      'stopMessageText',
+      'stopMessageStageMode',
+      'loopState.maxRepeats',
+      'flowId',
+      'stop_message_flow',
+      'servertool.stop_message',
+      '继续执行',
+      'readPositiveInteger',
+    ]) {
+      if (block.includes(keyword)) {
+        fail(
+          'stop-message-runtime-state-no-ts-owner',
+          `Forbidden TS runtime-state semantic "${keyword}" found in ${blockName}`
         );
       }
     }

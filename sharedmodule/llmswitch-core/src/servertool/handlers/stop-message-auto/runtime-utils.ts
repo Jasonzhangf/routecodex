@@ -2,7 +2,10 @@ import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import {
   planStopMessagePersistedLookupWithNative,
+  readRuntimeStopMessageStageModeWithNative,
+  resolveRuntimeStopMessageStateWithNative,
   resolveStopMessageSessionScopeWithNative,
+  resolveServertoolStateKeyWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../../../native/router-hotpath/native-servertool-core-semantics.js';
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
@@ -11,7 +14,6 @@ import {
 } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import { isStopEligibleForServerTool } from '../../stop-gateway-context.js';
 import { extractResponsesOutputText, hasToolLikeOutput } from './ai-followup.js';
-import { resolveStopMessageSnapshot } from './routing-state.js';
 
 export function resolveStickyKey(
   record: {
@@ -42,21 +44,7 @@ export function resolveStateKey(
   },
   runtimeMetadata?: unknown
 ): string {
-  const metadata = buildServertoolRoutingMetadata(record, runtimeMetadata);
-  const continuation = asRecord(metadata.continuation);
-  const continuationScope = toNonEmptyText(continuation?.continuationScope) || toNonEmptyText(continuation?.stickyScope);
-  if (continuationScope === 'request_chain') {
-    const resumeFrom = asRecord(continuation?.resumeFrom);
-    const chainId = toNonEmptyText(continuation?.chainId) || toNonEmptyText(resumeFrom?.requestId);
-    if (chainId) {
-      return chainId;
-    }
-  }
-  const stopScope = resolveStopMessageSessionScope(metadata, runtimeMetadata);
-  if (stopScope) {
-    return stopScope;
-  }
-  return toNonEmptyText(metadata.requestId) || 'default';
+  return resolveServertoolStateKeyWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata));
 }
 
 export function planStopMessagePersistedLookup(
@@ -140,43 +128,11 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
   stageMode?: 'on' | 'off' | 'auto';
   aiMode?: 'on' | 'off';
 } | null {
-  const runtime = asRecord(runtimeMetadata);
-  const state = runtime ? asRecord(runtime.stopMessageState) : null;
-  const direct = resolveStopMessageSnapshot(state);
-  if (direct) {
-    return direct;
-  }
-  const loopState = runtime ? asRecord(runtime.serverToolLoopState) : null;
-  if (!loopState || toNonEmptyText(loopState.flowId) !== 'stop_message_flow') {
-    return null;
-  }
-  const maxRepeats = readPositiveInteger(loopState.maxRepeats);
-  if (maxRepeats === undefined) {
-    return null;
-  }
-  const used = readPositiveInteger(state?.stopMessageUsed) ?? 0;
-  const text = toNonEmptyText(state?.stopMessageText) || '继续执行';
-  return {
-    text,
-    maxRepeats,
-    used,
-    source: 'servertool.stop_message',
-    stageMode: 'on'
-  };
+  return resolveRuntimeStopMessageStateWithNative(runtimeMetadata);
 }
 
 export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' | 'off' | 'auto' | undefined {
-  const runtime = asRecord(runtimeMetadata);
-  const state = runtime ? asRecord(runtime.stopMessageState) : null;
-  const value = state?.stopMessageStageMode;
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'auto') {
-    return normalized;
-  }
-  return undefined;
+  return readRuntimeStopMessageStageModeWithNative(runtimeMetadata);
 }
 
 function buildServertoolRoutingMetadata(
@@ -582,13 +538,4 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function toNonEmptyText(value: unknown): string {
   return typeof value === 'string' && value.trim().length ? value.trim() : '';
-}
-
-function readPositiveInteger(value: unknown): number | undefined {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-  const floored = Math.floor(parsed);
-  return floored >= 0 ? floored : undefined;
 }

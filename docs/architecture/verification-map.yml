@@ -132,6 +132,25 @@ verification:
     notes:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
 
+  - feature_id: hub.response_anthropic_client_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/anthropic_chat_response.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/provider_outcome.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+    contract:
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
+      - tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi anthropic --lib -- --nocapture
+      - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+    build:
+      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+    notes:
+      - Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export.
+
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
     unit:

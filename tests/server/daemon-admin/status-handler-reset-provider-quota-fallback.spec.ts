@@ -30,6 +30,81 @@ describe('daemon-admin module reset fallback', () => {
     createdTmpDir = null;
   });
 
+  it('exposes virtual router status on daemon status through the existing admin surface', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-status-'));
+    createdTmpDir = tmpDir;
+    createdLoginFile = path.join(tmpDir, 'login');
+    process.env.ROUTECODEX_LOGIN_FILE = createdLoginFile;
+
+    const daemon = { getModule: () => undefined };
+    const app = express();
+    app.use(express.json());
+    registerDaemonAuthRoutes(app);
+    registerStatusRoutes(app, {
+      app,
+      getManagerDaemon: () => daemon,
+      getServerId: () => 'test:0',
+      getHubPipeline: () => ({
+        getVirtualRouter: () => ({
+          getStatus: () => ({
+            routes: {},
+            health: [],
+            quota: [],
+            quotaHostSnapshot: [],
+            forwarders: [
+              {
+                forwarderId: 'fwd.gpt.gpt-test',
+                protocol: 'openai-responses',
+                modelId: 'gpt-test',
+                strategy: 'round-robin',
+                stickyKey: 'none',
+                targets: [
+                  {
+                    providerKey: 'sdfv.key1.gpt-test',
+                    disabled: false,
+                    providerRegistered: true,
+                    providerEnabled: true,
+                    runtimeKey: 'sdfv.key1',
+                    quotaBlocks: false,
+                    available: true
+                  }
+                ]
+              }
+            ]
+          })
+        })
+      })
+    } as any);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const setup = await fetch(`${base}/daemon/auth/setup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'password123' })
+      });
+      expect(setup.ok).toBe(true);
+      const cookie = setup.headers.get('set-cookie');
+      expect(typeof cookie).toBe('string');
+
+      const resp = await fetch(`${base}/daemon/status`, {
+        headers: { cookie: String(cookie) }
+      });
+      expect(resp.status).toBe(200);
+      const json = (await resp.json()) as any;
+      expect(json?.ok).toBe(true);
+      expect(json?.virtualRouter?.forwarders?.[0]?.forwarderId).toBe('fwd.gpt.gpt-test');
+      expect(json?.virtualRouter?.forwarders?.[0]?.targets?.[0]?.providerKey).toBe('sdfv.key1.gpt-test');
+      expect(json?.virtualRouter?.forwarders?.[0]?.targets?.[0]?.available).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('resets quota provider states when provider-quota module is absent', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-'));
     createdTmpDir = tmpDir;

@@ -1376,6 +1376,24 @@ pub fn has_stop_message_auto_cli_result_in_request_json(input_json: String) -> N
 }
 
 #[napi]
+pub fn resolve_servertool_state_key_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_servertool_state_key_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_runtime_stop_message_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_runtime_stop_message_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn read_runtime_stop_message_stage_mode_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::read_runtime_stop_message_stage_mode_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_backend_route_policy_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_backend_route_policy_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
