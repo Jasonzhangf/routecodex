@@ -2036,3 +2036,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 端口级 forwarder 排查先看 sample `client-request.json` 的 `metadata.allowedProviders`：若 routing target 是 `fwd.*` 但 allowlist 只有 `fwd` 而没有 forwarder 内真实 provider（如 `sdfv/llmgate/asxs/cc`），根因在 HTTP router port allowlist 构造，不在 Rust priority selection。修点是 `extractProviderKeysForRoutingGroup()` 展开 `virtualrouter.forwarders.*.targets`。
 - llmgate/free-gpt-5.5 `EMPTY_ASSISTANT_RESPONSE` 若样本是 `/v1/responses completed + output=[]`，先核对 provider-request 是否真正是 upstream SSE：`Accept:text/event-stream` 且 body `stream:true`。`responses.streaming="always"` 是 provider upstream 传输策略，不能被 client `stream:false` 覆盖；修点在 `ResponsesProvider`，不是 response contract 或路由 fallback。
 - `verify:llmswitch-rustification-audit` 若只报 `topDir=native nonNativeLoc` 增长，先 diff baseline/current 的 `prodTsFiles` 分类，定位具体 native 文件；对真实 native binding manifest/wrapper 应补明确 `native-router-hotpath` / NAPI binding contract marker 或收缩 TS 逻辑，禁止直接放宽 baseline 掩盖新增 TS runtime。
+
+## 2026-06-08 provider auth reroute / 10000 loopback 精华
+
+- 401/402/403 是当前 provider/account 的 terminal failure，但不是“整个路由请求不可恢复”。ErrorErr05 在 route pool 有备选 provider 时必须 `exclude_and_reroute`；只有 400/special_400、404、协议/request-shape/model 确定性错误继续 direct-return。修点只在 provider failure execution plan / executor 消费层，禁止改 direct payload、协议转换或加 relay 清洗。
+- returned provider response 里的 HTTP 401/402/403/408/425/429/5xx 必须先转成 `requestExecutorProviderErrorStage='provider.http'` 错误进入统一 provider-failure plan；不要在 response-status check 里提前当成功/直返客户端。
+- 看到 10000 `Empty reply from server` 时先跑 `netstat -anv -p tcp | awk '$4 ~ /\\.10000$/ || $4 ~ /:10000$/ {print}'`。若同时存在 `127.0.0.1.10000 netdisk_service` 和 `*.10000 node`，`127.0.0.1` 命中的是第三方 shadow listener；用本机非 loopback IP 访问 `http://<LAN-IP>:10000/health` 验 RCC，不要重启或改错误处理链。
