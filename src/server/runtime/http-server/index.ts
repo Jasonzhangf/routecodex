@@ -62,8 +62,7 @@ import {
 } from './direct-passthrough-payload.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
-import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
-import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
+import { reportRequestExecutorProviderError } from './executor/request-executor-provider-failure.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
@@ -146,14 +145,6 @@ function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | u
     ?? readTrimmedString(metadata.client_tmux_session_id)
     ?? readTrimmedString(metadata.tmuxSessionId)
     ?? readTrimmedString(metadata.tmux_session_id);
-}
-
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map((item) => item.trim());
 }
 
 import {
@@ -1130,7 +1121,7 @@ export class RouteCodexHttpServer {
             detail: directEntryDecision.reason ?? (directEntryDecision.requiresHubRelay ? 'requires_hub_relay' : 'invalid_direct_payload'),
             mode: 'client',
           });
-          return await this.executePipeline(nextInput);
+          throw new Error(`router-direct requires provider-wire payload: ${directEntryDecision.reason ?? 'invalid_direct_payload'}`);
         }
         this.logStage('router-direct.entry', input.requestId, {
           routingPolicyGroup: portConfig.routingPolicyGroup,
@@ -1143,30 +1134,10 @@ export class RouteCodexHttpServer {
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
         }
-        if (directResult.retryMetadata) {
-          this.logStage('router-direct.retry.standard_pipeline', input.requestId, {
-            reason: directResult.reason,
-            excludedProviderKeys: directResult.retryMetadata.excludedProviderKeys,
-            providerFailureAttemptOffset: directResult.retryMetadata.__routecodexProviderFailureAttemptOffset,
-          });
-          return await this.executePipeline({
-            ...nextInput,
-            metadata: {
-              ...(nextInput.metadata ?? {}),
-              ...directResult.retryMetadata,
-            },
-          });
-        }
-        if (directResult.preselectedRoute) {
-          return await this.executePipeline({
-            ...nextInput,
-            metadata: {
-              ...(nextInput.metadata ?? {}),
-              __routecodexPreselectedRoute: directResult.preselectedRoute,
-            },
-          });
-        }
-        // same-protocol direct not applicable, fall through to normal pipeline
+        this.logStage('router-direct.failed_no_relay', input.requestId, {
+          reason: directResult.reason,
+        });
+        throw new Error(`router-direct failed without relay: ${directResult.reason}`);
       }
       return await this.executePipeline(nextInput);
     }
@@ -1331,7 +1302,6 @@ export class RouteCodexHttpServer {
       };
     }
     let capturedUsage: Record<string, unknown> | undefined;
-    let retryMetadata: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
     try {
       directOutcome = await executeRouterDirectPipeline({
@@ -1411,9 +1381,7 @@ export class RouteCodexHttpServer {
           message: publicErrorMessage,
           directAttempt,
         });
-        const excludedProviderKeys = new Set<string>(readStringArray(metadataForHub.excludedProviderKeys));
-        const maxAttempts = resolveMaxProviderAttempts();
-        const providerFailurePlan = await resolveRequestExecutorProviderFailurePlan({
+        await reportRequestExecutorProviderError({
           error,
           retryError,
           requestId: input.requestId,
@@ -1429,19 +1397,9 @@ export class RouteCodexHttpServer {
           },
           dependencies: this.getModuleDependencies(),
           attempt: directAttempt,
-          maxAttempts,
-          stage: 'provider.send',
-          logicalRequestChainKey: input.requestId,
-          logicalChainRetryLimitStageRequestId: input.requestId,
           routePool: Array.isArray(ctx.routingDecision?.pool) ? ctx.routingDecision?.pool : undefined,
-          runtimeManager: {
-            resolveRuntimeKey: (providerKey?: string, fallback?: string, metadata?: Record<string, unknown>) =>
-              this.resolveRuntimeKeyForProviderBinding(providerKey, metadata) ?? fallback,
-          },
-          excludedProviderKeys,
-          recordAttempt: () => undefined,
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-          status: statusCode,
+          stageHint: 'provider.send',
           metadata: {
             ...metadataForHub,
             __rt: {
@@ -1451,30 +1409,15 @@ export class RouteCodexHttpServer {
               ...runtimeScope,
             },
           },
-          logNonBlockingError: (stage, reportError, details) => {
-            this.logStage(stage, input.requestId, {
-              ...(details ?? {}),
-              message: reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown error'),
-            });
+          extraDetails: {
+            source: 'router-direct',
+            directAttempt,
+            ...(typeof statusCode === 'number' ? { statusCode } : {}),
           },
         });
-        const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
-        if (retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan) {
-          retryMetadata = {
-            excludedProviderKeys: Array.from(excludedProviderKeys),
-            __routecodexProviderFailureAttemptOffset: directAttempt,
-          };
-        }
       },
       });
     } catch (error) {
-      if (retryMetadata) {
-        return {
-          used: false,
-          reason: 'router-direct-provider-failure-standard-retry',
-          retryMetadata,
-        };
-      }
       throw error;
     }
 
@@ -1483,7 +1426,6 @@ export class RouteCodexHttpServer {
       return {
         used: false,
         reason: directOutcome.reason,
-        ...(directOutcome.retryMetadata ? { retryMetadata: directOutcome.retryMetadata } : {}),
         preselectedRoute: {
           target,
           decision: routingDecision,

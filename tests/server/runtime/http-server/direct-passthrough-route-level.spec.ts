@@ -958,7 +958,7 @@ describe('direct passthrough route-level', () => {
     }
   }, 15000);
 
-  it('HTTP BLACKBOX: router-direct reroutes provider HTTP 401 through standard executor', async () => {
+  it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -981,17 +981,14 @@ describe('direct passthrough route-level', () => {
     const secondStandardSend = jest.fn(async () => ({
       status: 200,
       data: {
-        id: 'resp_router_direct_401_rerouted',
+        id: 'resp_router_direct_401_must_not_relay',
         object: 'response',
         status: 'completed',
         output_text: 'ok',
       },
     }));
-    const route = jest.fn((_payload: Record<string, unknown>, metadata: Record<string, unknown>) => {
-      const excluded = new Set<string>(
-        Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys as string[] : []
-      );
-      const providerKey = excluded.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+    const route = jest.fn(() => {
+      const providerKey = firstProviderKey;
       return {
         target: {
           providerKey,
@@ -1018,16 +1015,7 @@ describe('direct passthrough route-level', () => {
       },
     };
     (server as any).hubPipeline = {
-      execute: jest.fn(async (input: any) => {
-        const routeResult = route(input.body ?? {}, input.metadata ?? {});
-        return {
-          requestId: input.id,
-          providerPayload: input.body,
-          target: routeResult.target,
-          routingDecision: routeResult.decision,
-          metadata: input.metadata ?? {},
-        };
-      }),
+      execute: jest.fn(async () => { throw new Error('router-direct provider error must not enter standard executor'); }),
       getVirtualRouter: jest.fn(() => ({ route })),
       updateVirtualRouterConfig: jest.fn(),
     };
@@ -1088,13 +1076,14 @@ describe('direct passthrough route-level', () => {
           input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
         }),
       });
-      const body = await response.json() as Record<string, unknown>;
+      const bodyText = await response.text();
 
-      expect(response.status).toBe(200);
-      expect(body).toEqual(expect.objectContaining({ id: 'resp_router_direct_401_rerouted' }));
+      expect(response.status).toBe(401);
+      expect(bodyText).toContain('Upstream authentication failed');
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
-      expect(secondStandardSend).toHaveBeenCalledTimes(1);
-      expect(route).toHaveBeenCalledTimes(2);
+      expect(secondStandardSend).not.toHaveBeenCalled();
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(1);
     } finally {
       await server.stop();
     }

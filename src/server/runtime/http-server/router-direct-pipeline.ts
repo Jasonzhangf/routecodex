@@ -69,7 +69,6 @@ export interface RouterDirectResult {
 export interface RouterDirectSkipped {
   used: false;
   reason: string;
-  retryMetadata?: Record<string, unknown>;
   preselectedRoute?: {
     target: Record<string, unknown>;
     decision?: Record<string, unknown>;
