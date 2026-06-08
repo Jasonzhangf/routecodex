@@ -4,8 +4,10 @@ import path from 'node:path';
 export function createRequiredCoreOutputs(outDir) {
   return [
     path.join(outDir, 'conversion', 'hub', 'response', 'provider-response.js'),
+    path.join(outDir, 'conversion', 'shared', 'responses-conversation-store.js'),
     path.join(outDir, 'native', 'router-hotpath', 'native-virtual-router-runtime.js'),
     path.join(outDir, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js'),
+    path.join(outDir, 'native', 'router-hotpath', 'native-chat-process-node-result-semantics.js'),
   ];
 }
 

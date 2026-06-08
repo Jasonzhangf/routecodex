@@ -13,6 +13,7 @@ const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
 const nativeBuildScript = path.join(coreRoot, 'scripts', 'build-native-hotpath.mjs');
 const outDir = path.join(coreRoot, 'dist');
+const tsBuildInfo = path.join(coreRoot, 'tsconfig.tsbuildinfo');
 const requiredOutputs = createRequiredCoreOutputs(outDir);
 
 function fail(msg){ console.error(`[build-core] ${msg}`); process.exit(2); }
@@ -81,6 +82,17 @@ function runNativeBuild() {
   }
 }
 
+function removeStaleTsBuildInfoIfDistIncomplete() {
+  if (distIsValid()) {
+    return;
+  }
+  if (!fs.existsSync(tsBuildInfo)) {
+    return;
+  }
+  fs.rmSync(tsBuildInfo, { force: true });
+  console.log('[build-core] removed stale tsconfig.tsbuildinfo because dist is incomplete');
+}
+
 if (!fs.existsSync(tsc)) fail('TypeScript not installed in root node_modules. Run npm i.');
 if (!fs.existsSync(proj)) {
   console.log('[build-core] llmswitch-core source not found under sharedmodule; skip local core build (依赖包将用于运行/打包)');
@@ -94,6 +106,7 @@ if (skip === '1' || skip === 'true' || skip === 'yes') {
   process.exit(0);
 }
 runNativeBuild();
+removeStaleTsBuildInfoIfDistIncomplete();
 if (shouldSkipBuild()) {
   console.log('[build-core] dist up-to-date; skip rebuild:', outDir);
   process.exit(0);

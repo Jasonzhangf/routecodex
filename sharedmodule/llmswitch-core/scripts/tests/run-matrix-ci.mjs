@@ -75,7 +75,7 @@ async function main() {
   await fs.mkdir(reportDir, { recursive: true }).catch(() => {});
 
   // Build first (allow CI to select a deterministic build profile).
-  const buildScript = String(process.env.LLMSWITCH_MATRIX_BUILD_SCRIPT || 'build:dev').trim() || 'build:dev';
+  const buildScript = String(process.env.LLMSWITCH_MATRIX_BUILD_SCRIPT || 'build').trim() || 'build';
   const build = await new Promise((resolve) => {
     const child = spawn('npm', ['run', buildScript], { stdio: 'inherit', cwd: projectRoot });
     child.on('exit', (code) => resolve(code === 0));
