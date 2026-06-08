@@ -52,16 +52,26 @@ mod responses_direct_route_decision_tests {
     use super::*;
 
     #[test]
-    fn direct_decision_does_not_validate_or_relay_responses_wire_shape() {
+    fn direct_decision_does_not_relay_responses_reasoning_content() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
-                "stream": true
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "content": [
+                            { "type": "reasoning_text", "text": "client-standard history" }
+                        ],
+                        "summary": [
+                            { "type": "summary_text", "text": "summary stays" }
+                        ]
+                    }
+                ]
             }),
             "openai-responses",
             "client",
         )
-        .expect("direct decision must not validate live payload shape");
+        .expect("same-protocol direct must not use payload shape to force relay");
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);

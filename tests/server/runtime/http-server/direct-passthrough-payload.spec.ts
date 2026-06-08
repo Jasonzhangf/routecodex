@@ -150,6 +150,27 @@ describe('direct-passthrough-payload', () => {
     expect(decision.reason).toBeUndefined();
   });
 
+  it('keeps responses reasoning content on same-protocol direct path', () => {
+    const decision = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          {
+            type: 'reasoning',
+            content: [{ type: 'reasoning_text', text: 'client-standard history' }],
+          },
+        ],
+      },
+    });
+
+    expect(decision).toMatchObject({
+      providerWireValid: true,
+      requiresHubRelay: false,
+    });
+    expect(decision.reason).toBeUndefined();
+  });
+
   it('does not runtime-reject chat-style function tools on responses direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
