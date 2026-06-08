@@ -166,9 +166,6 @@ pub struct StopMessageDecisionContext {
     pub default_max_repeats: u32,
     pub default_text: String,
 
-    // Empty reply continue check
-    pub empty_reply_continue_local: bool,
-
     // Provider pin
     pub provider_pin: Option<ProviderPin>,
 }
@@ -984,10 +981,8 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
         return Some(snapshot.clone());
     }
 
-    // 3. Try default snapshot
-    //    Create default when no snapshot exists, goal is not active,
-    //    and current request is not an empty-reply-continue scenario.
-    let should_use_default = !ctx.goal_status.is_active() && !ctx.empty_reply_continue_local;
+    // 3. Try default snapshot when no snapshot exists and goal is not active.
+    let should_use_default = !ctx.goal_status.is_active();
 
     if should_use_default {
         if ctx.persisted_default_exhausted {
@@ -1055,7 +1050,6 @@ mod tests {
             default_enabled: true,
             default_max_repeats: 3,
             default_text: "继续执行".to_string(),
-            empty_reply_continue_local: false,
             provider_pin: None,
         }
     }

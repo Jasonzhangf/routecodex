@@ -40,7 +40,6 @@ export interface StopMessageDecisionContext {
   default_enabled: boolean;
   default_max_repeats: number;
   default_text: string;
-  empty_reply_continue_local: boolean;
   provider_pin?: ProviderPin;
 }
 

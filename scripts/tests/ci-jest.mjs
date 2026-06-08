@@ -63,7 +63,6 @@ const routingInstructionTests = [
   'tests/servertool/routing-instructions.spec.ts',
   'tests/servertool/server-side-web-search.spec.ts',
   'tests/servertool/vision-flow.spec.ts',
-  'tests/servertool/gemini-empty-reply-continue.spec.ts',
   'tests/servertool/exec-command-guard.spec.ts',
   'tests/servertool/hub-pipeline-session-headers.spec.ts',
   'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',

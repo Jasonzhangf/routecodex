@@ -78,6 +78,12 @@ const DELETED_REVIEW_TOOL_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/review-pure-blocks.ts`,
   `${ROOT}/tests/servertool/review-followup.spec.ts`,
 ];
+const DELETED_EMPTY_REPLY_CONTINUE_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/empty_reply_continue_contract.rs`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/empty-reply-continue.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/scripts/tests/servertool-empty-responses-continue.mjs`,
+  `${ROOT}/tests/servertool/gemini-empty-reply-continue.spec.ts`,
+];
 
 // ── Issues accumulator ─────────────────────────────────────────
 const issues = [];
@@ -1380,6 +1386,64 @@ function checkServertoolCliResultGuardRustOwner() {
   pass('servertool-cli-result-guard-rust-owner', 'servertool-core owns CLI result guard scanning');
 }
 
+// ── Check 17: deleted empty_reply_continue path stays absent ───
+function checkDeletedEmptyReplyContinueAbsent() {
+  for (const file of DELETED_EMPTY_REPLY_CONTINUE_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'deleted-empty-reply-continue-absent',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; empty-reply auto-continue previously rebuilt followup payloads and could drop multimodal content`
+      );
+    }
+  }
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const skeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
+  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+
+  for (const [file, content] of [
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib],
+    [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks],
+    [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports],
+    [`${RUST_SRC_DIR}/servertool_skeleton_config.rs`, skeletonConfig],
+    [TS_SERVER_SIDE_TOOLS, serverSideTools],
+  ]) {
+    for (const keyword of [
+      'empty_reply_continue',
+      'empty-reply-continue',
+      'EmptyReply',
+      'planEmptyReply',
+      'plan_empty_reply',
+      'empty_reply_continue_contract',
+    ]) {
+      if (content.includes(keyword)) {
+        fail(
+          'deleted-empty-reply-continue-absent',
+          `${file.replace(`${ROOT}/`, '')} must not contain deleted empty-reply continue semantic "${keyword}"`
+        );
+      }
+    }
+  }
+  for (const script of [
+    `${ROOT}/scripts/tests/ci-jest.mjs`,
+    `${ROOT}/sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs`,
+  ]) {
+    const content = readRequired(script);
+    if (content.includes('gemini-empty-reply-continue') || content.includes('servertool-empty-responses-continue')) {
+      fail(
+        'deleted-empty-reply-continue-absent',
+        `${script.replace(`${ROOT}/`, '')} must not schedule deleted empty-reply continue tests`
+      );
+    }
+  }
+  pass('deleted-empty-reply-continue-absent', 'deleted empty-reply continue path is absent from servertool runtime gates');
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -1401,6 +1465,7 @@ checkFollowupMainlineNativeBridgeRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkServertoolCliResultGuardRustOwner();
+checkDeletedEmptyReplyContinueAbsent();
 
 console.log();
 

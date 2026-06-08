@@ -16,7 +16,6 @@
 | Antigravity session/signature 头注入 | `gemini-http-provider.ts:applyAntigravityRequestCompat` | Family Profile (antigravity) | 同上 |
 | Antigravity 错误包装 (wrapAntigravityHttpErrorAsResponse) | `gemini-http-provider.ts:sendRequestInternal` | Family Profile (antigravity) | 错误处理策略 |
 | Gemini CLI user-agent 处理 | `gemini-cli-http-provider.ts` | Family Profile (gemini-cli) | CLI 特有头策略 |
-| Gemini empty-reply-continue servertool | `gemini-empty-reply-continue.ts` | Protocol (gemini-chat) | 协议层空回复处理 |
 
 ## 迁移策略
 

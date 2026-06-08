@@ -45,7 +45,6 @@ import {
   evaluateStopSchemaGateWithNative,
   runStopMessageAutoHandlerWithNative
 } from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
-import { detectProviderResponseShapeWithNative } from '../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -439,38 +438,6 @@ function handlerResultPersistKeys(candidateKeys: string[], stickyKey?: string, s
   return out;
 }
 
-function shouldYieldToEmptyReplyContinueLocal(args: {
-  base: unknown;
-  providerProtocol?: string;
-  entryEndpoint?: string;
-}): boolean {
-  const endpoint = String(args.entryEndpoint || '').toLowerCase();
-  const providerProtocol = String(args.providerProtocol || '').toLowerCase();
-  const payload = args.base && typeof args.base === 'object' && !Array.isArray(args.base)
-    ? (args.base as Record<string, unknown>)
-    : null;
-  if (endpoint.includes('/v1/responses')) {
-    if (detectProviderResponseShapeWithNative(payload) !== 'openai-responses') {
-      return false;
-    }
-    const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
-    const output = Array.isArray(payload?.output) ? payload.output as unknown[] : [];
-    const requiredAction = payload?.required_action && typeof payload.required_action === 'object';
-    if ((!status || status === 'completed') && output.length === 0 && !requiredAction) {
-      return true;
-    }
-  }
-  if (providerProtocol === 'gemini-chat') {
-    const choices = Array.isArray(payload?.choices) ? payload.choices as unknown[] : [];
-    const first = choices[0] && typeof choices[0] === 'object' && !Array.isArray(choices[0]) ? choices[0] as Record<string, unknown> : null;
-    const finishReason = typeof first?.finish_reason === 'string' ? first.finish_reason.trim().toLowerCase() : '';
-    if (finishReason === 'length') {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isPersistentStickyKey(value: unknown): value is string {
   return typeof value === 'string' && (
     value.startsWith('tmux:') || value.startsWith('session:') || value.startsWith('conversation:')
@@ -827,9 +794,6 @@ const handler: ServerToolHandler = async (
     default_enabled: tombstone.cleared ? false : resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
     default_text: resolveStopMessageDefaultTextLive(),
-    empty_reply_continue_local: shouldYieldToEmptyReplyContinueLocal({
-      base: ctx.base, providerProtocol: ctx.providerProtocol, entryEndpoint: ctx.entryEndpoint
-    }),
     provider_pin: undefined,
   };
 

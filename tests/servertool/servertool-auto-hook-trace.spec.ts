@@ -50,7 +50,7 @@ describe('servertool auto hook trace', () => {
     expect(match?.flowId).toBe('stop_message_flow');
   });
 
-  test('emits match trace for empty_reply_continue hook', async () => {
+  test('empty assistant stop does not use deleted empty-reply hook', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
     const adapterContext: AdapterContext = {
       requestId: 'req-hook-trace-empty',
@@ -91,12 +91,13 @@ describe('servertool auto hook trace', () => {
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('stop_message_flow');
 
+    expect(traces.some((event) => event.hookId === 'empty_reply_continue')).toBe(false);
     const match = traces.find((event) => event.hookId === 'stop_message_auto' && event.result === 'match');
     expect(match).toBeDefined();
     expect(match?.phase).toBe('default');
     expect(match?.priority).toBe(40);
     expect(match?.queue).toBe('A_optional');
-    expect(match?.queueIndex).toBeGreaterThan(0);
+    expect(match?.queueIndex).toBeGreaterThanOrEqual(0);
     expect(match?.queueTotal).toBeGreaterThan(0);
     expect(match?.flowId).toBe('stop_message_flow');
   });

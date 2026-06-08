@@ -1132,7 +1132,6 @@ describe('stop_message_auto servertool', () => {
         reenterPipeline
       });
 
-      expect(decisionContexts[0]?.empty_reply_continue_local).toBe(false);
       expect(result.executed).toBe(true);
       expect(result.flowId).toBe('stop_message_flow');
     } finally {

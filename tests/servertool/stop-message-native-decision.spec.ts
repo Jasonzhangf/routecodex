@@ -39,7 +39,6 @@ function buildMinimalDecisionContext(args: {
     default_enabled: args.defaultEnabled ?? true,
     default_max_repeats: args.defaultMaxRepeats ?? 3,
     default_text: args.defaultText ?? '继续执行',
-    empty_reply_continue_local: false,
     provider_pin: undefined,
   };
 }

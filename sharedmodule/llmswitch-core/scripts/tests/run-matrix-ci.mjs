@@ -232,9 +232,7 @@ async function main() {
   results.push(await run('matrix:servertool-followup-preserve-tools', 'scripts/tests/servertool-followup-preserve-tools.mjs'));
   // 1f.2) servertool followup must accept requires_action payloads (tool call)
   results.push(await run('matrix:servertool-followup-requires-action', 'scripts/tests/servertool-followup-requires-action.mjs'));
-  // 1f.2.1) responses empty-completed reply should auto-continue and include tool list hint
-  results.push(await run('matrix:servertool-empty-responses-continue', 'scripts/tests/servertool-empty-responses-continue.mjs'));
-  // 1f.2.2) continue_execution no-op tool should auto-followup and keep tool list available
+  // 1f.2.1) continue_execution no-op tool should auto-followup and keep tool list available
   results.push(
     await run('matrix:servertool-continue-execution-followup', 'scripts/tests/servertool-continue-execution-followup.mjs')
   );
