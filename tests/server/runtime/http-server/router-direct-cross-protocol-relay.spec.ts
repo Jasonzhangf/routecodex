@@ -1,6 +1,16 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { resetSessionStormBackoffStateForTests } from '../../../../src/server/runtime/http-server/executor/request-executor-session-storm-backoff';
 
 describe('router direct cross-protocol relay', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    resetSessionStormBackoffStateForTests();
+    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS;
+    delete process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS;
+    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS;
+    delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
+  });
+
   it('source and runtime artifacts keep protocol mismatch out of failed_no_relay', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
@@ -189,6 +199,71 @@ describe('router direct cross-protocol relay', () => {
         routecodexRoutingPolicyGroup: 'gateway_priority_5555',
       }));
     }
+  });
+
+  it('backs off repeated router-direct protocol mismatch failures without rewriting the error', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
+    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
+
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline],
+    ]);
+    jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'protocol mismatch: inbound=openai-responses, provider=openai-chat',
+    } as any);
+    const logStageSpy = jest.spyOn(server as any, 'logStage');
+
+    const buildInput = (requestId: string) => ({
+      requestId,
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'router-gpt-5.5',
+        stream: true,
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'search' }] }],
+      },
+      metadata: { sessionId: 'router-direct-protocol-mismatch-storm' },
+    });
+
+    await expect((server as any).executePortAwarePipeline(5555, buildInput('req_router_direct_mismatch_1')))
+      .rejects.toThrow('router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat');
+
+    const second = (server as any).executePortAwarePipeline(5555, buildInput('req_router_direct_mismatch_2'));
+    const secondExpectation = expect(second)
+      .rejects.toThrow('router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat');
+    await jest.advanceTimersByTimeAsync(999);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff_wait')).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await secondExpectation;
+
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(2);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(2);
   });
 
   it('propagates real direct protocol mismatch into Hub relay', async () => {

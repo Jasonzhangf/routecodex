@@ -176,6 +176,14 @@ import {
   logProviderRetrySwitchCompact,
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
+import {
+  consumeSessionStormBackoffMs,
+  isSessionStormBackoffCandidate,
+  peekSessionStormBackoffWaitMs,
+  resolveSessionStormBackoffScopes,
+  waitSessionStormBackoffWithGate,
+} from './executor/request-executor-session-storm-backoff.js';
+import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 
 const ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const routerDirectProviderSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
@@ -213,6 +221,17 @@ function logRouterDirectNonBlockingError(stage: string, error: unknown, details?
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
   console.warn(`[router-direct] ${stage} failed (non-blocking): ${message}${detailSuffix}`);
+}
+
+function asMetadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function buildRouterDirectFailureError(reason: unknown): Error {
+  const message = typeof reason === 'string' && reason.trim() ? reason.trim() : String(reason ?? 'unknown');
+  return new Error(`router-direct failed without relay: ${message}`);
 }
 
 export class RouteCodexHttpServer {
@@ -1175,6 +1194,29 @@ export class RouteCodexHttpServer {
             ? (input.body as Record<string, unknown>).model
             : undefined,
         });
+        const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
+        for (const scope of routerDirectStormScopes) {
+          const waitMs = peekSessionStormBackoffWaitMs(scope);
+          if (!(waitMs > 0)) {
+            continue;
+          }
+          this.logStage('request.session_storm_backoff_wait', input.requestId, {
+            scope,
+            waitMs,
+            source: 'router-direct',
+          });
+          await waitSessionStormBackoffWithGate(
+            scope,
+            waitMs,
+            getClientConnectionAbortSignal(asMetadataRecord(nextInput.metadata)),
+            logRouterDirectNonBlockingError,
+          );
+          this.logStage('request.session_storm_backoff_wait.completed', input.requestId, {
+            scope,
+            waitMs,
+            source: 'router-direct',
+          });
+        }
         const directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
         if (directResult.used) {
           return this.buildRouterDirectResult(directResult, input);
@@ -1203,7 +1245,18 @@ export class RouteCodexHttpServer {
         this.logStage('router-direct.failed_no_relay', input.requestId, {
           reason: directResult.reason,
         });
-        throw new Error(`router-direct failed without relay: ${directResult.reason}`);
+        const directError = buildRouterDirectFailureError(directResult.reason);
+        if (isSessionStormBackoffCandidate(directError)) {
+          for (const scope of routerDirectStormScopes) {
+            const backoffMs = consumeSessionStormBackoffMs(scope, directError);
+            this.logStage('request.session_storm_backoff.recorded', input.requestId, {
+              scope,
+              backoffMs,
+              source: 'router-direct',
+            });
+          }
+        }
+        throw directError;
       }
       return await this.executePipeline(nextInput);
     }

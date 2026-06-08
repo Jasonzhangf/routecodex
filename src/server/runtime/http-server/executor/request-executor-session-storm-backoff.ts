@@ -135,7 +135,15 @@ function isDeterministicNoProviderStorm(error: unknown): boolean {
   );
 }
 
+function isDeterministicDirectProtocolMismatchStorm(error: unknown): boolean {
+  const message = readErrorMessage(error).toLowerCase();
+  return message.includes('router-direct failed without relay: protocol mismatch:');
+}
+
 export function isSessionStormBackoffCandidate(error: unknown): boolean {
+  if (isDeterministicDirectProtocolMismatchStorm(error)) {
+    return true;
+  }
   if (isClientToolArgsInvalidStorm(error)) {
     return true;
   }
