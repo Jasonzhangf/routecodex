@@ -146,6 +146,10 @@ impl ProviderRegistry {
             "supportsMultimodal".to_string(),
             Value::Bool(self.has_capability(provider_key, "multimodal")),
         );
+        target.insert(
+            "supportsVision".to_string(),
+            Value::Bool(self.has_capability(provider_key, "vision")),
+        );
         if let Some(runtime) = profile.runtime_key.clone() {
             target.insert("runtimeKey".to_string(), Value::String(runtime.clone()));
             target.insert("concurrencyScopeKey".to_string(), Value::String(runtime));
@@ -384,6 +388,27 @@ mod tests {
         registry.load(providers.as_object().unwrap());
         assert!(registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
         assert!(registry.has_capability("sdfv.key1.gpt-5.4", "web_search"));
+    }
+
+    #[test]
+    fn build_target_exposes_vision_capability_separately_from_multimodal() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "media.key1.vision-model": {
+                "providerKey": "media.key1.vision-model",
+                "providerType": "openai",
+                "modelId": "vision-model",
+                "modelCapabilities": {
+                    "vision-model": ["vision"]
+                }
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        let target = registry
+            .build_target("media.key1.vision-model")
+            .expect("vision target should be materialized");
+        assert_eq!(target["supportsVision"], json!(true));
+        assert_eq!(target["supportsMultimodal"], json!(false));
     }
 
     #[test]

@@ -528,6 +528,7 @@ export interface TargetMetadata {
   outboundProfile: string;
   compatibilityProfile?: string;
   supportsMultimodal?: boolean;
+  supportsVision?: boolean;
   runtimeKey?: string;
   concurrencyScopeKey?: string;
   modelId: string;

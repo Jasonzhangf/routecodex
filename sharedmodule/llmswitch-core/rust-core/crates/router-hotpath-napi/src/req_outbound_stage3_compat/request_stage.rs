@@ -28,12 +28,12 @@ use crate::chat_process_media_semantics::{
 };
 use serde_json::Value;
 
-fn read_supports_multimodal_from_rt(adapter_context: &super::AdapterContext) -> Option<bool> {
+fn read_bool_from_rt(adapter_context: &super::AdapterContext, key: &str) -> Option<bool> {
     adapter_context
         .rt
         .as_ref()
         .and_then(Value::as_object)
-        .and_then(|rt| rt.get("supportsMultimodal"))
+        .and_then(|rt| rt.get(key))
         .and_then(|value| match value {
             Value::Bool(flag) => Some(*flag),
             Value::String(raw) => match raw.trim().to_ascii_lowercase().as_str() {
@@ -45,11 +45,22 @@ fn read_supports_multimodal_from_rt(adapter_context: &super::AdapterContext) -> 
         })
 }
 
+fn target_explicitly_has_no_visual_support(adapter_context: &super::AdapterContext) -> bool {
+    match (
+        read_bool_from_rt(adapter_context, "supportsMultimodal"),
+        read_bool_from_rt(adapter_context, "supportsVision"),
+    ) {
+        (Some(true), _) | (_, Some(true)) => false,
+        (Some(false), None | Some(false)) => true,
+        _ => false,
+    }
+}
+
 fn strip_media_for_non_multimodal_target(
     payload: Value,
     adapter_context: &super::AdapterContext,
 ) -> Value {
-    if read_supports_multimodal_from_rt(adapter_context) != Some(false) {
+    if !target_explicitly_has_no_visual_support(adapter_context) {
         return payload;
     }
     let Some(root) = payload.as_object() else {
