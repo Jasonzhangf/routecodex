@@ -4,7 +4,7 @@ import {
   buildChatNodeResultObservationWithNative,
   applyChatProcessedRequestWithNative,
   buildChatNodeResultMetadataWithNative
-} from '../../../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
+} from '../../../native/router-hotpath/native-chat-process-node-result-semantics.js';
 
 export interface HubProcessNodeResult {
   success: boolean;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
-import { bootstrapVirtualRouterConfig } from '../../dist/router/virtual-router/bootstrap.js';
-import { VirtualRouterError } from '../../dist/router/virtual-router/types.js';
+import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { VirtualRouterError } from '../../dist/native/router-hotpath/virtual-router-contracts.js';
 
 function createRequest(content, model) {
   return {

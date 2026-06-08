@@ -1,6 +1,6 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
   it('should show provider registry state when glm.kimi-k2.5 fails', async () => {
@@ -38,7 +38,8 @@ describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
     // 检查 providerRegistry
     const providerKeys = engine['providerRegistry'].listProviderKeys('glm');

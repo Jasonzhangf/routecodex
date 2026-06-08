@@ -9,7 +9,7 @@ import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 import {
   detectProviderResponseShapeWithNative,
   readFollowupClientInjectSourceWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;

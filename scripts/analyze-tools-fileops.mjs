@@ -8,7 +8,7 @@
  *   node scripts/analyze-tools-fileops.mjs [baseDir] [outDir]
  * Defaults:
  *   baseDir = ~/.routecodex/codex-samples
- *   outDir  = ./reports
+ *   outDir  = ./docs/reports
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -16,7 +16,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const baseDir = process.argv[2] || path.join(os.homedir(), '.routecodex', 'codex-samples');
-const outDir = process.argv[3] || path.join(process.cwd(), 'reports');
+const outDir = process.argv[3] || path.join(process.cwd(), 'docs', 'reports');
 
 function isJson(f){ return f.toLowerCase().endsWith('.json'); }
 function readJson(f){ try { return JSON.parse(fs.readFileSync(f,'utf-8')); } catch { return null; } }

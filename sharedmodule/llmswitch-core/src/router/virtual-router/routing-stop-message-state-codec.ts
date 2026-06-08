@@ -2,7 +2,7 @@ import type { RoutingInstructionState } from './routing-instructions.js';
 import {
   deserializeStopMessageStateWithNative,
   serializeStopMessageStateWithNative
-} from './engine-selection/native-virtual-router-stop-message-state-semantics.js';
+} from '../../native/router-hotpath/native-virtual-router-stop-message-state-semantics.js';
 
 export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 

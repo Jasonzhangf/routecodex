@@ -4,10 +4,10 @@ import type { ProtocolPipelineContext } from '../../hooks/protocol-hooks.js';
 import { buildAdapterContextFromPipeline } from '../../hooks/adapter-context.js';
 import { runStandardChatRequestFilters } from '../../../index.js';
 import { buildAnthropicFromOpenAIChat } from '../../../codecs/anthropic-openai-codec.js';
-import { buildOpenAIChatFromAnthropicWithNative } from '../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
-import { chatEnvelopeToStandardizedWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
-import { parseReqInboundFormatEnvelopeWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
-import { mapOpenaiChatToChatWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
+import { buildOpenAIChatFromAnthropicWithNative } from '../../../../native/router-hotpath/native-compat-action-semantics.js';
+import { chatEnvelopeToStandardizedWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { parseReqInboundFormatEnvelopeWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-edge-stage-semantics.js';
+import { mapOpenaiChatToChatWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
 import {
   canonicalizeOpenAIChatResponse,
   convertStandardizedToOpenAIChat as convertCanonicalToOpenAIChat,

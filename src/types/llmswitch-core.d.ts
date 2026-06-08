@@ -1,4 +1,4 @@
-declare module 'rcc-llmswitch-core/dist/router/virtual-router/provider-runtime-ingress.js' {
+declare module 'rcc-llmswitch-core/dist/native/router-hotpath/native-provider-runtime-ingress.js' {
   export interface ProviderErrorEvent {
     code: string;
     message: string;
@@ -46,37 +46,10 @@ declare module 'rcc-llmswitch-core/dist/router/virtual-router/provider-runtime-i
   }
   export function reportProviderErrorToRouterPolicy(event: ProviderErrorEvent): ProviderErrorEvent;
   export function reportProviderSuccessToRouterPolicy(event: ProviderSuccessEvent): ProviderSuccessEvent;
-  export function setVirtualRouterPolicyRuntimeRouterHooks(
-    owner: unknown,
-    hooks?: {
-      handleProviderError?: (event: ProviderErrorEvent) => void;
-      handleProviderSuccess?: (event: ProviderSuccessEvent) => void;
-    }
-  ): void;
-  export function setProviderRuntimeQuotaHooks(
-    owner: unknown,
-    hooks?: {
-      onProviderError?: (event: ProviderErrorEvent) => void;
-      onProviderSuccess?: (event: ProviderSuccessEvent) => void;
-    }
-  ): void;
-  export function setProviderRuntimeProviderQuotaHooks(
-    owner: unknown,
-    hooks?: {
-      onProviderError?: (event: ProviderErrorEvent) => void;
-    }
-  ): void;
-  export function setProviderRuntimeObserverHooks(
-    owner: unknown,
-    hooks?: {
-      onProviderErrorReported?: (event: ProviderErrorEvent) => void;
-      onProviderSuccessReported?: (event: ProviderSuccessEvent) => void;
-    }
-  ): void;
   export function resetProviderRuntimeIngressForTests(): void;
 }
 
-declare module 'rcc-llmswitch-core/dist/router/virtual-router/types.js' {
+declare module 'rcc-llmswitch-core/dist/native/router-hotpath/virtual-router-contracts.js' {
   export interface ProviderErrorRuntimeMetadata {
     requestId: string;
     providerKey?: string;

@@ -1,4 +1,4 @@
-import { normalizeArgsBySchemaWithNative, normalizeToolsWithNative } from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { normalizeArgsBySchemaWithNative, normalizeToolsWithNative } from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 // Shared tool + argument mapping helpers (schema-driven)
 

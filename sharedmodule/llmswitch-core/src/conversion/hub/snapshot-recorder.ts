@@ -1,7 +1,7 @@
 import type { StageRecorder } from './format-adapters/index.js';
 import type { AdapterContext } from './types/chat-envelope.js';
 import { createSnapshotWriter, type SnapshotWriter } from '../snapshot-utils.js';
-import { normalizeSnapshotStagePayloadWithNative } from '../../router/virtual-router/engine-selection/native-snapshot-hooks.js';
+import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';
 
 export interface SnapshotStageRecorderOptions {
   context: AdapterContext;

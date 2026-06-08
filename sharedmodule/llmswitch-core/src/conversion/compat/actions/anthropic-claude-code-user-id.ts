@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../../hub/types/chat-envelope.js';
 import type { JsonObject } from '../../hub/types/json.js';
 import { buildNativeReqOutboundCompatAdapterContext } from '../../hub/pipeline/compat/native-adapter-context.js';
-import { applyAnthropicClaudeCodeUserIdWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { applyAnthropicClaudeCodeUserIdWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 const PROFILE = 'chat:claude-code';
 const DEFAULT_PROVIDER_PROTOCOL = 'anthropic-messages';

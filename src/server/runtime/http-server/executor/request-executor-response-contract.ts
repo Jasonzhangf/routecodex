@@ -11,7 +11,7 @@ let cachedNativeSemanticsPromise: Promise<NativeChatProcessNodeResultSemanticsMo
 async function getNativeSemantics(): Promise<NativeChatProcessNodeResultSemanticsModule> {
   if (!cachedNativeSemanticsPromise) {
     cachedNativeSemanticsPromise = importCoreDist<NativeChatProcessNodeResultSemanticsModule>(
-      'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
+      'native/router-hotpath/native-chat-process-node-result-semantics'
     );
   }
   return cachedNativeSemanticsPromise;

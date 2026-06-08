@@ -12,9 +12,10 @@
 - Rust 路由真源
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs`
   - 负责 quota/health 参与后的最终 route selection，以及后续“路由不能空”不变量。
-- Rust quota host ingress/bridge
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`
-  - 负责 runtime 侧 quota host mutate / snapshot 桥。
+- Rust provider runtime ingress/bridge
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs`
+  - 负责 runtime 侧 provider error/success 进入 Rust router policy。
 - Host 管理模块唯一控制面
   - `src/manager/modules/quota/quota-manager.ts`
   - 负责 store hydrate/persist、manager lifecycle、对外暴露唯一 `getControlSurface()`

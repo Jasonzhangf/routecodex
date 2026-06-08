@@ -5,7 +5,7 @@ import {
   prepareResponsesConversationEntryWithNative,
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import type { AnyRecord, ConversationEntry } from './responses-conversation-store-types.js';
 
 export function assertResponsesConversationStoreNativeAvailable(): void {

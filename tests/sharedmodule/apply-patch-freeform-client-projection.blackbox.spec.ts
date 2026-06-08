@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeResponsesToolCallArgumentsForClientWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { normalizeResponsesToolCallArgumentsForClientWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 const PATCH = '*** Begin Patch\n*** Add File: tmp/apft/01-hello.txt\n+hello from apply_patch\n*** End Patch';
 

@@ -1,16 +1,23 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
+import { jest } from '@jest/globals';
+import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+
+const events: ProviderErrorEvent[] = [];
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js', () => ({
+  report_internal_error_err_02_host_to_router_policy: (source: ProviderErrorEvent) => {
+    events.push(source);
+    return source;
+  },
+}));
+
+const {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js';
-import {
-  resetProviderRuntimeIngressForTests,
-  setProviderRuntimeObserverHooks
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
-import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+} = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
 
 describe('routing state store observability', () => {
   const prevHome = process.env.RCC_HOME;
@@ -19,8 +26,6 @@ describe('routing state store observability', () => {
   const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
 
   let tempRoot = '';
-  let events: ProviderErrorEvent[] = [];
-  let observerOwner: object | null = null;
 
   const state = {
     allowedProviders: new Set<string>(),
@@ -36,22 +41,11 @@ describe('routing state store observability', () => {
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;
     delete process.env.ROUTECODEX_SESSION_DIR;
-    events = [];
-    observerOwner = {};
-    resetProviderRuntimeIngressForTests();
-    setProviderRuntimeObserverHooks(observerOwner, {
-      onProviderErrorReported: (event) => {
-        events.push(event);
-      }
-    });
+    events.length = 0;
   });
 
   afterEach(() => {
-    if (observerOwner) {
-      setProviderRuntimeObserverHooks(observerOwner, undefined);
-    }
-    observerOwner = null;
-    resetProviderRuntimeIngressForTests();
+    events.length = 0;
     if (prevHome === undefined) delete process.env.RCC_HOME;
     else process.env.RCC_HOME = prevHome;
     if (prevUserDir === undefined) delete process.env.ROUTECODEX_USER_DIR;

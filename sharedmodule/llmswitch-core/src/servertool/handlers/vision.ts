@@ -9,7 +9,7 @@ import {
   visionBuildAnalysisPayloadWithNative,
   visionBuildPinnedMetadataWithNative,
   visionExtractOriginalUserPromptWithNative
-} from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 const FLOW_ID = 'vision_flow';
 const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { sanitizeProviderOutboundPayloadWithNative } from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 type JsonObject = Record<string, any>;
 

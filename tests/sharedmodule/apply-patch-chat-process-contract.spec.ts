@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
-import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
   const result = runHubPipelineLibWithNative({
@@ -64,7 +64,7 @@ function buildApplyPatchRequest(): StandardizedRequest {
 describe('apply_patch freeform chat-process contract', () => {
   it('keeps hub envelope standardization out of apply_patch argument rewriting', async () => {
     const { coerceStandardizedRequestFromPayloadWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-builders.js'
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js'
     );
     const inputPatch = '*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch\n';
     const output = coerceStandardizedRequestFromPayloadWithNative({

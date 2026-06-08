@@ -1,4 +1,4 @@
-import { ensureBridgeInstructionsWithNative } from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { ensureBridgeInstructionsWithNative } from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function ensureBridgeInstructions(payload: Record<string, unknown>): string | undefined {
   const normalized = ensureBridgeInstructionsWithNative(payload);

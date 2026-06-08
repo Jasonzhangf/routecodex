@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { bootstrapProvidersWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-virtual-router-bootstrap-providers.js';
+import { bootstrapProvidersWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.js';
 
 describe('virtual-router native provider auth bootstrap', () => {
   const prevAuthDir = process.env.RCC_AUTH_DIR;

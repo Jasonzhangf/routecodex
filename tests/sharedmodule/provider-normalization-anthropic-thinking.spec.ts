@@ -2,11 +2,30 @@ import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { normalizeProvider } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/provider-normalization.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import type { ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+
+function bootstrapProvider(providerId: string, provider: Record<string, unknown>, modelId: string): ProviderRuntimeProfile {
+  const result = bootstrapVirtualRouterConfig({
+    virtualrouter: {
+      providers: {
+        [providerId]: provider
+      },
+      routing: {
+        default: [`${providerId}.${modelId}`]
+      }
+    }
+  });
+  const runtime = Object.values(result.runtime)[0];
+  if (!runtime) {
+    throw new Error(`runtime entry missing for ${providerId}`);
+  }
+  return runtime;
+}
 
 describe('provider normalization anthropic thinking config', () => {
   it('reads array-style model thinking by model id instead of array index', () => {
-    const normalized = normalizeProvider('ali-coding-plan', {
+    const normalized = bootstrapProvider('ali-coding-plan', {
       id: 'ali-coding-plan',
       type: 'anthropic',
       baseURL: 'https://example.test/anthropic',
@@ -22,7 +41,7 @@ describe('provider normalization anthropic thinking config', () => {
           anthropicThinkingBudgets: { medium: 4096 }
         }
       ]
-    });
+    }, 'glm-5');
 
     expect(normalized.modelAnthropicThinking).toEqual({
       'glm-5': 'high',
@@ -44,7 +63,7 @@ describe('provider normalization anthropic thinking config', () => {
   it('normalizes the real ali-coding-plan provider config with model ids', () => {
     const configPath = path.join(process.cwd(), 'config', 'providers', 'ali-coding-plan.json');
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const normalized = normalizeProvider('ali-coding-plan', raw);
+    const normalized = bootstrapProvider('ali-coding-plan', raw, 'glm-5');
 
     expect(normalized.modelAnthropicThinking?.['glm-5']).toBe('high');
     expect(normalized.modelAnthropicThinking?.['glm-4.7']).toBe('high');

@@ -30,8 +30,6 @@ const mockBridgeModule = () => ({
   createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
   reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
   reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
-  setProviderRuntimeQuotaHooks: jest.fn(async () => {}),
-  setProviderRuntimeProviderQuotaHooks: jest.fn(async () => {}),
   bootstrapVirtualRouterConfig: jest.fn(),
   getHubPipelineCtor: jest.fn(),
   getHubPipelineCtorForImpl: jest.fn(),
@@ -40,6 +38,7 @@ const mockBridgeModule = () => ({
   buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
   injectMcpToolsForChatJson: jest.fn(async () => []),
   injectMcpToolsForResponsesJson: jest.fn(async () => []),
+  deriveFinishReasonNative: jest.fn(() => undefined),
   importCoreDist: jest.fn(async () => ({}))
 });
 

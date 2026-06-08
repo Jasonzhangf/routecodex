@@ -15,12 +15,12 @@ function isIgnoredByGit(p) {
   return out.status === 0;
 }
 
-function listRootEntries() {
+function listRootEntries({ includeIgnored = false } = {}) {
   const cwd = process.cwd();
   return fs
     .readdirSync(cwd, { withFileTypes: true })
     .filter((d) => d.name !== '.git')
-    .filter((d) => !isIgnoredByGit(d.name))
+    .filter((d) => includeIgnored || !isIgnoredByGit(d.name))
     .map((d) => d.name)
     .sort();
 }
@@ -67,51 +67,170 @@ function isForbiddenTrackedPath(p) {
 
 function checkRootLayout() {
   // Fixed top-level layout. Adding new root entries requires an explicit policy change.
- const allowed = new Set([
-   '.agents',
-   'eslint.config.js',
-   '.beads',
-   '.github',
-   '.gitattributes',
-   '.gitignore',
-   'AGENTS.md',
-   'HEARTBEAT.md',
-   'DELIVERY.md',
-   'README.md',
-   'MEMORY.md',
-   'config',
-   'configsamples',
-   'dist',
-   'docs',
-   'jest.config.js',
-   'memory',
-   'note.md',
-   'node_modules',
-   'package',
-   'package-lock.json',
-   'package.json',
-   'rcc',
-   'samples',
-   'scripts',
-   'sharedmodule',
-   'src',
-   'task.md',
-   'tests',
-   'tmp',
-   'tsconfig.jest.json',
-   'tsconfig.json',
-   'vendor',
-   'CACHE.md',
-   'botpy.log',
-   'clock.md',
-   'models',
- ]);
+  const sourceRoots = new Set([
+    '.agents',
+    '.beads',
+    '.github',
+    '.gitattributes',
+    '.gitignore',
+    'AGENTS.md',
+    'DELIVERY.md',
+    'HEARTBEAT.md',
+    'MEMORY.md',
+    'README.md',
+    'config',
+    'configsamples',
+    'docs',
+    'eslint.config.js',
+    'jest.config.js',
+    'memory',
+    'note.md',
+    'package-lock.json',
+    'package.json',
+    'samples',
+    'scripts',
+    'sharedmodule',
+    'src',
+    'task.md',
+    'tests',
+    'tsconfig.jest.json',
+    'tsconfig.json',
+    'vendor',
+    'webui',
+  ]);
+  const generatedRoots = new Set([
+    'artifacts',
+    'coverage',
+    'dist',
+    'logs',
+    'node_modules',
+    'tmp',
+    'test-results',
+  ]);
+  const localStateRoots = new Set([
+    '.agent-state',
+    '.cache',
+    '.local-index',
+    'CACHE.md',
+  ]);
+  const temporaryLegacyRoots = new Set([]);
+  const allowed = new Set([
+    ...sourceRoots,
+    ...generatedRoots,
+    ...localStateRoots,
+    ...temporaryLegacyRoots,
+  ]);
 
-  const rootEntries = listRootEntries();
+  const rootEntries = listRootEntries({ includeIgnored: true });
   const unexpected = rootEntries.filter((name) => !allowed.has(name));
   if (unexpected.length) {
     console.error('[repo-sanity] unexpected root entries (top-level is fixed):');
     for (const name of unexpected) console.error(`- ${name}`);
+    process.exit(2);
+  }
+}
+
+function listDirectoryChildren(rootName) {
+  if (!fs.existsSync(rootName)) return [];
+  const stat = fs.lstatSync(rootName);
+  if (!stat.isDirectory()) return [];
+  return fs
+    .readdirSync(rootName, { withFileTypes: true })
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function checkApprovedGeneratedSubroots() {
+  const scopedRoots = [
+    {
+      root: 'artifacts',
+      allowedChildren: new Set(['pack']),
+      message: 'artifacts/ may only contain approved generated subroot artifacts/pack',
+    },
+    {
+      root: '.cache',
+      allowedChildren: new Set(['model-cache']),
+      message: '.cache/ may only contain approved local cache subroot .cache/model-cache',
+    },
+  ];
+  const violations = [];
+  for (const scopedRoot of scopedRoots) {
+    for (const child of listDirectoryChildren(scopedRoot.root)) {
+      if (!scopedRoot.allowedChildren.has(child)) {
+        violations.push(`${scopedRoot.message}: ${scopedRoot.root}/${child}`);
+      }
+    }
+  }
+  if (violations.length) {
+    console.error('[repo-sanity] unexpected generated/local subroot detected:');
+    for (const violation of violations) console.error(`- ${violation}`);
+    process.exit(2);
+  }
+}
+
+function checkRootGeneratedResidue() {
+  const forbidden = [];
+  const rootEntries = listRootEntries({ includeIgnored: true });
+  for (const name of rootEntries) {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.tgz')) forbidden.push(name);
+    if (lower.endsWith('.log')) forbidden.push(name);
+    if (name === 'bin' || name === 'lib') forbidden.push(name);
+    if (name === '.install-pack') forbidden.push(name);
+    if (name === 'clock.md') forbidden.push(name);
+    if (name === 'entities.json') forbidden.push(name);
+    if (name === 'mempalace.yaml') forbidden.push(name);
+    if (name === 'hypatia') forbidden.push(name);
+    if (name === '.hypatia' || name === '.hypatia_data') forbidden.push(name);
+    if (name === '.codex-work' || name === '.drudge' || name === '.reasonix') forbidden.push(name);
+    if (name === 'models') forbidden.push(name);
+    if (name === 'package') forbidden.push(name);
+    if (name === 'rcc') forbidden.push(name);
+  }
+  if (forbidden.length) {
+    console.error('[repo-sanity] forbidden root generated/local/legacy residue detected:');
+    for (const name of Array.from(new Set(forbidden)).sort()) console.error(`- ${name}`);
+    process.exit(2);
+  }
+}
+
+function checkRootWriteSources() {
+  const checks = [
+    {
+      path: 'scripts/pack-mode.mjs',
+      forbidden: /spawnSync\('npm',\s*\['pack'\]\)/,
+      message: 'scripts/pack-mode.mjs must use --pack-destination under artifacts/pack',
+    },
+    {
+      path: 'scripts/pack-rcc.mjs',
+      forbidden: /path\.join\(PROJECT_ROOT,\s*tarballName\)/,
+      message: 'scripts/pack-rcc.mjs must read tarballs from artifacts/pack',
+    },
+    {
+      path: 'scripts/install-global.sh',
+      forbidden: /\$INSTALL_BUILD_ROOT\/\.install-pack/,
+      message: 'scripts/install-global.sh must not use root .install-pack for in-place builds',
+    },
+    {
+      path: 'scripts/tool-classification-report.ts',
+      forbidden: /path\.join\(process\.cwd\(\),\s*['"]reports['"]/,
+      message: 'scripts/tool-classification-report.ts must write reports under docs/reports',
+    },
+    {
+      path: 'scripts/analyze-tools-fileops.mjs',
+      forbidden: /path\.join\(process\.cwd\(\),\s*['"]reports['"]/,
+      message: 'scripts/analyze-tools-fileops.mjs must write reports under docs/reports',
+    },
+  ];
+  const hits = [];
+  for (const check of checks) {
+    if (!fs.existsSync(check.path)) continue;
+    const content = fs.readFileSync(check.path, 'utf8');
+    if (check.forbidden.test(content)) hits.push(check.message);
+  }
+  if (hits.length) {
+    console.error('[repo-sanity] forbidden root write source detected:');
+    for (const hit of hits) console.error(`- ${hit}`);
     process.exit(2);
   }
 }
@@ -230,6 +349,9 @@ if (forbidden.length) {
 }
 
 checkRootLayout();
+checkApprovedGeneratedSubroots();
+checkRootGeneratedResidue();
+checkRootWriteSources();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
 checkLlmswitchRustificationAudit();

@@ -61,9 +61,7 @@ export {
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,
-  reportProviderSuccessToRouterPolicy,
-  setProviderRuntimeQuotaHooks,
-  setProviderRuntimeProviderQuotaHooks
+  reportProviderSuccessToRouterPolicy
 } from './bridge/runtime-integrations.js';
 export {
   loadRoutingInstructionStateSync,

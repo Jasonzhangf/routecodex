@@ -4,7 +4,7 @@ import {
   planStopMessagePersistedLookupWithNative,
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
-} from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import type { RoutingInstructionState } from '../../../router/virtual-router/routing-instructions.js';
 import {
   saveRoutingInstructionStateSync

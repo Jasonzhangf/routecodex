@@ -8,7 +8,7 @@ import type {
   RoutingDiagnostics,
   TargetMetadata,
   VirtualRouterHealthStore,
-} from "../../../router/virtual-router/types.js";
+} from "../../../native/router-hotpath/virtual-router-contracts.js";
 import { type HubProcessNodeResult } from "../process/chat-process-node-result.js";
 import {
   type HubPolicyConfig,

@@ -1,5 +1,5 @@
-import { VirtualRouterError, VirtualRouterErrorCode } from './types.js';
-import type { ProviderProfile, TargetMetadata, ModelCapability } from './types.js';
+import { VirtualRouterError, VirtualRouterErrorCode } from '../../native/router-hotpath/virtual-router-contracts.js';
+import type { ProviderProfile, TargetMetadata, ModelCapability } from '../../native/router-hotpath/virtual-router-contracts.js';
 
 const NON_BLOCKING_WARN_THROTTLE_MS = 60_000;
 const nonBlockingWarnByStage = new Map<string, number>();

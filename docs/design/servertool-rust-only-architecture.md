@@ -556,8 +556,8 @@ servertool 的真正骨架层：
 
 可临时保留：
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-loader.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
 - 少量 transport bridge helper
 
 ### 迁移后 Host 壳层目标
@@ -1527,7 +1527,7 @@ resolveStopMessageSessionScope
 
 在：
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 
 新增：
 
@@ -1573,8 +1573,8 @@ resolveStopMessageSessionScope
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 2. TS bridge：
-   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
-   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+   - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+   - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 3. stop-message runtime 壳层：
    - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
 4. stop-message 主链：

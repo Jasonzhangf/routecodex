@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 
 describe('bootstrapVirtualRouterConfig tabglm defaults', () => {
   it('does not infer anthropic:claude-code without explicit compatibilityProfile', () => {

@@ -5,14 +5,14 @@ import { buildNativeReqOutboundCompatAdapterContext } from '../../hub/pipeline/c
 import type {
   NativeReqOutboundCompatAdapterContextInput,
   NativeRespInboundStage3CompatInput
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { runRespInboundStage3CompatWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
+import { runRespInboundStage3CompatWithNative } from '../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import {
   isNativeDisabledByEnv,
   makeNativeRequiredError
-} from '../../../router/virtual-router/engine-selection/native-router-hotpath-policy.js';
-import { report_internal_error_err_02_host_to_router_policy } from '../../../router/virtual-router/provider-runtime-ingress.js';
-import type { ProviderErrorEvent } from '../../../router/virtual-router/types.js';
+} from '../../../native/router-hotpath/native-router-hotpath-policy.js';
+import { report_internal_error_err_02_host_to_router_policy } from '../../../native/router-hotpath/native-provider-runtime-ingress.js';
+import type { ProviderErrorEvent } from '../../../native/router-hotpath/virtual-router-contracts.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekToolProtocol = 'native' | 'text';

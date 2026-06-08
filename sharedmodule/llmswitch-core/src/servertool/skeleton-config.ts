@@ -1,5 +1,5 @@
 import type { ServerToolHandler } from './types.js';
-import { getDefaultServertoolSkeletonDocumentWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { getDefaultServertoolSkeletonDocumentWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import type {
   ServertoolTriggerMode,
   ServertoolAutoHookPhase,
@@ -11,7 +11,7 @@ import type {
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
-} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
+} from '../native/router-hotpath/native-followup-mainline-semantics.js';
 export type {
   ServertoolTriggerMode,
   ServertoolAutoHookPhase,
@@ -23,7 +23,7 @@ export type {
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
-} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
+} from '../native/router-hotpath/native-followup-mainline-semantics.js';
 
 // Types moved to native-followup-mainline-semantics.ts
 

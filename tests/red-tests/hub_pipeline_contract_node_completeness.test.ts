@@ -2,7 +2,7 @@ import {
   describeHubPipelineContractsWithNative,
   describeVirtualRouterContractsWithNative,
   describePipelineContractWithNative,
-} from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-vr-node-contracts.js';
+} from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-vr-node-contracts.js';
 
 const HUB_NODES: Array<{ nodeId: string; ownerBuilder: string }> = [
   { nodeId: 'HubReqInbound02Standardized', ownerBuilder: 'build_hub_req_inbound_02_from_payload' },

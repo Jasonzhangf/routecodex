@@ -1,5 +1,5 @@
 import { RoutingClassifier } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/classifier.js';
-import type { RoutingFeatures, RouterMetadataInput } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+import type { RoutingFeatures, RouterMetadataInput } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 function buildMetadata(overrides?: Partial<RouterMetadataInput>): RouterMetadataInput {
   return {

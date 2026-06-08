@@ -10,6 +10,7 @@ config/llmswitch/
 *.tgz
 *.pid
 .secrets.baseline
+artifacts/pack/
 
 # Local debug payloads
 /payloads/
@@ -69,9 +70,6 @@ memory/
 # Local development files
 CACHE.md
 botpy.log
-clock.md
-models/
-/.drudge/
 /*.backup
 /*.backup2
 /*.backup3
@@ -79,22 +77,21 @@ models/
 **/*.backup2
 **/*.backup3
 sharedmodule/llmswitch-core/CACHE.md
+sharedmodule/llmswitch-core/note.md
+sharedmodule/llmswitch-core/rust-core/note.md
 vendor/llmswitch-core/
 
 # Local agent/tooling state (never commit)
-.reasonix/
+.agent-state/
+.local-index/
+.cache/
 
 # Local agent skills (local only)
 .agents/
 sharedmodule/llmswitch-core/router_hotpath_napi.node
 sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/text_guidance_web.rs
-# mempalace local artifacts
+# mempalace/hypatia local artifacts now live under .local-index/
 .mempalace/
-entities.json
-mempalace.yaml
-.hypatia/
-.hypatia_data/
-/hypatia
 # Rust build artifacts (cargo target/)
 target/
 sharedmodule/llmswitch-core/rust-core/target/

@@ -3,9 +3,9 @@ import type { ConversionContext } from '../../../../types.js';
 import type { CanonicalChatRequest } from '../../../schema/index.js';
 import type { ProtocolPipelineContext } from '../../../hooks/protocol-hooks.js';
 import { buildAdapterContextFromPipeline } from '../../../hooks/adapter-context.js';
-import { standardizedToChatEnvelopeWithNative } from '../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { mapOpenaiChatFromChatWithNative } from '../../../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
-import { runOpenAIResponseCodecWithNative } from '../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { standardizedToChatEnvelopeWithNative } from '../../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
+import { mapOpenaiChatFromChatWithNative } from '../../../../../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
+import { runOpenAIResponseCodecWithNative } from '../../../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export const DEFAULT_OPENAI_ENDPOINT = '/v1/chat/completions';
 export const OPENAI_PROTOCOL = 'openai-chat';

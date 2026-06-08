@@ -1,6 +1,6 @@
 // Resolve payload budget (bytes) for a given model from native routing semantics.
 
-import { resolveBudgetForModelWithNative } from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { resolveBudgetForModelWithNative } from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function resolveBudgetForModelSync(modelId: string): { maxBytes: number; safetyRatio: number; allowedBytes: number; source: string } {
   return resolveBudgetForModelWithNative(modelId, null);

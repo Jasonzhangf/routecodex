@@ -3,7 +3,7 @@ import { buildServertoolAutoHookQueueConfig } from './skeleton-config.js';
 import {
   planServertoolAutoHookQueuesWithNative,
   runServertoolOrchestrationMutationWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import type { ToolCall } from './types.js';
 
 function normalizeServerToolCallName(name: string): string {

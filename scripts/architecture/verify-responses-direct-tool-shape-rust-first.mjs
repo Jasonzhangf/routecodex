@@ -7,7 +7,7 @@ const failures = [];
 const directPath = path.join(root, 'src/server/runtime/http-server/direct-passthrough-payload.ts');
 const providerPath = path.join(root, 'src/providers/core/runtime/responses-provider.ts');
 const bridgePath = path.join(root, 'src/modules/llmswitch/bridge/native-exports.ts');
-const nativeTsPath = path.join(root, 'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.ts');
+const nativeTsPath = path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts');
 const rustPath = path.join(root, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 
 for (const abs of [directPath, providerPath, bridgePath, nativeTsPath, rustPath]) {

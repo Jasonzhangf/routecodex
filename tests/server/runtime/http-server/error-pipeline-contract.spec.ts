@@ -48,7 +48,7 @@ describe('Error Pipeline contract', () => {
     const owners = [
       ['src/providers/core/utils/provider-error-reporter.ts', 'capture_error_err_02_host_from_error_err_01_source'],
       ['src/providers/core/runtime/provider-failure-policy-impl.ts', 'classify_error_err_03_runtime_from_error_err_02_host'],
-      ['sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts', 'apply_error_err_04_router_policy_from_error_err_03_runtime'],
+      ['sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts', 'apply_error_err_04_router_policy_from_error_err_03_runtime'],
       ['src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts', 'consume_error_err_05_execution_decision_from_error_err_04_router_policy'],
       ['src/server/utils/http-error-mapper.ts', 'project_error_err_06_client_from_error_err_05_execution_decision'],
     ] as const;
@@ -77,14 +77,14 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('throw error;');
   });
 
-  it('router-direct live path does not classify or retry provider errors locally', () => {
+  it('router-direct live path delegates provider errors to the unified ErrorErr05 execution plan', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('router-direct.send.error');
-    expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
-    expect(source).not.toContain('providerFailurePlan.retryExecutionPlan');
-    expect(source).not.toContain("reason: 'router-direct-provider-failure-standard-retry'");
-    expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
+    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).toContain('providerFailurePlan.retryExecutionPlan');
+    expect(source).toContain("reason: 'router-direct-provider-failure-standard-retry'");
+    expect(source).toContain('__routecodexProviderFailureAttemptOffset');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
     expect(source).not.toContain('__routerDirectRecoverable');
   });
@@ -100,7 +100,7 @@ describe('Error Pipeline contract', () => {
   it('manual reportProviderErrorToRouterPolicy event construction stays in bridge/capture modules only', () => {
     const offenders = matches(/reportProviderErrorToRouterPolicy\s*\(\s*\{/).filter((entry) => {
       return !entry.startsWith('src/providers/core/utils/provider-error-reporter.ts:')
-        && !entry.startsWith('sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts:')
+        && !entry.startsWith('sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts:')
         && !entry.includes('/tests/');
     });
     expect(offenders).toEqual([]);

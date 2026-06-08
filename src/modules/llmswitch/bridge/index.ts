@@ -29,9 +29,7 @@ export {
   createResponsesSseToJsonConverter,
   createResponsesJsonToSseConverter,
   reportProviderErrorToRouterPolicy,
-  reportProviderSuccessToRouterPolicy,
-  setProviderRuntimeQuotaHooks,
-  setProviderRuntimeProviderQuotaHooks
+  reportProviderSuccessToRouterPolicy
 } from './runtime-integrations.js';
 export {
   loadRoutingInstructionStateSync,

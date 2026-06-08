@@ -8,10 +8,10 @@ import type {
 import type { JsonObject } from './types/json.js';
 import {
   chatEnvelopeToStandardizedWithNative
-} from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+} from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import {
   standardizedToChatEnvelopeWithNative
-} from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+} from '../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 
 export interface ChatToStandardizedOptions {
   adapterContext: AdapterContext;

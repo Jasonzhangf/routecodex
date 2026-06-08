@@ -1,4 +1,4 @@
-import { executeHubPipelineWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { executeHubPipelineWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 export type NativeResponseProtocol = 'openai-chat' | 'anthropic-messages' | 'gemini-chat';
 

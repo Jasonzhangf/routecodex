@@ -73,9 +73,9 @@ CRS upstream 可能返回：
    - 为 `BridgeInputToChatInput` 增加受控 continuation 标志。
 2. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs`
    - 在 pending tool_call 终态校验处分支处理 continuation 场景。
-3. `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics-types.ts`
+3. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts`
    - 同步 TS native binding 类型。
-4. `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics-tools-core.ts`
+4. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-tools-core.ts`
    - 透传新标志到 native。
 5. `sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts`
    - 仅增加受控选项，不改变默认校验语义。

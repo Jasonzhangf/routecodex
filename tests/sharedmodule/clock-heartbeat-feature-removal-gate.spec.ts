@@ -23,9 +23,9 @@ const REMOVED_PATHS = [
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_heartbeat_directives.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/clock_runtime.rs',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.ts',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.js',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-clock-reminder-semantics.d.ts',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-clock-reminder-semantics.ts',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-clock-reminder-semantics.js',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-clock-reminder-semantics.d.ts',
   'tests/servertool/servertool-clock.spec.ts',
 ];
 
@@ -106,7 +106,7 @@ describe('clock heartbeat feature removal gate', () => {
     const forbiddenFiles = [
       'src/server/runtime/http-server/tmux-injection-runtime-config.ts',
       'src/server/runtime/http-server/tmux-injection-history.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.d.ts',
       'sharedmodule/llmswitch-core/src/servertool/handlers/clock-pure-blocks.d.ts',
     ];
     const survivors = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));

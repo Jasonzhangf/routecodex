@@ -5,8 +5,8 @@ import { buildNativeReqOutboundCompatAdapterContext } from '../../hub/pipeline/c
 import type {
   NativeReqOutboundCompatAdapterContextInput,
   NativeReqOutboundStage3CompatInput
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { runReqOutboundStage3CompatWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
+import { runReqOutboundStage3CompatWithNative } from '../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 
 const PROFILE = 'chat:claude-code';
 const DEFAULT_PROVIDER_PROTOCOL = 'anthropic-messages';

@@ -26,7 +26,7 @@ const TEST_SESSION_IDS = [
   'sess-stopmessage-explicit-override-runtime'
 ];
 
-type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js');
+type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
 type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
 type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
@@ -76,7 +76,7 @@ describe('stopMessage is tmux-scoped', () => {
       fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
     }
 
-    const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js');
+    const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
     const engineMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
     const stickyMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-state-store.js');
     const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');

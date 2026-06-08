@@ -1,7 +1,7 @@
-import type { RouterMetadataInput } from '../../types.js';
+import type { RouterMetadataInput } from '../../../../native/router-hotpath/virtual-router-contracts.js';
 import type { RoutingInstructionState } from '../../routing-instructions.js';
 import { mergeStopMessageFromPersisted } from '../../stop-message-state-sync.js';
-import { report_internal_error_err_02_host_to_router_policy } from '../../provider-runtime-ingress.js';
+import { report_internal_error_err_02_host_to_router_policy } from '../../../../native/router-hotpath/native-provider-runtime-ingress.js';
 
 export type RoutingInstructionStateStoreLike = {
   loadSync: (key: string) => RoutingInstructionState | null;

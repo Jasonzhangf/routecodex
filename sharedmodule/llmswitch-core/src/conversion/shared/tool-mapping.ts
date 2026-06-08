@@ -6,7 +6,7 @@ import {
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 // Placeholder for strict tool/arguments mapping shared helper.
 // Phase 2 will move normalization & schema-aware shaping here.

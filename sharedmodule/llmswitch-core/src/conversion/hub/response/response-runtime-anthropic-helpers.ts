@@ -2,7 +2,7 @@ import {
   applyReasoningPayloadToMessageWithNative,
   normalizeMessageReasoningPayloadWithNative,
   resolveAnthropicToolNameWithNative
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 export type ToolAliasMap = Record<string, string>;
 

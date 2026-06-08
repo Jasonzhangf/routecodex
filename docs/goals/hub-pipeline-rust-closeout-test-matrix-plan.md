@@ -32,7 +32,7 @@
 ### In Scope
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/**`
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`
-- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-*.ts`
+- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-*.ts`
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/**`
 - `/Users/fanzhang/Documents/github/routecodex/tests/sharedmodule/**`
 - hub rust residue 审计文档与 gate

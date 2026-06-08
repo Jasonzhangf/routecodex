@@ -22,7 +22,7 @@ import {
   webSearchBuildSystemPromptWithNative,
   webSearchFindArrayWithNative,
   buildServertoolToolOutputPayloadWithNative,
-} from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 interface WebSearchEngineConfig {
   id: string;

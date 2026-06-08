@@ -140,7 +140,7 @@ describe('hub pipeline stage residue audit', () => {
         if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
           continue;
         }
-        if (relativePath === 'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-lib.js') {
+        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-lib.js') {
           continue;
         }
         const source = fs.readFileSync(fullPath, 'utf8');
@@ -540,11 +540,11 @@ describe('hub pipeline stage residue audit', () => {
   it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
     const wrapperPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
     );
     const requiredExportsPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
     );
     const wrapperSource = fs.readFileSync(wrapperPath, 'utf8');
     const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
@@ -1585,9 +1585,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js.map',
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.d.ts',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.js',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.js.map',
-      'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-shared-conversion-semantics-tools.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js.map',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.d.ts',
     ];
     const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 

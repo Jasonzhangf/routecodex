@@ -82,7 +82,7 @@ owners:
       - shouldKeepProviderExcludedForNextAttempt
     allowed_paths:
       - src/providers/core/runtime
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/server/runtime/http-server/executor
     forbidden_paths:
       - src/client
@@ -108,11 +108,12 @@ owners:
       - apply_route_selection
       - build_vr_route_04_from_hub_req_chatprocess_03
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/router/virtual-router
       - src/providers/core/runtime
       - src/client
       - src/server/runtime/http-server/executor
@@ -122,6 +123,7 @@ owners:
       - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     required_gates:
+      - npm run verify:vr-no-ts-runtime
       - npm run verify:llmswitch-rustification-audit
       - npm run verify:repo-sanity
     migration_target: rust
@@ -167,9 +169,10 @@ owners:
       - collect_recoverable_cooldown_for_key
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
-      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - docs
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/router/virtual-router
       - src/server/runtime/http-server/daemon-admin
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
@@ -179,6 +182,7 @@ owners:
       - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
     required_gates:
+      - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-ci
       - npm run verify:llmswitch-rustification-audit
     migration_target: rust
@@ -333,7 +337,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -361,7 +365,7 @@ owners:
       - normalize_responses_function_tools
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -387,7 +391,7 @@ owners:
       - normalize_responses_tool_parameters
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -412,7 +416,7 @@ owners:
       - apply_responses_instructions_to_input
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -437,7 +441,7 @@ owners:
       - apply_responses_token_limit_field_normalization
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -462,7 +466,7 @@ owners:
       - apply_responses_c4m_request_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -489,7 +493,7 @@ owners:
       - apply_responses_crs_request_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime

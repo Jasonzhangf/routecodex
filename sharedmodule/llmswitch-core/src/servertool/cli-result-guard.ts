@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { validateClientExecCommandResultWithNative } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+import { validateClientExecCommandResultWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 const ROUTECODEX_STOP_MESSAGE_AUTO_CLI = 'routecodex servertool run stop_message_auto';
 const MAX_SCAN_DEPTH = 10;

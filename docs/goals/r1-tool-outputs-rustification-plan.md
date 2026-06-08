@@ -5,7 +5,7 @@
 
 ## 范围
 - TS: `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.ts`
-- Native bridge: `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-*.ts`
+- Native bridge: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-*.ts`
 - Rust: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/*`
 
 ## 迁移策略

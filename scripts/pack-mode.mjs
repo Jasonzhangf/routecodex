@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { ensureRepoPackOutputDir } from './lib/repo-output-paths.mjs';
 
 function parseArgs(argv) {
   const out = {};
@@ -204,7 +205,11 @@ try {
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));
 
   // pack
-  const r = spawnSync('npm', ['pack'], { stdio: 'inherit' });
+  const packDestination = ensureRepoPackOutputDir(projectRoot);
+  const r = spawnSync('npm', ['pack', '--pack-destination', packDestination], {
+    stdio: 'inherit',
+    cwd: projectRoot,
+  });
   if (r.status !== 0) {
     throw new Error('npm pack failed');
   }

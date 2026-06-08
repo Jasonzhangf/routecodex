@@ -1464,6 +1464,11 @@ pub fn bootstrap_virtual_router_routing_json_bridge(
     )
 }
 
+#[napi(js_name = "bootstrapVirtualRouterConfigJson")]
+pub fn bootstrap_virtual_router_config_json_bridge(input_json: String) -> NapiResult<String> {
+    virtual_router_engine::bootstrap::bootstrap_virtual_router_config_json(input_json)
+}
+
 #[napi(js_name = "bootstrapVirtualRouterProvidersJson")]
 pub fn bootstrap_virtual_router_providers_json_bridge(
     providers_json: String,
@@ -1497,6 +1502,28 @@ pub fn bootstrap_virtual_router_config_meta_json_bridge(
         section_json,
         routing_source_json,
     )
+}
+
+#[napi(js_name = "reportProviderErrorToRouterPolicyJson")]
+pub fn report_provider_error_to_router_policy_json_bridge(event_json: String) -> NapiResult<String> {
+    let event_value: Value = serde_json::from_str(&event_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let normalized = virtual_router_engine::provider_runtime_ingress::report_provider_error(&event_value);
+    serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "reportProviderSuccessToRouterPolicyJson")]
+pub fn report_provider_success_to_router_policy_json_bridge(event_json: String) -> NapiResult<String> {
+    let event_value: Value = serde_json::from_str(&event_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let normalized = virtual_router_engine::provider_runtime_ingress::report_provider_success(&event_value);
+    serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "resetProviderRuntimeIngressForTestsJson")]
+pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<String> {
+    virtual_router_engine::provider_runtime_ingress::reset_for_tests();
+    Ok("true".to_string())
 }
 
 mod hub_req_inbound_unified_fastpath;

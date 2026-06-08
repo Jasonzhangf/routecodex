@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { applyResponseBlacklistWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { applyResponseBlacklistWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export interface ResponseBlacklistConfig {
   paths?: string[];

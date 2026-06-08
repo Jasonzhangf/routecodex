@@ -1,6 +1,6 @@
 import { convertBridgeInputToChatMessages } from '../../bridge-message-utils.js';
-import { stripChatProcessHistoricalImages } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
-import { liftResponsesResumeIntoSemanticsWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js';
+import { stripChatProcessHistoricalImages } from '../../../native/router-hotpath/native-router-hotpath.js';
+import { liftResponsesResumeIntoSemanticsWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js';
 import {
   materializeLatestResponsesContinuationByScope,
   resumeLatestResponsesContinuationByScope

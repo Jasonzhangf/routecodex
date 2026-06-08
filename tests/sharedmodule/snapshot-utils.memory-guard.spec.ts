@@ -4,7 +4,7 @@ const writeSnapshotViaHooksWithNativeMock = jest.fn();
 const shouldRecordSnapshotsWithNativeMock = jest.fn(() => true);
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-snapshot-hooks.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.js',
   () => ({
     shouldRecordSnapshotsWithNative: shouldRecordSnapshotsWithNativeMock,
     writeSnapshotViaHooksWithNative: writeSnapshotViaHooksWithNativeMock

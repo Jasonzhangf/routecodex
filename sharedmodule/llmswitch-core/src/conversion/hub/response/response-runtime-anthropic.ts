@@ -1,9 +1,9 @@
 import type { JsonObject } from '../types/json.js';
 import {
   buildAnthropicResponseFromChatFullWithNative
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
-import { buildChatResponseFromResponsesWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
-import { buildOpenAIChatResponseFromAnthropicMessageWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { buildChatResponseFromResponsesWithNative } from '../../../native/router-hotpath/native-shared-conversion-semantics.js';
+import { buildOpenAIChatResponseFromAnthropicMessageWithNative } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   registerResponsesReasoning,
   consumeResponsesReasoning,

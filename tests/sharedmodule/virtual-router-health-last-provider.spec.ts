@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 function buildConfig(targets: string[]): any {
   const providers = Object.fromEntries(

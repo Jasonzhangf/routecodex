@@ -5,7 +5,7 @@ describe('native router heavy-input fastpath wrapper', () => {
     jest.resetModules();
 
     jest.unstable_mockModule(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-loader.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
       () => ({
         loadNativeRouterHotpathBinding: () => ({
           decideHeavyInputFastpathJson: () =>
@@ -20,7 +20,7 @@ describe('native router heavy-input fastpath wrapper', () => {
     );
 
     jest.unstable_mockModule(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-policy.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js',
       () => ({
         isNativeDisabledByEnv: () => false,
         makeNativeRequiredError: (_capability: string, reason?: string) =>
@@ -29,7 +29,7 @@ describe('native router heavy-input fastpath wrapper', () => {
     );
 
     const mod = await import(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.js'
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js'
     );
 
     expect(mod.decideHeavyInputFastpath({ messages: [] }, {})).toEqual({

@@ -1,6 +1,6 @@
 import type { StandardizedMessage } from '../../../conversion/hub/types/standardized.js';
 import type { RoutingInstruction } from './types.js';
-import { parseRoutingInstructionsWithNative } from '../engine-selection/native-virtual-router-routing-instructions-semantics.js';
+import { parseRoutingInstructionsWithNative } from '../../../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 function readLatestUserMessageText(messages: StandardizedMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {

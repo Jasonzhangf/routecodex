@@ -22,7 +22,7 @@ jest.unstable_mockModule(
           rebindResponsesConversationRequestId: mockRebindResponsesConversationRequestId
         };
       }
-      if (subpath === 'router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers') {
+      if (subpath === 'native/router-hotpath/native-hub-pipeline-semantic-mappers') {
         return {
           normalizeServertoolFollowupPayloadShapeWithNative: (_entryEndpoint: string, payload: Record<string, unknown>) => {
             const messages = Array.isArray(payload.messages) ? payload.messages as any[] : undefined;
@@ -67,7 +67,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js',
+  '../../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     getDefaultServertoolSkeletonDocumentWithNative: mockGetDefaultServertoolSkeletonDocumentWithNative,
     detectEmptyAssistantPayloadContractSignalWithNative: jest.fn(() => false),

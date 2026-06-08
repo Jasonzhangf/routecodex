@@ -30,8 +30,8 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-governance-blocks.ts:28` 当 `activeProcessMode === "passthrough"` 时返回 `undefined`，直接跳过 governance。
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-provider-payload.ts:164` 当 `activeProcessMode === "passthrough"` 时直接 `jsonClone(rawRequest)` 生成 `providerPayload`，跳过 outbound hooks/semantic mapper 主链。
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound.ts:102` 当 passthrough 且 entry/outbound 协议不一致时抛错，说明 passthrough 是实际路由执行分支。
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-passthrough.ts:115` 定义 `resolveActiveProcessModeWithNative()`。
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts:302` 仍要求 `resolveActiveProcessModeJson` native export。
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-passthrough.ts:115` 定义 `resolveActiveProcessModeWithNative()`。
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts:302` 仍要求 `resolveActiveProcessModeJson` native export。
 
 边界证据：
 - `src/server/runtime/http-server/router-direct-pipeline.ts` 是 server/router 层 same-protocol direct bypass；它不是 Hub Pipeline passthrough。

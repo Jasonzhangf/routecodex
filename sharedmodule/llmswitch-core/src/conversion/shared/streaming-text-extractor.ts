@@ -6,7 +6,7 @@ import {
   createStreamingToolExtractorStateWithNative,
   feedStreamingToolExtractorWithNative,
   resetStreamingToolExtractorStateWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 type NativeState = Record<string, unknown>;
 

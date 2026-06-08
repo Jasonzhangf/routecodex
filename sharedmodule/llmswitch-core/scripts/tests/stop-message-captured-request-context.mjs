@@ -47,7 +47,7 @@ async function main() {
   const originalAutoEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED;
   const originalAutoIflow = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
   const { HubPipeline, __unsafeBuildAdapterContextForTest } = await importModule('conversion/hub/pipeline/hub-pipeline.js');
-  const { bootstrapVirtualRouterConfig } = await importModule('router/virtual-router/bootstrap.js');
+  const { bootstrapVirtualRouterConfig } = await importModule('native/router-hotpath/native-virtual-router-bootstrap-config.js');
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
   const { saveRoutingInstructionStateSync } = await importModule('router/virtual-router/routing-state-store.js');
 

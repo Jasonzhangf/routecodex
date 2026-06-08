@@ -8,7 +8,7 @@
  *
  * Defaults:
  *   samplesRoot = ~/.routecodex/codex-samples
- *   outputFile  = ./reports/tool-classification-report.md
+ *   outputFile  = ./docs/reports/tool-classification-report.md
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +42,7 @@ const EXAMPLE_LIMIT = 5;
 async function main(): Promise<void> {
   const [, , rootArg, outputArg] = process.argv;
   const sampleRoot = rootArg || path.join(os.homedir(), '.routecodex', 'codex-samples');
-  const outputFile = outputArg || path.join(process.cwd(), 'reports', 'tool-classification-report.md');
+  const outputFile = outputArg || path.join(process.cwd(), 'docs', 'reports', 'tool-classification-report.md');
 
   if (!fs.existsSync(sampleRoot)) {
     throw new Error(`Sample root not found: ${sampleRoot}`);

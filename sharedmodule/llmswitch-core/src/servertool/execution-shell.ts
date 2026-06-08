@@ -17,7 +17,7 @@ import type {
 import { executeVisionBackendPlan } from './handlers/vision.js';
 import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import { getServerToolHandler, listRegisteredServerToolHandlerRecords } from './registry.js';
-import { planServertoolNoopOutcomeWithNative, planServertoolOutcomeWithNative, planServertoolToolCallDispatchWithNative } from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolNoopOutcomeWithNative, planServertoolOutcomeWithNative, planServertoolToolCallDispatchWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runPreCommandHooks } from './pre-command-hooks.js';
 import {
   buildServertoolFollowupConfig,

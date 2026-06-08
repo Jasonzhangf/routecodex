@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 describe('provider outbound native sanitize namespace guard', () => {
   test('flattens namespace tool aggregate before provider transport', () => {

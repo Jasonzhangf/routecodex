@@ -1,5 +1,5 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { normalizeServertoolFollowupPayloadShapeWithNative } from '../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
+import { normalizeServertoolFollowupPayloadShapeWithNative } from '../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
 
 export type FollowupShapeViolation = {
   code: 'RESPONSES_FOLLOWUP_MESSAGES_ONLY';

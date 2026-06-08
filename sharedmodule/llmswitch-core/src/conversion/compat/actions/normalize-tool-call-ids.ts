@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { normalizeToolCallIdsWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { normalizeToolCallIdsWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export function normalizeToolCallIdsInPlace(root: JsonObject): void {
   const normalized = normalizeToolCallIdsWithNative(root as unknown as Record<string, unknown>);

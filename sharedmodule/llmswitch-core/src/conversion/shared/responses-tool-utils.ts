@@ -6,8 +6,8 @@ import {
   normalizeResponsesCallIdWithNative,
   resolveToolCallIdStyleWithNative,
   stripInternalToolingMetadataWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
-import { sanitizeResponsesFunctionNameWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
+import { sanitizeResponsesFunctionNameWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 export type ToolCallIdStyle = 'preserve' | 'fc';
 

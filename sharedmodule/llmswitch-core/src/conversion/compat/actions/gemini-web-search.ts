@@ -1,7 +1,7 @@
 import type { JsonObject } from '../../hub/types/json.js';
 import type { AdapterContext } from '../../hub/types/chat-envelope.js';
 import { buildNativeReqOutboundCompatAdapterContext } from '../../hub/pipeline/compat/native-adapter-context.js';
-import { applyGeminiWebSearchRequestCompatWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { applyGeminiWebSearchRequestCompatWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 const PROFILE = 'chat:gemini';
 const DEFAULT_PROVIDER_PROTOCOL = 'gemini-chat';

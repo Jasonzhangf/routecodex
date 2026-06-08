@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import { buildRouteCandidates } from '../../src/router/virtual-router/engine-selection/route-utils.js';
 import { ProviderRegistry } from '../../src/router/virtual-router/provider-registry.js';
-import type { RoutePoolTier, RoutingFeatures } from '../../src/router/virtual-router/types.js';
+import type { RoutePoolTier, RoutingFeatures } from '../../src/native/router-hotpath/virtual-router-contracts.js';
 
 describe('virtual-router web_search preview route priority', () => {
   test('prepends web_search route when web_search_preview tool is declared', () => {

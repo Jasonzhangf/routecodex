@@ -50,7 +50,7 @@ function createVirtualRouterBootstrapInput() {
 
 async function main() {
   const { HubPipeline } = await import('../../dist/conversion/hub/pipeline/hub-pipeline.js');
-  const { bootstrapVirtualRouterConfig } = await import('../../dist/router/virtual-router/bootstrap.js');
+  const { bootstrapVirtualRouterConfig } = await import('../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 
   const { config: virtualRouter } = bootstrapVirtualRouterConfig(createVirtualRouterBootstrapInput());
   const hubPipeline = new HubPipeline({ virtualRouter });

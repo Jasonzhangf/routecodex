@@ -128,7 +128,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 |------|------|
 | `rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs` | 移除错误的 `#[napi]` macro |
 | `rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/mod.rs` | 导出 `strip_function_namespace_json` |
-| `src/router/virtual-router/engine-selection/native-compat-action-semantics.ts` | 添加 `stripFunctionNamespaceWithNative` wrapper |
+| `src/native/router-hotpath/native-compat-action-semantics.ts` | 添加 `stripFunctionNamespaceWithNative` wrapper |
 | `src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/client-remap-protocol-switch.ts` | 导入 + 调用 Rust，删除本地 TS 实现（14 行） |
 
 ### 验证

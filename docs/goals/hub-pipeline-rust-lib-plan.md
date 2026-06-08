@@ -17,8 +17,8 @@ In scope：
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`
 - `sharedmodule/llmswitch-core/src/conversion/hub/process/**`
 - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/**`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub*.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat*.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub*.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat*.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/**`
 
 Out of scope：

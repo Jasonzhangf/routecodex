@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../../types/chat-envelope.js';
 import type { JsonObject } from '../../types/json.js';
-import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 
 export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext

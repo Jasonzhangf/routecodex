@@ -11,7 +11,7 @@ import {
   parseRccFenceDocumentWithNative,
   type RccDirective,
   type RccFenceDocument
-} from '../../router/virtual-router/engine-selection/native-rcc-fence-semantics.js';
+} from '../../native/router-hotpath/native-rcc-fence-semantics.js';
 import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
 
 type StoplessGoalStateSyncResult = {

@@ -1,4 +1,4 @@
-import { buildRouterMetadataInputWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-builders.js';
+import { buildRouterMetadataInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
 import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/keys.js';
 
 describe('hub pipeline router metadata builder', () => {

@@ -49,13 +49,13 @@ describe('Server module help contract (Phase Server-A)', () => {
   });
 
   it('required-exports allowlist includes new NAPI function names', () => {
-    const ex = readSrc('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts');
+    const ex = readSrc('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
     expect(ex).toContain('describeServerContractsJson');
     expect(ex).toContain('describeServerModuleHelpJson');
   });
 
   it('TS wrappers expose describeServerContractsWithNative and describeServerModuleHelpWithNative', () => {
-    const ts = readSrc('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-vr-node-contracts.ts');
+    const ts = readSrc('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts');
     expect(ts).toContain('describeServerContractsWithNative');
     expect(ts).toContain('describeServerModuleHelpWithNative');
   });

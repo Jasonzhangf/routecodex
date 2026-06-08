@@ -4,7 +4,7 @@ import { buildNativeReqOutboundCompatAdapterContext } from "../../hub/pipeline/c
 import {
   applyUniversalShapeRequestFilterWithNative,
   applyUniversalShapeResponseFilterWithNative,
-} from "../../../router/virtual-router/engine-selection/native-compat-action-semantics.js";
+} from "../../../native/router-hotpath/native-compat-action-semantics.js";
 
 type RequestMessagesRule = {
   when?: {

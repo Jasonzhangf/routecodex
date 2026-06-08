@@ -95,8 +95,6 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
       shouldRetry: false
     }),
     getNetworkErrorCodes: () => [],
-    setProviderRuntimeQuotaHooks: async () => true,
-    setProviderRuntimeProviderQuotaHooks: async () => true,
     bootstrapVirtualRouterConfig: async (input: unknown) => ({ config: input, targetRuntime: {} }),
     getHubPipelineCtor: async () =>
       class HubPipelineMock {

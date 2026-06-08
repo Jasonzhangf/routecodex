@@ -1,7 +1,7 @@
 import {
   runBridgeActionPipelineWithNative,
   type NativeBridgeActionState
-} from '../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+} from '../native/router-hotpath/native-hub-bridge-action-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 

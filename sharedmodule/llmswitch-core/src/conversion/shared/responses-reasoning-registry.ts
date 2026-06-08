@@ -13,7 +13,7 @@ export interface ResponsesReasoningPayload {
   encrypted_content?: string | null;
 }
 
-import { isNativeDisabledByEnv, readNativeFunction } from '../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics-shared.js';
+import { isNativeDisabledByEnv, readNativeFunction } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics-shared.js';
 
 function callNative(capability: string, ...args: unknown[]): unknown {
   if (isNativeDisabledByEnv()) return undefined;

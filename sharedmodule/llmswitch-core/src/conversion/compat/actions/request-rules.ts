@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { applyRequestRulesWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { applyRequestRulesWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export interface RequestRulesConfig {
   tools?: {

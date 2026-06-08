@@ -1,7 +1,7 @@
 import {
   injectMcpToolsForChatWithNative,
   injectMcpToolsForResponsesWithNative
-} from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function injectMcpToolsForChat(tools: any[] | undefined, discoveredServers: string[]): any[] {
   return injectMcpToolsForChatWithNative(tools, discoveredServers) as any[];

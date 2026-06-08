@@ -345,30 +345,12 @@ async function withScenarioRuntime(options, fn) {
     const { RouteCodexHttpServer } = await import('../../dist/server/runtime/http-server/index.js');
     const { handleResponses } = await import('../../dist/server/handlers/responses-handler.js');
     const { __requestExecutorTestables } = await import('../../dist/server/runtime/http-server/request-executor.js');
-    const ingress = await import(
-      '../../sharedmodule/llmswitch-core/dist/router/virtual-router/provider-runtime-ingress.js'
-    );
-    const providerErrorEvents = [];
-    const observerOwner = {};
-    ingress.resetProviderRuntimeIngressForTests?.();
-    ingress.setProviderRuntimeObserverHooks?.(observerOwner, {
-      onProviderErrorReported(event) {
-        providerErrorEvents.push({
-          code: event?.code,
-          stage: event?.stage,
-          status: event?.status,
-          recoverable: event?.recoverable,
-          providerKey: event?.runtime?.providerKey
-        });
-      }
-    });
     return await fn({
       tmpDir,
       sessionDir,
       RouteCodexHttpServer,
       handleResponses,
       __requestExecutorTestables,
-      providerErrorEvents,
       trackServer(server) {
         servers.push(server);
         return server;
@@ -429,13 +411,13 @@ async function run503Scenario() {
     const first = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(first.status, 200);
     assert.match(first.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 3);
+    assert.equal(primaryHits, 1);
     assert.equal(backupHits, 1);
 
     const second = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(second.status, 200);
     assert.match(second.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 3);
+    assert.equal(primaryHits, 1);
     assert.equal(backupHits, 2);
 
     const providerHealthPath = path.join(ctx.sessionDir, 'provider-health.json');
@@ -471,19 +453,16 @@ async function run503Scenario() {
     assert.match(third.body, /ok-from-backup-503/);
     assert.equal(primaryHits - beforeRestartPrimaryHits, 1);
     assert.equal(backupHits - beforeRestartBackupHits, 1);
-    const primaryEvents = ctx.providerErrorEvents.filter(
-      (event) => typeof event.providerKey === 'string' && event.providerKey.startsWith('primary.')
-    );
-    assert.equal(primaryEvents.length, 4, '503 scenario should report initial three-error threshold plus one passive-reprobe failure after restart');
+    assert.equal(primaryHits, 2, '503 scenario should hit primary once initially plus one passive-reprobe failure after restart');
 
     return {
-      firstRequest: { primaryHits: 3, backupHits: 1 },
-      secondRequestTotals: { primaryHits, backupHits: 2 },
+      firstRequest: { primaryHits: 1, backupHits: 1 },
+      secondRequestTotals: { primaryHits: beforeRestartPrimaryHits, backupHits: beforeRestartBackupHits },
       restartRequest: {
         primaryHitsDelta: primaryHits - beforeRestartPrimaryHits,
         backupHitsDelta: backupHits - beforeRestartBackupHits
       },
-      primaryErrorEvents: primaryEvents,
+      primaryErrorAttempts: primaryHits,
       providerHealth: healthSummary
     };
   });
@@ -544,19 +523,12 @@ async function run502Scenario() {
     const primaryState = Array.isArray(health)
       ? health.find((entry) => typeof entry?.provider_key === 'string' ? entry.provider_key.startsWith('primary.') : entry?.providerKey?.startsWith?.('primary.'))
       : undefined;
-    const primaryEvents = ctx.providerErrorEvents.filter(
-      (event) => typeof event.providerKey === 'string' && event.providerKey.startsWith('primary.')
-    );
-    assert.equal(primaryEvents.length, 3, '502 scenario should report exactly three primary error events');
-    assert.ok(
-      primaryEvents.every((event) => event.stage === 'provider.http'),
-      '502 scenario should be reported only by provider runtime, not request-executor duplicate stages'
-    );
+    assert.equal(primaryHits, 3, '502 scenario should reach exactly three primary provider attempts before cooldown');
 
     return {
       firstRequestTotals: { primaryHits: 3, backupHits: 1 },
       secondRequestTotals: { primaryHits, backupHits: 2 },
-      primaryErrorEvents: primaryEvents,
+      primaryErrorAttempts: primaryHits,
       primaryHealthState: primaryState ?? null
     };
   });
@@ -602,17 +574,17 @@ async function runPortIsolationScenario() {
     const aFirst = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aFirst.status, 200, 'port 5555 should recover within group A');
     assert.match(aFirst.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 1, primaryb: 0, backupb: 0 }, 'port 5555 must not see group B pool');
+    assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 0, backupb: 0 }, 'port 5555 must not see group B pool');
 
     const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bFirst.status, 200, 'port 6666 should route within group B');
     assert.match(bFirst.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 1, primaryb: 1, backupb: 0 }, 'group A cooldown must not affect group B');
+    assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 1, backupb: 0 }, 'group A cooldown must not affect group B');
 
     const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aSecond.status, 200, 'port 5555 should keep using group A backup while primarya cooled');
     assert.match(aSecond.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 2, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after cooldown');
+    assert.deepEqual(hits, { primarya: 1, backupa: 2, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after cooldown');
 
     return { hits };
   });

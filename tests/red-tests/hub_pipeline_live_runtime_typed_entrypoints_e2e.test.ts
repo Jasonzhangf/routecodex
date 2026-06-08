@@ -24,7 +24,7 @@ import {
   describeHubPipelineContractsWithNative,
   describeVirtualRouterContractsWithNative,
   describePipelineContractWithNative,
-} from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-vr-node-contracts.js';
+} from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-vr-node-contracts.js';
 
 const REQUIRED_HUB_NODES = [
   'HubReqInbound02Standardized',

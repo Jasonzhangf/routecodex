@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { runReqOutboundStage3CompatWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+import { runReqOutboundStage3CompatWithNative } from '../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import { buildGlmRequestCompatInput } from './glm-native-compat.js';
 
 export interface AutoThinkingConfig {

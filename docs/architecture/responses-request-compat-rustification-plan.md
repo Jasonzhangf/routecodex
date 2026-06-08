@@ -26,7 +26,7 @@ Rust 真源：
 
 TS 允许存在的仅是 bridge / orchestration：
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts`
 
 ## 收口规则

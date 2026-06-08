@@ -2,7 +2,7 @@ import {
   extractOutputSegmentsWithNative,
   normalizeContentPartWithNative,
   normalizeMessageContentPartsWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 

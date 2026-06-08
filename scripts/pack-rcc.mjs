@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { ensureRepoPackOutputDir } from './lib/repo-output-paths.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -45,7 +46,8 @@ try {
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
   const version = String(pkg.version || '').trim();
   const tarballName = `rcc-${version}.tgz`;
-  const tarballPath = path.join(PROJECT_ROOT, tarballName);
+  const packOutputDir = ensureRepoPackOutputDir(PROJECT_ROOT);
+  const tarballPath = path.join(packOutputDir, tarballName);
 
   if (!fs.existsSync(tarballPath)) {
     throw new Error(`tarball not found: ${tarballPath}`);

@@ -1,4 +1,4 @@
-import { normalizeProviderProtocolTokenWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import { normalizeProviderProtocolTokenWithNative } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 
 const DISABLE_FLAG = (process.env.ROUTECODEX_HUB_ENABLED || process.env.ROUTECODEX_ENABLE_HUB) ?? '1';
 const PROTOCOL_LIST = process.env.ROUTECODEX_HUB_PROTOCOLS;

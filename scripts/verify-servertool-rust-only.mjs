@@ -214,7 +214,7 @@ function checkServertoolCliProjectionMap() {
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const cliProjection = readRequired(CLI_PROJECTION);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
-  const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-servertool-core-semantics.ts`);
+  const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
 
   assertContains(
     'cli-projection-map',
@@ -254,7 +254,7 @@ function checkServertoolCliProjectionMap() {
   );
   assertContains(
     'cli-projection-native-wrapper',
-    `${ROOT}/sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-servertool-core-semantics.ts`,
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
     nativeServertoolWrapper,
     'buildClientExecCliProjectionOutputWithNative'
   );

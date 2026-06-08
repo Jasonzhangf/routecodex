@@ -1,5 +1,5 @@
 import type { TextMarkupNormalizeOptions } from '../../types/text-markup-normalizer.js';
-import { normalizeAssistantTextToToolCallsWithNative } from '../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { normalizeAssistantTextToToolCallsWithNative } from '../../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 function enabled(): boolean {
   try {

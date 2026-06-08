@@ -156,7 +156,7 @@ Rust 决定“要做什么以及为什么”；TS 只执行 effect，不改变 p
 改动范围：
 
 - Rust：`hub_pipeline_lib.rs`、`lib.rs` module/export wiring。
-- TS wrapper：`src/router/virtual-router/engine-selection/native-hub-pipeline-lib.ts` 或相邻 native wrapper。
+- TS wrapper：`src/native/router-hotpath/native-hub-pipeline-lib.ts` 或相邻 native wrapper。
 - Tests：contract/unit tests。
 
 验收：

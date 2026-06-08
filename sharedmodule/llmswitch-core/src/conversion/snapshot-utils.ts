@@ -1,7 +1,7 @@
 import {
   shouldRecordSnapshotsWithNative,
   writeSnapshotViaHooksWithNative
-} from '../router/virtual-router/engine-selection/native-snapshot-hooks.js';
+} from '../native/router-hotpath/native-snapshot-hooks.js';
 
 export interface SnapshotHookOptions {
   endpoint: string;

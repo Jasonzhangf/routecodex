@@ -1,4 +1,4 @@
-import { resolveHubProtocolAllowlistsWithNative } from '../router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+import { resolveHubProtocolAllowlistsWithNative } from '../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 const allowlists = resolveHubProtocolAllowlistsWithNative();
 

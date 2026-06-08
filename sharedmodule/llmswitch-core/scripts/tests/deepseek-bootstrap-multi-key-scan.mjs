@@ -18,7 +18,7 @@ async function main() {
   process.env.ROUTECODEX_AUTH_DIR = authDir;
 
   try {
-    const { bootstrapVirtualRouterConfig } = await import('../../dist/router/virtual-router/bootstrap.js');
+    const { bootstrapVirtualRouterConfig } = await import('../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 
     const input = {
       virtualrouter: {

@@ -4,7 +4,7 @@ import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 import {
   buildClientExecCliProjectionOutputWithNative,
   type ClientExecCliProjectionOutput,
-} from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export const SERVERTOOL_CLI_PROJECTION_FEATURE_ID = 'feature_id: hub.servertool_cli_projection';
 export const SERVERTOOL_CLI_PROJECTION_CANONICAL_BUILDER =

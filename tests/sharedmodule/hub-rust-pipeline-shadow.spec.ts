@@ -27,12 +27,12 @@ interface HubPipelineOutput {
   error?: { code?: string; message?: string };
 }
 
-let _semantics: typeof import('../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js') | null = null;
+let _semantics: typeof import('../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js') | null = null;
 
 async function getSemantics() {
   if (!_semantics) {
     const p = pathToFileURL(
-      path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'router', 'virtual-router', 'engine-selection', 'native-hub-pipeline-orchestration-semantics.js')
+      path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'native', 'router-hotpath', 'native-hub-pipeline-orchestration-semantics.js')
     ).href;
     _semantics = await import(p);
   }

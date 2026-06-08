@@ -8,12 +8,16 @@ It does not redefine user runtime state under `~/.rcc`. `~/.rcc` remains the run
 
 ## Current Audit
 
-Evidence collected on 2026-06-07:
+Evidence collected on 2026-06-07 and updated on 2026-06-08:
 
 - `git check-ignore -v` proves these root items are ignored generated/local state: `tmp/`, `bin/`, `lib/`, `.clock/`, `.codex-work/`, `.drudge/`, `.hypatia/`, `.hypatia_data/`, `.reasonix/`, `clock.md`, `entities.json`, `mempalace.yaml`, `hypatia`, `models/`, `tmp-route-sample.mjs`, `tmp-route-test.mjs`.
 - `git ls-files` proved these suspicious root items were tracked, so they required source changes instead of local-trash deletion: `package/`, historical `nested/deep/ap003.txt`, `rcc`.
 - `.git/info/exclude` currently ignores `webui/`, but `package.json`, `jest.config.js`, and `scripts/install-global.sh` treat `webui/` as source input. This is a local exclude hazard: ignored status alone is not sufficient deletion evidence.
 - Existing `scripts/ci/repo-sanity.mjs` already enforces a fixed top-level layout, but its allowlist still preserves legacy exceptions such as `package`, `tmp`, `clock.md`, `models`, and `CACHE.md`.
+- 2026-06-08 update: `scripts/pack-mode.mjs` and `scripts/pack-rcc.mjs` now write tarballs under `artifacts/pack/`; `scripts/install-global.sh` uses `artifacts/pack/install-global` inside its build root instead of `.install-pack`.
+- 2026-06-08 update: tracked legacy `package/` and root `rcc` symlink were physically removed. `package.json files` no longer includes `rcc`, and install isolation no longer copies `package/` or `rcc`.
+- 2026-06-08 update: local tool/index/model state was migrated out of root into approved local roots: `.agent-state/`, `.local-index/`, and `.cache/model-cache/`. `webui/` is no longer locally excluded and is treated as source.
+- 2026-06-08 update: report scripts that defaulted to root `reports/` now default to `docs/reports/`, and `repo-sanity` locks scoped generated/local subroots so `artifacts/` only allows `pack/` and `.cache/` only allows `model-cache/`.
 
 Current root classification:
 
@@ -26,18 +30,18 @@ Current root classification:
 | `tmp/` | Test/runtime temp | Jest session artifacts | Must be disposable |
 | `test-results/`, `sharedmodule/**/test-results/` | Test output | scripts write snapshots/matrix output | Must be disposable |
 | `coverage/` | Coverage output | Jest coverage config | Must be disposable |
-| `.install-pack/`, root `*.tgz` | Packaging output | install/pack scripts | Must move to temp or `artifacts/pack/` |
+| `artifacts/pack/` | Packaging output | pack/install scripts | Approved generated root; root `*.tgz`, `.install-pack/`, and non-pack `artifacts/*` are forbidden |
 | `bin/`, `lib/` | Local npm prefix residue | ignored, symlink to repo | Remove and prevent root local prefix usage |
-| `package/` | Tracked legacy release package residue | `git ls-files`, qoder package content | Migrate or delete in dedicated cleanup slice |
+| `package/` | Deleted tracked legacy release package residue | `git ls-files`, qoder package content, no active RouteCodex reference | Deleted on 2026-06-08; gate forbids reappearance |
 | `nested/deep/ap003.txt` | Tracked self-test residue | `git ls-files`, apply_patch checklist sample | Deleted; checklist now uses `tmp/nested/deep/ap003.txt` |
-| `rcc` | Tracked CLI symlink | `package.json files`, `pack:rcc` flow | Keep until packaging entry is redesigned |
+| `rcc` | Deleted tracked CLI symlink | package bin already points to `dist/cli.js`; release pack mutates bin | Deleted on 2026-06-08; gate forbids reappearance |
 | `webui/` | Source input hidden by local exclude | package/test/install references | Must not delete; fix local exclude separately |
 | `.beads/` | Task state | `.beads/issues.jsonl` is truth | Track only `issues.jsonl`; runtime db/log disposable |
 | `.agents/` | Local project skill truth | project rules and local skills | Keep local, ignored |
 | `memory/`, `CACHE.md` | Project memory/cache | AGENTS memory contract | Keep local, ignored |
-| `.hypatia/`, `.hypatia_data/`, `hypatia`, `entities.json`, `mempalace.yaml` | External indexing state | Hypatia/MemPalace files | Do not silently delete; migrate to `.local-index/` or tool home |
-| `.reasonix/`, `.codex-work/`, `.drudge/`, `.clock/`, `clock.md` | Agent/tool local state | ignored local state | Migrate to `.agent-state/` or tool home; root files forbidden afterwards |
-| `models/` | Model cache | 3.2G ignored local cache | Do not delete without explicit cache policy |
+| `.local-index/` | External indexing state | Hypatia/MemPalace files migrated from root | Approved local root; root Hypatia/MemPalace files forbidden |
+| `.agent-state/` | Agent/tool local state | `.reasonix/`, `.codex-work/`, `.drudge/`, `clock.md` migrated from root | Approved local root; old root state names forbidden |
+| `.cache/model-cache/` | Model cache | root `models/bert` migrated without deletion | Approved local cache root; root `models/` and non-model-cache `.cache/*` are forbidden |
 | `samples/` | Tracked/evidence samples | package/test usage | Keep as sample/evidence truth |
 | `vendor/` | Project dependency/vendor input | tracked-visible root | Keep until owner audit proves obsolete |
 
@@ -47,10 +51,11 @@ Root is reserved for:
 
 - project entry documents: `AGENTS.md`, `README.md`, `DELIVERY.md`, `MEMORY.md`, `note.md`;
 - package/toolchain manifests: `package.json`, `package-lock.json`, `tsconfig*.json`, `jest.config.js`, `eslint.config.js`, `.gitignore`, `.gitattributes`;
-- source/config/test/documentation roots: `src/`, `sharedmodule/`, `config/`, `configsamples/`, `docs/`, `scripts/`, `tests/`, `samples/`;
-- explicit packaging compatibility entries: `rcc` until replaced by a non-root packaging entry;
+- source/config/test/documentation roots: `src/`, `sharedmodule/`, `config/`, `configsamples/`, `docs/`, `scripts/`, `tests/`, `samples/`, `webui/`;
 - local-only state roots explicitly approved by policy: `.beads/`, `.agents/`, `memory/`, `CACHE.md`;
-- generated roots explicitly approved by policy: `dist/`, `node_modules/`, `tmp/`, `coverage/`, `test-results/`, Rust `target/`.
+- generated roots explicitly approved by policy: `dist/`, `node_modules/`, `tmp/`, `coverage/`, `test-results/`, `logs/`, and Rust workspace-local `target/` directories under their owning packages.
+- generated roots explicitly approved by policy for packaging: `artifacts/pack/`.
+- local-only roots explicitly approved by policy: `.agent-state/`, `.local-index/`, `.cache/model-cache/`.
 
 Everything else requires a documented owner and a gate update before it may exist at root.
 
@@ -67,11 +72,11 @@ All code that writes files must choose one of these roots:
 | Test temp | `tmp/<suite>/` or OS temp via `fs.mkdtemp(os.tmpdir())` | If evidence is needed after test, promote to `test-results/<suite>/` |
 | Test reports | `test-results/<suite>/` | Never write ad-hoc root JSON or logs |
 | Coverage | `coverage/` | Owned by test/coverage tooling |
-| Pack/install tarballs | OS temp or `artifacts/pack/` | Root `*.tgz` is forbidden |
+| Pack/install tarballs | `artifacts/pack/` or OS temp | Root `*.tgz` is forbidden |
 | Runtime debug logs | `logs/<feature>/` only for repo-local debug; otherwise `~/.rcc/logs/` | No root `.log` files |
 | Runtime snapshots/errorsamples | `~/.rcc/codex-samples/`, `~/.rcc/diag/`, or configured snapshot root | Do not write runtime evidence to repo root |
 | Local agent/tool state | `.agent-state/<tool>/` or tool home outside repo | No root `clock.md`, `entities.json`, `mempalace.yaml` |
-| Search/model/index caches | tool home outside repo or `.cache/<tool>/` | `models/` needs explicit cache policy before cleanup |
+| Search/model/index caches | tool home outside repo, `.local-index/<tool>/`, or `.cache/model-cache/` | Root `models/` is forbidden |
 | Generated docs/reports meant to be tracked | `docs/reports/`, `docs/audits/`, `docs/goals/` | No ad-hoc root Markdown except approved entry docs |
 
 Rules for implementations:
@@ -93,17 +98,23 @@ Phase 1: stop new root clutter
 - Remove local npm-prefix assumptions that create `bin/` and `lib/` under the repo.
 - Fix `.git/info/exclude` or document that local `webui/` exclusion is invalid for this repo.
 
+Status on 2026-06-08: path helper and pack/install path migration are complete; `webui/` local exclude hazard is corrected locally and `webui/` is source; `scripts/tool-classification-report.ts` and `scripts/analyze-tools-fileops.mjs` now default tracked report output to `docs/reports/`.
+
 Phase 2: migrate legacy tracked clutter
 
 - Decide whether `package/` still has an active packaging role. If not, delete it physically and update `package.json files` / install scripts. If yes, move it under `scripts/packaging/legacy-qoder/` with explicit owner docs.
 - Keep `nested/deep/ap003.txt` deleted. The apply_patch self-test checklist must use `tmp/nested/deep/ap003.txt` or another disposable temp path.
 - Replace root `rcc` symlink with a generated packaging artifact if package consumers no longer require a tracked root symlink.
 
+Status on 2026-06-08: `package/` and root `rcc` are deleted; `nested/deep/ap003.txt` remains deleted.
+
 Phase 3: consolidate tool state
 
 - Move `.codex-work/`, `.reasonix/`, `.drudge/`, `.clock/`, `clock.md` to `.agent-state/<tool>/` or the tool's user home.
 - Move Hypatia/MemPalace state (`.hypatia*`, `hypatia`, `entities.json`, `mempalace.yaml`) to a tool-specific home or `.local-index/<tool>/`.
 - Write a model-cache policy for `models/`: either external cache home or an explicit `models/` keep rule with pruning command.
+
+Status on 2026-06-08: root tool/index/model state migrated to `.agent-state/`, `.local-index/`, and `.cache/model-cache/`; root names are forbidden by gate.
 
 Phase 4: tighten gates
 
@@ -116,6 +127,8 @@ Phase 4: tighten gates
   - root `bin/` / `lib/` creation;
   - side-by-side TS emit under `src/**`;
   - output defaults equal to `process.cwd()` without an approved subroot.
+
+Status on 2026-06-08: `repo-sanity` root allowlist is split and scans ignored root entries too, so ignored root residue cannot bypass layout checks. It also rejects old root report defaults, non-pack `artifacts/*`, and non-model-cache `.cache/*`.
 
 ## Cleanup Policy
 
@@ -132,13 +145,15 @@ High-confidence disposable items may be deleted after `git check-ignore` evidenc
 
 Do not delete without a dedicated migration decision:
 
-- tracked `package/`, `nested/`, `rcc`;
 - `webui/`, even if locally ignored;
-- `models/`;
 - `samples/`;
 - `vendor/`;
-- `.hypatia*`, `hypatia`, `entities.json`, `mempalace.yaml`;
 - `~/.rcc/diag` or `~/.rcc/codex-samples`.
+
+2026-06-08 migration decisions:
+
+- `package/` and root `rcc` were deleted after source reference audit.
+- `models/`, Hypatia/MemPalace, and agent/tool state were migrated, not deleted.
 
 ## Verification
 

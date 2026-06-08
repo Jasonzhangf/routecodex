@@ -14,7 +14,7 @@ import {
   evaluateStopSchemaGateWithNative,
   type StopMessageDecisionContext,
   type StopMessageDecision
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js';
 
 function buildMinimalDecisionContext(args: {
   stopEligible: boolean;

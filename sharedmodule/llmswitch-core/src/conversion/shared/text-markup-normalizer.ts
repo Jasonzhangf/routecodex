@@ -16,7 +16,7 @@ export {
   extractSimpleXmlToolsFromTextWithNative as extractSimpleXmlToolsFromText,
   extractToolNamespaceXmlBlocksFromTextWithNative as extractToolNamespaceXmlBlocksFromText,
   extractXMLToolCallsFromTextWithNative as extractXMLToolCallsFromText
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export { normalizeAssistantTextToToolCalls } from './text-markup-normalizer/normalize.js';
 
@@ -24,4 +24,4 @@ export {
   extractToolCallsFromReasoningTextWithNative,
   parseLenientJsonishWithNative,
   repairArgumentsToStringWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';

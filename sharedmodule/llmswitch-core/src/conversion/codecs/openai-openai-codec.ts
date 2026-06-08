@@ -2,7 +2,7 @@ import type { ConversionCodec, ConversionContext, ConversionProfile } from '../t
 import {
   runOpenAIRequestCodecWithNative,
   runOpenAIResponseCodecWithNative
-} from '../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+} from '../../native/router-hotpath/native-compat-action-semantics.js';
 
 export class OpenAIOpenAIConversionCodec implements ConversionCodec {
   readonly id = 'openai-openai';

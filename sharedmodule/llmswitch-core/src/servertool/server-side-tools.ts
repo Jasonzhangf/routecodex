@@ -19,7 +19,7 @@ import {
   detectEmptyAssistantPayloadContractSignalWithNative,
   planServertoolToolCallDispatchWithNative,
   runServertoolResponseStageWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   buildServertoolDispatchPlanInput,
   resolveToolCallExecutionOutcome,

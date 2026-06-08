@@ -1,5 +1,5 @@
 import type { StageRecorder } from '../../format-adapters/index.js';
-import { parseLenientJsonishWithNative } from '../../../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { parseLenientJsonishWithNative } from '../../../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 function normalizeRecordPayload(payload: unknown): object {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {

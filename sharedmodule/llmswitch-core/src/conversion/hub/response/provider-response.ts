@@ -5,7 +5,7 @@ import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { recordStage } from '../pipeline/stages/utils.js';
 import { ProviderProtocolError } from '../../provider-protocol-error.js';
-import { executeHubPipelineWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { executeHubPipelineWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import {
   logHubStageTiming,
   peekHubStageTopSummary
@@ -20,7 +20,7 @@ import {
   type ProviderProtocol
 } from './provider-response-helpers.js';
 import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
-import { buildResponsesPayloadFromChatWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 type HubStageTopEntry = {
   stage: string;

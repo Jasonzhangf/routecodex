@@ -3,7 +3,7 @@ import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/route
 import type {
   VirtualRouterConfig,
   ProviderErrorEvent
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 describe('Virtual router series cooldown', () => {
   it('blacklists an entire model series after repeated 429s', () => {

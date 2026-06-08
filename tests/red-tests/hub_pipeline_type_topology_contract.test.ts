@@ -96,8 +96,8 @@ describe('Hub Pipeline request type topology contract', () => {
   it('exposes Rust runtime contract help as the online topology entry', () => {
     const registry = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs');
     const bindings = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
-    const requiredExports = read('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts');
-    const tsBridge = read('sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-vr-node-contracts.ts');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+    const tsBridge = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts');
     for (const token of [
       'describe_hub_pipeline_contracts',
       'describe_virtual_router_contracts',

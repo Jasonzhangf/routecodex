@@ -14,7 +14,7 @@ let cachedNativeHotpath: NativeRouterHotpathModule | null = null;
 function failNativeRequired<T = never>(capability: string, reason?: string): T {
   if (!cachedNativePolicy) {
     cachedNativePolicy = requireCoreDist<NativeRouterHotpathPolicyModule>(
-      'router/virtual-router/engine-selection/native-router-hotpath-policy'
+      'native/router-hotpath/native-router-hotpath-policy'
     );
   }
   const fn = cachedNativePolicy.failNativeRequired;
@@ -27,7 +27,7 @@ function failNativeRequired<T = never>(capability: string, reason?: string): T {
 function loadNativeRouterHotpathBindingForInternalUse(): Record<string, unknown> | null {
   if (!cachedNativeHotpath) {
     cachedNativeHotpath = requireCoreDist<NativeRouterHotpathModule>(
-      'router/virtual-router/engine-selection/native-router-hotpath'
+      'native/router-hotpath/native-router-hotpath'
     );
   }
   const fn = cachedNativeHotpath.loadNativeRouterHotpathBindingForInternalUse;

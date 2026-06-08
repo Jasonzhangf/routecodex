@@ -782,7 +782,7 @@ fn normalize_provider(
         provider,
         responses_node,
     );
-    let process_mode = normalize_process_mode(provider.get("process"));
+    let process_mode = normalize_process_mode(provider_id, provider.get("process"))?;
     let streaming = resolve_provider_streaming_preference(provider, responses_node);
     let model_streaming = normalize_model_streaming(provider);
     let (model_context_tokens, default_context_tokens) = normalize_model_context_tokens(provider);
@@ -2310,16 +2310,18 @@ fn resolve_compatibility_profile(
     Ok("compat:passthrough".to_string())
 }
 
-fn normalize_process_mode(value: Option<&Value>) -> String {
+fn normalize_process_mode(provider_id: &str, value: Option<&Value>) -> Result<String, String> {
     let normalized = value
         .and_then(Value::as_str)
         .map(|value| value.trim().to_lowercase())
         .unwrap_or_else(|| "chat".to_string());
-    if normalized == "passthrough" {
-        "passthrough".to_string()
-    } else {
-        "chat".to_string()
+    if normalized.is_empty() || normalized == "chat" {
+        return Ok("chat".to_string());
     }
+    Err(format!(
+        "Provider \"{}\" process=\"{}\" is invalid. Hub Pipeline only supports process=\"chat\".",
+        provider_id, normalized
+    ))
 }
 
 fn detect_provider_type(provider: &Map<String, Value>) -> String {

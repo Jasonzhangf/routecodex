@@ -1,5 +1,5 @@
 import { runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine.js';
-import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 describe('servertool CLI projection blackbox', () => {
   it('returns exec_command projection and does not reenter for intercepted servertool call', async () => {

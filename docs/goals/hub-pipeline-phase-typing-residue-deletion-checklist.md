@@ -89,7 +89,7 @@ Phase 8B-2 red tests now lock `run_resp_outbound_pipeline` and `run_resp_outboun
 
 Phase 8B-3 review proof: `runHubPipelineStageWithNative` remains live only in `native-hub-pipeline-orchestration-semantics-protocol.ts` / `.d.ts` / generated `.js` and the API contract test; `runHubPipelineStageJson` remains required as the Rust NAPI capability string / export. Live request/response mainlines use `runHubPipelineLibWithNative` / `executeHubPipelineWithNative`, not the stage wrapper.
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-lib.js` is a local untracked generated barrel in this worktree, not a committed deletion target for Phase 8B-3.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-lib.js` is a local untracked generated barrel in this worktree, not a committed deletion target for Phase 8B-3.
 - No tracked TS/JS/d.ts source imports `native-hub-pipeline-lib`; red tests now forbid making that barrel a live import surface.
 - Red tests continue to lock `runHubPipelineStageWithNative` source consumers to the native protocol wrapper declarations/implementation only.
 
@@ -175,13 +175,13 @@ Phase 8F-5 virtual router engine helper deletion proof: two TS engine helper fil
 
 Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had no live source/test import and no dynamic bridge importer. The native capabilities they referenced remain locked by `native-router-hotpath-required-exports.ts`; the live request filter wrapper is `native-chat-request-filter-semantics.ts`, not the deleted governed-filter residue.
 
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governed-filter-semantics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-post-governed-normalization-semantics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-web-search-intent-semantics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-governance-semantics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-target-semantics.ts`.
-- Deleted `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-virtual-router-stop-message-actions-semantics.ts` plus same-name generated `.js` / `.d.ts` / `.js.map` artifacts.
-- Kept `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-failure-policy.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/native-exports.ts` and `src/providers/core/runtime/provider-failure-policy-native.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governed-filter-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-post-governed-normalization-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-web-search-intent-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-governance-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-target-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-actions-semantics.ts` plus same-name generated `.js` / `.d.ts` / `.js.map` artifacts.
+- Kept `sharedmodule/llmswitch-core/src/native/router-hotpath/native-failure-policy.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/native-exports.ts` and `src/providers/core/runtime/provider-failure-policy-native.ts`.
 - Red test now fails if any deleted unused wrapper residue reappears.
 
 Phase 8F-7 Hub/VR side-by-side emit cleanup proof: current `sharedmodule/llmswitch-core/tsconfig.json` emits to `dist`, and `.gitignore` marks `sharedmodule/llmswitch-core/src/**/*.js`, `.d.ts`, and `.js.map` as generated artifacts. Therefore side-by-side emit files under Hub Pipeline and Virtual Router source truth dirs are stale local artifacts, not runtime source truth.
@@ -211,7 +211,7 @@ Phase 8F-10 additional Hub zero-consumer source deletion proof: import graph and
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts`.
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts`.
 - Kept `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/snapshot-recorder.ts` via `importCoreDist('conversion/hub/snapshot-recorder')`.
-- Kept `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-failure-policy.ts` because it is dynamically loaded by bridge/runtime failure-policy owners.
+- Kept `sharedmodule/llmswitch-core/src/native/router-hotpath/native-failure-policy.ts` because it is dynamically loaded by bridge/runtime failure-policy owners.
 - Updated `docs/goals/metadata-request-isolation-plan.md` so it points to live `chat-envelope.ts` and records that `chat-schema.ts` must not be restored.
 - Red test now fails if any deleted source file reappears.
 

@@ -9,7 +9,7 @@ import type {
   RoutePoolTier,
   RouterMetadataInput,
   RoutingFeatures
-} from '../../src/router/virtual-router/types.js';
+} from '../../src/native/router-hotpath/virtual-router-contracts.js';
 import type { RoutingInstructionState } from '../../src/router/virtual-router/routing-instructions.js';
 
 function buildState(): RoutingInstructionState {

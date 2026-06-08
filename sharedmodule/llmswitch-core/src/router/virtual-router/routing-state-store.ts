@@ -5,7 +5,7 @@ import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState
 } from './routing-instructions.js';
-import { report_internal_error_err_02_host_to_router_policy } from './provider-runtime-ingress.js';
+import { report_internal_error_err_02_host_to_router_policy } from '../../native/router-hotpath/native-provider-runtime-ingress.js';
 import {
   resolveRccPath
 } from '../../runtime/user-data-paths.js';

@@ -42,8 +42,6 @@ describe('QuotaManagerModule', () => {
 
     const bridgeMock = () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     });
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, bridgeMock);
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
@@ -81,7 +79,7 @@ describe('QuotaManagerModule', () => {
   });
 
 
-  it('does not register unified quota runtime second ingress hooks when phase1 unified quota gate is enabled', async () => {
+  it('does not route unified quota events through a TS core-manager ingress when phase1 unified quota gate is enabled', async () => {
     const coreManager = {
       hydrateFromStore: async () => {},
       registerProviderStaticConfig: jest.fn(),
@@ -92,12 +90,8 @@ describe('QuotaManagerModule', () => {
       persistNow: async () => {}
     };
 
-    const setProviderRuntimeQuotaHooks = jest.fn(async () => true);
-
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks,
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -118,7 +112,6 @@ describe('QuotaManagerModule', () => {
     });
     await mod.start();
 
-    expect(setProviderRuntimeQuotaHooks).not.toHaveBeenCalled();
     expect(coreManager.onProviderError).not.toHaveBeenCalled();
     expect(coreManager.onProviderSuccess).not.toHaveBeenCalled();
   });
@@ -139,8 +132,6 @@ describe('QuotaManagerModule', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -196,8 +187,6 @@ describe('QuotaManagerModule', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -275,8 +264,6 @@ describe('QuotaManagerModule', () => {
         };
         return wrapped;
       },
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(QUOTA_STORE_MODULE_PATH, () => ({
       loadProviderQuotaSnapshot: jest.fn(async () => ({
@@ -358,8 +345,6 @@ describe('QuotaManagerModule', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -385,8 +370,6 @@ describe('QuotaManagerModule', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -455,8 +438,6 @@ describe('QuotaManagerModule', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       createCoreQuotaManager: async () => coreManager,
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -544,8 +525,6 @@ describe('QuotaManagerModule', () => {
         getSnapshot: jest.fn(() => ({ updatedAtMs: Date.now(), providers: {} })),
         persistNow: async () => {}
       }),
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(QUOTA_STORE_MODULE_PATH, () => ({
       loadProviderQuotaSnapshot: jest.fn(async () => loadedSnapshot),

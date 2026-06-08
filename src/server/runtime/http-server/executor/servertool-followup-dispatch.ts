@@ -21,7 +21,7 @@ let cachedNativeHubPipelineSemanticMappers: NativeHubPipelineSemanticMappersModu
 async function getNativeHubPipelineSemanticMappers(): Promise<NativeHubPipelineSemanticMappersModule> {
   if (!cachedNativeHubPipelineSemanticMappers) {
     cachedNativeHubPipelineSemanticMappers = await importCoreDist<NativeHubPipelineSemanticMappersModule>(
-      'router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers'
+      'native/router-hotpath/native-hub-pipeline-semantic-mappers'
     );
   }
   return cachedNativeHubPipelineSemanticMappers;

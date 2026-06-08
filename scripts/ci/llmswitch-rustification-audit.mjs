@@ -173,6 +173,36 @@ function parseAllowlistFromEnv() {
   );
 }
 
+function mapFilesByCanonicalPath(files) {
+  const out = new Map();
+  for (const file of files || []) {
+    out.set(file.path, file);
+  }
+  return out;
+}
+
+function buildCanonicalTopDirStats(snapshot) {
+  const out = {};
+  for (const file of snapshot.prodTsFiles || []) {
+    const relFromSrc = file.path.replace('sharedmodule/llmswitch-core/src/', '');
+    const topDir = relFromSrc.split('/')[0] || '.';
+    const curr = out[topDir] || {
+      prodTsFiles: 0,
+      prodTsLoc: 0,
+      nonNativeFiles: 0,
+      nonNativeLoc: 0,
+    };
+    curr.prodTsFiles += 1;
+    curr.prodTsLoc += file.loc || 0;
+    if (!file.nativeLinked) {
+      curr.nonNativeFiles += 1;
+      curr.nonNativeLoc += file.loc || 0;
+    }
+    out[topDir] = curr;
+  }
+  return out;
+}
+
 function compareSnapshot(current, baseline) {
   const errors = [];
   const allow = parseAllowlistFromEnv();
@@ -188,24 +218,32 @@ function compareSnapshot(current, baseline) {
     );
   }
 
-  const baselineFiles = new Map((baseline.prodTsFiles || []).map((f) => [f.path, f]));
-  const currentFiles = new Map((current.prodTsFiles || []).map((f) => [f.path, f]));
+  const baselineFiles = mapFilesByCanonicalPath(baseline.prodTsFiles);
+  const currentFiles = mapFilesByCanonicalPath(current.prodTsFiles);
 
-  const newProdTsFiles = Array.from(currentFiles.keys()).filter((k) => !baselineFiles.has(k));
-  const disallowedNewFiles = newProdTsFiles.filter((k) => !allow.has(k));
+  const newProdTsFiles = Array.from(currentFiles.entries())
+    .filter(([k]) => !baselineFiles.has(k))
+    .map(([, file]) => file.path);
+  const disallowedNewFiles = Array.from(currentFiles.entries())
+    .filter(([k]) => !baselineFiles.has(k))
+    .map(([k, file]) => ({ canonicalPath: k, path: file.path }))
+    .filter((entry) => !allow.has(entry.path) && !allow.has(entry.canonicalPath))
+    .map((entry) => entry.path);
   if (disallowedNewFiles.length > 0) {
     errors.push(
       `new prod TS files are blocked (set LLMSWITCH_TS_NEW_ALLOW for explicit exceptions): ${disallowedNewFiles.join(', ')}`,
     );
   }
 
+  const baselineByTopDir = buildCanonicalTopDirStats(baseline);
+  const currentByTopDir = buildCanonicalTopDirStats(current);
   const topDirs = new Set([
-    ...Object.keys(baseline.byTopDir || {}),
-    ...Object.keys(current.byTopDir || {}),
+    ...Object.keys(baselineByTopDir),
+    ...Object.keys(currentByTopDir),
   ]);
   for (const dir of topDirs) {
-    const base = (baseline.byTopDir || {})[dir]?.nonNativeLoc || 0;
-    const now = (current.byTopDir || {})[dir]?.nonNativeLoc || 0;
+    const base = baselineByTopDir[dir]?.nonNativeLoc || 0;
+    const now = currentByTopDir[dir]?.nonNativeLoc || 0;
     if (now > base) {
       errors.push(`nonNativeLoc increased in topDir=${dir}: baseline=${base}, current=${now}`);
     }

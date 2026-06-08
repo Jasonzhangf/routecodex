@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/daemon-admin/quota-handler.js';
-import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests, setVirtualRouterPolicyRuntimeRouterHooks } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
+import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
 
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
@@ -180,8 +180,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
 
   it('keeps 402/resetAt state aligned across persist/hydrate/admin and clears it on success', async () => {
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -194,7 +192,7 @@ describe('daemon-admin quota unified special-family consistency', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/quota-manager.js');
     const providerKey = 'quota.key1.gpt-test';
     const runtimeKey = 'quota.key1';
-    const resetAtIso = '2026-05-28T00:00:00.000Z';
+    const resetAtIso = '2026-12-28T00:00:00.000Z';
     const resetAtMs = Date.parse(resetAtIso);
     const rustStateRef = {
       current: {
@@ -219,20 +217,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
       }
     };
     const hubPipeline = createMockHubPipeline(rustStateRef);
-    const routerHookOwner = {};
-    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
-      handleProviderError: (event: any) => {
-        const router = hubPipeline.getVirtualRouter();
-        if (event?.code === 'HTTP_402') {
-          const resetAtMs = Date.parse(String(event?.details?.resetAt || event?.resetAt || ''));
-          router.applyKeepPoolCooldownQuota?.(providerKey, resetAtMs, 'HTTP_402');
-        }
-      },
-      handleProviderSuccess: (event: any) => {
-        hubPipeline.getVirtualRouter().recoverProviderQuota?.(event?.runtime?.providerKey);
-      }
-    });
-
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-resetat-special-'));
     createdTmpDir = tmpDir;
     createdLoginFile = path.join(tmpDir, 'login');
@@ -380,7 +364,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
         });
         expect(adminAfterSuccess?.cooldownUntil).toBeNull();
       } finally {
-        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await mod2.stop();
         await server2.close();
       }
@@ -392,8 +375,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
 
   it('sanitizes auth/fatal persisted state on restart and keeps admin projection aligned after success', async () => {
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: {
@@ -429,32 +410,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
       }
     };
     const hubPipeline = createMockHubPipeline(rustStateRef);
-    const routerHookOwner = {};
-    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
-      handleProviderError: (event: any) => {
-        const key = event?.runtime?.providerKey;
-        rustStateRef.current[key] = {
-          ...(rustStateRef.current[key] ?? { providerKey: key, authType: 'apikey', priorityTier: 100 }),
-          providerKey: key,
-          inPool: false,
-          reason: 'authVerify',
-          authIssue: event?.details?.authIssue ?? null,
-          cooldownUntil: null,
-          blacklistUntil: null,
-          resetAt: null,
-          lastErrorSeries: 'EFATAL',
-          lastErrorCode: event?.code ?? 'NEW_API_ERROR',
-          lastErrorAtMs: Date.now(),
-          consecutiveErrorCount: 1,
-          selectionPenalty: 1,
-          lastProviderGuardApplied: false
-        };
-      },
-      handleProviderSuccess: (event: any) => {
-        hubPipeline.getVirtualRouter().recoverProviderQuota?.(event?.runtime?.providerKey);
-      }
-    });
-
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-auth-special-'));
     createdTmpDir = tmpDir;
     createdLoginFile = path.join(tmpDir, 'login');
@@ -603,7 +558,6 @@ describe('daemon-admin quota unified special-family consistency', () => {
           consecutiveErrorCount: 0
         });
       } finally {
-        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await mod2.stop();
         await server2.close();
       }

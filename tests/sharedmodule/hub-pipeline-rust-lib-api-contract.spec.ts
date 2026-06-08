@@ -3,7 +3,7 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 // Mock the native binding loader so we can control which functions exist
 const nativeBindings: Record<string, unknown> = {};
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js',
   () => ({
     loadNativeRouterHotpathBindingForInternalUse: () => nativeBindings,
   })
@@ -11,7 +11,7 @@ jest.unstable_mockModule(
 
 // Mock native router hotpath policy
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-policy.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js',
   () => ({
     isNativeDisabledByEnv: () => false,
     failNativeRequired: () => { throw new Error('native disabled'); },
@@ -31,7 +31,7 @@ const {
   runHubPipelineOrchestrationWithNative,
   runHubPipelineLibWithNative,
 } = await import(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js'
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js'
 );
 
 describe('HubPipeline Rust Lib API contract', () => {
@@ -70,7 +70,7 @@ describe('HubPipeline Rust Lib API contract', () => {
 
   it('orchestration semantics protocol exports the Rust lib entry', async () => {
     const { runHubPipelineLibWithNative: fromLib } = await import(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js'
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js'
     ).catch(() => ({ runHubPipelineLibWithNative: undefined }));
     expect(fromLib).toBeDefined();
   });

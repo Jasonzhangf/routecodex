@@ -4,7 +4,7 @@ import {
   findHeaderValueWithNative,
   normalizeHeaderKeyWithNative,
   pickHeaderWithNative
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-session-identifiers-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.js';
 
 export interface SessionIdentifiers {
   sessionId?: string;

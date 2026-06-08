@@ -26,7 +26,7 @@
 ### In Scope
 - `sharedmodule/llmswitch-core/src/servertool/`
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/`
 - `docs/design/servertool-rust-only-architecture.md`
 - `scripts/verify-servertool-rust-only.mjs`
@@ -235,7 +235,7 @@ resolveStopMessageSessionScope
 - `planStopMessagePersistedLookupWithNative(input)`
 
 建议位置：
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 
 建议返回类型：
 
@@ -319,7 +319,7 @@ type NativeStopMessagePersistedLookupPlan = {
 
 #### B1. 扩展 required exports 白名单
 - 文件：
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - 动作：
   - 新增 `"planStopMessagePersistedLookupJson"`
 - 责任边界：
@@ -327,7 +327,7 @@ type NativeStopMessagePersistedLookupPlan = {
 
 #### B2. 新增 TS bridge 能力
 - 文件：
-  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 - 动作：
   - 新增 parse type / payload parser
   - 新增 `planStopMessagePersistedLookupWithNative(...)`
@@ -393,8 +393,8 @@ type NativeStopMessagePersistedLookupPlan = {
 
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
 - `scripts/verify-servertool-rust-only.mjs`（仅在最后一 patch 才可动）

@@ -6,7 +6,7 @@ import {
   ensureMessagesArrayWithNative,
   serializeToolArgumentsWithNative,
   serializeToolOutputWithNative
-} from '../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+} from '../native/router-hotpath/native-hub-bridge-action-semantics.js';
 
 export interface BridgeInputBuildOptions {
   messages: Array<Record<string, unknown>>;

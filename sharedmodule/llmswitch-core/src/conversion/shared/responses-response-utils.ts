@@ -8,7 +8,7 @@ import {
   buildChatResponseFromResponsesWithNative,
   collectToolCallsFromResponsesWithNative,
   resolveFinishReasonWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function collectToolCallsFromResponses(response: Record<string, unknown>): Array<Record<string, unknown>> {
   return collectToolCallsFromResponsesWithNative(response);

@@ -500,19 +500,6 @@ type ProviderRuntimeIngressExports = {
   reportProviderSuccessToRouterPolicy?: (
     event: ProviderSuccessEvent,
   ) => ProviderSuccessEvent;
-  setProviderRuntimeQuotaHooks?: (
-    owner: unknown,
-    hooks?: {
-      onProviderError?: (event: ProviderErrorEvent) => void;
-      onProviderSuccess?: (event: ProviderSuccessEvent) => void;
-    },
-  ) => void;
-  setProviderRuntimeProviderQuotaHooks?: (
-    owner: unknown,
-    hooks?: {
-      onProviderError?: (event: ProviderErrorEvent) => void;
-    },
-  ) => void;
 };
 
 let cachedProviderRuntimeIngress: ProviderRuntimeIngressExports | null = null;
@@ -521,7 +508,7 @@ async function getProviderRuntimeIngress(): Promise<ProviderRuntimeIngressExport
   if (!cachedProviderRuntimeIngress) {
     cachedProviderRuntimeIngress =
       await importCoreDist<ProviderRuntimeIngressExports>(
-        "router/virtual-router/provider-runtime-ingress",
+        "native/router-hotpath/native-provider-runtime-ingress",
       );
   }
   return cachedProviderRuntimeIngress;
@@ -584,7 +571,7 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
       "[llmswitch-bridge] preload failed: provider runtime ingress hooks not available",
     );
   }
-  loaded.push("router/virtual-router/provider-runtime-ingress");
+  loaded.push("native/router-hotpath/native-provider-runtime-ingress");
 
   return { loaded };
 }
@@ -613,35 +600,4 @@ export async function reportProviderSuccessToRouterPolicy(
     );
   }
   return fn(event);
-}
-
-export async function setProviderRuntimeQuotaHooks(
-  owner: unknown,
-  hooks?: {
-    onProviderError?: (event: ProviderErrorEvent) => void;
-    onProviderSuccess?: (event: ProviderSuccessEvent) => void;
-  },
-): Promise<boolean> {
-  const mod = await getProviderRuntimeIngress();
-  const fn = mod.setProviderRuntimeQuotaHooks;
-  if (typeof fn !== "function") {
-    return false;
-  }
-  fn(owner, hooks);
-  return true;
-}
-
-export async function setProviderRuntimeProviderQuotaHooks(
-  owner: unknown,
-  hooks?: {
-    onProviderError?: (event: ProviderErrorEvent) => void;
-  },
-): Promise<boolean> {
-  const mod = await getProviderRuntimeIngress();
-  const fn = mod.setProviderRuntimeProviderQuotaHooks;
-  if (typeof fn !== "function") {
-    return false;
-  }
-  fn(owner, hooks);
-  return true;
 }

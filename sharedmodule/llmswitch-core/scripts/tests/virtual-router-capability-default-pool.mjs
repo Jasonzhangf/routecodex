@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
-import { bootstrapVirtualRouterConfig } from '../../dist/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 
 function createRequest({ content, tools, messages }) {
   return {

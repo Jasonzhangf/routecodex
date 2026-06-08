@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { normalizeResponsePayloadWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { normalizeResponsePayloadWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export interface ResponseNormalizeConfig {
   finishReasonMap?: Record<string, string>;

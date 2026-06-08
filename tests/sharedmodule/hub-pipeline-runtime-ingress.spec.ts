@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const hookCalls: Array<{ owner: unknown; hooks?: { handleProviderError?: (event: unknown) => void; handleProviderSuccess?: (event: unknown) => void } }> = [];
-const setVirtualRouterPolicyRuntimeRouterHooks = jest.fn((owner: unknown, hooks?: { handleProviderError?: (event: unknown) => void; handleProviderSuccess?: (event: unknown) => void }) => {
-  hookCalls.push({ owner, hooks });
-});
 const setHubPolicyRuntimePolicy = jest.fn();
 
 const engineInstances: Array<{
@@ -11,29 +7,38 @@ const engineInstances: Array<{
   updateDeps: jest.Mock;
   handleProviderError: jest.Mock;
   handleProviderSuccess: jest.Mock;
+  registerProviderRuntimeIngress: jest.Mock;
+  unregisterProviderRuntimeIngress: jest.Mock;
 }> = [];
 
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js', () => ({
-  VirtualRouterEngine: class VirtualRouterEngineMock {
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js', () => ({
+  createVirtualRouterRuntime: () => {
+    const engine = {
+      initialize: jest.fn(),
+      updateDeps: jest.fn(),
+      handleProviderError: jest.fn(),
+      handleProviderSuccess: jest.fn(),
+      registerProviderRuntimeIngress: jest.fn(),
+      unregisterProviderRuntimeIngress: jest.fn(),
+    };
+    engineInstances.push(engine);
+    return engine;
+  },
+}));
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-engine-proxy.js', () => ({
+  VirtualRouterEngineProxy: class VirtualRouterEngineMock {
     public initialize = jest.fn();
     public updateDeps = jest.fn();
     public handleProviderError = jest.fn();
     public handleProviderSuccess = jest.fn();
+    public registerProviderRuntimeIngress = jest.fn();
+    public unregisterProviderRuntimeIngress = jest.fn();
 
     constructor(_deps?: unknown) {
       engineInstances.push(this as any);
     }
   }
-}));
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js', () => ({
-  setVirtualRouterPolicyRuntimeRouterHooks,
-  reportProviderErrorToRouterPolicy: jest.fn((event: unknown) => event),
-  reportProviderSuccessToRouterPolicy: jest.fn((event: unknown) => event),
-  setProviderRuntimeQuotaHooks: jest.fn(),
-  setProviderRuntimeProviderQuotaHooks: jest.fn(),
-  setProviderRuntimeObserverHooks: jest.fn(),
-  resetProviderRuntimeIngressForTests: jest.fn()
 }));
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.js', async () => {
@@ -48,39 +53,21 @@ const { HubPipeline } = await import('../../sharedmodule/llmswitch-core/src/conv
 
 describe('HubPipeline runtime ingress wiring', () => {
   beforeEach(() => {
-    hookCalls.length = 0;
     engineInstances.length = 0;
-    setVirtualRouterPolicyRuntimeRouterHooks.mockClear();
     setHubPolicyRuntimePolicy.mockClear();
   });
 
-  it('registers router runtime hooks via provider-runtime-ingress and unregisters on dispose', () => {
+  it('registers native router runtime ingress and unregisters on dispose', () => {
     const pipeline = new HubPipeline({
       virtualRouter: {} as any
     });
 
     expect(setHubPolicyRuntimePolicy).toHaveBeenCalledTimes(1);
     expect(engineInstances).toHaveLength(1);
-    expect(setVirtualRouterPolicyRuntimeRouterHooks).toHaveBeenNthCalledWith(
-      1,
-      pipeline,
-      expect.objectContaining({
-        handleProviderError: expect.any(Function),
-        handleProviderSuccess: expect.any(Function)
-      })
-    );
-
-    const hooks = hookCalls[0]?.hooks;
-    const providerError = { code: 'HTTP_429' };
-    const providerSuccess = { runtime: { requestId: 'req_1' } };
-    hooks?.handleProviderError?.(providerError);
-    hooks?.handleProviderSuccess?.(providerSuccess);
-
-    expect(engineInstances[0]!.handleProviderError).toHaveBeenCalledWith(providerError);
-    expect(engineInstances[0]!.handleProviderSuccess).toHaveBeenCalledWith(providerSuccess);
+    expect(engineInstances[0]!.registerProviderRuntimeIngress).toHaveBeenCalledTimes(1);
 
     pipeline.dispose();
 
-    expect(setVirtualRouterPolicyRuntimeRouterHooks).toHaveBeenNthCalledWith(2, pipeline, undefined);
+    expect(engineInstances[0]!.unregisterProviderRuntimeIngress).toHaveBeenCalledTimes(1);
   });
 });

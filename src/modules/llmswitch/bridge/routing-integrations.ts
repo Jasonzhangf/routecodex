@@ -22,7 +22,7 @@ type VirtualRouterBootstrapModule = {
 };
 
 export async function bootstrapVirtualRouterConfig(input: AnyRecord): Promise<AnyRecord> {
-  const mod = await importCoreDist<VirtualRouterBootstrapModule>('router/virtual-router/bootstrap');
+  const mod = await importCoreDist<VirtualRouterBootstrapModule>('native/router-hotpath/native-virtual-router-bootstrap-config');
   const fn = mod.bootstrapVirtualRouterConfig;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] bootstrapVirtualRouterConfig not available');

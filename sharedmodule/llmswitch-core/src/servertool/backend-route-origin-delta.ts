@@ -7,7 +7,7 @@ import {
   applyFollowupDeltaPlanWithNative,
   extractAssistantFollowupMessageWithNative,
   extractCapturedChatSeedWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export type FollowupOriginSeed = JsonObject;
 

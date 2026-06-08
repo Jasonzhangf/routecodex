@@ -6,7 +6,7 @@
 import {
   describeServerContractsWithNative,
   describeServerModuleHelpWithNative
-} from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-vr-node-contracts.js';
+} from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-vr-node-contracts.js';
 
 describe('server module help live NAPI verification (Phase Server-E)', () => {
   it('lists exactly 4 server modules with contract version 2026-06-03.server-module-help.v1', () => {

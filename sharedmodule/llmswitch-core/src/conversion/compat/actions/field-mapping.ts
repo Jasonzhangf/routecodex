@@ -1,5 +1,5 @@
 type MappingType = 'string' | 'number' | 'boolean' | 'object' | 'array';
-import { applyFieldMappingsWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { applyFieldMappingsWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export interface FieldMapping {
   sourcePath: string;

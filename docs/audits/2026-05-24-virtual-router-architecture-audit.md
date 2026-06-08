@@ -51,7 +51,7 @@
 - 返回序列化结果
 
 5. **TS 层至少在结构命名上已朝 thin-shell 收缩**
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-*.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/process/*.ts`
 
 但本次尚未逐文件核验这些 TS 文件内部是否完全无 payload 语义，因此 TS 纯度结论只可判为“方向正确但证据未闭合”。
@@ -222,7 +222,7 @@
 
 建议逐文件检查：
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-*.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/process/*.ts`
 
 判定标准直接使用 `docs/agent-routing/10-runtime-ssot-routing.md` 中的三层判定：
@@ -266,7 +266,7 @@
 4. 不先做大改，先基于文件证据完成审计矩阵。
 
 执行目标：
-1. 审计 `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-*.ts` 是否 100% 薄壳。
+1. 审计 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts` 是否 100% 薄壳。
 2. 审计 `sharedmodule/llmswitch-core/src/conversion/hub/process/*.ts` 是否仅做纯编排。
 3. 列出所有违反“纯编排”或“Rust-only 语义真源”的 TS 文件与函数。
 4. 给出 Rust 迁移去向：哪些应迁入 `router-hotpath-napi`，哪些应拆成独立 blocks。

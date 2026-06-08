@@ -1,8 +1,8 @@
 import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
 import { resolveHubProtocolSpec } from './protocol-spec.js';
-import { normalizeProviderProtocolTokenWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
-import { sanitizeProviderOutboundPayloadWithNative } from '../../../router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+import { normalizeProviderProtocolTokenWithNative } from '../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 import { loadCompatProfileRegistry, getPolicyOverrides } from '../../compat/profile-registry/registry.js';
 import { shouldSkipPolicy } from '../../compat/profile-registry/policy-overrides.js';
 

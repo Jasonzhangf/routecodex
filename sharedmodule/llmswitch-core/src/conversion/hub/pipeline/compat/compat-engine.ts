@@ -4,10 +4,10 @@ import type { CompatApplicationResult } from './compat-types.js';
 import {
   runReqOutboundStage3CompatWithNative,
   runRespInboundStage3CompatWithNative
-} from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+} from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import {
   normalizeProviderProtocolTokenWithNative
-} from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+} from '../../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import { buildNativeReqOutboundCompatAdapterContext } from './native-adapter-context.js';
 
 // feature_id: responses.request_compat_normalization

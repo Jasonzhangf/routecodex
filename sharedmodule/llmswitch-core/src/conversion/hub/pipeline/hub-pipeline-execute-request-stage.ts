@@ -1,17 +1,17 @@
-import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
+import type { VirtualRouterRuntime } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
 import type {
   HubPipelineConfig,
   HubPipelineNodeResult,
   HubPipelineResult,
   NormalizedRequest,
 } from "./hub-pipeline.js";
-import { runHubPipelineLibWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { runHubPipelineLibWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
   hooks?: TContext;
-  routerEngine: VirtualRouterEngine;
+  routerEngine: VirtualRouterRuntime;
   config: HubPipelineConfig;
 }): Promise<HubPipelineResult> {
   const { normalized, config, routerEngine } = args;

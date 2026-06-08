@@ -1,6 +1,6 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
+import type { VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 describe('provider.model with initialize call', () => {
   it('should work with glm provider.model after initialize', async () => {
@@ -38,19 +38,10 @@ describe('provider.model with initialize call', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
-    
-    // 关键：必须调用 initialize！
-    engine.initialize({
-      routing: config.routing,
-      providers: config.providers,
-      classifier: { longContextThresholdTokens: 180000 },
-      loadBalancing: { strategy: 'round-robin' },
-      health: { failureThreshold: 3, cooldownMs: 30000 }
-    });
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
     const providerKeys = engine['providerRegistry'].listProviderKeys('glm');
-    console.log('glm providerKeys:', providerKeys);
     expect(providerKeys.length).toBeGreaterThan(0);
 
    const result = await engine.route({
@@ -96,8 +87,8 @@ describe('provider.model with initialize call', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
-    engine.initialize(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
     await expect(engine.route({
       model: 'glm.kimi-k2.5',
@@ -132,8 +123,8 @@ describe('provider.model with initialize call', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
-    engine.initialize(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
     const result = await engine.route({
       model: 'glm.kimi-k2.5',

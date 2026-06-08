@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { applyReqProcessToolGovernanceWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
+import { applyReqProcessToolGovernanceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.js';
 
 type NativeGovernanceInput = Parameters<typeof applyReqProcessToolGovernanceWithNative>[0];
 

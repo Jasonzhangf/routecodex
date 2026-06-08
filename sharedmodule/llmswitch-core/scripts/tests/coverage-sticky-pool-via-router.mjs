@@ -24,7 +24,7 @@ function createMetadata(requestId, sessionId) {
 
 async function main() {
   const { VirtualRouterEngine } = await import('../../dist/router/virtual-router/engine.js');
-  const { bootstrapVirtualRouterConfig } = await import('../../dist/router/virtual-router/bootstrap.js');
+  const { bootstrapVirtualRouterConfig } = await import('../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 
   const blocked = new Set();
   const quotaView = (providerKey) => ({ inPool: !blocked.has(providerKey) });

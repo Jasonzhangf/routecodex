@@ -1,7 +1,7 @@
 import type { ProcessedRequest, StandardizedMessage, StandardizedRequest } from '../../conversion/hub/types/standardized.js';
-import type { RouterMetadataInput, StopMessageStateSnapshot } from './types.js';
-import { parseRoutingInstructionKindsWithNative } from './engine-selection/native-virtual-router-routing-instructions-semantics.js';
-import { parseStopMessageInstructionWithNative } from './engine-selection/native-virtual-router-stop-message-semantics.js';
+import type { RouterMetadataInput, StopMessageStateSnapshot } from '../../native/router-hotpath/virtual-router-contracts.js';
+import { parseRoutingInstructionKindsWithNative } from '../../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+import { parseStopMessageInstructionWithNative } from '../../native/router-hotpath/native-virtual-router-stop-message-semantics.js';
 import { extractMessageText, getLatestUserMessage } from './message-utils.js';
 import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import { isStopMessageFileReference, resolveStopMessageText } from './stop-message-file-resolver.js';

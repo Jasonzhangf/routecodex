@@ -39,13 +39,13 @@ import { loadRoutingInstructionStateSync } from '../../router/virtual-router/rou
 import type {
   StopMessageDecisionContext,
   StopMessageDecision
-} from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
+} from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
 import {
   evaluateGoalActiveStopLoopGuardWithNative,
   evaluateStopSchemaGateWithNative,
   runStopMessageAutoHandlerWithNative
-} from '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js';
-import { detectProviderResponseShapeWithNative } from '../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
+import { detectProviderResponseShapeWithNative } from '../../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState,
@@ -75,7 +75,7 @@ async function decideStopMessageAction(
     return decideOverride(ctx);
   }
   const { decideStopMessageActionWithNative: nativeFn } = await import(
-    '../../router/virtual-router/engine-selection/native-stop-message-auto-semantics.js'
+    '../../native/router-hotpath/native-stop-message-auto-semantics.js'
   );
   return nativeFn(ctx);
 }

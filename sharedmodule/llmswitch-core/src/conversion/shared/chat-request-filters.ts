@@ -1,8 +1,8 @@
 import type { ConversionContext, ConversionProfile } from '../types.js';
 import { normalizeChatRequest } from './openai-message-normalize.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
-import { buildGovernedFilterPayloadWithNative } from '../../router/virtual-router/engine-selection/native-chat-request-filter-semantics.js';
-import { pruneChatRequestPayloadWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import { buildGovernedFilterPayloadWithNative } from '../../native/router-hotpath/native-chat-request-filter-semantics.js';
+import { pruneChatRequestPayloadWithNative } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 
 /**
  * Native-primary Chat request filters.

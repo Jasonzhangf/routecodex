@@ -45,7 +45,7 @@ describe('virtual-router responses default capabilities', () => {
 });
 
 
-import { bootstrapVirtualRouterConfig } from '../../src/router/virtual-router/bootstrap.js';
+import { bootstrapVirtualRouterConfig } from '../../src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../src/router/virtual-router/engine.js';
 
 test('thinking route with declared tools still keeps responses primary provider selectable', () => {

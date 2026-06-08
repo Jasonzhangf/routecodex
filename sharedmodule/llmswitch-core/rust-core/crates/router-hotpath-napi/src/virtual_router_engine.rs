@@ -1,4 +1,5 @@
 mod classifier;
+pub(crate) mod bootstrap;
 pub(crate) mod config_bootstrap;
 mod context_weighted;
 mod engine;
@@ -11,6 +12,7 @@ pub(crate) mod instructions;
 mod load_balancer;
 mod message_utils;
 mod napi_proxy;
+pub(crate) mod provider_runtime_ingress;
 pub(crate) mod provider_bootstrap;
 mod provider_registry;
 mod quota;

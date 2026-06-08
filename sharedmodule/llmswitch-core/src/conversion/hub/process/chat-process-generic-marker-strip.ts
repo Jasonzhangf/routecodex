@@ -2,7 +2,7 @@ import type { StandardizedRequest } from '../types/standardized.js';
 import {
   cleanRoutingInstructionMarkersWithNative,
   parseRoutingInstructionsWithNative,
-} from '../../../router/virtual-router/engine-selection/native-virtual-router-routing-instructions-semantics.js';
+} from '../../../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 export function stripGenericMarkersFromRequest(
   request: StandardizedRequest

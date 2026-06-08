@@ -1,5 +1,5 @@
 import type { ResponsesRequestContext } from './responses-openai-bridge.js';
-import { evaluateResponsesHostPolicyWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+import { evaluateResponsesHostPolicyWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 export interface ResponsesHostPolicyResult {
   shouldStripHostManagedFields: boolean;

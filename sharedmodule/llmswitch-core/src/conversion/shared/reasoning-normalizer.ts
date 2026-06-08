@@ -5,7 +5,7 @@ import {
   normalizeReasoningInGeminiPayloadWithNative,
   normalizeReasoningInOpenAIPayloadWithNative,
   normalizeReasoningInResponsesPayloadWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export const RESPONSES_INSTRUCTIONS_REASONING_FIELD = '__rcc_reasoning_instructions';
 

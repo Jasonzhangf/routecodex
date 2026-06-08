@@ -241,6 +241,18 @@ impl VirtualRouterEngineProxy {
         core.mark_concurrency_scope_idle(&scope_key);
         Ok(())
     }
+
+    #[napi]
+    pub fn register_provider_runtime_ingress(&self) -> NapiResult<()> {
+        super::provider_runtime_ingress::register_runtime(&self.core);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn unregister_provider_runtime_ingress(&self) -> NapiResult<()> {
+        super::provider_runtime_ingress::unregister_runtime(&self.core);
+        Ok(())
+    }
 }
 
 fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {

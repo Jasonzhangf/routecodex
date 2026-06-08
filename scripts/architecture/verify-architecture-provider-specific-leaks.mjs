@@ -5,7 +5,7 @@ const root = process.cwd();
 const targetRoots = [
   'sharedmodule/llmswitch-core/src/conversion/hub/process',
   'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs',

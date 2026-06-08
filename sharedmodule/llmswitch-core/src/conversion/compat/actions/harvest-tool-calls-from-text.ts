@@ -1,6 +1,6 @@
 import type { JsonObject } from '../../hub/types/json.js';
 import type { TextMarkupNormalizeOptions } from '../../shared/text-markup-normalizer.js';
-import { harvestToolCallsFromTextWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { harvestToolCallsFromTextWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 export interface HarvestToolCallsFromTextConfig {
   normalizer?: TextMarkupNormalizeOptions;

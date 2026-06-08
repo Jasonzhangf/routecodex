@@ -2,7 +2,7 @@ import type { BridgeActionDescriptor, BridgeActionStage } from './bridge-actions
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative
-} from '../router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+} from '../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 type PhaseConfig = {
   inbound?: BridgeActionDescriptor[];

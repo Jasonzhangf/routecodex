@@ -1,5 +1,5 @@
-import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
-import { runHubPipelineLibWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js";
+import type { VirtualRouterRuntime } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
+import { runHubPipelineLibWithNative } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js";
 import type {
   HubPipelineConfig,
   HubPipelineNodeResult,
@@ -10,7 +10,7 @@ import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeChatProcessEntryPipeline(args: {
   normalized: NormalizedRequest;
-  routerEngine: VirtualRouterEngine;
+  routerEngine: VirtualRouterRuntime;
   config: HubPipelineConfig;
 }): Promise<HubPipelineResult> {
   const { normalized, routerEngine, config } = args;

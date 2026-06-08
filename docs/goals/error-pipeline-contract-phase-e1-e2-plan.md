@@ -53,7 +53,7 @@ Out of scope：
 1. `src/providers/core/utils/provider-error-reporter.ts`：定义/导出 `ErrorErr01SourceRaised`、`ErrorErr02HostCaptured` 与唯一 capture/report wrapper。
 2. `src/server/runtime/http-server/router-direct-pipeline.ts`：direct provider call try/catch 只调用 `onProviderError(ErrorErr01SourceRaised)` 并 rethrow 原始错误。
 3. `src/server/runtime/http-server/index.ts`：把 direct provider error hook 接到 `report_error_err_02_host_to_router_policy_from_error_err_01_source`，并注入正确 runtime/session scope。
-4. `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`：提供内部 Router policy bridge，禁止业务模块手写 raw policy event。
+4. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` + Rust `virtual_router_engine/provider_runtime_ingress.rs`：提供内部 Router policy bridge，禁止业务模块手写 raw policy event。
 5. `sharedmodule/llmswitch-core/src/router/virtual-router/**` 与相关 compat action：把手写 `reportProviderErrorToRouterPolicy({ ... })` 收口到唯一 bridge。
 
 测试：

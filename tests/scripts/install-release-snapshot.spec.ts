@@ -37,9 +37,8 @@ describe('install-release-snapshot', () => {
       'sharedmodule',
       'llmswitch-core',
       'dist',
-      'router',
-      'virtual-router',
-      'engine-selection',
+      'native',
+      'router-hotpath',
       'native-hub-pipeline-session-identifiers-semantics.js'
     );
 

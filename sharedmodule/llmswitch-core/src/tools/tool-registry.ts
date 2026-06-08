@@ -3,7 +3,7 @@
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
 import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
-import { validateApplyPatchArgumentsWithNative } from '../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+import { validateApplyPatchArgumentsWithNative } from '../native/router-hotpath/native-chat-process-governance-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 

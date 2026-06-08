@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { inspectStopGatewaySignalWithNative, type StopGatewayContext } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+import { inspectStopGatewaySignalWithNative, type StopGatewayContext } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // ── Main ────────────────────────────────────────────────────────────────────
 

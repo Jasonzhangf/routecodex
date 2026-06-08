@@ -14,8 +14,8 @@ import type { ResponsesRequestContext } from './types.js';
 import {
   buildResponsesPayloadFromChatWithNative,
   normalizeResponsesToolCallArgumentsForClientWithNative
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
-import { normalizeChatResponseReasoningToolsWithNative } from '../../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { normalizeChatResponseReasoningToolsWithNative } from '../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 
 function normalizeResponsesToolCallArgumentsForClient(responsesPayload: Record<string, unknown>, context?: ResponsesRequestContext): void {
   const toolsRaw = Array.isArray(context?.toolsRaw) ? (context?.toolsRaw as unknown[]) : [];

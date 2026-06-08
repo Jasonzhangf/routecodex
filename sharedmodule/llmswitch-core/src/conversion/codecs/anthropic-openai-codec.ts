@@ -3,7 +3,7 @@ import { buildAnthropicRequestFromOpenAIChat } from '../shared/anthropic-message
 import {
   buildAnthropicFromOpenAIChatWithNative,
   buildOpenAIChatFromAnthropicWithNative
-} from '../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+} from '../../native/router-hotpath/native-compat-action-semantics.js';
 
 export function buildOpenAIChatFromAnthropic(
   payload: unknown,

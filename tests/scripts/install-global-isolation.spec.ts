@@ -18,4 +18,9 @@ describe('install-global artifact isolation', () => {
     expect(script).toMatch(/\(cd "\$INSTALL_BUILD_ROOT" && .*install-release-snapshot\.mjs/);
     expect(script).toContain('--skip-install-current');
   });
+
+  it('keeps install pack output under the approved artifacts root', () => {
+    expect(script).toContain('$INSTALL_BUILD_ROOT/artifacts/pack/install-global');
+    expect(script).not.toContain('$INSTALL_BUILD_ROOT/.install-pack');
+  });
 });

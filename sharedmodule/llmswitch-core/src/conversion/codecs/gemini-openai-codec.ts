@@ -5,8 +5,8 @@ import {
   runGeminiFromOpenAIChatCodecWithNative,
   runGeminiOpenAIRequestCodecWithNative,
   runGeminiOpenAIResponseCodecWithNative
-} from '../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
-import { buildChatResponseFromResponsesWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-compat-action-semantics.js';
+import { buildChatResponseFromResponsesWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   consumeResponsesPassthroughByAliases,
   consumeResponsesPayloadSnapshotByAliases,

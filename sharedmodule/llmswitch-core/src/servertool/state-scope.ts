@@ -2,7 +2,7 @@ import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

@@ -4,7 +4,7 @@ import type { JsonValue, JsonObject } from '../hub/types/json.js';
 import {
   buildGeminiToolsFromBridgeWithNative,
   prepareGeminiToolsForBridgeWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function prepareGeminiToolsForBridge(
   rawTools: JsonValue | undefined,

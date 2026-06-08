@@ -51,7 +51,7 @@ import {
   buildFollowupRequestIdWithNative,
   injectLoopWarningWithNative,
   decideBudgetResetWithNative
-} from '../router/virtual-router/engine-selection/native-followup-mainline-semantics.js';
+} from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   compactFollowupErrorReason,
   normalizeClientInjectText,

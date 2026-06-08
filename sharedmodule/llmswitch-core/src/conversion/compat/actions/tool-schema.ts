@@ -1,5 +1,5 @@
 import type { JsonObject } from '../../hub/types/json.js';
-import { sanitizeToolSchemaGlmShellWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { sanitizeToolSchemaGlmShellWithNative } from '../../../native/router-hotpath/native-compat-action-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.js';
+import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.js';
 
 const mockNormalizeApplyPatchArgumentsJson = jest.fn((inputJson: string) => {
   const input = JSON.parse(inputJson) as { arguments?: { patch?: string; filePath?: string; fileContent?: string } };
@@ -17,7 +17,7 @@ const mockNormalizeApplyPatchArgumentsJson = jest.fn((inputJson: string) => {
 });
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js',
   () => ({
     loadNativeRouterHotpathBindingForInternalUse: () => ({
       normalizeApplyPatchArgumentsJson: mockNormalizeApplyPatchArgumentsJson
@@ -26,7 +26,7 @@ jest.unstable_mockModule(
 );
 
 const { normalizeApplyPatchArgumentsWithNative } = await import(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governance-semantics.js'
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.js'
 );
 
 describe('apply_patch native governance wiring', () => {

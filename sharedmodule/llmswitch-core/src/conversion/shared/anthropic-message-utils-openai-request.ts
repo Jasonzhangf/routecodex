@@ -1,4 +1,4 @@
-import { buildAnthropicFromOpenAIChatWithNative } from '../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
+import { buildAnthropicFromOpenAIChatWithNative } from '../../native/router-hotpath/native-compat-action-semantics.js';
 
 type Unknown = Record<string, unknown>;
 

@@ -92,10 +92,12 @@ function findDefinitionHits(relPath, builder) {
   const patterns = [
     new RegExp(`\\bexport\\s+function\\s+${escaped}\\b`),
     new RegExp(`\\bfunction\\s+${escaped}\\b`),
+    new RegExp(`\\bfn\\s+${escaped}\\b`),
     new RegExp(`\\bpub(?:\\(crate\\))?\\s+fn\\s+${escaped}\\b`),
     new RegExp(`\\bpub\\(super\\)\\s+fn\\s+${escaped}\\b`),
     new RegExp(`\\bexport\\s+const\\s+${escaped}\\s*=`),
     new RegExp(`\\bconst\\s+${escaped}\\s*=`),
+    new RegExp(`^\\s*(?:(?:public|private|protected)\\s+)?${escaped}\\s*\\([^)]*\\)\\s*[:{]`),
   ];
 
   for (const file of files) {

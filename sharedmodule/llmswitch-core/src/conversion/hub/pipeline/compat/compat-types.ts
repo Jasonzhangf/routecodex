@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from '../../types/json.js';
-import type { NativeProviderProtocolToken } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import type { NativeProviderProtocolToken } from '../../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 
 type ShapeFilterConfig = Record<string, unknown>;
 type ResponseBlacklistConfig = Record<string, unknown>;

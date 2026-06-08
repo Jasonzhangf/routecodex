@@ -8,7 +8,7 @@ import {
   packShellArgsWithNative,
   repairFindMetaWithNative,
   splitCommandStringWithNative
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export interface ShellArgs {
   command: string | string[];

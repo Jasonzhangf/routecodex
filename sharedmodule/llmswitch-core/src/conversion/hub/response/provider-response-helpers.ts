@@ -2,7 +2,7 @@ import type { AdapterContext } from '../types/chat-envelope.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
 import {
   resolveProviderResponseContextHelpersWithNative
-} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 export type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';

@@ -3,7 +3,7 @@ import { isJsonObject, type JsonObject, type JsonValue } from './hub/types/json.
 import {
   ensureProtocolStateWithNative,
   getProtocolStateWithNative
-} from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 const PROTOCOL_STATE_KEY = 'protocolState';
 

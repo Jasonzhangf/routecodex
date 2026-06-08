@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.js';
+import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.js';
 
 const nodeRequire = createRequire(import.meta.url);
 

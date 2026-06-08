@@ -3,7 +3,7 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 const mockRunHubPipelineLibWithNative = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
   () => ({
     runHubPipelineLibWithNative: mockRunHubPipelineLibWithNative,
   })

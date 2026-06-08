@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 
 import { registerDaemonAuthRoutes } from '../../../src/server/runtime/http-server/daemon-admin/auth-handler.js';
 import { registerQuotaRoutes } from '../../../src/server/runtime/http-server/daemon-admin/quota-handler.js';
-import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests, setVirtualRouterPolicyRuntimeRouterHooks } from '../../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
+import { reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy, resetProviderRuntimeIngressForTests } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
 
 const BRIDGE_MODULE_PATH = '../../../src/modules/llmswitch/bridge.js';
 const GATE_MODULE_PATH = new URL('../../../src/server/runtime/http-server/daemon-admin/routecodex-x7e-gate.ts', import.meta.url).pathname;
@@ -95,8 +95,6 @@ describe('quota unified evidence aggregator', () => {
     };
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      setProviderRuntimeQuotaHooks: jest.fn(async () => true),
-      setProviderRuntimeProviderQuotaHooks: jest.fn(async () => true)
     }));
     jest.unstable_mockModule(GATE_MODULE_PATH, () => ({
       x7eGate: { phase1UnifiedQuota: true, phase2UnifiedControl: true },
@@ -187,27 +185,10 @@ describe('quota unified evidence aggregator', () => {
     await quotaModule.start();
     const daemon = { getModule: (id: string) => (id === 'quota' ? quotaModule : undefined) };
     const server = await createAuthenticatedQuotaServer({ daemon, loginFile, hubPipeline });
-    const routerHookOwner = {};
-    setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, {
-      handleProviderError: (event: any) => {
-        const key = event?.runtime?.providerKey;
-        const resetAtMs = Date.parse(String(event?.details?.resetAt || event?.resetAt || ''));
-        if (key && Number.isFinite(resetAtMs)) {
-          virtualRouter.handleProviderError?.({
-            ...event,
-            details: { ...(event?.details ?? {}), resetAt: new Date(resetAtMs).toISOString() }
-          });
-        }
-      },
-      handleProviderSuccess: (event: any) => {
-        virtualRouter.handleProviderSuccess?.(event);
-      }
-    });
-
     try {
-      const resetAtIso = '2026-05-28T00:00:00.000Z';
+      const resetAtIso = '2026-12-28T00:00:00.000Z';
       const resetAtMs = Date.parse(resetAtIso);
-      reportProviderErrorToRouterPolicy({
+      const errorEvent = reportProviderErrorToRouterPolicy({
         code: 'HTTP_402',
         status: 402,
         message: `HTTP 402: {"resetAt":"${resetAtIso}"}`,
@@ -215,6 +196,7 @@ describe('quota unified evidence aggregator', () => {
         timestamp: Date.now(),
         details: { resetAt: resetAtIso }
       });
+      virtualRouter.handleProviderError?.(errorEvent);
 
       const after402Snapshot = quotaModule.getAdminSnapshot()[providerA];
       const after402ReadOnly = quotaModule.getQuotaViewReadOnly()(providerA);
@@ -302,10 +284,11 @@ describe('quota unified evidence aggregator', () => {
         const hydrated402Json = await hydrated402Resp.json() as any;
         const hydrated402Admin = hydrated402Json.providers.find((entry: any) => entry.providerKey === providerA);
 
-        reportProviderSuccessToRouterPolicy({
+        const successEvent = reportProviderSuccessToRouterPolicy({
           runtime: { providerKey: providerA, runtimeKey: 'quota.key1' },
           timestamp: Date.now()
         });
+        virtualRouterHydrated.handleProviderSuccess?.(successEvent);
 
         const afterSuccessSnapshot = quotaModuleHydrated.getAdminSnapshot()[providerA];
         const afterSuccessReadOnly = quotaModuleHydrated.getQuotaViewReadOnly()(providerA);
@@ -369,7 +352,6 @@ describe('quota unified evidence aggregator', () => {
         expect(evidence.successProjectionAlignedAfterHydrate.readOnly.inPool).toBe(true);
         expect(evidence.successProjectionAlignedAfterHydrate.admin.inPool).toBe(true);
       } finally {
-        setVirtualRouterPolicyRuntimeRouterHooks(routerHookOwner, undefined);
         await quotaModuleHydrated.stop();
         await serverHydrated.close();
       }

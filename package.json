@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.2987",
+  "version": "0.90.2988",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -20,7 +20,6 @@
     "sharedmodule/llmswitch-core/package.json",
     "config/",
     "scripts/",
-    "rcc",
     "README.md",
     "LICENSE",
     "docs/",
@@ -51,6 +50,7 @@
     "test:ci:coverage": "npm run test:ci:jest:coverage",
     "verify:repo-sanity": "node scripts/ci/repo-sanity.mjs",
     "verify:llmswitch-rustification-audit": "node scripts/ci/llmswitch-rustification-audit.mjs",
+    "verify:vr-no-ts-runtime": "node scripts/architecture/verify-vr-no-ts-runtime.mjs",
     "verify:file-line-limit": "node scripts/ci/check-file-line-limit.mjs",
     "audit:silent-failure": "node scripts/ci/silent-failure-audit.mjs",
     "vr:dryrun": "node scripts/virtual-router-dryrun.mjs",

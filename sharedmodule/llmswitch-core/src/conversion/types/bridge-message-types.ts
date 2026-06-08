@@ -1,4 +1,4 @@
-import type { NativeReqInboundSemanticLiftApplyInput } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import type { NativeReqInboundSemanticLiftApplyInput } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 
 export type BridgeContentPart = {
   type: string;

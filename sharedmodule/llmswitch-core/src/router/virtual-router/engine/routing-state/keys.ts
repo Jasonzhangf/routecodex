@@ -1,6 +1,6 @@
-import type { RouterMetadataInput } from '../../types.js';
-import { failNativeRequired } from '../../engine-selection/native-router-hotpath-policy.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from '../../engine-selection/native-router-hotpath.js';
+import type { RouterMetadataInput } from '../../../../native/router-hotpath/virtual-router-contracts.js';
+import { failNativeRequired } from '../../../../native/router-hotpath/native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../../../../native/router-hotpath/native-router-hotpath.js';
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;

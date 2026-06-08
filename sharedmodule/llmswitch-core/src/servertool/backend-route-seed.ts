@@ -3,7 +3,7 @@ import {
   extractCapturedChatSeedWithNative,
   normalizeFollowupParametersWithNative,
   resolveFollowupModelWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export type CapturedChatSeed = {
   model?: string;

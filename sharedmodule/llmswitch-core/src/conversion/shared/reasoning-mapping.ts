@@ -1,4 +1,4 @@
-import { mapReasoningContentToResponsesOutputWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { mapReasoningContentToResponsesOutputWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export interface ReasoningItem {
   type: 'reasoning';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { RouteLoadBalancer } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/load-balancer.js';
-import { selectProviderKeyFromCandidatePool } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.js';
+import { selectProviderKeyFromCandidatePool } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/tier-selection-select.js';
 
 describe('virtual-router retry excluded candidates', () => {
   it('does not reselect an already excluded concrete providerKey from the candidate pool', () => {

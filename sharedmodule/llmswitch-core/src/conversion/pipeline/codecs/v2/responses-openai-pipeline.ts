@@ -17,9 +17,9 @@ import {
   OPENAI_PROTOCOL
 } from './shared/openai-chat-helpers.js';
 import { buildAdapterContextFromPipeline } from '../../hooks/adapter-context.js';
-import { chatEnvelopeToStandardizedWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
-import { standardizedToChatEnvelopeWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
-import { applyBridgeCaptureToolResultsWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+import { chatEnvelopeToStandardizedWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { standardizedToChatEnvelopeWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
+import { applyBridgeCaptureToolResultsWithNative } from '../../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 
 const DEFAULT_RESPONSES_ENDPOINT = '/v1/responses';
 const RESPONSES_PROTOCOL = 'openai-responses';

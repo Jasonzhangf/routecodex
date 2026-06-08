@@ -1,4 +1,4 @@
-import { normalizeChatMessageContentWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { normalizeChatMessageContentWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 function assertChatOutputNormalizerNativeAvailable(): void {
   if (typeof normalizeChatMessageContentWithNative !== 'function') {

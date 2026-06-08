@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 describe('hub pipeline Rust responses provider payload regression', () => {
   it('keeps /v1/responses tool requests as Responses wire payload for openai-responses providers', () => {

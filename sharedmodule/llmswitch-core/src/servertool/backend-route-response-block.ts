@@ -4,7 +4,7 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import {
   isEmptyClientResponsePayloadWithNative,
   isToolCallContinuationResponseWithNative
-} from '../router/virtual-router/engine-selection/native-chat-process-node-result-semantics.js';
+} from '../native/router-hotpath/native-chat-process-node-result-semantics.js';
 import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {

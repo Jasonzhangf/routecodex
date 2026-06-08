@@ -1092,7 +1092,7 @@ async function normalizeResponsesToolCallsForClientBody(
   }
   try {
     const mod = await importCoreDist<{ normalizeResponsesToolCallArgumentsForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
-      'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+      'native/router-hotpath/native-hub-pipeline-resp-semantics'
     );
     if (typeof mod.normalizeResponsesToolCallArgumentsForClientWithNative !== 'function') {
       throw new Error('[handler-response] normalizeResponsesToolCallArgumentsForClientWithNative not available');

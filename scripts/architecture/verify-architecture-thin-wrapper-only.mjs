@@ -4,7 +4,7 @@ import path from 'node:path';
 const root = process.cwd();
 const targetRoots = [
   'sharedmodule/llmswitch-core/src/conversion/hub/process',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath',
 ];
 const exts = new Set(['.ts']);
 
@@ -12,7 +12,7 @@ const allowedFiles = new Set([
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts',
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts',
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts',
-  'sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.ts',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
 ]);
 
 const dangerousPatterns = [

@@ -1,7 +1,7 @@
 import {
   analyzeChatProcessMedia,
   stripChatProcessHistoricalImages,
-} from "../../../router/virtual-router/engine-selection/native-router-hotpath.js";
+} from "../../../native/router-hotpath/native-router-hotpath.js";
 import type { StandardizedMessage } from "../types/standardized.js";
 
 export function stripHistoricalImageAttachments(

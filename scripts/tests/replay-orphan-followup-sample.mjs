@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { coerceStandardizedRequestFromPayloadWithNative } from '../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-builders.js';
+import { coerceStandardizedRequestFromPayloadWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
 
 function findLatestOrphanCallId(logPath) {
   const text = fs.readFileSync(logPath, 'utf8');

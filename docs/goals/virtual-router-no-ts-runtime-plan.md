@@ -50,7 +50,7 @@ This plan is stricter than the current thin-shell policy. Current docs and gates
 ## Current Evidence Baseline
 
 - `sharedmodule/llmswitch-core/src/router/virtual-router` currently has production TS runtime files.
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection` is the largest wrapper surface and must not remain as hand-written TS.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath` is the largest wrapper surface and must not remain as hand-written TS.
 - Rust VR truth already exists for route selection, routing bootstrap, provider bootstrap/registry, routing state store, health/quota, instructions, direct model, and NAPI proxy under `virtual_router_engine`.
 - Existing docs currently permit TS thin shells:
   - `docs/ARCHITECTURE.md`
@@ -246,7 +246,7 @@ Rust owner:
 
 TS deletion candidates:
 
-- `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/**`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/**`
 - matching dist artifacts
 
 Work:

@@ -49,7 +49,7 @@ export function loadNativeFailurePolicyBridge(): NativeFailurePolicyBridge | nul
     }
     const nativePath = path.resolve(
       resolveModuleDir(),
-      '../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/engine-selection/native-failure-policy.js'
+      '../../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-failure-policy.js'
     );
     cachedNativeFailurePolicy = nativeRequire(nativePath) as NativeFailurePolicyBridge;
     return cachedNativeFailurePolicy;

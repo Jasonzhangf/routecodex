@@ -4,8 +4,8 @@ import { buildNativeReqOutboundCompatAdapterContext } from "../../hub/pipeline/c
 import type {
   NativeReqOutboundCompatAdapterContextInput,
   NativeRespInboundStage3CompatInput,
-} from "../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js";
-import { runRespInboundStage3CompatWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js";
+} from "../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js";
+import { runRespInboundStage3CompatWithNative } from "../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js";
 
 const PROFILE = "chat:glm";
 const DEFAULT_PROVIDER_PROTOCOL = "openai-chat";

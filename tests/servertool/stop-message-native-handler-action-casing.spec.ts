@@ -12,7 +12,7 @@ describe('stop_message native handler action casing', () => {
   it('lowercase trigger action produces reenter stopless plan', async () => {
     process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativePath();
     const { runStopMessageAutoHandlerWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-stop-message-auto-semantics.js'
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js'
     );
 
     const result = runStopMessageAutoHandlerWithNative({

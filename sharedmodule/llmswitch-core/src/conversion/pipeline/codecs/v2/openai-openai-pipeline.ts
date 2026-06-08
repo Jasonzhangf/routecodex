@@ -12,9 +12,9 @@ import type { FormatEnvelope } from '../../../hub/types/format-envelope.js';
 import { runStandardChatRequestFilters } from '../../../index.js';
 import { ConversionMetaBag, type ConversionMetaRecord } from '../../meta/meta-bag.js';
 import type { CanonicalChatRequest } from '../../schema/index.js';
-import { chatEnvelopeToStandardizedWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
-import { parseReqInboundFormatEnvelopeWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
-import { mapOpenaiChatToChatWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-semantic-mappers.js';
+import { chatEnvelopeToStandardizedWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { parseReqInboundFormatEnvelopeWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-edge-stage-semantics.js';
+import { mapOpenaiChatToChatWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
 import {
   canonicalizeOpenAIChatResponse,
   convertStandardizedToOpenAIChat as convertCanonicalToOpenAIChat,

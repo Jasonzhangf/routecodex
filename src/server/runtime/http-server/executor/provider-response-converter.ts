@@ -102,7 +102,7 @@ let nativeRespSemanticsModulePromise: Promise<NativeRespSemanticsModule> | null 
 async function loadNativeRespSemanticsModule(): Promise<NativeRespSemanticsModule> {
   if (!nativeRespSemanticsModulePromise) {
     nativeRespSemanticsModulePromise = importCoreDist<NativeRespSemanticsModule>(
-      'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+      'native/router-hotpath/native-hub-pipeline-resp-semantics'
     );
   }
   return nativeRespSemanticsModulePromise;

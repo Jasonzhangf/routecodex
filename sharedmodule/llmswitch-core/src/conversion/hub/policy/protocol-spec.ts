@@ -9,7 +9,7 @@ import {
   OPENAI_RESPONSES_ALLOWED_FIELDS,
   OPENAI_RESPONSES_PARAMETERS_WRAPPER_ALLOW_KEYS
 } from '../../protocol-field-allowlists.js';
-import { resolveHubProtocolSpecWithNative } from '../../../router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js';
+import { resolveHubProtocolSpecWithNative } from '../../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 export interface ProviderOutboundLayoutRule {
   code: 'forbid_wrapper';

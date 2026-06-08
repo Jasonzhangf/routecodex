@@ -3,7 +3,7 @@ import {
   cloneRuntimeMetadataWithNative,
   ensureRuntimeMetadataCarrierWithNative,
   readRuntimeMetadataWithNative
-} from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
 

@@ -20,7 +20,7 @@ import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
-} from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+} from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
   filterBridgeInputForUpstreamWithNative,
@@ -29,7 +29,7 @@ import {
   resolveResponsesRequestBridgeDecisionsWithNative,
   resolveResponsesBridgeToolsWithNative,
   runBridgeActionPipelineWithNative
-} from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+} from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 import type {
   BuildChatRequestResult,
   BuildResponsesRequestResult,

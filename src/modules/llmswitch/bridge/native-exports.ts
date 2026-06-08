@@ -4,10 +4,13 @@
  * Thin wrappers around llmswitch-core native bindings.
  */
 
+// feature_id: responses.direct_tool_shape_contract
+// canonical_builders: evaluate_responses_direct_route_decision_json, has_declared_apply_patch_tool_json
+
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, requireCoreDist, resolveCoreModulePath, type AnyRecord } from './module-loader.js';
+import { importCoreDist, requireCoreDist, type AnyRecord } from './module-loader.js';
 import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
 type NativeFailureClassification = unknown;
@@ -140,7 +143,7 @@ function getFailurePolicyModule(): NativeFailurePolicyModule {
   }
   try {
     cachedFailurePolicyModule = requireCoreDist<NativeFailurePolicyModule>(
-      'router/virtual-router/engine-selection/native-failure-policy'
+      'native/router-hotpath/native-failure-policy'
     );
   } catch {
     cachedFailurePolicyModule = null;
@@ -160,7 +163,7 @@ function getHubVrNodeContracts(): NativeHubVrNodeContracts {
   }
   try {
     cachedHubVrNodeContracts = requireCoreDist<NativeHubVrNodeContracts>(
-      'router/virtual-router/engine-selection/native-hub-vr-node-contracts'
+      'native/router-hotpath/native-hub-vr-node-contracts'
     );
   } catch {
     cachedHubVrNodeContracts = null;
@@ -222,7 +225,7 @@ async function getSharedConversionSemantics(): Promise<NativeSharedConversionSem
   }
   try {
     cachedSharedSemantics = await importCoreDist<NativeSharedConversionSemantics>(
-      'router/virtual-router/engine-selection/native-shared-conversion-semantics'
+      'native/router-hotpath/native-shared-conversion-semantics'
     );
   } catch {
     cachedSharedSemantics = null;
@@ -242,7 +245,7 @@ async function getRespSemantics(): Promise<NativeHubPipelineRespSemantics> {
   }
   try {
     cachedRespSemantics = await importCoreDist<NativeHubPipelineRespSemantics>(
-      'router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics'
+      'native/router-hotpath/native-hub-pipeline-resp-semantics'
     );
   } catch {
     cachedRespSemantics = null;
@@ -280,7 +283,7 @@ async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySeman
   }
   try {
     cachedHubBridgePolicySemantics = await importCoreDist<NativeHubBridgePolicySemantics>(
-      'router/virtual-router/engine-selection/native-hub-bridge-policy-semantics'
+      'native/router-hotpath/native-hub-bridge-policy-semantics'
     );
   } catch {
     cachedHubBridgePolicySemantics = null;
@@ -300,7 +303,7 @@ function getHubBridgePolicySemanticsSync(): NativeHubBridgePolicySemantics {
   }
   try {
     cachedHubBridgePolicySemanticsSync = requireCoreDist<NativeHubBridgePolicySemantics>(
-      'router/virtual-router/engine-selection/native-hub-bridge-policy-semantics'
+      'native/router-hotpath/native-hub-bridge-policy-semantics'
     );
   } catch {
     cachedHubBridgePolicySemanticsSync = null;
@@ -390,13 +393,8 @@ function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemanti
     return cachedChatProcessNodeResultSemantics;
   }
   try {
-    const wrapperPath = resolveCoreModulePath(
-      'router/virtual-router/engine-selection/native-chat-process-node-result-semantics'
-    );
-    const nativePath = path.resolve(wrapperPath, '..', '..', '..', '..', 'native', 'router_hotpath_napi.node');
-    cachedChatProcessNodeResultSemantics = createRequire(wrapperPath)(
-      nativePath
-    );
+    cachedChatProcessNodeResultSemantics =
+      getRouterHotpathJsonBindingSync() as NativeChatProcessNodeResultSemantics;
   } catch {
     cachedChatProcessNodeResultSemantics = null;
   }

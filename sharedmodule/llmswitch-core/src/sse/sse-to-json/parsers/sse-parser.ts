@@ -4,8 +4,8 @@ import type {
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from '../../../router/virtual-router/engine-selection/native-router-hotpath-policy.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from '../../../router/virtual-router/engine-selection/native-router-hotpath.js';
+} from '../../../native/router-hotpath/native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../../../native/router-hotpath/native-router-hotpath.js';
 
 export interface SseParserConfig {
   enableStrictValidation: boolean;

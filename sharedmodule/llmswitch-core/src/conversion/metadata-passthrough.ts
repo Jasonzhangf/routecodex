@@ -2,7 +2,7 @@ import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from './hub/
 import {
   encodeMetadataPassthroughWithNative,
   extractMetadataPassthroughWithNative
-} from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 interface PassthroughOptions {
   prefix: string;

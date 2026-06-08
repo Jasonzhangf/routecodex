@@ -2,7 +2,7 @@
 import {
   parseLenientJsonishWithNative,
   repairArgumentsToStringWithNative
-} from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+} from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export function tryParseJson<T = unknown>(s: unknown): T | unknown {
   if (typeof s !== 'string') return s as T;

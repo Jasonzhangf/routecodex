@@ -1,5 +1,5 @@
 import { HubPipeline } from '../../src/conversion/hub/pipeline/hub-pipeline.js';
-import type { VirtualRouterConfig } from '../../src/router/virtual-router/types.js';
+import type { VirtualRouterConfig } from '../../src/native/router-hotpath/virtual-router-contracts.js';
 
 const routerConfig: VirtualRouterConfig = {
   routing: {

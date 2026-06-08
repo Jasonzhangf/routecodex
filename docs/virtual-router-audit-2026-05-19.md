@@ -70,7 +70,7 @@
    - 结论：与 no-fallback 约束冲突，建议删除并直接抛错（fail-fast）。
 
 2. **疑似 fallback 违例（应移除）**
-   - 文件：`src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.ts`
+   - 文件：`src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts`
    - 行为：`fallbackProtocol/fallbackPayload` 在 native 结果不可用时回退 TS 值。
    - 结论：应改为 native 结果异常即 fail-fast。
 

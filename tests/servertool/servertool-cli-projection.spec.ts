@@ -2,7 +2,7 @@ import {
   jest
 } from '@jest/globals';
 
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-servertool-core-semantics.js', () => ({
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js', () => ({
   buildClientExecCliProjectionOutputWithNative: (input: any) => {
     if (input.toolName === 'stop_message_auto') {
       return {

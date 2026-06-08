@@ -1,5 +1,23 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-08 note.md consolidation index
+- Scope: this pass adds a safe topic map and promotes only facts re-verified against current code/tests. Raw history remains below for evidence; no broad deletion.
+- `~/.rcc` / root generated cleanup: promoted to `MEMORY.md` top entries `cleanup` / `root-layout`; raw note retained as evidence.
+- direct passthrough / 429 retry / Responses SSE terminal / conversation store / generated artifact cleanup / stopless / image routing: already promoted to 2026-06-07 `MEMORY.md` sections; no duplicate promotion in this consolidation pass.
+- apply_patch 10000/freeform/provider-history cluster: promoted to `2026-06-08 apply_patch freeform client/provider boundary`. Older servertool pressure/self-test notes remain raw historical evidence; the current verified boundary is freeform client projection plus provider-side patch input preservation, not the old line-edit/servertool dialect.
+- provider business error 2013 cluster: promoted to `2026-06-08 provider status 2013 classification split`. Current code proves the classification split, while the request-executor provider-failure-plan focused gate is red, so end-to-end retry-plan closeout is unpromoted.
+- Responses started-SSE error path cluster: promoted to `2026-06-08 Responses started-SSE error projection boundary`.
+- stopless/direct usage/error projection deploy: partially promoted as `2026-06-08 ErrorErr06 public projection boundary`; usage/session and stopless subclaims are unpromoted because current focused gates are red in this worktree.
+- VR complete Rustification / VR no-TS runtime: promoted only as current-state gap `2026-06-08 Virtual Router no-TS runtime current state`; completion is unproven because VR TS files/imports remain and focused gates are red.
+- legacy 2026-05 Windsurf / qwenchat / deepseek-web / Hub slimming / servertool followup clusters: kept raw in this pass unless already covered by dated `MEMORY.md` or local skill entries. Promote them only after fresh current-code verification because many notes were superseded by later Rust-only, direct-passthrough, metadata, and topology contracts.
+- Legacy cluster map:
+  - 2026-05-08 Provider/Hub Pipeline slimming, wrapper deletion, God Object split: historical refactor record; current durable truths are later Hub Rust closeout / zero-consumer deletion entries in `MEMORY.md`.
+  - 2026-05-09 to 2026-05-11 `/goal`, DeepSeek Web, TOML, compliance audit, tool harvest, silent hang: raw troubleshooting history; many claims predate current Rust Hub/metadata/topology locks and require fresh verification before promotion.
+  - 2026-05-12 to 2026-05-18 Responses continuation/save-restore, Mimo/Qwen/DeepSeek SSE, heartbeat/session, qwenchat WAF: mixed historical state; promote only per-topic after current code/test evidence.
+  - 2026-05-20 to 2026-05-24 Windsurf auth/tool protocol/apply_patch/run_command: mostly superseded by existing Windsurf design/MEMORY facts and project AGENTS Windsurf guard; no duplicate promotion here.
+  - 2026-05-30 to 2026-06-04 direct passthrough, metadata isolation, pipeline topology, MiniMax 2013, servertool/stopless, SSE terminal: latest verified parts are already in dated `MEMORY.md`; older raw entries remain as incident evidence.
+  - 2026-06-05 to 2026-06-07 apply_patch, direct tool-shape, hardcode/fallback audit, quota/provider switch, servertool CLI, VR no-TS, image routing: only the reverified apply_patch/2013/SSE/ErrorErr06/VR facts are promoted in this pass; unverified subclaims stay raw.
+
 ## 2026-06-07 direct passthrough 正确边界纠正
 
 - direct/router-direct/provider-direct 不是 Hub Pipeline，也不是 provider outbound builder：正确行为是当前 request body 对象 identity passthrough + 必要 hooks；禁止 clone、raw metadata replay、direct body builder、provider outbound sanitizer、runtime tool validator、history repair、protocol conversion。
@@ -16320,3 +16338,57 @@ Phase E: TS fallback 物理删除
 - Fix boundary: `sharedmodule/llmswitch-core/src/servertool/engine.ts` now resolves reasoning as `execution.context.assistantStopText -> engineResult.finalChatResponse assistant text -> explicit default`; continuation prompt still stays in CLI `--input-json`.
 - Test stabilization: the historical goal-context CLI projection test clears its session/tmux state files before running, preventing previous `stopMessageUsed=3` residue from changing repeatCount and prompt layer.
 - Verification PASS: `cargo test -p stop-message-core --lib`; `cargo test -p router-hotpath-napi stop_message_auto --lib`; stop-message Jest 2 suites / 68 passed / 16 skipped; `npm run verify:servertool-rust-only`; `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-07 VR no-TS runtime Slice 6 evidence
+- Current target doc: docs/goals/virtual-router-no-ts-runtime-plan.md demands no production TS runtime/wrapper under sharedmodule/llmswitch-core/src/router/virtual-router/**; engine-selection/native-*.ts must disappear.
+- Current evidence before edits: git clean; src/router/virtual-router has many TS files; engine-selection has 68 tracked TS wrapper files and ~18k LOC; rg found 355 references to virtual-router/engine-selection across source/tests/scripts/docs.
+- dist/router/virtual-router still contains stale generated VR artifacts, including old wrappers not present in src; final gate must scan and delete dist residues too.
+- Chosen next slice: migrate native binding wrapper host out of VR namespace to non-VR path, then delete old engine-selection source path and update production/test imports.
+
+## 2026-06-08 root generated artifacts governance audit
+- Root inventory current suspicious entries: `.codex-work/`, `.drudge/`, `.hypatia/`, `.hypatia_data/`, `.reasonix/`, `clock.md`, `entities.json`, `hypatia`, `mempalace.yaml`, `models/`, `package/`, root `rcc`, and local-excluded `webui/`. `tmp/`, `dist/`, `node_modules/` are approved generated/dependency roots.
+- Ignore/tracking evidence: `git check-ignore -v` proves tool/cache state is ignored; `git ls-files package rcc` proves `package/` and `rcc` are tracked legacy. `webui/` is hidden only by `.git/info/exclude`, while `package.json`, `jest.config.js`, `scripts/install-global.sh`, and Vite config treat it as source input.
+- Source write evidence: `scripts/pack-mode.mjs` still runs root `npm pack`; `scripts/pack-rcc.mjs` expects root `rcc-<version>.tgz`; `scripts/install-global.sh` uses `$INSTALL_BUILD_ROOT/.install-pack`, which becomes root `.install-pack` under in-place build. These are the root write truth points for pack/install artifacts.
+- Legacy decision evidence: tracked `package/` is qodercli package residue (`@qoder-ai/qodercli`) with no current package/install reference except stale isolated-copy list; root `rcc` is a symlink to `dist/cli.js`, while package bin already points to `dist/cli.js` and pack-mode mutates bin for release.
+- Gate evidence before edits: `node scripts/ci/repo-sanity.mjs` passes root layout/untracked/secrets and fails only at llmswitch rustification baseline/new moved TS files.
+- Final verification evidence: root layout/root generated residue/root write checks no longer fail, and current root inventory has no forbidden `package`, root `rcc`, root `*.tgz`, `.install-pack`, root `models`, `clock.md`, `entities.json`, `mempalace.yaml`, `hypatia`, `.hypatia*`, `.codex-work`, `.drudge`, or `.reasonix`.
+- Remaining full-gate blocker: `node scripts/ci/repo-sanity.mjs` currently fails at the general untracked-source check on VR/Rustification source files: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs`, `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts`, and `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts`. These are not root generated artifacts; do not hide/delete them as part of this governance goal.
+- Additional write-path audit found two target-scope misses: `scripts/tool-classification-report.ts` and `scripts/analyze-tools-fileops.mjs` defaulted tracked reports to root `reports/`. Both now default to `docs/reports/`; `repo-sanity` catches the old `path.join(process.cwd(), 'reports')` pattern for those scripts.
+- Gate alignment update: plan allows root `logs/<feature>/` for repo-local debug, so `repo-sanity` now allows `logs/`; scoped subroot checks now reject non-pack `artifacts/*` and non-model-cache `.cache/*`.
+- Verification after this pass: `rg` for root `reports` defaults returns no matches outside gate patterns, `find artifacts .cache logs -maxdepth 2 -mindepth 1` shows only `artifacts/pack` and `.cache/model-cache`, `npx tsc --noEmit --pretty false` PASS, `git diff --check && git diff --cached --check` PASS. Full `repo-sanity` remains blocked only by the same 3 VR/Rustification untracked source files.
+
+## 2026-06-08 VR no-TS runtime Slice 1 bootstrap closeout
+- Moved VR bootstrap/types contract out of `src/router/virtual-router`: TS callers now use `src/native/router-hotpath/native-virtual-router-bootstrap-config.ts` and `virtual-router-contracts.ts`; old `src/router/virtual-router/bootstrap.ts`, `bootstrap/**`, and `types.ts` are deleted.
+- Added Rust single bootstrap entrypoint `virtual_router_engine/bootstrap.rs` and NAPI export `bootstrapVirtualRouterConfigJson`; it returns `config`, `runtime`, `targetRuntime`, `providers`, and `routing`.
+- Rust bootstrap now carries config `clock` meta and rejects non-chat provider `process` with CONFIG_ERROR; test assertions use native/bootstrap blackbox and provider unavailable error code.
+- Deleted ignored untracked dist bootstrap residues under `sharedmodule/llmswitch-core/dist/router/virtual-router/bootstrap*` after `git ls-files` empty + `git check-ignore` `dist/` evidence.
+- Verification PASS: `cargo test -p router-hotpath-napi virtual_router_engine::bootstrap --lib -- --nocapture`; `node scripts/build-native-hotpath.mjs`; `npm run build -- --pretty false` in llmswitch-core; root `npx tsc --noEmit --pretty false`; Slice 1 Jest 4 suites / 12 tests. `npm run verify:vr-no-ts-runtime` still RED only on remaining Slice 2+ VR TS runtime files.
+
+## 2026-06-08 VR provider runtime ingress native closeout
+- Physically deleted old TS hook fanout owner `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts`; active owner is now `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` plus Rust `virtual_router_engine/provider_runtime_ingress.rs`.
+- HubPipeline now registers native VR runtime ingress through `VirtualRouterEngineProxy.registerProviderRuntimeIngress()` / `unregisterProviderRuntimeIngress()`; direct/bridge imports moved to `native/router-hotpath/native-provider-runtime-ingress`.
+- Error pipeline contract updated: router-direct still does not classify provider transport errors inside `router-direct-pipeline.ts`, but live direct execution may delegate provider 429/5xx to the unified `resolveRequestExecutorProviderFailurePlan` ErrorErr05 consumer to perform provider switch/reroute.
+- Verification PASS: `npx tsc --noEmit --pretty false`; `npm run verify:repo-sanity`; `git diff --check && git diff --cached --check`; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; focused ingress/error Jest 5 suites / 15 tests; VR/native bootstrap/provider suites 8 suites / 20 tests.
+- Remaining RED: `npm run verify:vr-no-ts-runtime` still fails on 20 production TS files under `sharedmodule/llmswitch-core/src/router/virtual-router/**`, so VR no-TS runtime closeout is not complete.
+
+## 2026-06-08 5555 llmgate/asxs priority route audit
+- Current truth: `~/.rcc/config.toml` 5555 `coding` / `thinking` / `default` are `mode = "priority"`, but `longcontext` is actually `mode = "weighted"` with weights `sdfv=20`, `llmgate key1/key2=10/10`, `asxs=1`; comment says `longcontext=sdfv > llmgate > asxs`, but config does not enforce priority for longcontext.
+- Rust VR selection evidence: `mode="priority"` returns the first available target in configured order; `mode="weighted"` uses smooth weighted selection, so low-weight asxs can still be selected eventually.
+- Live evidence: `~/.rcc/codex-samples/.../ports/5555/asxs.crsa.gpt-5.5/req_1780802993077_e1b4d912/provider-request.json` proves a 5555 request sent to asxs; `~/.rcc/logs/server-5555.log` shows `longcontext/gateway-priority-5555-weighted-longcontext` hits and repeated `thinking` llmgate 503 errors around 2026-06-06 23:15.
+- Conclusion: asxs appears either because request classified into 5555 longcontext weighted pool, or because higher priority targets were filtered by health/quota/excluded state; not because priority mode itself randomly skipped llmgate.
+
+## 2026-06-08 VR provider runtime ingress slice reverify
+- Removed obsolete bridge API surface for `setVirtualRouterPolicyRuntimeRouterHooks`, `setProviderRuntimeObserverHooks`, `setProviderRuntimeQuotaHooks`, and `setProviderRuntimeProviderQuotaHooks`; production bridge now exposes only native Rust provider error/success ingress.
+- Deleted ignored dist residue `sharedmodule/llmswitch-core/dist/router/virtual-router/provider-runtime-ingress.{js,d.ts}` after explicit path check; `find sharedmodule/llmswitch-core/dist/router/virtual-router -maxdepth 1 \( -name 'provider-runtime-ingress.js' -o -name 'provider-runtime-ingress.d.ts' \) -print` now returns empty.
+- Updated ErrorErr04 owner references to `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` + Rust `virtual_router_engine/provider_runtime_ingress.rs`; removed old quota hook mock fields and stale docs references, leaving only the migration plan deletion-candidate mention.
+- Test fixture correction: daemon-admin 402 `resetAt` fixtures now use future `2026-12-28T00:00:00.000Z`; previous `2026-05-28T00:00:00.000Z` was expired on current run date and correctly hydrated as ordinary cooldown.
+- Provider failure blackbox aligned to Rust 503 policy: HTTP 503 trips daily cooldown on first failure, then reroutes; restart does one passive reprobe. HTTP 502 threshold behavior remains separate.
+- Architecture gate fixes: route availability floor anchors moved off forbidden old VR TS path into Rust engine module; canonical-builder definition gate now recognizes Rust private `fn` and TS class methods without treating ordinary calls as definitions; quota index fake export replaced by comment anchor.
+- Verification PASS this slice: `node scripts/build-native-hotpath.mjs` in llmswitch-core; `cargo test -p router-hotpath-napi provider_runtime_ingress --lib -- --nocapture` (2 tests); `npm run build -- --pretty false` in llmswitch-core; root `npm run build:min`; root `npx tsc --noEmit --pretty false`; `git diff --check`; focused ingress/error Jest 5 suites / 15 tests; daemon-admin/quota Jest 4 suites / 13 tests; `npm run verify:architecture-error-chain-bypass`; `npm run verify:provider-failure-ban-blackbox`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:architecture-ci`.
+- Current expected RED: `npm run verify:vr-no-ts-runtime` still fails on 20 remaining production TS files under `sharedmodule/llmswitch-core/src/router/virtual-router/**`; `provider-runtime-ingress.ts` is no longer in that failure list.
+
+## 2026-06-08 staged review before native ingress commit
+- Blocker fixed: `request-executor.rebind-failfast.spec.ts` bridge mock was missing current `deriveFinishReasonNative` export after old hook APIs were removed.
+- Blocker fixed: quota resetAt fixtures used `2026-05-28`, which is expired on 2026-06-08 and makes hydrated cooldown appear as immediate out-of-pool state; moved fixture resetAt to `2026-12-28`.
+- Blackbox contract aligned: provider 503 now reports once, enters ErrorErr05 switch/reroute, and selects backup; tests assert `primaryHits=1` before restart and one passive reprobe after restart, not the old three-hit provider-internal threshold.
+- Verification PASS in this review: focused quota/request-executor Jest 7 suites / 22 tests; focused ingress/error Jest 5 suites / 15 tests; `npm run verify:provider-failure-ban-blackbox`; `npx tsc --noEmit --pretty false`; `npm run verify:repo-sanity`; `git diff --check && git diff --cached --check`; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`.

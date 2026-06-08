@@ -102,8 +102,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       sanitizeFollowupText: (value: string) => value,
       reportProviderErrorToRouterPolicy: async (event: any) => event,
       reportProviderSuccessToRouterPolicy: async (event: any) => event,
-      setProviderRuntimeQuotaHooks: async () => true,
-      setProviderRuntimeProviderQuotaHooks: async () => true,
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -250,8 +248,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       sanitizeFollowupText: (value: string) => value,
       reportProviderErrorToRouterPolicy: async (event: any) => event,
       reportProviderSuccessToRouterPolicy: async (event: any) => event,
-      setProviderRuntimeQuotaHooks: async () => true,
-      setProviderRuntimeProviderQuotaHooks: async () => true,
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -379,8 +375,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       sanitizeFollowupText: (value: string) => value,
       reportProviderErrorToRouterPolicy: async (event: any) => event,
       reportProviderSuccessToRouterPolicy: async (event: any) => event,
-      setProviderRuntimeQuotaHooks: async () => true,
-      setProviderRuntimeProviderQuotaHooks: async () => true,
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -514,8 +508,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       sanitizeFollowupText: (value: string) => value,
       reportProviderErrorToRouterPolicy: async (event: any) => event,
       reportProviderSuccessToRouterPolicy: async (event: any) => event,
-      setProviderRuntimeQuotaHooks: async () => true,
-      setProviderRuntimeProviderQuotaHooks: async () => true,
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}

@@ -126,8 +126,8 @@ prepare_isolated_build_root() {
     }
 
     for item in \
-        package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js eslint.config.js rcc README.md LICENSE \
-        src scripts config configsamples docs webui vendor package; do
+        package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
+        src scripts config configsamples docs webui vendor; do
         copy_isolated_path "$item"
     done
     copy_isolated_path "samples/mock-provider"
@@ -225,7 +225,7 @@ global_install() {
     fi
 
     # 依赖隔离 build root 中已完成的 dist；先 pack 再安装，避免 npm 把临时目录装成全局 symlink。
-    local pack_dir="$INSTALL_BUILD_ROOT/.install-pack"
+    local pack_dir="$INSTALL_BUILD_ROOT/artifacts/pack/install-global"
     mkdir -p "$pack_dir"
     local packed_name
     packed_name="$(cd "$INSTALL_BUILD_ROOT" && npm pack --pack-destination "$pack_dir" --silent | awk '/\.tgz$/ { name=$0 } END { print name }')"

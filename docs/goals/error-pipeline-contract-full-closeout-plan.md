@@ -54,7 +54,7 @@ Out of scope：
 
 1. `src/providers/core/utils/provider-error-reporter.ts`：`ErrorErr01 -> ErrorErr02` owning module。
 2. `src/providers/core/runtime/provider-error-catalog.ts` 与 `provider-failure-policy-impl.ts`：`ErrorErr03` owning module。
-3. `sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.ts` 与 Rust `virtual_router_engine`：`ErrorErr04` owning module。
+3. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` 与 Rust `virtual_router_engine/provider_runtime_ingress.rs`：`ErrorErr04` owning module。
 4. `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`：`ErrorErr05` consumer owning module。
 5. `src/server/utils/http-error-mapper.ts` / HTTP handler projection：`ErrorErr06` owning module。
 6. `tests/server/runtime/http-server/error-pipeline-contract.spec.ts`：全仓错误链红测入口。

@@ -1,0 +1,352 @@
+import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
+
+type HubPipelineInput = {
+  requestId: string;
+  endpoint: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  payload: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  stream: boolean;
+  processMode: 'chat';
+  direction: 'request' | 'response';
+  stage: string;
+};
+
+type HubPipelineOutput = {
+  requestId: string;
+  success: boolean;
+  payload?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+};
+
+type HubPipelineLibInput = {
+  config?: Record<string, unknown>;
+  request: HubPipelineInput;
+};
+
+type HubPipelineLibOutput = HubPipelineOutput & {
+  standardizedRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
+  effectPlan: {
+    effects: Array<Record<string, unknown>>;
+  };
+  diagnostics: Array<Record<string, unknown>>;
+};
+
+const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
+const nonBlockingProtocolLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
+
+
+function logNativeProtocolNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingProtocolLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingProtocolLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-orchestration-semantics-protocol] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeProtocolNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
+function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.[name];
+  return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
+}
+
+function safeStringify(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    logNativeProtocolNonBlocking('safeStringify', error);
+    return undefined;
+  }
+}
+
+function parseString(raw: string): string | null {
+  const parsed = parseJson('parseString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  return typeof parsed === 'string' ? parsed : null;
+}
+
+function parseRecord(raw: string): Record<string, unknown> | null {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseOptionalString(raw: string): string | undefined | null {
+  const parsed = parseJson('parseOptionalString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'string' ? parsed : null;
+}
+
+function parseOptionalBoolean(raw: string): boolean | undefined | null {
+  const parsed = parseJson('parseOptionalBoolean', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'boolean' ? parsed : null;
+}
+
+function parseOrchestrationOutput(raw: string): HubPipelineOutput | null {
+  const parsed = parseJson('parseOrchestrationOutput', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const requestId = typeof row.requestId === 'string' ? row.requestId : '';
+  const success = row.success === true;
+  if (!requestId) {
+    return null;
+  }
+  const output: HubPipelineOutput = { requestId, success };
+  if (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)) {
+    output.payload = row.payload as Record<string, unknown>;
+  }
+  if (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)) {
+    output.metadata = row.metadata as Record<string, unknown>;
+  }
+  if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
+    const err = row.error as Record<string, unknown>;
+    const code = typeof err.code === 'string' ? err.code.trim() : '';
+    const message = typeof err.message === 'string' ? err.message.trim() : '';
+    if (code && message) {
+      output.error = {
+        code,
+        message,
+        ...(Object.prototype.hasOwnProperty.call(err, 'details') ? { details: err.details } : {})
+      };
+    }
+  }
+  return output;
+}
+
+function parseLibOutput(raw: string): HubPipelineLibOutput | null {
+  const parsed = parseJson('parseLibOutput', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  const requestId = typeof row.requestId === 'string' ? row.requestId : '';
+  const success = row.success === true;
+  const effectPlan = row.effectPlan && typeof row.effectPlan === 'object' && !Array.isArray(row.effectPlan)
+    ? row.effectPlan as Record<string, unknown>
+    : null;
+  const effects = Array.isArray(effectPlan?.effects) ? effectPlan.effects : null;
+  const diagnostics = Array.isArray(row.diagnostics) ? row.diagnostics : null;
+  if (!requestId || !effects || !diagnostics) {
+    return null;
+  }
+  const output: HubPipelineLibOutput = {
+    requestId,
+    success,
+    effectPlan: { effects: effects as Array<Record<string, unknown>> },
+    diagnostics: diagnostics as Array<Record<string, unknown>>
+  };
+  if (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)) {
+    output.payload = row.payload as Record<string, unknown>;
+  }
+  if (row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)) {
+    output.metadata = row.metadata as Record<string, unknown>;
+  }
+  if (row.error && typeof row.error === 'object' && !Array.isArray(row.error)) {
+    const err = row.error as Record<string, unknown>;
+    const code = typeof err.code === 'string' ? err.code.trim() : '';
+    const message = typeof err.message === 'string' ? err.message.trim() : '';
+    if (code && message) {
+      output.error = {
+        code,
+        message,
+        ...(Object.prototype.hasOwnProperty.call(err, 'details') ? { details: err.details } : {})
+      };
+    }
+  }
+  return output;
+}
+
+export function executeHubPipelineWithNative(
+  input: HubPipelineLibInput
+): HubPipelineLibOutput {
+  const capability = 'executeHubPipelineJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineLibOutput>(capability, reason);
+
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseLibOutput(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function runHubPipelineLibWithNative(
+  input: HubPipelineLibInput
+): HubPipelineLibOutput {
+  const capability = 'runHubPipelineLibJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineLibOutput>(capability, reason);
+
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseLibOutput(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {
+  const capability = 'runHubPipelineJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const inputJson = safeStringify(input);
+  if (!inputJson) return fail('json stringify failed');
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) return fail('empty result');
+    return parseOrchestrationOutput(raw) ?? fail('invalid payload');
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error ?? 'unknown'));
+  }
+}
+
+function callNativeString(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  try {
+    const raw = fn(...args);
+    if (typeof raw !== 'string') return fail('non-string result');
+    return raw;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error ?? 'unknown'));
+  }
+}
+
+function callNativeJsonString(capability: string, value: unknown): string {
+  const inputJson = safeStringify(value);
+  if (!inputJson) return failNativeRequired<string>(capability, 'json stringify failed');
+  return callNativeString(capability, [inputJson]);
+}
+
+function stringifyNativeArgument(capability: string, value: unknown): string {
+  const inputJson = safeStringify(value);
+  return inputJson ?? failNativeRequired<string>(capability, 'json stringify failed');
+}
+
+export function normalizeHubEndpointWithNative(endpoint: string): string {
+  const capability = 'normalizeHubEndpointJson';
+  return parseString(callNativeString(capability, [endpoint])) ?? failNativeRequired<string>(capability, 'invalid payload');
+}
+
+export function resolveHubProviderProtocolWithNative(value: string): string {
+  const capability = 'resolveProviderProtocolJson';
+  return parseString(callNativeString(capability, [value])) ?? failNativeRequired<string>(capability, 'invalid payload');
+}
+
+export function resolveHubClientProtocolWithNative(entryEndpoint: string): string {
+  const capability = 'resolveHubClientProtocolJson';
+  return parseString(callNativeString(capability, [entryEndpoint])) ?? failNativeRequired<string>(capability, 'invalid payload');
+}
+
+export function extractModelHintFromMetadataWithNative(metadata: Record<string, unknown>): string | undefined {
+  const capability = 'extractModelHintFromMetadataJson';
+  const parsed = parseOptionalString(callNativeJsonString(capability, metadata));
+  return parsed === null ? failNativeRequired<string | undefined>(capability, 'invalid payload') : parsed;
+}
+
+export function resolveHubSseProtocolFromMetadataWithNative(metadata: Record<string, unknown>): string | undefined {
+  const capability = 'resolveSseProtocolFromMetadataJson';
+  const parsed = parseOptionalString(callNativeJsonString(capability, metadata));
+  return parsed === null ? failNativeRequired<string | undefined>(capability, 'invalid payload') : parsed;
+}
+
+export function resolveSseProtocolWithNative(metadata: Record<string, unknown>, providerProtocol: string): string {
+  const capability = 'resolveSseProtocolJson';
+  return parseString(callNativeString(capability, [stringifyNativeArgument(capability, metadata), providerProtocol]))
+    ?? failNativeRequired<string>(capability, 'invalid payload');
+}
+
+export function resolveOutboundStreamIntentWithNative(value: unknown): boolean | undefined {
+  const capability = 'resolveOutboundStreamIntentJson';
+  const parsed = parseOptionalBoolean(callNativeJsonString(capability, value));
+  return parsed === null ? failNativeRequired<boolean | undefined>(capability, 'invalid payload') : parsed;
+}
+
+export function applyOutboundStreamPreferenceWithNative(
+  request: Record<string, unknown>,
+  stream: boolean | undefined,
+  processMode?: string,
+): Record<string, unknown> {
+  const capability = 'applyOutboundStreamPreferenceJson';
+  const raw = callNativeString('applyOutboundStreamPreferenceJson', [
+    stringifyNativeArgument(capability, request),
+    stringifyNativeArgument(capability, stream ?? null),
+    processMode ?? '',
+  ]);
+  return parseRecord(raw) ?? failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+}

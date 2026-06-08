@@ -1,10 +1,10 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { parseOutput } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-action-semantics-parsers.js';
-import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics-parsers.js';
-import { parseBoolean as parseReqInboundBoolean } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-parsers.js';
-import { parseBoolean as parseReqOutboundBoolean } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics-parsers.js';
-import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-analysis.js';
+import { parseOutput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.js';
+import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
+import { parseBoolean as parseReqInboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.js';
+import { parseBoolean as parseReqOutboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.js';
+import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
 
 async function importWithNativeParseFailureMock<TModule>(
   modulePath: string,
@@ -14,7 +14,7 @@ async function importWithNativeParseFailureMock<TModule>(
   jest.resetModules();
 
   jest.unstable_mockModule(
-    '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath.js',
+    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js',
     () => ({
       loadNativeRouterHotpathBindingForInternalUse: () => ({
         [bindingExport]: () => invalidRaw
@@ -23,7 +23,7 @@ async function importWithNativeParseFailureMock<TModule>(
   );
 
   jest.unstable_mockModule(
-    '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-policy.js',
+    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js',
     () => ({
       isNativeDisabledByEnv: () => false,
       failNativeRequired: (_capability: string, reason?: string) => {
@@ -87,7 +87,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       buildAnthropicToolAliasMapWithNative: (tools: unknown) => Record<string, unknown> | undefined;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-governance-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.js',
       'buildAnthropicToolAliasMapJson'
     );
 
@@ -106,7 +106,7 @@ describe('native semantics parser observability', () => {
         runtimeMetadata: Record<string, unknown>
       ) => { shouldInject: boolean; selectedEngineIndexes: number[] };
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
       'planChatWebSearchOperationsJson'
     );
 
@@ -122,7 +122,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       mapResumeToolOutputsDetailedWithNative: (responsesResume: unknown) => Array<{ tool_call_id: string; content: string }>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-inbound-outbound-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.js',
       'mapResumeToolOutputsDetailedJson'
     );
 
@@ -140,7 +140,7 @@ describe('native semantics parser observability', () => {
         metadata: Record<string, unknown> | undefined
       ) => Record<string, unknown>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-metadata-policy.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.js',
       'resolveStopMessageRouterMetadataJson'
     );
 
@@ -156,7 +156,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       normalizeHubEndpointWithNative: (endpoint: string) => string;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics-protocol.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
       'normalizeHubEndpointJson'
     );
 
@@ -172,7 +172,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       resolveBridgePolicyWithNative: (options?: { protocol?: string; moduleType?: string }) => unknown;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js',
       'resolveBridgePolicyJson'
     );
 
@@ -188,7 +188,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       sanitizeFormatEnvelopeWithNative: <T>(candidate: T) => T;
     }>(
-      '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.js',
       'sanitizeFormatEnvelopeJson'
     );
 

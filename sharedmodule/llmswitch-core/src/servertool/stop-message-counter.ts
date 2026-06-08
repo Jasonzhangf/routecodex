@@ -11,7 +11,7 @@ import { applyStopMessageSnapshotToState, resolveStopMessageSnapshot } from './h
 import { planStopMessagePersistedLookup } from './handlers/stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './handlers/stopless-goal-state.js';
 import { inspectStopGatewaySignal } from './stop-gateway-context.js';
-import { calculateBudgetWithNative, type BudgetSnapshot, type DefaultBudgetConfig } from '../router/virtual-router/engine-selection/native-servertool-core-semantics.js';
+import { calculateBudgetWithNative, type BudgetSnapshot, type DefaultBudgetConfig } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // ── Shared helpers (stay in TS due to I/O) ──────────────────────────────────
 

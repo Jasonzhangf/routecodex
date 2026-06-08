@@ -1,4 +1,4 @@
-import { buildProviderProtocolErrorWithNative } from '../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+import { buildProviderProtocolErrorWithNative } from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
 export type ProviderProtocolErrorCode =
   | 'TOOL_PROTOCOL_ERROR'

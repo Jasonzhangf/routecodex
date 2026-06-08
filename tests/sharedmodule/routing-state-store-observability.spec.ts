@@ -1,33 +1,26 @@
-import {
-  resetProviderRuntimeIngressForTests,
-  setProviderRuntimeObserverHooks
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/provider-runtime-ingress.js';
-import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
-import {
+import { jest } from '@jest/globals';
+import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+
+const events: ProviderErrorEvent[] = [];
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js', () => ({
+  report_internal_error_err_02_host_to_router_policy: (source: ProviderErrorEvent) => {
+    events.push(source);
+    return source;
+  },
+}));
+
+const {
   getRoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/store.js';
+} = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine/routing-state/store.js');
 
 describe('routing state store observability', () => {
-  let events: ProviderErrorEvent[] = [];
-  let observerOwner: object | null = null;
-
   beforeEach(() => {
-    events = [];
-    observerOwner = {};
-    resetProviderRuntimeIngressForTests();
-    setProviderRuntimeObserverHooks(observerOwner, {
-      onProviderErrorReported: (event) => {
-        events.push(event);
-      }
-    });
+    events.length = 0;
   });
 
   afterEach(() => {
-    if (observerOwner) {
-      setProviderRuntimeObserverHooks(observerOwner, undefined);
-    }
-    observerOwner = null;
-    resetProviderRuntimeIngressForTests();
+    events.length = 0;
   });
 
   test('emits explicit error when refreshing existing persistent state fails', () => {
