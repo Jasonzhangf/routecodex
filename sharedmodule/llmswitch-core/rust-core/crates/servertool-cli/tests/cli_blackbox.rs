@@ -122,3 +122,19 @@ fn old_restoration_marker_fails_fast() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("SERVERTOOL_DENIED_CLI_MARKER: old_cli_"));
 }
+
+#[test]
+fn internal_carrier_fails_fast() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "servertool_fixture",
+            "--input-json",
+            r#"{"metadata":{"requestId":"req_internal"}}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("SERVERTOOL_DENIED_INTERNAL_CARRIER: metadata"));
+}

@@ -147,4 +147,36 @@ describe('servertool CLI command', () => {
     expect(errors[0]).toContain('SERVERTOOL_DENIED_CLI_MARKER: old_cli_');
     expect(exits).toEqual([1]);
   });
+
+  it('fails fast when CLI input contains internal RouteCodex carriers', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        exits.push(code);
+        throw new Error(`exit ${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync([
+        'node',
+        'routecodex',
+        'servertool',
+        'run',
+        'servertool_fixture',
+        '--input-json',
+        '{"metadata":{"requestId":"req_internal"}}'
+      ])
+    ).rejects.toThrow('exit 1');
+
+    expect(output).toEqual([]);
+    expect(errors[0]).toContain('SERVERTOOL_DENIED_INTERNAL_CARRIER: metadata');
+    expect(exits).toEqual([1]);
+  });
 });
