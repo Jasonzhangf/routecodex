@@ -113,7 +113,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - sharedmodule/llmswitch-core/src/router
       - src/providers/core/runtime
       - src/client
       - src/server/runtime/http-server/executor
@@ -172,7 +172,7 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - docs
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/router/virtual-router
+      - sharedmodule/llmswitch-core/src/router
       - src/server/runtime/http-server/daemon-admin
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime

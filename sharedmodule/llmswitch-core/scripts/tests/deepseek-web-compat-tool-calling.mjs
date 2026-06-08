@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   runReqOutboundStage3CompatWithNative,
   runRespInboundStage3CompatWithNative
-} from '../../dist/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+} from '../../dist/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 
 function applyRequestCompat(profile, payload, options = {}) {
   const adapterContext = options?.adapterContext && typeof options.adapterContext === 'object'

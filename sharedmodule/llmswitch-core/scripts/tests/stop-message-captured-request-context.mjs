@@ -49,7 +49,7 @@ async function main() {
   const { HubPipeline, __unsafeBuildAdapterContextForTest } = await importModule('conversion/hub/pipeline/hub-pipeline.js');
   const { bootstrapVirtualRouterConfig } = await importModule('native/router-hotpath/native-virtual-router-bootstrap-config.js');
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
-  const { saveRoutingInstructionStateSync } = await importModule('router/virtual-router/routing-state-store.js');
+  const { saveRoutingInstructionStateSync } = await importModule('native/router-hotpath/native-virtual-router-routing-state.js');
 
   tmpSessionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rc-stopmsg-captured-'));
   process.env.ROUTECODEX_SESSION_DIR = tmpSessionDir;

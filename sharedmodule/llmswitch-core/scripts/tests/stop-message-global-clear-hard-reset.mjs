@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
-import { parseRoutingInstructions } from '../../dist/router/virtual-router/routing-instructions.js';
+import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
+import { parseRoutingInstructions } from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 
 function createEngine() {
   const engine = new VirtualRouterEngine();

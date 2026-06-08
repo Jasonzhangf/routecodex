@@ -23,7 +23,7 @@ function createMetadata(requestId, sessionId) {
 }
 
 async function main() {
-  const { VirtualRouterEngine } = await import('../../dist/router/virtual-router/engine.js');
+  const { VirtualRouterEngine } = await import('../../dist/native/router-hotpath/native-virtual-router-runtime.js');
   const { bootstrapVirtualRouterConfig } = await import('../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 
   const blocked = new Set();

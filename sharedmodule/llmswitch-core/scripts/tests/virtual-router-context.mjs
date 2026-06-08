@@ -11,7 +11,7 @@ const SMALL_KEY = 'ctx.small.main.tiny';
 const FALLBACK_KEY = 'ctx.long.main.colossal';
 
 async function main() {
-  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine.js'));
+  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/native/router-hotpath/native-virtual-router-runtime.js'));
   const engine = new VirtualRouterEngine();
   engine.initialize(buildConfig());
 
@@ -38,12 +38,7 @@ async function main() {
   );
   assert.equal(longResult.decision.routeName, 'longcontext');
 
-  engine.handleProviderFailure({
-    providerKey: FALLBACK_KEY,
-    fatal: true,
-    affectsHealth: true,
-    reason: 'test:fallback_unhealthy'
-  });
+  engine.markProviderCooldown(FALLBACK_KEY, 60_000);
 
   const degradedResult = engine.route(longRequest, fallbackMeta);
   assert.equal(

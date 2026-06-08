@@ -2447,11 +2447,11 @@ Tags: virtual-router, rustification, no-ts-runtime, native-owner, architecture-g
 Tags: 1token, responses-provider, baseurl, auth, 5555, 2026-06-08
 
 ## 2026-06-08 Virtual Router TS residue full cleanup
-- Old VR TS runtime path text has been removed from active source/script/test/package runtime references. Docs may still mention old deleted paths as historical facts or forbidden-path map entries.
+- Old VR TS runtime path text has been removed from active source/script/test/package references and active docs; old path knowledge is limited to the no-resurrection gate itself.
 - The resurrection-gate old-path knowledge is internal to `scripts/architecture/verify-vr-no-ts-runtime.mjs`, where paths are constructed to enforce the no-resurrection gate. The gate also blocks known stale TS classifier/features/report residue files.
-- Deleted stale TS classifier/features/report scripts/tests rather than preserving TS equivalents; classification/features remain Rust-owned under `virtual_router_engine`.
+- Deleted stale TS classifier/features/report/matrix scripts/tests rather than preserving TS equivalents; classification/features remain Rust-owned under `virtual_router_engine`.
 - Native host bridge/contracts under `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-*.ts` and `virtual-router-contracts.ts` remain live binding surface and must not be treated as old VR runtime residue.
-- Verified: active old runtime references are absent while remaining old-path grep hits are historical docs/function-map forbidden paths; `npm run verify:vr-no-ts-runtime`, `npm run verify:repo-sanity`, `npm run verify:llmswitch-rustification-audit`, `npm run verify:architecture-ci`, `npx tsc --noEmit --pretty false`, `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture`, and `git diff --check` all passed.
+- Verified: old runtime references are absent from active source/script/test/package/doc scopes except the gate's own internally constructed denylist; `npm run verify:vr-no-ts-runtime`, `npm run verify:repo-sanity`, `npm run verify:llmswitch-rustification-audit`, `npm run verify:architecture-ci`, `npx tsc --noEmit --pretty false`, `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture`, and `git diff --check` all passed.
 Tags: virtual-router, ts-residue-cleanup, rust-owner, no-ts-runtime, architecture-gate, 2026-06-08
 
 ## 2026-06-08 Servertool bootstrap replay requestId Rust owner

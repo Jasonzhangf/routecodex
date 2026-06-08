@@ -12,7 +12,7 @@ async function main() {
     path.resolve(repoRoot, 'dist/conversion/compat/actions/gemini-web-search.js')
   );
   const { applyIflowToolTextFallbackWithNative } = await import(
-    path.resolve(repoRoot, 'dist/router/virtual-router/engine-selection/native-compat-action-semantics.js')
+    path.resolve(repoRoot, 'dist/native/router-hotpath/native-compat-action-semantics.js')
   );
   const { buildNativeReqOutboundCompatAdapterContext } = await import(
     path.resolve(repoRoot, 'dist/conversion/hub/pipeline/compat/native-adapter-context.js')

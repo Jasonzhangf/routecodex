@@ -21,7 +21,7 @@ async function loadModules() {
   const protocolAllowlists = await import(moduleUrl('conversion/protocol-field-allowlists.js'));
   const protocolSpec = await import(moduleUrl('conversion/hub/policy/protocol-spec.js'));
   const nativeSemantics = await import(
-    moduleUrl('router/virtual-router/engine-selection/native-hub-bridge-policy-semantics.js')
+    moduleUrl('native/router-hotpath/native-hub-bridge-policy-semantics.js')
   );
   return { protocolAllowlists, protocolSpec, nativeSemantics };
 }

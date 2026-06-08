@@ -169,8 +169,12 @@ async function main() {
   }
 
   const coreDist = path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
-  const engineUrl = pathToFileURL(path.join(coreDist, 'router', 'virtual-router', 'engine.js')).href;
-  const bootstrapUrl = pathToFileURL(path.join(coreDist, 'router', 'virtual-router', 'bootstrap.js')).href;
+  const engineUrl = pathToFileURL(
+    path.join(coreDist, 'native', 'router-hotpath', 'native-virtual-router-runtime.js')
+  ).href;
+  const bootstrapUrl = pathToFileURL(
+    path.join(coreDist, 'native', 'router-hotpath', 'native-virtual-router-bootstrap-config.js')
+  ).href;
   const { VirtualRouterEngine } = await import(engineUrl);
   const { bootstrapVirtualRouterConfig } = await import(bootstrapUrl);
 

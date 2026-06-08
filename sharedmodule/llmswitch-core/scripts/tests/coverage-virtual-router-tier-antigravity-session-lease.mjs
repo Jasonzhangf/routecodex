@@ -27,11 +27,7 @@ const reqOutboundNativeUrl = pathToFileURL(
 const hotpathNativeUrl = pathToFileURL(
   path.join(
     repoRoot,
-    'dist',
-    'router',
-    'virtual-router',
-    'engine-selection',
-    'native-router-hotpath.js'
+    'dist', 'native', 'router-hotpath', 'native-router-hotpath.js'
   )
 ).href;
 

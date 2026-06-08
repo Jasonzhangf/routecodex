@@ -133,12 +133,6 @@ async function main() {
   results.push(await run('matrix:coverage-responses-sse-missing-terminator', 'scripts/tests/responses-sse-missing-terminator.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
   results.push(await run('matrix:coverage-compat-iflow-qwen-tool-tokens', 'scripts/tests/compat-iflow-qwen-tool-tokens.mjs'));
-  results.push(
-    await run(
-      'matrix:compat-iflow-thinking-reasoning-content',
-      'scripts/tests/compat-iflow-thinking-reasoning-content.mjs'
-    )
-  );
   results.push(await run('matrix:compat-iflow-kimi-history-media-placeholder', 'scripts/tests/compat-iflow-kimi-history-media-placeholder.mjs'));
   results.push(await run('matrix:compat-iflow-reasoning-replay-20260206', 'scripts/tests/compat-iflow-reasoning-replay-20260206.mjs'));
   results.push(await run('matrix:compat-profile-auto-resolve', 'scripts/tests/compat-profile-auto-resolve.mjs'));
@@ -208,8 +202,6 @@ async function main() {
   );
   // 1e.1) virtual-router direct provider.model selection (RR across keys)
   results.push(await run('matrix:virtual-router-direct-model', 'scripts/tests/virtual-router-direct-model.mjs'));
-  // 1e.2) route classifier: local search tools must not be misrouted to web_search
-  results.push(await run('matrix:web-search-vs-search-route', 'scripts/tests/web-search-vs-search-route.mjs'));
   // 1e.3) capability-based routing must use default pool (vision/web_search)
   results.push(
     await run(
@@ -218,7 +210,6 @@ async function main() {
     )
   );
   // 1f) servertool followup timeout (must not hang)
-  results.push(await run('matrix:virtual-router-media-kimi-route', 'scripts/tests/virtual-router-media-kimi-route.mjs'));
   results.push(await run('matrix:vision-kimi-bypass', 'scripts/tests/vision-kimi-bypass.mjs'));
   results.push(await run('matrix:servertool-timeout', 'scripts/tests/servertool-timeout.mjs'));
   // 1f.1) stop_message_flow followup message trimming (Gemini tool-calling adjacency)

@@ -129,8 +129,8 @@ Rust 当前 quota snapshot 不承载或未证明承载：
 
 以下面已经有 closeout 证据，不应再回流：
 
-1. `sharedmodule/llmswitch-core/src/router/virtual-router/health-manager.ts`
-2. `sharedmodule/llmswitch-core/src/router/virtual-router/engine/cooldown-manager.ts`
+1. former TS VR health manager（已删除，禁止复活）
+2. former TS VR cooldown manager（已删除，禁止复活）
 
 这两处已被物理删除，说明“router-local health/cooldown TS 第二中心”不再是保留选项。
 

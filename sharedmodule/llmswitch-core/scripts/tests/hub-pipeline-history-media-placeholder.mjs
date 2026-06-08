@@ -65,7 +65,7 @@ async function main() {
     path.join(projectRoot, 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js')
   );
   const { bootstrapVirtualRouterConfig } = await import(
-    path.join(projectRoot, 'dist', 'router', 'virtual-router', 'bootstrap.js')
+    path.join(projectRoot, 'dist', 'native', 'router-hotpath', 'native-virtual-router-bootstrap-config.js')
   );
 
   const { config: virtualRouter } = bootstrapVirtualRouterConfig(

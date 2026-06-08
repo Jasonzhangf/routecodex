@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const moduleUrl = pathToFileURL(
-  path.join(repoRoot, 'dist', 'router', 'virtual-router', 'engine-selection', 'native-router-hotpath-quota-buckets.js')
+  path.join(repoRoot, 'dist', 'native', 'router-hotpath', 'native-router-hotpath-quota-buckets.js')
 ).href;
 const nativeNodePath = path.join(repoRoot, 'dist', 'native', 'router_hotpath_napi.node');
 

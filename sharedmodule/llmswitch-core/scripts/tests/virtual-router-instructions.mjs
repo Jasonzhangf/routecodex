@@ -1,4 +1,4 @@
-import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
 import assert from 'assert';
 
 function createRequest(content) {

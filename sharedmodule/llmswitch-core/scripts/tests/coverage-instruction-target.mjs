@@ -8,7 +8,7 @@ async function main() {
   // This test now validates that the native module is available and the function
   // can be exercised through the napi proxy when loaded.
   try {
-    const { loadNativeRouterHotpathBinding } = await import('../../dist/router/virtual-router/engine-selection/native-router-hotpath-loader.js');
+    const { loadNativeRouterHotpathBinding } = await import('../../dist/native/router-hotpath/native-router-hotpath-loader.js');
     const native = loadNativeRouterHotpathBinding();
     assert.ok(native, 'native module must be loadable');
 

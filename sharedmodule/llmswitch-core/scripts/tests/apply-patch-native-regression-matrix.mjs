@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   normalizeApplyPatchArgumentsWithNative,
   validateApplyPatchArgumentsWithNative
-} from '../../dist/router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+} from '../../dist/native/router-hotpath/native-chat-process-governance-semantics.js';
 import { maybeAugmentApplyPatchErrorContent } from '../../dist/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
 import { runServerSideToolEngine } from '../../dist/servertool/server-side-tools.js';
 

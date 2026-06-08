@@ -250,10 +250,7 @@ async function bootstrapVirtualRouterConfig(rawConfig) {
     repoRoot,
     'sharedmodule',
     'llmswitch-core',
-    'dist',
-    'router',
-    'virtual-router',
-    'bootstrap.js'
+    'dist', 'native', 'router-hotpath', 'native-virtual-router-bootstrap-config.js'
   );
   const mod = await import(url.pathToFileURL(bootstrapPath).href);
   if (typeof mod.bootstrapVirtualRouterConfig !== 'function') {

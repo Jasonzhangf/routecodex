@@ -30,12 +30,6 @@
       "@jsonstudio/llms/guidance": [
         "sharedmodule/llmswitch-core/dist/guidance/index.d.ts"
       ],
-      "../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.js": [
-        "sharedmodule/llmswitch-core/dist/router/virtual-router/error-center.d.ts"
-      ],
-      "../../../../../../../sharedmodule/llmswitch-core/dist/router/virtual-router/types.js": [
-        "sharedmodule/llmswitch-core/dist/router/virtual-router/types.d.ts"
-      ]
     }
   },
   "include": ["src/**/*"],

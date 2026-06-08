@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { VirtualRouterEngine } from '../../dist/router/virtual-router/engine.js';
+import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
 import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 
 function createMemoryRoutingStateStore() {

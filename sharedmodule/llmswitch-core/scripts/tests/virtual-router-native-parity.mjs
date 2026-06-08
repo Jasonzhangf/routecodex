@@ -52,7 +52,7 @@ function createCase(rng, count, nowMs) {
 
 async function main() {
   const mod = await import(
-    path.join(repoRoot, 'dist', 'router', 'virtual-router', 'engine-selection', 'native-router-hotpath.js')
+    path.join(repoRoot, 'dist', 'native', 'router-hotpath', 'native-router-hotpath.js')
   );
   const { buildQuotaBucketsWithMode, getNativeRouterHotpathSource } = mod;
   if (typeof buildQuotaBucketsWithMode !== 'function') {

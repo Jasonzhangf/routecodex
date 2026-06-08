@@ -4,7 +4,7 @@
 
 ### P0
 1. **删除单 provider 强制回填 fallback（fail-fast）**
-   - 文件：`sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts`
+   - 文件：former TS VR engine（已删除，禁止复活）
    - 变更：
      - 删除 `tryForceSingleProviderDecisionWhenPoolExhausted` 方法。
      - 删除 `route()` 内 3 处调用，native 路由异常/无效 payload 直接抛错。
@@ -18,10 +18,10 @@
 ### P1
 3. **移除 TS 重复状态应用入口（运行时统一 Rust 真源）**
    - 文件：
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.d.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/state.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions/state.d.ts`
+     - former TS VR routing-instructions entry
+     - former TS VR routing-instructions declaration
+     - former TS VR routing-instructions state entry
+     - former TS VR routing-instructions state declaration
    - 变更：
      - 移除 `applyRoutingInstructions` export。
      - 从 `state.ts` 删除 `applyRoutingInstructions` 实现，仅保留 serialize/deserialize。
@@ -31,10 +31,8 @@
 
 5. **收缩 stop/pre-command TS 壳层到 0（仅保留 Rust 真源）**
    - 删除：
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-stop-message-actions.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-stop-message-actions.d.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-pre-command-actions.ts`
-     - `sharedmodule/llmswitch-core/src/router/virtual-router/routing-pre-command-actions.d.ts`
+     - former TS VR routing-stop-message-actions entry/declaration
+     - former TS VR routing-pre-command-actions entry/declaration
    - 说明：该两组文件仅被已移除的 TS `applyRoutingInstructions` 路径引用，删除后运行时完全走 Rust 真源。
 
 ### P0-B（Hub 硬违规）
@@ -51,12 +49,12 @@
 
 ### 1) grep 扫描（要求项）
 - 命令：
-  - `grep -rn "fallbackProtocol\|fallbackPayload\|tryForceSingleProviderDecisionWhenPoolExhausted\|applyRoutingInstructions" sharedmodule/llmswitch-core/src/router/virtual-router --include="*.ts" || true`
+  - `npm run verify:vr-no-ts-runtime`
 - 结果：**无输出**（目标字符串已移除）。
 
 ### 1.1) stop/pre-command 壳层引用扫描
 - 命令：
-  - `grep -rn "routing-stop-message-actions\|routing-pre-command-actions" sharedmodule/llmswitch-core/src/router/virtual-router --include="*.ts" --include="*.d.ts"`
+  - `npm run verify:vr-no-ts-runtime`
 - 结果：**无输出**（壳层及引用已清零）。
 
 ### 2) native 异常不回退 TS

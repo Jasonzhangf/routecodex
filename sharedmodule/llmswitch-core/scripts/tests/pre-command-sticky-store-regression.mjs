@@ -36,7 +36,7 @@ async function main() {
     { mode: 0o755 }
   );
 
-  const { saveRoutingInstructionStateSync } = await importModule('router/virtual-router/routing-state-store.js');
+  const { saveRoutingInstructionStateSync } = await importModule('native/router-hotpath/native-virtual-router-routing-state.js');
   const { runServerSideToolEngine } = await importModule('servertool/server-side-tools.js');
 
   saveRoutingInstructionStateSync('session:precommand-session', {

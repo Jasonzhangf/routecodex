@@ -16808,9 +16808,9 @@ Phase E: TS fallback 物理删除
 - Runtime caution: 5520 smoke with `model=1token.gpt-5.5` returned `PROVIDER_NOT_AVAILABLE`, but latest provider-request sample showed it routed to `https://sdfv.cn/v1/responses`, so that failure does not prove 1token baseURL is wrong.
 
 ## 2026-06-08 VR TS residue full closeout final
-- Removed old VR TS runtime path residue from active source/script/test/package runtime references. The same grep across `docs` still shows intentional historical/deleted-path and function-map forbidden-path references, not live imports.
-- Removed stale TS classifier/features/report scripts and tests instead of reviving old TS classifier code; Rust `virtual_router_engine` remains classifier/features owner.
-- `scripts/architecture/verify-vr-no-ts-runtime.mjs` owns the active resurrection gate and constructs old paths internally; it also scans sharedmodule tests and known stale residue files. Historical docs may still name old paths as former/deleted locations.
+- Removed old VR TS runtime path residue from active source/script/test/package/doc references; only `scripts/architecture/verify-vr-no-ts-runtime.mjs` may construct old paths internally as denylist input.
+- Removed stale TS classifier/features/report/matrix scripts and tests instead of reviving old TS classifier code; Rust `virtual_router_engine` remains classifier/features owner.
+- `scripts/architecture/verify-vr-no-ts-runtime.mjs` owns the active resurrection gate, scans sharedmodule scripts/tests, catches slash paths and segmented `path.join('router','virtual-router')` forms, and blocks known stale residue files.
 - Verification PASS: `npm run verify:vr-no-ts-runtime`; `npm run verify:repo-sanity`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:architecture-ci`; `npx tsc --noEmit --pretty false`; `cargo test -p router-hotpath-napi virtual_router_engine --lib -- --nocapture` (247 passed); `git diff --check`.
 - Boundary: live native host bridge/contracts under `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-*.ts` and `virtual-router-contracts.ts` remain intentional binding surface, not old VR runtime residue.
 

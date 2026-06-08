@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function main() {
-  const engineModule = await import(path.resolve(repoRoot, 'dist', 'router', 'virtual-router', 'engine.js'));
+  const engineModule = await import(path.resolve(repoRoot, 'dist', 'native', 'router-hotpath', 'native-virtual-router-runtime.js'));
   const { VirtualRouterEngine } = engineModule;
 
   const sessionId = `test-${Date.now()}`;

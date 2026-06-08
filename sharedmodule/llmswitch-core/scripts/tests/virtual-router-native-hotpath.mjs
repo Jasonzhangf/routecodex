@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function main() {
-  const mod = await import(path.join(repoRoot, 'dist', 'router', 'virtual-router', 'engine-selection', 'native-router-hotpath.js'));
+  const mod = await import(path.join(repoRoot, 'dist', 'native', 'router-hotpath', 'native-router-hotpath.js'));
   const {
     buildQuotaBuckets,
     getNativeRouterHotpathSource,

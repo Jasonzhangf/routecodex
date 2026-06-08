@@ -12,7 +12,7 @@ const KEY_A2 = 'antigravity.2-bravo.testmodel';
 const KEY_G1 = 'gemini-cli.1-alpha.testmodel';
 
 async function main() {
-  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine.js'));
+  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/native/router-hotpath/native-virtual-router-runtime.js'));
 
   {
     // 1) Pins to the first alias (config order) while healthy.

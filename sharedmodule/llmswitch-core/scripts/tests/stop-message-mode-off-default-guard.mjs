@@ -57,7 +57,7 @@ async function runStopRequest(runServerToolOrchestration, args) {
 
 async function main() {
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
-  const { saveRoutingInstructionStateSync } = await importModule('router/virtual-router/routing-state-store.js');
+  const { saveRoutingInstructionStateSync } = await importModule('native/router-hotpath/native-virtual-router-routing-state.js');
 
   const originalHome = process.env.HOME;
   const originalUserDir = process.env.ROUTECODEX_USER_DIR;

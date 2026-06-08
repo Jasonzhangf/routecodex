@@ -7,9 +7,15 @@ const distVrSegments = ['sharedmodule/llmswitch-core', 'dist', 'router', 'virtua
 const srcVrRoot = sourceVrSegments.join('/');
 const distVrRoot = distVrSegments.join('/');
 const oldWrapperPath = ['router', 'virtual-router', 'engine-selection'].join('/');
+const oldRuntimePathSegmentPattern = /['"`]router['"`]\s*,\s*['"`]virtual-router['"`]/;
+const oldDistRuntimePathSegmentPattern = /['"`]dist['"`]\s*,\s*['"`]router['"`]\s*,\s*['"`]virtual-router['"`]/;
+const oldSourceRuntimePathSegmentPattern = /['"`]src['"`]\s*,\s*['"`]router['"`]\s*,\s*['"`]virtual-router['"`]/;
+const oldWrapperPathSegmentPattern = /['"`]router['"`]\s*,\s*['"`]virtual-router['"`]\s*,\s*['"`]engine-selection['"`]/;
 const oldRuntimePathFragments = ['', '../', '../../', '../../../', '../../../../'].flatMap((prefix) => [
   `${prefix}${srcVrRoot}`,
   `${prefix}${distVrRoot}`,
+  `${prefix}src/router/virtual-router`,
+  `${prefix}dist/router/virtual-router`,
 ]);
 const oldClassifierResidueFiles = [
   'scripts/analyze-routing-classifier.mjs',
@@ -28,10 +34,12 @@ const oldClassifierResidueFiles = [
 const scanRoots = [
   'sharedmodule/llmswitch-core/src',
   'sharedmodule/llmswitch-core/tests',
+  'sharedmodule/llmswitch-core/scripts',
   'src',
   'tests',
   'scripts',
   'docs',
+  'tsconfig.json',
   'package.json',
 ];
 
@@ -99,7 +107,9 @@ function isProductionReferenceFile(relFile) {
     relFile.startsWith('sharedmodule/llmswitch-core/src/')
     || relFile.startsWith('src/')
     || relFile.startsWith('scripts/')
+    || relFile.startsWith('sharedmodule/llmswitch-core/scripts/')
     || relFile.startsWith('tests/')
+    || relFile === 'tsconfig.json'
     || relFile === 'package.json'
   );
 }
@@ -130,16 +140,21 @@ for (const file of scanRoots.flatMap(listFiles)) {
   const content = fs.readFileSync(file, 'utf8');
   const lines = content.split('\n');
   lines.forEach((line, index) => {
-    if (!line.includes(oldWrapperPath)) return;
+    if (!line.includes(oldWrapperPath) && !oldWrapperPathSegmentPattern.test(line)) return;
     if (isAllowedTextReference(relFile, line)) return;
     failures.push(`${relFile}:${index + 1}: old VR wrapper path reference: ${line.trim()}`);
   });
-  if (!isProductionReferenceFile(relFile)) {
-    continue;
-  }
   lines.forEach((line, index) => {
-    if (!oldRuntimePathFragments.some((fragment) => line.includes(fragment))) return;
+    if (
+      !oldRuntimePathFragments.some((fragment) => line.includes(fragment))
+      && !oldRuntimePathSegmentPattern.test(line)
+      && !oldDistRuntimePathSegmentPattern.test(line)
+      && !oldSourceRuntimePathSegmentPattern.test(line)
+    ) {
+      return;
+    }
     if (isAllowedTextReference(relFile, line)) return;
+    if (!isProductionReferenceFile(relFile) && !relFile.startsWith('docs/')) return;
     failures.push(`${relFile}:${index + 1}: old VR runtime path reference: ${line.trim()}`);
   });
 }

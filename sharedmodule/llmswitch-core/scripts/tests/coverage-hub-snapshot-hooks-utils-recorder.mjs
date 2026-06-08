@@ -47,7 +47,7 @@ async function withTempNativeModule(source, run) {
 async function loadModules(tag) {
   const [nativeHooks, snapshotUtils, snapshotRecorder] = await Promise.all([
     cacheBustedImport(
-      moduleUrl('router/virtual-router/engine-selection/native-snapshot-hooks.js'),
+      moduleUrl('native/router-hotpath/native-snapshot-hooks.js'),
       `native-snapshot-hooks-${tag}`
     ),
     cacheBustedImport(moduleUrl('conversion/snapshot-utils.js'), `snapshot-utils-${tag}`),

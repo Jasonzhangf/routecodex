@@ -11,7 +11,7 @@ const KEY_A = 'antigravity.a.gemini-3-pro-high';
 const KEY_B = 'antigravity.b.gemini-3-pro-high';
 
 async function main() {
-  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/router/virtual-router/engine.js'));
+  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/native/router-hotpath/native-virtual-router-runtime.js'));
 
   const engine = new VirtualRouterEngine();
   engine.initialize(buildConfig());
