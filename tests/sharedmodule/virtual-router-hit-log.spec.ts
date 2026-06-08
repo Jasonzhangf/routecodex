@@ -2,7 +2,7 @@ import {
   createVirtualRouterHitRecord,
   formatVirtualRouterHit,
   toVirtualRouterHitEvent
-} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-logging.js';
+} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
 
 describe('virtual-router hit log', () => {
   it('includes request token estimate when available', () => {

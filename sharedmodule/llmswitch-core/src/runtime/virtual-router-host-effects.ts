@@ -9,7 +9,7 @@ import { resolveRccUserDir } from './user-data-paths.js';
 import {
   resolveStopMessageScope,
 } from '../router/virtual-router/engine/routing-state/store.js';
-import { resolveRouteColor, resolveSessionColor } from '../router/virtual-router/engine-logging.js';
+import { resolveRouteColor, resolveSessionColor } from './virtual-router-hit-log.js';
 import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../router/virtual-router/routing-state-store.js';
 import type { RoutingInstructionState } from '../router/virtual-router/routing-instructions.js';
 import { mergeStopMessageFromPersisted } from '../router/virtual-router/stop-message-state-sync.js';

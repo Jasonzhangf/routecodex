@@ -5,10 +5,10 @@ import {
   type RoutingFeatures,
   type RoutingInstructionMode,
   type VirtualRouterContextRoutingConfig
-} from '../../native/router-hotpath/virtual-router-contracts.js';
-import { ProviderRegistry } from './provider-registry.js';
-import type { RoutingInstructionState } from './routing-instructions.js';
-import type { VirtualRouterHitEvent } from '../../telemetry/stats-center.js';
+} from '../native/router-hotpath/virtual-router-contracts.js';
+import { ProviderRegistry } from '../router/virtual-router/provider-registry.js';
+import type { RoutingInstructionState } from '../router/virtual-router/routing-instructions.js';
+import type { VirtualRouterHitEvent } from '../telemetry/stats-center.js';
 
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 
@@ -16,7 +16,6 @@ type LoggingDeps = {
   providerRegistry: ProviderRegistry;
   contextRouting: VirtualRouterContextRoutingConfig | undefined;
 };
-
 
 export type StopMessageRuntimeSummary = {
   hasAny: boolean;
@@ -333,7 +332,7 @@ export function buildHitReason(
   deps: LoggingDeps
 ): string {
   const reasoning = classification.reasoning || '';
-  let primary = reasoning.split('|')[0] || '';
+  const primary = reasoning.split('|')[0] || '';
   const commandDetail = features.lastAssistantToolLabel;
   void mode;
   const base = (() => {
