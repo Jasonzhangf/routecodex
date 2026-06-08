@@ -1157,18 +1157,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('anthropic response bridge policy must fail fast instead of swallowing policy errors', () => {
+  it('legacy anthropic response bridge policy TS shell must stay physically removed', () => {
     const filePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-policy.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = [
-      ...(source.includes('// ignore policy failures') ? ['swallows anthropic response policy failure'] : []),
-      ...(/try\s*\{[\s\S]*runBridgeActionPipeline/.test(source) ? ['wraps bridge policy execution in broad try'] : []),
-    ];
 
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('hub request mainline must enter Rust total API without request-stage mapper hooks', () => {

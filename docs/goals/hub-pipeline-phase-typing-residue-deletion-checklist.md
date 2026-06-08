@@ -215,6 +215,12 @@ Phase 8F-10 additional Hub zero-consumer source deletion proof: import graph and
 - Updated `docs/goals/metadata-request-isolation-plan.md` so it points to live `chat-envelope.ts` and records that `chat-schema.ts` must not be restored.
 - Red test now fails if any deleted source file reappears.
 
+Phase 8F-11 legacy Anthropic response bridge policy deletion proof: `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-policy.ts` had no live source/test/script importer; exact symbol scan found only the file itself and the residue audit. The active Anthropic response runtime calls Rust/native response helpers directly through `response-runtime-anthropic.ts` and `response-runtime-anthropic-helpers.ts`.
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-policy.ts`.
+- Red test now fails if this legacy TS policy shell reappears.
+- This deletion removes a zero-consumer TS response policy shell only; provider wire payload and client response projection semantics remain owned by the Rust/native response helpers.
+
 ## Deleted Proof — Phase 8A-1
 
 Phase 8A-1 physically removed the legacy request process TS shell after call graph migration to the Rust total HubPipeline entry:
