@@ -66,6 +66,7 @@ pub enum ServertoolCliError {
     UnsupportedTool(String),
     DeniedTool(String),
     DeniedMarker(&'static str),
+    DeniedInternalCarrier(&'static str),
     MissingField(&'static str),
     InvalidField(&'static str),
 }
@@ -81,6 +82,9 @@ impl std::fmt::Display for ServertoolCliError {
             }
             ServertoolCliError::DeniedMarker(marker) => {
                 write!(f, "SERVERTOOL_DENIED_CLI_MARKER: {marker}")
+            }
+            ServertoolCliError::DeniedInternalCarrier(carrier) => {
+                write!(f, "SERVERTOOL_DENIED_INTERNAL_CARRIER: {carrier}")
             }
             ServertoolCliError::MissingField(field) => {
                 write!(f, "SERVERTOOL_CLI_MISSING_FIELD: {field}")
@@ -119,6 +123,7 @@ fn validate_cli_run_input(input: &ServertoolCliRunInput) -> Result<(), Servertoo
         &serde_json::to_string(&input.input)
             .map_err(|_| ServertoolCliError::InvalidField("inputJson"))?,
     )?;
+    validate_no_internal_carrier(&input.input)?;
     Ok(())
 }
 
@@ -310,6 +315,7 @@ pub fn build_client_exec_cli_projection_output(
     validate_no_denied_cli_marker(
         &serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("input"))?,
     )?;
+    validate_no_internal_carrier(&input)?;
     if !is_client_exec_cli_projection(tool_name) {
         return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
     }
@@ -431,6 +437,7 @@ pub fn build_client_visible_projection_shell(
             &serde_json::to_string(&tool_call)
                 .map_err(|_| ServertoolCliError::InvalidField("additionalToolCalls"))?,
         )?;
+        validate_no_internal_carrier(&tool_call)?;
         tool_calls.push(Value::Object(row.clone()));
     }
 
@@ -470,6 +477,7 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
     if !value.is_object() {
         return Err(ServertoolCliError::InvalidField("exec_command_output"));
     }
+    validate_no_internal_carrier(&value)?;
     let tool_name = value
         .get("toolName")
         .and_then(|v| v.as_str())
@@ -488,6 +496,61 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
     Ok(value)
+}
+
+const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
+    "__rt",
+    "__raw_request_body",
+    "__servertool_cli_projection",
+    "metadata",
+    "metaCarrier",
+    "snapshot",
+    "debug",
+    "debugCarrier",
+    "ticket",
+    "restorationHandle",
+    "restorationStore",
+];
+
+const DENIED_INTERNAL_CARRIER_TEXT: &[&str] = &[
+    "__rt",
+    "__raw_request_body",
+    "__servertool_cli_projection",
+    "metaCarrier",
+    "restoration handle",
+    "restoration store",
+];
+
+fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolCliError> {
+    match value {
+        Value::Object(record) => {
+            for (key, item) in record {
+                let normalized_key = key.trim();
+                for denied in DENIED_INTERNAL_CARRIER_KEYS {
+                    if normalized_key == *denied {
+                        return Err(ServertoolCliError::DeniedInternalCarrier(denied));
+                    }
+                }
+                validate_no_internal_carrier(item)?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_no_internal_carrier(item)?;
+            }
+            Ok(())
+        }
+        Value::String(raw) => {
+            for denied in DENIED_INTERNAL_CARRIER_TEXT {
+                if raw.contains(denied) {
+                    return Err(ServertoolCliError::DeniedInternalCarrier(denied));
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -610,6 +673,21 @@ mod tests {
         )
         .expect_err("old marker must fail");
         assert_eq!(err, ServertoolCliError::DeniedMarker("old_cli_"));
+    }
+
+    #[test]
+    fn cli_rejects_internal_carrier_in_input_json() {
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "servertool_fixture".to_string(),
+                input: json!({"__rt":{"requestId":"req_internal"}}),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("internal carrier must fail");
+        assert_eq!(err, ServertoolCliError::DeniedInternalCarrier("__rt"));
     }
 
     #[test]
@@ -750,6 +828,36 @@ mod tests {
     }
 
     #[test]
+    fn client_visible_projection_shell_rejects_additional_internal_carrier() {
+        let native_projection = build_client_exec_cli_projection_output(
+            "servertool_fixture",
+            "servertool_cli_projection",
+            json!({"value":1}),
+            0,
+            0,
+        )
+        .expect("fixture projection output");
+        let err =
+            build_client_visible_projection_shell(ServertoolClientVisibleProjectionShellInput {
+                request_id: "req_mixed_projection".to_string(),
+                client_call_id: "call_servertool_cli_fixture_1".to_string(),
+                native_projection,
+                reasoning_text: "servertool fixture projection".to_string(),
+                additional_tool_calls: vec![json!({
+                    "id": "call_exec_command_1",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"echo hi\"}"
+                    },
+                    "metadata": {"requestId": "req_internal"}
+                })],
+            })
+            .expect_err("additional internal carrier must not be client-visible");
+        assert_eq!(err, ServertoolCliError::DeniedInternalCarrier("metadata"));
+    }
+
+    #[test]
     fn projection_rejects_fake_exec_and_web_search() {
         assert_eq!(
             build_client_exec_cli_projection_output(
@@ -786,6 +894,20 @@ mod tests {
                 0,
             ),
             Err(ServertoolCliError::DeniedMarker("old_cli_"))
+        );
+    }
+
+    #[test]
+    fn projection_rejects_internal_metadata_input() {
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "servertool_fixture",
+                "servertool_cli_projection",
+                json!({"metadata":{"debug":true}}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedInternalCarrier("metadata"))
         );
     }
 
@@ -851,6 +973,19 @@ mod tests {
         assert_eq!(
             validate_client_exec_command_result(&raw.to_string()),
             Err(ServertoolCliError::InvalidField("flowId"))
+        );
+    }
+
+    #[test]
+    fn exec_result_validation_rejects_internal_snapshot_carrier() {
+        let raw = json!({
+            "toolName": "servertool_fixture",
+            "flowId": "servertool_cli_projection",
+            "snapshot": {"requestId": "req_internal"}
+        });
+        assert_eq!(
+            validate_client_exec_command_result(&raw.to_string()),
+            Err(ServertoolCliError::DeniedInternalCarrier("snapshot"))
         );
     }
 
