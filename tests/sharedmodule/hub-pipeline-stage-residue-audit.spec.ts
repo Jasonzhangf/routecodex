@@ -22,6 +22,9 @@ function collectMatches(source: string, checks: ResidueCheck[]): string[] {
 }
 
 function walkFiles(dir: string, suffixes: string[], out: string[] = []): string[] {
+  if (!fs.existsSync(dir)) {
+    return out;
+  }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -863,11 +866,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('servertool followup dispatch and shape guard must not coerce tool semantics in TS', () => {
-    const files = [
+  it('servertool followup dispatch and backend route shells must not coerce tool semantics in TS', () => {
+    const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts',
+    ];
+    const files = [
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts',
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
     ];
+    const existingDeletedFiles = deletedFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
     const findings = files.flatMap((relativePath) => {
       const filePath = path.join(process.cwd(), relativePath);
       const source = fs.readFileSync(filePath, 'utf8');
@@ -879,7 +886,7 @@ describe('hub pipeline stage residue audit', () => {
       ]);
     });
 
-    expect(findings).toEqual([]);
+    expect({ existingDeletedFiles, findings }).toEqual({ existingDeletedFiles: [], findings: [] });
   });
 
   it('servertool handlers must not inject or strip tool protocol payloads in TS', () => {

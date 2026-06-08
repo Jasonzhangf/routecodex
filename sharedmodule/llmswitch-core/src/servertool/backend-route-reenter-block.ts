@@ -4,10 +4,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {
-  normalizeServertoolFollowupPayloadShape,
-  validateServertoolFollowupPayloadShape
-} from './backend-route-shape-guard.js';
+import { normalizeServertoolFollowupPayloadShapeWithNative } from '../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
 
 function readTrimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -271,7 +268,7 @@ export async function runReenterFollowup(args: {
       || stage.includes('retry')
       || stage.includes('empty')
       || stage === 'attempt_error'
-      || stage === 'payload_validation_failed'
+      || stage === 'payload_normalize_failed'
     );
   };
   const lifecycle = (stage: string, extra?: Record<string, unknown>): void => {
@@ -326,42 +323,26 @@ export async function runReenterFollowup(args: {
     rawHasMessages: Array.isArray((args.followupPayloadRaw as Record<string, unknown>).messages)
   });
 
-  const normalizedShapePayload = normalizeServertoolFollowupPayloadShape({
-    entryEndpoint: args.followupEntryEndpoint,
-    payload: args.followupPayloadRaw
-  });
+  let normalizedShapePayload: JsonObject;
+  try {
+    normalizedShapePayload = normalizeServertoolFollowupPayloadShapeWithNative(
+      args.followupEntryEndpoint,
+      args.followupPayloadRaw as Record<string, unknown>
+    ) as JsonObject;
+  } catch (error) {
+    lifecycle('payload_normalize_failed', {
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
   lifecycle('payload_normalized', {
     hasNormalizedPayload: Boolean(normalizedShapePayload),
     normalizedHasInput: Array.isArray((normalizedShapePayload as Record<string, unknown> | null | undefined)?.input),
     normalizedHasMessages: Array.isArray((normalizedShapePayload as Record<string, unknown> | null | undefined)?.messages)
   });
-  const shapeValidation = validateServertoolFollowupPayloadShape({
-    entryEndpoint: args.followupEntryEndpoint,
-    payload: normalizedShapePayload
-  });
-  if (shapeValidation.ok === false) {
-    const violation = shapeValidation.violation;
-    const wrapped = new ProviderProtocolError('[servertool] followup payload shape invalid', {
-      code: 'SERVERTOOL_FOLLOWUP_INVALID_SHAPE',
-      category: 'INTERNAL_ERROR',
-      details: {
-        flowId: args.flowId,
-        requestId: args.requestId,
-        reason: violation.reason,
-        violationCode: violation.code
-      }
-    }) as ProviderProtocolError & { status?: number };
-    wrapped.status = 502;
-    lifecycle('payload_validation_failed', {
-      violationCode: violation.code,
-      reason: violation.reason
-    });
-    throw wrapped;
-  }
-  lifecycle('payload_validation_passed');
 
   let followupPayload = args.coerceFollowupPayloadStream(
-    (normalizedShapePayload ?? args.followupPayloadRaw) as JsonObject,
+    normalizedShapePayload,
     args.metadata.stream === true
   );
   if (followupPayload && args.shouldInjectStopLoopWarning && args.loopState) {

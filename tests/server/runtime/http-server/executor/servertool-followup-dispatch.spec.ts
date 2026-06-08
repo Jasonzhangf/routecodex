@@ -80,12 +80,6 @@ jest.unstable_mockModule(
       normalizedPayload: payload,
       toolCalls: []
     })),
-    planStopMessagePersistedLookupWithNative: jest.fn(() => ({
-      shouldLoad: false
-    })),
-    resolveStopMessageSessionScopeWithNative: jest.fn(() => null),
-    resolveServertoolStateKeyWithNative: jest.fn(() => null),
-    resolveServertoolStickyKeyWithNative: jest.fn(() => null),
     planServertoolOutcomeWithNative: jest.fn(() => ({
       mode: 'passthrough'
     })),
@@ -94,6 +88,22 @@ jest.unstable_mockModule(
       mandatoryOrder: []
     })),
     planServertoolFollowupRuntimeWithNative: jest.fn(() => null)
+  })
+);
+
+jest.unstable_mockModule(
+  '../../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planStopMessagePersistedLookupWithNative: jest.fn(() => ({
+      strictSessionScope: null,
+      stickyKey: null,
+      candidateKeys: [],
+      lookupPolicy: 'strict_then_sticky_then_session_family',
+      readStopMessageSnapshot: false,
+      readStopMessageTombstone: false
+    })),
+    resolveStopMessageSessionScopeWithNative: jest.fn(() => null),
+    resolveServertoolStickyKeyWithNative: jest.fn(() => null)
   })
 );
 

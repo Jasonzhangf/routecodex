@@ -38,6 +38,7 @@ const TS_CLI_EXECUTOR = `${SERVERTOOL_TS_DIR}/cli-executor.ts`;
 const RUST_SERVERTOOL_CLI = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs`;
 const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
 const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
+const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
@@ -98,11 +99,24 @@ function listFiles(dir, files = []) {
     const stat = statSync(full);
     if (stat.isDirectory()) {
       listFiles(full, files);
+    } else if (/\.d\.ts$/.test(full)) {
+      continue;
     } else if (/\.(ts|tsx|js|mjs|rs)$/.test(full)) {
       files.push(full);
     }
   }
   return files;
+}
+
+function findJestUnstableMockModuleBlock(content, modulePath) {
+  const moduleIndex = content.indexOf(`jest.unstable_mockModule(\n  '${modulePath}'`);
+  if (moduleIndex < 0) return null;
+
+  const nextMockIndex = content.indexOf('\njest.unstable_mockModule(', moduleIndex + 1);
+  if (nextMockIndex < 0) {
+    return content.slice(moduleIndex);
+  }
+  return content.slice(moduleIndex, nextMockIndex);
 }
 
 // ── Check 1: No .bak files in active servertool paths ──────────
@@ -410,6 +424,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
   const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
+  const followupDispatchSpec = readRequired(`${ROOT}/tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts`);
 
   assertContains(
     'stop-message-persisted-lookup-rust-owner',
@@ -465,6 +480,25 @@ function checkStopMessagePersistedLookupRustOwner() {
       );
     }
   }
+  const chatProcessMockBlock = findJestUnstableMockModuleBlock(
+    followupDispatchSpec,
+    '../../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js'
+  );
+  if (chatProcessMockBlock) {
+    for (const symbol of [
+      'planStopMessagePersistedLookupWithNative',
+      'resolveStopMessageSessionScopeWithNative',
+      'resolveServertoolStickyKeyWithNative',
+      'resolveServertoolStateKeyWithNative',
+    ]) {
+      if (chatProcessMockBlock.includes(symbol)) {
+        fail(
+          'stop-message-persisted-lookup-bridge-owner',
+          `servertool-followup-dispatch.spec.ts must not mock ${symbol} on the chat-process servertool wrapper`
+        );
+      }
+    }
+  }
 
   const forbiddenTsLookupOwners = [
     'fallbackStickyKey',
@@ -512,6 +546,15 @@ function checkBackendRoutePolicyRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
+  if (existsSync(TS_BACKEND_ROUTE_SHAPE_GUARD)) {
+    fail(
+      'backend-route-shape-guard-no-ts-owner',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts must stay physically deleted; native normalize is the owner'
+    );
+  } else {
+    pass('backend-route-shape-guard-no-ts-owner', 'backend-route-shape-guard.ts is physically deleted');
+  }
+
   assertContains(
     'backend-route-policy-rust-owner',
     RUST_SERVERTOOL_BACKEND_ROUTE,
@@ -552,6 +595,28 @@ function checkBackendRoutePolicyRustOwner() {
       fail(
         'backend-route-policy-rust-owner',
         `${toolName} has forbidden ${forbiddenProjection} mapping in backend_route_contract.rs`
+      );
+    }
+  }
+  const files = ACTIVE_RUNTIME_SCAN_PATHS.flatMap((dir) => listFiles(dir));
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    if (content.includes('./backend-route-shape-guard.js')) {
+      fail(
+        'backend-route-shape-guard-no-ts-owner',
+        `Forbidden backend-route-shape-guard import found in ${file.replace(`${ROOT}/`, '')}`
+      );
+    }
+    if (content.includes('validateServertoolFollowupPayloadShape')) {
+      fail(
+        'backend-route-shape-guard-no-ts-owner',
+        `Forbidden deleted TS shape validation symbol found in ${file.replace(`${ROOT}/`, '')}`
+      );
+    }
+    if (content.includes('SERVERTOOL_FOLLOWUP_INVALID_SHAPE')) {
+      fail(
+        'backend-route-shape-guard-no-ts-owner',
+        `Forbidden deleted servertool shape error code found in ${file.replace(`${ROOT}/`, '')}`
       );
     }
   }
