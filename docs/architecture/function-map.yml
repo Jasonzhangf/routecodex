@@ -27,11 +27,13 @@ owners:
       - tests/sharedmodule/servertool-pending-session.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts
     required_gates:
       - npm run verify:servertool-rust-only
     migration_target: rust
     notes:
       - Rust owns orchestration semantics; TS only bridge/reentry/IO.
+      - Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner.
 
   - feature_id: hub.servertool_cli_projection
     status: planned

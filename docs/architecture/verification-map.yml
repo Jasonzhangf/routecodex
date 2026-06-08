@@ -12,6 +12,7 @@ verification:
     contract:
       - tests/sharedmodule/servertool-pending-session.spec.ts
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts
     integration:
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     smoke:
@@ -20,6 +21,7 @@ verification:
       - npm run build:min
     notes:
       - If provider/client protocol shape changes, add targeted followup entry smoke.
+      - Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers.
 
   - feature_id: hub.servertool_cli_projection
     change_risk: high

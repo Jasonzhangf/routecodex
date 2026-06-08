@@ -283,3 +283,17 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 - Kept `buildChatResponseFromResponses` as full-native invocation and JSON parse glue.
 - Added `tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts` to prevent the old TS wrapper exports and native imports from returning.
 - Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` to include the new deletion gate.
+
+## 2026-06-09 Slice: Reasoning Tool Parser Shell Deletion
+
+### Audit Result
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-parser.ts` was a zero-consumer TS native wrapper around `extractToolCallsFromReasoningTextWithNative`.
+- `rg` found no live import or symbol consumer outside the file itself; the native capability remains exported directly through `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts`.
+- Keeping the parser shell created a duplicate response-side tool extraction surface next to the Rust/native text-markup owner.
+
+### Implementation Result
+
+- Physically deleted `reasoning-tool-parser.ts`.
+- Added `tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts` to require the helper shell to stay deleted and to verify the native text-markup owner still exposes `extractToolCallsFromReasoningTextWithNative`.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` to include the deletion gate.
