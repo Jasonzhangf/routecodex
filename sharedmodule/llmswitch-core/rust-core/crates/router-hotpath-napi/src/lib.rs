@@ -2141,21 +2141,6 @@ pub fn bootstrap_virtual_router_providers_json_bridge(
     )
 }
 
-#[napi(js_name = "bootstrapVirtualRouterProviderProfilesJson")]
-pub fn bootstrap_virtual_router_provider_profiles_json_bridge(
-    routed_target_keys_json: String,
-    alias_index_json: String,
-    model_index_json: String,
-    runtime_entries_json: String,
-) -> NapiResult<String> {
-    virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_provider_profiles_json(
-        routed_target_keys_json,
-        alias_index_json,
-        model_index_json,
-        runtime_entries_json,
-    )
-}
-
 #[napi(js_name = "bootstrapVirtualRouterConfigMetaJson")]
 pub fn bootstrap_virtual_router_config_meta_json_bridge(
     section_json: String,

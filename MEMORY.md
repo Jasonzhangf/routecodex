@@ -1615,7 +1615,7 @@ Tags: virtual-router, provider-bootstrap, deepseek-web, key1, empty-auth-entry, 
 
 Tags: mimo, anthropic-messages, thinking, reasoning_content, req-outbound-stage3-compat, rust-ssot, 2026-05-12
 
-- 2026-06-07: Hub Pipeline Phase 8F-4 已物理删除 5 个 0-consumer Virtual Router TS bootstrap 残留：`bootstrap/auth-utils.ts`、`bootstrap/claude-code-helpers.ts`、`bootstrap/config-normalizers.ts`、`bootstrap/web-search-config.ts`、`token-file-scanner.ts`。当前真源是 Rust native bootstrap (`bootstrapVirtualRouterProvidersJson` / `bootstrapVirtualRouterProviderProfilesJson` / `bootstrapVirtualRouterConfigMetaJson`) 与 `virtual_router_engine/provider_bootstrap.rs`；auth token scanning 的活跃 owner 是 `src/providers/auth/token-scanner/`。禁止为修复 bootstrap/runtime alias 问题复活这些 TS helper。
+- 2026-06-07: Hub Pipeline Phase 8F-4 已物理删除 5 个 0-consumer Virtual Router TS bootstrap 残留：`bootstrap/auth-utils.ts`、`bootstrap/claude-code-helpers.ts`、`bootstrap/config-normalizers.ts`、`bootstrap/web-search-config.ts`、`token-file-scanner.ts`。当前 public native bootstrap entry 是 `bootstrapVirtualRouterProvidersJson` / `bootstrapVirtualRouterConfigJson` / `bootstrapVirtualRouterConfigMetaJson`；provider-profile bootstrap 是 `virtual_router_engine/provider_bootstrap.rs` 内部 helper，不再是 public NAPI export。auth token scanning 的活跃 owner 是 `src/providers/auth/token-scanner/`。禁止为修复 bootstrap/runtime alias 问题复活这些 TS helper。
 
 Tags: hub-pipeline-phase8f4, virtual-router-bootstrap, rust-ssot, dead-ts-deletion, no-resurrection, 2026-06-07
 
@@ -3023,3 +3023,9 @@ Tags: hub-pipeline, semantic-mapper, submit-tool-outputs, dead-code, napi-export
 - Removed the public TS wrappers, required-export entries, Rust NAPI JSON wrappers, and the wrapper-only empty-input test. Kept the internal Rust functions because they are part of the active Rust-owned request path.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired public wrapper/export names from returning while allowing internal Rust mainline functions.
 Tags: hub-pipeline, req-process, route-selection, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 VR bootstrap/stop-message public wrappers removed
+- Exact scan found `bootstrapProviderProfilesWithNative` and `parseStopMessageInstructionWithNative` had no TS/runtime consumer. Their Rust helpers remain live internally: provider-profile bootstrap is called by `bootstrapVirtualRouterConfigJson`, and stop-message parsing is called by the routing-instruction parser.
+- Removed the zero-consumer TS wrappers, required-export entries, the `bootstrapVirtualRouterProviderProfilesJson` NAPI bridge, and public NAPI exposure for `parse_stop_message_instruction_json`; kept both Rust helpers crate-internal.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public wrapper/export names from returning while allowing Rust-internal mainline helpers.
+Tags: virtual-router, bootstrap, stop-message, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

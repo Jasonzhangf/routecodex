@@ -1,5 +1,4 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde::Serialize;
 
 const SM_UNBOUNDED_MAX_REPEATS: i64 = 2_147_483_647;
@@ -379,8 +378,7 @@ fn parse_stop_message_instruction(
     make_set_output(text, max_repeats, ai_mode)
 }
 
-#[napi]
-pub fn parse_stop_message_instruction_json(instruction: String) -> NapiResult<String> {
+pub(crate) fn parse_stop_message_instruction_json(instruction: String) -> NapiResult<String> {
     let output = parse_stop_message_instruction(instruction);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

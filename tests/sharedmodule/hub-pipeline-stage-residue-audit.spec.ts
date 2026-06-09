@@ -2535,6 +2535,43 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired VR bootstrap and stop-message public wrappers must stay Rust-internal', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_instruction.rs',
+    ];
+    const retiredSymbols = [
+      'bootstrapProviderProfilesWithNative',
+      'bootstrapVirtualRouterProviderProfilesJson',
+      'bootstrap_virtual_router_provider_profiles_json_bridge',
+      'parseStopMessageInstructionWithNative',
+      'StopMessageNativeParseOutput',
+      'parseStopMessageInstructionJson',
+      '#[napi]\npub(crate) fn parse_stop_message_instruction_json',
+      '#[napi]\npub fn parse_stop_message_instruction_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

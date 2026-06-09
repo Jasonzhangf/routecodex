@@ -18827,3 +18827,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory picked `native-hub-pipeline-req-process-semantics.ts`: `applyHubOperationsWithNative` and `applyReqProcessRouteSelectionWithNative` had zero TS/runtime consumers; `applyReqProcessToolGovernanceWithNative` stays live for req-process contract tests.
 - Change: removed the two public TS wrappers, required-export entries, Rust NAPI JSON wrappers, and wrapper-only empty-input test. Internal Rust `apply_hub_operations` / `apply_route_selection` remain because active Rust mainline uses them.
 - Guard: residue gate blocks the public wrapper/export names from returning without banning the internal Rust mainline functions.
+
+2026-06-09 VR bootstrap/stop-message public wrapper deletion:
+- Inventory picked two single zero-consumer wrappers: `bootstrapProviderProfilesWithNative` and `parseStopMessageInstructionWithNative`.
+- Change: removed the TS wrappers, required-export entries, `bootstrapVirtualRouterProviderProfilesJson` NAPI bridge, and public NAPI exposure for `parse_stop_message_instruction_json`. Kept Rust-internal provider-profile bootstrap and stop-message parser because Rust config/bootstrap and routing-instruction parser still call them.
+- Guard: residue gate blocks the public wrapper/export names while allowing crate-internal Rust helpers.
