@@ -750,6 +750,18 @@ function checkStandaloneServertoolBinary() {
   assertContains('servertool-cli-supported-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn stop_message_auto_outputs_rust_owned_schema');
   assertContains('servertool-cli-supported-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn servertool_fixture_outputs_ordinary_exec_command_json');
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn private_carrier_text_fails_fast');
+  for (const needle of [
+    'fn fake_exec_tool_name_fails_fast',
+    'fn denied_cli_markers_fail_fast',
+    'fn denied_cli_markers_in_tool_name_and_flow_fail_fast',
+    'fn internal_carrier_fails_fast',
+    'fn restoration_handle_carrier_fails_fast',
+    'SERVERTOOL_DENIED_TOOL: fake_exec',
+    'SERVERTOOL_DENIED_CLI_MARKER: {expected_marker}',
+    'SERVERTOOL_DENIED_INTERNAL_CARRIER: {carrier}',
+  ]) {
+    assertContains('servertool-cli-denied-marker-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, needle);
+  }
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'SERVERTOOL_DENIED_INTERNAL_CARRIER: serverToolFollowup');
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
   for (const toolName of ['web_search', 'vision_auto', 'memory_cache_auto']) {
