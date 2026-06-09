@@ -41,7 +41,7 @@
 | native-shared-conversion-semantics-reasoning.ts | 371 | 9 | 10 |
 | native-hub-bridge-action-semantics-tools-request.ts | 363 | 9 | 10 |
 | native-shared-conversion-semantics.ts | 360 | 19 | 9 |
-| native-hub-pipeline-orchestration-semantics-search-resume.ts | 294 | 7 | 10 |
+| native-hub-pipeline-orchestration-semantics-search-resume.ts | 已删：2026-06-09 | 0 | 0 |
 | native-shared-conversion-semantics-metadata.ts | 285 | 7 | 8 |
 | native-hub-bridge-action-semantics-tools-core.ts | 280 | 8 | 9 |
 | native-hub-pipeline-orchestration-semantics.ts | 271 | 27 | 2 |

@@ -148,24 +148,10 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
 }
 
 pub use crate::hub_pipeline_blocks::napi_bindings::{
-    apply_direct_builtin_web_search_tool_json, apply_has_image_attachment_flag_json,
-    apply_outbound_stream_preference_json, build_captured_chat_request_snapshot_json,
-    build_hub_pipeline_result_metadata_json, build_req_inbound_node_result_json,
-    build_req_inbound_skipped_node_json, build_req_outbound_node_result_json,
-    build_router_metadata_input_json, build_tool_governance_node_result_json,
-    coerce_standardized_request_from_payload_json, extract_adapter_context_metadata_fields_json,
+    build_router_metadata_input_json, coerce_standardized_request_from_payload_json,
     extract_model_hint_from_metadata_json, find_mappable_semantics_keys_json,
-    is_canonical_web_search_tool_definition_json, is_search_route_id_json,
-    lift_responses_resume_into_semantics_json, normalize_hub_endpoint_json,
-    prepare_runtime_metadata_for_servertools_json, read_responses_resume_from_metadata_json,
-    read_responses_resume_from_request_semantics_json,
-    resolve_adapter_context_metadata_signals_json, resolve_adapter_context_object_carriers_json,
-    resolve_hub_client_protocol_json, resolve_hub_policy_override_json,
-    resolve_hub_shadow_compare_config_json, resolve_outbound_stream_intent_json,
-    resolve_provider_protocol_json, resolve_router_metadata_runtime_flags_json,
-    resolve_sse_protocol_from_metadata_json, resolve_sse_protocol_json,
-    resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
-    sync_responses_context_from_canonical_messages_json, sync_session_identifiers_to_metadata_json,
+    normalize_hub_endpoint_json, resolve_sse_protocol_json, resolve_stop_message_router_metadata_json,
+    run_hub_pipeline_json,
 };
 
 #[cfg(test)]

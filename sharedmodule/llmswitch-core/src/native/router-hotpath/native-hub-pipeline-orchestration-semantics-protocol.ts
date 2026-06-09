@@ -126,14 +126,6 @@ function parseString(raw: string): string | null {
   return typeof parsed === 'string' ? parsed : null;
 }
 
-function parseRecord(raw: string): Record<string, unknown> | null {
-  const parsed = parseJson('parseRecord', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed as Record<string, unknown>;
-}
-
 function parseOptionalString(raw: string): string | undefined | null {
   const parsed = parseJson('parseOptionalString', raw);
   if (parsed === JSON_PARSE_FAILED) {
@@ -143,17 +135,6 @@ function parseOptionalString(raw: string): string | undefined | null {
     return undefined;
   }
   return typeof parsed === 'string' ? parsed : null;
-}
-
-function parseOptionalBoolean(raw: string): boolean | undefined | null {
-  const parsed = parseJson('parseOptionalBoolean', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  return typeof parsed === 'boolean' ? parsed : null;
 }
 
 function parseOrchestrationOutput(raw: string): HubPipelineOutput | null {
@@ -455,24 +436,8 @@ export function normalizeHubEndpointWithNative(endpoint: string): string {
   return parseString(callNativeString(capability, [endpoint])) ?? failNativeRequired<string>(capability, 'invalid payload');
 }
 
-export function resolveHubProviderProtocolWithNative(value: string): string {
-  const capability = 'resolveProviderProtocolJson';
-  return parseString(callNativeString(capability, [value])) ?? failNativeRequired<string>(capability, 'invalid payload');
-}
-
-export function resolveHubClientProtocolWithNative(entryEndpoint: string): string {
-  const capability = 'resolveHubClientProtocolJson';
-  return parseString(callNativeString(capability, [entryEndpoint])) ?? failNativeRequired<string>(capability, 'invalid payload');
-}
-
 export function extractModelHintFromMetadataWithNative(metadata: Record<string, unknown>): string | undefined {
   const capability = 'extractModelHintFromMetadataJson';
-  const parsed = parseOptionalString(callNativeJsonString(capability, metadata));
-  return parsed === null ? failNativeRequired<string | undefined>(capability, 'invalid payload') : parsed;
-}
-
-export function resolveHubSseProtocolFromMetadataWithNative(metadata: Record<string, unknown>): string | undefined {
-  const capability = 'resolveSseProtocolFromMetadataJson';
   const parsed = parseOptionalString(callNativeJsonString(capability, metadata));
   return parsed === null ? failNativeRequired<string | undefined>(capability, 'invalid payload') : parsed;
 }
@@ -481,24 +446,4 @@ export function resolveSseProtocolWithNative(metadata: Record<string, unknown>, 
   const capability = 'resolveSseProtocolJson';
   return parseString(callNativeString(capability, [stringifyNativeArgument(capability, metadata), providerProtocol]))
     ?? failNativeRequired<string>(capability, 'invalid payload');
-}
-
-export function resolveOutboundStreamIntentWithNative(value: unknown): boolean | undefined {
-  const capability = 'resolveOutboundStreamIntentJson';
-  const parsed = parseOptionalBoolean(callNativeJsonString(capability, value));
-  return parsed === null ? failNativeRequired<boolean | undefined>(capability, 'invalid payload') : parsed;
-}
-
-export function applyOutboundStreamPreferenceWithNative(
-  request: Record<string, unknown>,
-  stream: boolean | undefined,
-  processMode?: string,
-): Record<string, unknown> {
-  const capability = 'applyOutboundStreamPreferenceJson';
-  const raw = callNativeString('applyOutboundStreamPreferenceJson', [
-    stringifyNativeArgument(capability, request),
-    stringifyNativeArgument(capability, stream ?? null),
-    processMode ?? '',
-  ]);
-  return parseRecord(raw) ?? failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
 }

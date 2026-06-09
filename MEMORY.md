@@ -2987,3 +2987,9 @@ Tags: hub-pipeline, passthrough, dead-code, napi-export, rust-only, residue-gate
 - Removed the public NAPI wrappers, the internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, their legacy DTOs, and tests that existed only to exercise the retired stage API.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now fails if the legacy stage bridge API symbols return anywhere in active Rust source.
 Tags: hub-pipeline, stage-bridge, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline orchestration public wrapper surface removed
+- Exact scan found a set of standalone Hub orchestration public wrappers had no runtime consumer after excluding their defining file, aggregate re-export, required-export gate, docs, and memory: metadata/protocol node-result builders, web-search/resume wrappers, and related Rust NAPI JSON exports.
+- Removed `native-hub-pipeline-orchestration-semantics-search-resume.ts`, the zero-consumer TS `*WithNative` exports, their required-export entries, and their Rust NAPI JSON wrapper/re-export surface. Kept internal Rust helper functions private because active Rust Hub tests/mainline still exercise those semantics.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired wrapper/export symbol set from returning in active TS/Rust public surfaces.
+Tags: hub-pipeline, orchestration-wrapper, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

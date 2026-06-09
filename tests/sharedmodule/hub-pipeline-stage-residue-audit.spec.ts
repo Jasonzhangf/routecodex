@@ -2134,6 +2134,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-state-semantics.ts',
       'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-stop-message-state-semantics.js',
       'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-stop-message-state-semantics.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-search-resume.ts',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-search-resume.js',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-search-resume.d.ts',
       'sharedmodule/llmswitch-core/config/rust-migration-modules.json',
       'sharedmodule/llmswitch-core/docs/rust-migration-gates.md',
       'sharedmodule/llmswitch-core/scripts/check-shadow-coverage-gate.mjs',
@@ -2226,6 +2229,118 @@ describe('hub pipeline stage residue audit', () => {
     const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     expect(existing).toEqual([]);
+  });
+
+  it('retired hub orchestration public NAPI wrappers must not be restored without runtime consumers', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
+    ];
+    const retiredSymbols = [
+      'buildHubPipelineResultMetadataWithNative',
+      'buildReqOutboundNodeResultWithNative',
+      'buildReqInboundNodeResultWithNative',
+      'buildReqInboundSkippedNodeWithNative',
+      'buildCapturedChatRequestSnapshotWithNative',
+      'prepareRuntimeMetadataForServertoolsWithNative',
+      'applyHasImageAttachmentFlagWithNative',
+      'syncSessionIdentifiersToMetadataWithNative',
+      'buildToolGovernanceNodeResultWithNative',
+      'resolveRouterMetadataRuntimeFlagsWithNative',
+      'extractAdapterContextMetadataFieldsWithNative',
+      'resolveAdapterContextMetadataSignalsWithNative',
+      'resolveAdapterContextObjectCarriersWithNative',
+      'resolveHubPolicyOverrideFromMetadataWithNative',
+      'resolveHubShadowCompareConfigWithNative',
+      'resolveHubProviderProtocolWithNative',
+      'resolveHubClientProtocolWithNative',
+      'resolveHubSseProtocolFromMetadataWithNative',
+      'resolveOutboundStreamIntentWithNative',
+      'applyOutboundStreamPreferenceWithNative',
+      'isSearchRouteIdWithNative',
+      'isCanonicalWebSearchToolDefinitionWithNative',
+      'applyDirectBuiltinWebSearchToolWithNative',
+      'liftResponsesResumeIntoSemanticsWithNative',
+      'syncResponsesContextFromCanonicalMessagesWithNative',
+      'readResponsesResumeFromMetadataWithNative',
+      'readResponsesResumeFromRequestSemanticsWithNative',
+      'buildHubPipelineResultMetadataJson',
+      'buildReqOutboundNodeResultJson',
+      'buildReqInboundNodeResultJson',
+      'buildReqInboundSkippedNodeJson',
+      'buildCapturedChatRequestSnapshotJson',
+      'prepareRuntimeMetadataForServertoolsJson',
+      'applyHasImageAttachmentFlagJson',
+      'syncSessionIdentifiersToMetadataJson',
+      'buildToolGovernanceNodeResultJson',
+      'resolveRouterMetadataRuntimeFlagsJson',
+      'extractAdapterContextMetadataFieldsJson',
+      'resolveAdapterContextMetadataSignalsJson',
+      'resolveAdapterContextObjectCarriersJson',
+      'resolveHubPolicyOverrideJson',
+      'resolveHubShadowCompareConfigJson',
+      'resolveProviderProtocolJson',
+      'resolveHubClientProtocolJson',
+      'resolveSseProtocolFromMetadataJson',
+      'resolveOutboundStreamIntentJson',
+      'applyOutboundStreamPreferenceJson',
+      'isSearchRouteIdJson',
+      'isCanonicalWebSearchToolDefinitionJson',
+      'applyDirectBuiltinWebSearchToolJson',
+      'liftResponsesResumeIntoSemanticsJson',
+      'syncResponsesContextFromCanonicalMessagesJson',
+      'readResponsesResumeFromMetadataJson',
+      'readResponsesResumeFromRequestSemanticsJson',
+      'build_hub_pipeline_result_metadata_json',
+      'build_req_outbound_node_result_json',
+      'build_req_inbound_node_result_json',
+      'build_req_inbound_skipped_node_json',
+      'build_captured_chat_request_snapshot_json',
+      'prepare_runtime_metadata_for_servertools_json',
+      'apply_has_image_attachment_flag_json',
+      'sync_session_identifiers_to_metadata_json',
+      'build_tool_governance_node_result_json',
+      'resolve_router_metadata_runtime_flags_json',
+      'extract_adapter_context_metadata_fields_json',
+      'resolve_adapter_context_metadata_signals_json',
+      'resolve_adapter_context_object_carriers_json',
+      'resolve_hub_policy_override_json',
+      'resolve_hub_shadow_compare_config_json',
+      'resolve_provider_protocol_json',
+      'resolve_hub_client_protocol_json',
+      'resolve_sse_protocol_from_metadata_json',
+      'resolve_outbound_stream_intent_json',
+      'apply_outbound_stream_preference_json',
+      'is_search_route_id_json',
+      'is_canonical_web_search_tool_definition_json',
+      'apply_direct_builtin_web_search_tool_json',
+      'lift_responses_resume_into_semantics_json',
+      'sync_responses_context_from_canonical_messages_json',
+      'read_responses_resume_from_metadata_json',
+      'read_responses_resume_from_request_semantics_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
   });
 
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {

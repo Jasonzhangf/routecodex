@@ -51,41 +51,6 @@ export interface NativeStopMessageRouterMetadataOutput {
   tmux_session_id?: string;
 }
 
-export interface NativeRouterMetadataRuntimeFlagsOutput {
-  estimatedInputTokens?: number;
-}
-
-export interface NativeHubPolicyOverrideOutput {
-  mode: 'off' | 'observe' | 'enforce';
-  sampleRate?: number;
-}
-
-export interface NativeHubShadowCompareConfigOutput {
-  baselineMode: 'off' | 'observe' | 'enforce';
-}
-
-export interface NativeAdapterContextMetadataSignalsOutput {
-  clientRequestId?: string;
-  groupRequestId?: string;
-  originalModelId?: string;
-  clientModelId?: string;
-  modelId?: string;
-  estimatedInputTokens?: number;
-  sessionId?: string;
-  conversationId?: string;
-}
-
-export interface NativeAdapterContextObjectCarriersOutput {
-  runtime?: Record<string, unknown>;
-  capturedChatRequest?: Record<string, unknown>;
-  clientConnectionState?: Record<string, unknown>;
-  clientDisconnected?: boolean;
-}
-
-export interface NativeLiftResponsesResumeIntoSemanticsOutput {
-  request: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-}
 
 export interface NativeRouterMetadataInputBuildInput {
   requestId: string;
@@ -105,47 +70,6 @@ export interface NativeRouterMetadataInputBuildInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface NativeHubPipelineResultMetadataBuildInput {
-  normalized: {
-    metadata: Record<string, unknown>;
-    entryEndpoint: string;
-    stream: boolean;
-    processMode: 'chat';
-    routeHint?: string;
-  };
-  outboundProtocol: string;
-  target?: unknown;
-  outboundStream?: boolean;
-  capturedChatRequest: Record<string, unknown>;
-  shadowCompareBaselineMode?: 'off' | 'observe' | 'enforce';
-  effectivePolicy?: { mode?: 'off' | 'observe' | 'enforce' };
-  shadowBaselineProviderPayload?: Record<string, unknown>;
-}
-
-export interface NativeReqOutboundNodeResultBuildInput {
-  outboundStart: number;
-  outboundEnd: number;
-  messages: number;
-  tools: number;
-}
-
-export interface NativeReqInboundNodeResultBuildInput {
-  inboundStart: number;
-  inboundEnd: number;
-  messages: number;
-  tools: number;
-}
-
-export interface NativeReqInboundSkippedNodeBuildInput {
-  reason?: string;
-}
-
-export interface NativeCapturedChatRequestSnapshotBuildInput {
-  model?: unknown;
-  messages?: unknown;
-  tools?: unknown;
-  parameters?: unknown;
-}
 
 export interface NativeCoerceStandardizedRequestInput {
   payload: Record<string, unknown>;
@@ -163,80 +87,24 @@ export interface NativeCoerceStandardizedRequestOutput {
   rawPayload: Record<string, unknown>;
 }
 
-export interface NativeServertoolRuntimeMetadataBuildInput {
-  metadata?: Record<string, unknown>;
-  webSearchConfig?: Record<string, unknown>;
-  execCommandGuard?: Record<string, unknown>;
-  applyPatchConfig?: Record<string, unknown>;
-}
-
-export interface NativeHasImageAttachmentFlagInput {
-  metadata?: Record<string, unknown>;
-  hasImageAttachment: boolean;
-}
-
-export interface NativeSessionIdentifiersMetadataSyncInput {
-  metadata?: Record<string, unknown>;
-  sessionId?: string;
-  conversationId?: string;
-}
-
-export interface NativeToolGovernanceNodeResultInput {
-  success?: boolean;
-  metadata?: Record<string, unknown>;
-  error?: {
-    code?: unknown;
-    message?: unknown;
-    details?: unknown;
-  };
-}
 
 export {
-  applyOutboundStreamPreferenceWithNative,
   extractModelHintFromMetadataWithNative,
   normalizeHubEndpointWithNative,
-  resolveHubClientProtocolWithNative,
-  resolveHubProviderProtocolWithNative,
-  resolveHubSseProtocolFromMetadataWithNative,
-  resolveOutboundStreamIntentWithNative,
   resolveSseProtocolWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
   runHubPipelineOrchestrationWithNative
 } from './native-hub-pipeline-orchestration-semantics-protocol.js';
 
 export {
-  resolveAdapterContextMetadataSignalsWithNative,
-  resolveAdapterContextObjectCarriersWithNative,
-  resolveHubPolicyOverrideFromMetadataWithNative,
-  resolveHubShadowCompareConfigWithNative,
-  resolveRouterMetadataRuntimeFlagsWithNative,
-  resolveStopMessageRouterMetadataWithNative,
-  extractAdapterContextMetadataFieldsWithNative
+  resolveStopMessageRouterMetadataWithNative
 } from './native-hub-pipeline-orchestration-semantics-metadata-policy.js';
 
 export {
-  applyHasImageAttachmentFlagWithNative,
-  buildCapturedChatRequestSnapshotWithNative,
-  buildHubPipelineResultMetadataWithNative,
-  buildReqInboundNodeResultWithNative,
-  buildReqInboundSkippedNodeWithNative,
-  buildReqOutboundNodeResultWithNative,
   buildRouterMetadataInputWithNative,
-  buildToolGovernanceNodeResultWithNative,
-  coerceStandardizedRequestFromPayloadWithNative,
-  prepareRuntimeMetadataForServertoolsWithNative,
-  syncSessionIdentifiersToMetadataWithNative
+  coerceStandardizedRequestFromPayloadWithNative
 } from './native-hub-pipeline-orchestration-semantics-builders.js';
 
-export {
-  applyDirectBuiltinWebSearchToolWithNative,
-  isCanonicalWebSearchToolDefinitionWithNative,
-  isSearchRouteIdWithNative,
-  liftResponsesResumeIntoSemanticsWithNative,
-  readResponsesResumeFromMetadataWithNative,
-  readResponsesResumeFromRequestSemanticsWithNative,
-  syncResponsesContextFromCanonicalMessagesWithNative
-} from './native-hub-pipeline-orchestration-semantics-search-resume.js';
 
 function parseStringArray(raw: string): string[] | null {
   try {

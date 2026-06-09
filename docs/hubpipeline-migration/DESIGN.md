@@ -683,7 +683,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 | unified-hub-shadow | ✅ diff=0 |
 
 ### 语义状态
-- **Rust 唯一真源**：`shouldNormalizeReasoningPayloadWithNative` + `normalizeReasoningPayloadV2WithNative` + `resolveHubProviderProtocolWithNative`
+- **Rust 唯一真源**：`shouldNormalizeReasoningPayloadWithNative` + `normalizeReasoningPayloadV2WithNative` + Rust protocol helper（retired public wrapper `resolveHubProviderProtocolWithNative` must not be restored without runtime consumers）
 - **TS 残留**：`approximateJsonBytes`（纯 logging utility，7 行）
 - **标注**：NOT VERIFIED（5520 未重启）
 

@@ -19,47 +19,6 @@ type RouterMetadataInputBuildInput = {
   metadata?: Record<string, unknown>;
 };
 
-type HubPipelineResultMetadataBuildInput = {
-  normalized: {
-    metadata: Record<string, unknown>;
-    entryEndpoint: string;
-    stream: boolean;
-    processMode: 'chat';
-    routeHint?: string;
-  };
-  outboundProtocol: string;
-  target?: unknown;
-  outboundStream?: boolean;
-  capturedChatRequest: Record<string, unknown>;
-  
-  shadowCompareBaselineMode?: 'off' | 'observe' | 'enforce';
-  effectivePolicy?: { mode?: 'off' | 'observe' | 'enforce' };
-  shadowBaselineProviderPayload?: Record<string, unknown>;
-};
-
-type ReqOutboundNodeResultBuildInput = {
-  outboundStart: number;
-  outboundEnd: number;
-  messages: number;
-  tools: number;
-};
-
-type ReqInboundNodeResultBuildInput = {
-  inboundStart: number;
-  inboundEnd: number;
-  messages: number;
-  tools: number;
-};
-
-type ReqInboundSkippedNodeBuildInput = { reason?: string };
-
-type CapturedChatRequestSnapshotBuildInput = {
-  model?: unknown;
-  messages?: unknown;
-  tools?: unknown;
-  parameters?: unknown;
-};
-
 type CoerceStandardizedRequestInput = {
   payload: Record<string, unknown>;
   normalized: {
@@ -74,34 +33,6 @@ type CoerceStandardizedRequestInput = {
 type CoerceStandardizedRequestOutput = {
   standardizedRequest: Record<string, unknown>;
   rawPayload: Record<string, unknown>;
-};
-
-type ServertoolRuntimeMetadataBuildInput = {
-  metadata?: Record<string, unknown>;
-  webSearchConfig?: Record<string, unknown>;
-  execCommandGuard?: Record<string, unknown>;
-  applyPatchConfig?: Record<string, unknown>;
-};
-
-type HasImageAttachmentFlagInput = {
-  metadata?: Record<string, unknown>;
-  hasImageAttachment: boolean;
-};
-
-type SessionIdentifiersMetadataSyncInput = {
-  metadata?: Record<string, unknown>;
-  sessionId?: string;
-  conversationId?: string;
-};
-
-type ToolGovernanceNodeResultInput = {
-  success?: boolean;
-  metadata?: Record<string, unknown>;
-  error?: {
-    code?: unknown;
-    message?: unknown;
-    details?: unknown;
-  };
 };
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
@@ -153,10 +84,8 @@ function parseCoerceStandardizedRequestOutput(raw: string): CoerceStandardizedRe
   return { standardizedRequest, rawPayload };
 }
 
-function invokeRecordCapability(
-  capability: string,
-  payloadFactory: () => string[] | null
-): Record<string, unknown> {
+export function buildRouterMetadataInputWithNative(input: RouterMetadataInputBuildInput): Record<string, unknown> {
+  const capability = 'buildRouterMetadataInputJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
   if (isNativeDisabledByEnv()) {
@@ -166,12 +95,12 @@ function invokeRecordCapability(
   if (!fn) {
     return fail();
   }
-  const args = payloadFactory();
-  if (!args) {
+  const inputJson = safeStringify(input ?? {});
+  if (!inputJson) {
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(...args);
+    const raw = fn(inputJson);
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
@@ -181,54 +110,6 @@ function invokeRecordCapability(
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
-}
-
-export function buildRouterMetadataInputWithNative(input: RouterMetadataInputBuildInput): Record<string, unknown> {
-  return invokeRecordCapability('buildRouterMetadataInputJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function buildHubPipelineResultMetadataWithNative(
-  input: HubPipelineResultMetadataBuildInput
-): Record<string, unknown> {
-  return invokeRecordCapability('buildHubPipelineResultMetadataJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function buildReqOutboundNodeResultWithNative(
-  input: ReqOutboundNodeResultBuildInput
-): Record<string, unknown> {
-  return invokeRecordCapability('buildReqOutboundNodeResultJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function buildReqInboundNodeResultWithNative(input: ReqInboundNodeResultBuildInput): Record<string, unknown> {
-  return invokeRecordCapability('buildReqInboundNodeResultJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function buildReqInboundSkippedNodeWithNative(input: ReqInboundSkippedNodeBuildInput): Record<string, unknown> {
-  return invokeRecordCapability('buildReqInboundSkippedNodeJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function buildCapturedChatRequestSnapshotWithNative(
-  input: CapturedChatRequestSnapshotBuildInput
-): Record<string, unknown> {
-  return invokeRecordCapability('buildCapturedChatRequestSnapshotJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
 }
 
 export function coerceStandardizedRequestFromPayloadWithNative(
@@ -260,39 +141,4 @@ export function coerceStandardizedRequestFromPayloadWithNative(
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
-}
-
-export function prepareRuntimeMetadataForServertoolsWithNative(
-  input: ServertoolRuntimeMetadataBuildInput
-): Record<string, unknown> {
-  return invokeRecordCapability('prepareRuntimeMetadataForServertoolsJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function applyHasImageAttachmentFlagWithNative(input: HasImageAttachmentFlagInput): Record<string, unknown> {
-  return invokeRecordCapability('applyHasImageAttachmentFlagJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-export function syncSessionIdentifiersToMetadataWithNative(
-  input: SessionIdentifiersMetadataSyncInput
-): Record<string, unknown> {
-  return invokeRecordCapability('syncSessionIdentifiersToMetadataJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
-}
-
-
-export function buildToolGovernanceNodeResultWithNative(
-  input: ToolGovernanceNodeResultInput
-): Record<string, unknown> {
-  return invokeRecordCapability('buildToolGovernanceNodeResultJson', () => {
-    const inputJson = safeStringify(input ?? {});
-    return inputJson ? [inputJson] : null;
-  });
 }
