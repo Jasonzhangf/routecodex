@@ -143,6 +143,7 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_backend_route_runtime': [
     'tests/servertool/server-side-web-search.spec.ts',
     'tests/servertool/vision-flow.spec.ts',
+    'tests/servertool/servertool-mixed-tools.spec.ts',
   ],
   'hub.servertool_stopless_cli_projection_seed': [
     'tests/servertool/stop-message-auto.spec.ts',

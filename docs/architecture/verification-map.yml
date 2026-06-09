@@ -200,6 +200,7 @@ verification:
     integration:
       - tests/servertool/server-side-web-search.spec.ts
       - tests/servertool/vision-flow.spec.ts
+      - tests/servertool/servertool-mixed-tools.spec.ts
       - tests/servertool/followup-bootstrap-replay.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
