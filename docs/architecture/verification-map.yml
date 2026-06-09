@@ -327,6 +327,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_inbound_02_standardized.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts
     contract:
       - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
       - tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts
@@ -337,6 +338,8 @@ verification:
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
       - tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts
       - tests/server/handlers/handler-metadata-boundary.spec.ts
+    residue:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
       - npm run verify:repo-sanity
     build:

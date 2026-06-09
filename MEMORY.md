@@ -2844,3 +2844,9 @@ Tags: servertool, backend-route, stopless, runtime-action, rust-owner, thin-shel
 - Gate: `npm run verify:servertool-rust-only` blocks `extractCapturedChatSeed` and `./backend-route-seed.js` in the bootstrap replay shell.
 - Verified on 2026-06-09: focused/full servertool Rust suites, NAPI bootstrap bridge tests, native wrapper probe, bootstrap Jest, required servertool Jest bundle, root `tsc`, servertool rust-only gate, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3037`.
 Tags: servertool, backend-route, bootstrap-replay, captured-seed, rust-owner, thin-shell, 2026-06-09
+
+## 2026-06-09 HubPipeline JSON helper surface narrowed
+- `sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts` must stay a minimal TS bridge helper surface: `JsonValue`, `JsonObject`, `isJsonObject`, and live `jsonClone` only.
+- Do not restore zero-consumer public helpers `JsonArray`, `isJsonArray`, or exported `JsonPrimitive`; array-specific JSON semantics should remain plain `JsonValue[]` unless a new Rust/native mapped owner and gate is added.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these retired public helpers from returning; function/verification maps include `types/json.ts` under `hub.metadata_boundary` bridge coverage.
+Tags: hub-pipeline, json-helper, public-surface, dead-code, residue-gate, function-map, 2026-06-09

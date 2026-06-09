@@ -1025,6 +1025,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface StageRecorder');
   });
 
+  it('hub json helper public surface must not restore zero-consumer array helpers', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      { label: 'exports zero-consumer JsonPrimitive alias', pattern: /export\s+type\s+JsonPrimitive\b/ },
+      { label: 'exports zero-consumer JsonArray alias', pattern: /export\s+type\s+JsonArray\b/ },
+      { label: 'exports zero-consumer isJsonArray helper', pattern: /export\s+function\s+isJsonArray\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export type JsonValue');
+    expect(source).toContain('export function isJsonObject');
+    expect(source).toContain('export function jsonClone');
+  });
+
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),

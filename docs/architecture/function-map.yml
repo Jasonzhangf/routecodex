@@ -624,6 +624,7 @@ owners:
       - describe_pipeline_contract
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts
       - src/providers/core/runtime
       - src/server/handlers
     forbidden_paths:
@@ -643,6 +644,7 @@ owners:
     notes:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
       - Rust contract help owns the standard control/data split for Hub and VR nodes.
+      - TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired.
 
   - feature_id: hub.runtime_ingress_bridge
     status: active

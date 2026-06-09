@@ -18653,3 +18653,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - `servertool-core::backend_route_contract::plan_bootstrap_replay` now owns replay seed selection from `adapter_context.capturedChatRequest`; TS bootstrap replay shell passes `adapterContext` to native and no longer imports `extractCapturedChatSeed`.
 - `verify:servertool-rust-only` now blocks `extractCapturedChatSeed` / `./backend-route-seed.js` inside `backend-route-bootstrap-replay-block.ts`.
 - Verification PASS: focused/full servertool Rust suites, NAPI bridge bootstrap tests, native wrapper probe, bootstrap Jest, required servertool Jest bundle, root `tsc`, `verify:servertool-rust-only`, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health` ready version 0.90.3037, `/v1/models` count 292, and real `/v1/responses` exact output `routecodex-e2e-3037`.
+
+2026-06-09 HubPipeline JSON helper public surface pruning:
+- Inventory found `sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts::jsonClone` is live through runtime metadata, Responses bridge, Anthropic shared utils, and servertool shadow, so it is not dead code.
+- Exact scan found `JsonArray`, `isJsonArray`, and exported `JsonPrimitive` had no live source/test/script consumers outside their own definition. Removed `JsonArray` / `isJsonArray` and made `JsonPrimitive` internal.
+- Added residue audit gate to block those zero-consumer public helpers from returning; updated `hub.metadata_boundary` function/verification map to mark `types/json.ts` as TS bridge-only helper surface.
