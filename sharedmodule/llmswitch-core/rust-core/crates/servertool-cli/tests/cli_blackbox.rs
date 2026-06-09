@@ -122,6 +122,30 @@ fn invalid_stop_message_flow_id_fails_fast() {
 }
 
 #[test]
+fn explicit_flow_arg_overrides_input_json_flow_id() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "stop_message_auto",
+            "--flow",
+            "stop_message_flow",
+            "--input-json",
+            r#"{"flowId":"wrong_flow","continuationPrompt":"continue from explicit flow","repeatCount":1,"maxRepeats":3}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["flowId"], "stop_message_flow");
+    assert_eq!(value["input"]["flowId"], "wrong_flow");
+    assert_no_internal_or_restoration_carrier(&value);
+}
+
+#[test]
 fn invalid_stop_message_repeat_budget_fails_fast() {
     for input_json in [
         r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":1,"maxRepeats":0}"#,
