@@ -485,6 +485,8 @@ function checkServertoolCliProjectionMap() {
   for (const needle of [
     'fn web_search_cannot_build_client_exec_projection_plan',
     'fn vision_auto_cannot_build_client_exec_projection_plan',
+    'fn unknown_tool_returns_none',
+    'fn unknown_tool_is_rejected_by_projection_builder',
     'fn memory_cache_auto_is_rejected_by_client_projection_builder',
     'fn memory_cache_auto_is_rejected_by_backend_route_builder',
   ]) {
