@@ -3059,3 +3059,9 @@ Tags: hub-pipeline, compat-action, bridge-actions, dead-code, napi-export, rust-
 - Removed the zero-consumer TS wrappers, TS-only parser/type shells, required-export entries, and Rust public NAPI JSON bridge functions. Kept Rust internal mainline helpers such as `build_format_request`, `apply_req_outbound_context_snapshot`, and `normalize_tool_session_payload`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired req_outbound context/format/tool-session public wrapper/export names from returning.
 Tags: hub-pipeline, req-outbound, tool-session, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Req outbound context helper public wrappers removed
+- Exact scan found `mergeContextToolOutputsWithNative`, `normalizeContextToolsWithNative`, `selectToolCallIdStyleWithNative` and matching `*Json` NAPI exports had no live runtime consumer; references were limited to TS bridge definitions, required-export entries, and Rust public JSON bridge functions.
+- Removed those zero-consumer TS wrappers, wrapper-only local parsers, required-export entries, Rust public NAPI JSON bridge functions, and the now-unused Rust internal `select_tool_call_id_style` helper. Kept Rust internal helpers `merge_context_tool_outputs` and `normalize_context_tools` because `apply_req_outbound_context_snapshot` still uses them in the active Rust Hub mainline.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now also blocks these standalone context helper public wrapper/export names from returning.
+Tags: hub-pipeline, req-outbound, context-merge, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

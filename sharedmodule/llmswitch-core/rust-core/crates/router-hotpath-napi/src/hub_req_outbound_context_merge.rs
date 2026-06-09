@@ -1,5 +1,3 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -166,37 +164,6 @@ fn normalize_context_tools(snapshot: &Value) -> Option<Vec<Value>> {
     Some(tools)
 }
 
-fn select_tool_call_id_style(
-    adapter_context: &Value,
-    snapshot: &Value,
-    current: Option<String>,
-) -> Option<String> {
-    let adapter_style = adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("toolCallIdStyle"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-
-    let snapshot_style = snapshot
-        .as_object()
-        .and_then(|obj| obj.get("toolCallIdStyle"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-
-    let resolved = adapter_style.or(snapshot_style)?;
-    if current
-        .as_ref()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        == Some(resolved.clone())
-    {
-        return Some(resolved);
-    }
-    Some(resolved)
-}
-
 fn should_attach_req_outbound_context_snapshot(
     has_snapshot: bool,
     context_metadata_key: Option<String>,
@@ -272,42 +239,4 @@ pub fn apply_req_outbound_context_snapshot(
         tool_outputs,
         tools,
     }
-}
-
-#[napi]
-pub fn merge_context_tool_outputs_json(
-    existing_json: String,
-    snapshot_json: String,
-) -> NapiResult<String> {
-    let existing: Value = serde_json::from_str(&existing_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = merge_context_tool_outputs(&existing, &snapshot);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn normalize_context_tools_json(snapshot_json: String) -> NapiResult<String> {
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_context_tools(&snapshot);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn select_tool_call_id_style_json(
-    adapter_context_json: String,
-    snapshot_json: String,
-    current_style_json: String,
-) -> NapiResult<String> {
-    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let current_style: Option<String> = serde_json::from_str(&current_style_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-
-    let output = select_tool_call_id_style(&adapter_context, &snapshot, current_style);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

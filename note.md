@@ -18857,3 +18857,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Req outbound public wrapper deletion:
 - Inventory: `resolveReqOutboundContextMergePlanWithNative`, `buildReqOutboundFormatPayloadWithNative`, `applyReqOutboundContextSnapshotWithNative`, `normalizeToolSessionMessagesWithNative`, `updateToolSessionHistoryWithNative`, and `shouldAttachReqOutboundContextSnapshotWithNative` had no live source/runtime consumers. Their matching JSON exports only existed as public NAPI/required-export surfaces.
 - Change: removed those TS wrappers, TS-only parser/type shells, required-export entries, and Rust public JSON bridge functions. Kept Rust internal helpers (`build_format_request`, `apply_req_outbound_context_snapshot`, `normalize_tool_session_payload`, etc.) for active Hub mainline/tests.
+
+2026-06-09 Req outbound context helper public wrapper deletion:
+- Inventory: `mergeContextToolOutputsWithNative`, `normalizeContextToolsWithNative`, `selectToolCallIdStyleWithNative` had no consumers outside defining TS bridge/required-export/Rust public NAPI bridge surfaces.
+- Change: removed the three TS wrappers, wrapper-only local parsers, required-export entries, Rust public `*_json` NAPI bridge functions, and the now-unused Rust internal `select_tool_call_id_style`. Kept Rust internal `merge_context_tool_outputs` and `normalize_context_tools` because active `apply_req_outbound_context_snapshot` still calls them.
