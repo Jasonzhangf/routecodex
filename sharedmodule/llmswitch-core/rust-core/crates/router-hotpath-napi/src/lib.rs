@@ -10,7 +10,6 @@ use chat_process_media_semantics::{
 use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
 mod anthropic_response_helper;
-mod chat_continue_execution_directive_injection;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
 mod chat_process_media_semantics;

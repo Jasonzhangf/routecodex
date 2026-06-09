@@ -17,15 +17,6 @@ export type NativeChatWebSearchPlan = {
   selectedEngineIndexes: number[];
 };
 
-export type NativeContinueExecutionPlan = {
-  shouldInject: boolean;
-};
-
-export type NativeContinueDirectiveInjection = {
-  changed: boolean;
-  messages: unknown[];
-};
-
 export type NativePayloadContractSignal = {
   reason: string;
   marker: string;
@@ -166,37 +157,6 @@ function parseWebSearchPlan(raw: string): NativeChatWebSearchPlan | null {
   };
 }
 
-function parseBooleanInjectionPlan(raw: string): NativeContinueExecutionPlan | null {
-  const parsed = parseJson('parseBooleanInjectionPlan', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  if (typeof row.shouldInject !== 'boolean') {
-    return null;
-  }
-  return { shouldInject: row.shouldInject };
-}
-
-function parseContinueExecutionPlan(raw: string): NativeContinueExecutionPlan | null {
-  return parseBooleanInjectionPlan(raw);
-}
-
-function parseContinueDirectiveInjection(raw: string): NativeContinueDirectiveInjection | null {
-  const parsed = parseJson('parseContinueDirectiveInjection', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
-    return null;
-  }
-  return {
-    changed: row.changed,
-    messages: row.messages
-  };
-}
-
 function parsePayloadContractSignal(raw: string): NativePayloadContractSignal | null {
   const parsed = parseJson('parsePayloadContractSignal', raw);
   if (parsed === JSON_PARSE_FAILED) {
@@ -276,17 +236,6 @@ function parseProviderResponseShape(raw: string):
   return null;
 }
 
-function parseReviewOperations(raw: string): Record<string, unknown>[] | null {
-  const parsed = parseJson('parseReviewOperations', raw);
-  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed.filter(
-    (entry): entry is Record<string, unknown> =>
-      Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
-  );
-}
-
 function parseBoolean(raw: string): boolean | null {
   const parsed = parseJson('parseBoolean', raw);
   if (parsed === JSON_PARSE_FAILED) {
@@ -334,19 +283,6 @@ export function detectProviderResponseShapeWithNative(
   }
 }
 
-export function isCanonicalChatCompletionPayloadWithNative(payload: unknown): boolean {
-  const capability = 'isCanonicalChatCompletionPayloadJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
-    const parsed = parseBoolean(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean {
   const capability = 'containsSyntheticRoutecodexControlTextJson';
   const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
@@ -354,53 +290,6 @@ export function containsSyntheticRouteCodexControlTextWithNative(payload: unknow
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
     const parsed = parseBoolean(raw);
     return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function isStopMessageStateActiveWithNative(raw: unknown): boolean {
-  const capability = 'isStopMessageStateActiveJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  try {
-    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [raw ?? null]);
-    const parsed = parseBoolean(response);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveHasActiveStopMessageForContinueExecutionWithNative(
-  runtimeState: unknown,
-  persistedState: unknown
-): boolean {
-  const capability = 'resolveHasActiveStopMessageForContinueExecutionJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  try {
-    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [
-      runtimeState ?? null,
-      persistedState ?? null
-    ]);
-    const parsed = parseBoolean(response);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function buildContinueExecutionOperationsWithNative(
-  shouldInject: boolean
-): Record<string, unknown>[] {
-  const capability = 'buildContinueExecutionOperationsJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>[]>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapability(capability, [shouldInject === true]);
-    const parsed = parseReviewOperations(raw);
-    return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -416,41 +305,6 @@ export function planChatWebSearchOperationsWithNative(
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, runtimeMetadata]);
     const parsed = parseWebSearchPlan(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function planContinueExecutionOperationsWithNative(
-  runtimeMetadata: Record<string, unknown>,
-  hasActiveStopMessage: boolean
-): NativeContinueExecutionPlan {
-  const capability = 'planContinueExecutionOperationsJson';
-  const fail = (reason?: string) => failNativeRequired<NativeContinueExecutionPlan>(capability, reason);
-  try {
-    const runtimeMetadataJson = encodeJsonArg(capability, runtimeMetadata);
-    const raw = invokeNativeStringCapability(capability, [runtimeMetadataJson, hasActiveStopMessage === true]);
-    const parsed = parseContinueExecutionPlan(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function injectContinueExecutionDirectiveWithNative(
-  messages: unknown[],
-  marker: string,
-  targetText: string
-): NativeContinueDirectiveInjection {
-  const capability = 'injectContinueExecutionDirectiveJson';
-  const fail = (reason?: string) => failNativeRequired<NativeContinueDirectiveInjection>(capability, reason);
-  try {
-    const messagesJson = encodeJsonArg(capability, messages);
-    const raw = invokeNativeStringCapability(capability, [messagesJson, marker, targetText]);
-    const parsed = parseContinueDirectiveInjection(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

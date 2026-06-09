@@ -2877,11 +2877,15 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired servertool utility public bridges must stay deleted', () => {
     const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_continue_execution_directive_injection.rs',
+    ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs',
     ];
     const retiredSymbols = [
@@ -2891,18 +2895,44 @@ describe('hub pipeline stage residue audit', () => {
       'webSearchResolveToolNameWithNative',
       'webSearchParseToolArgumentsWithNative',
       'webSearchFindArrayWithNative',
+      'buildContinueExecutionOperationsWithNative',
+      'planContinueExecutionOperationsWithNative',
+      'injectContinueExecutionDirectiveWithNative',
+      'isStopMessageStateActiveWithNative',
+      'resolveHasActiveStopMessageForContinueExecutionWithNative',
+      'isCanonicalChatCompletionPayloadWithNative',
+      'NativeContinueExecutionPlan',
+      'NativeContinueDirectiveInjection',
+      'parseBooleanInjectionPlan',
+      'parseContinueExecutionPlan',
+      'parseContinueDirectiveInjection',
+      'parseReviewOperations',
       'ServertoolFollowupFlowProfilePayload',
       'parseServertoolFollowupFlowProfilePayload',
       'planChatServertoolOrchestrationBundleJson',
       'resolveServertoolFollowupFlowProfileJson',
       'webSearchFindArrayJson',
       'runApplyPatchJson',
+      'buildContinueExecutionOperationsJson',
+      'planContinueExecutionOperationsJson',
+      'injectContinueExecutionDirectiveJson',
+      'isStopMessageStateActiveJson',
+      'resolveHasActiveStopMessageForContinueExecutionJson',
+      'isCanonicalChatCompletionPayloadJson',
+      'chat_continue_execution_directive_injection',
       '#[napi]\npub fn plan_chat_servertool_orchestration_bundle_json',
       '#[napi]\npub fn resolve_servertool_followup_flow_profile_json',
       '#[napi]\npub fn web_search_find_array_json',
       '#[napi]\npub fn run_apply_patch_json',
+      '#[napi]\npub fn build_continue_execution_operations_json',
+      '#[napi]\npub fn plan_continue_execution_operations_json',
+      '#[napi]\npub fn inject_continue_execution_directive_json',
+      '#[napi]\npub fn is_stop_message_state_active_json',
+      '#[napi]\npub fn resolve_has_active_stop_message_for_continue_execution_json',
+      '#[napi]\npub fn is_canonical_chat_completion_payload_json',
     ];
-    const findings: string[] = [];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = existingRetiredFiles.map((relativePath) => `${relativePath}:file exists`);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);

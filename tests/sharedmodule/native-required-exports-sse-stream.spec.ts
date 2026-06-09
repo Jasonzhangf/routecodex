@@ -54,6 +54,15 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeToolCallIdStyleCandidateJson');
   });
 
+  test('does not require retired servertool continuation helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('buildContinueExecutionOperationsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('planContinueExecutionOperationsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('injectContinueExecutionDirectiveJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isStopMessageStateActiveJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveHasActiveStopMessageForContinueExecutionJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isCanonicalChatCompletionPayloadJson');
+  });
+
   test('native resume helper returns protocol error envelope instead of napi generic failure', () => {
     const binding = nodeRequire(
       path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')

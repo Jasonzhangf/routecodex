@@ -1089,46 +1089,6 @@ pub(crate) fn build_continue_execution_operations(should_inject: bool) -> Value 
     Value::Array(Vec::new())
 }
 
-fn is_stop_message_state_active(raw: &Value) -> bool {
-    let record = match raw.as_object() {
-        Some(v) => v,
-        None => return false,
-    };
-    let text = record
-        .get("stopMessageText")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .unwrap_or_default();
-    let max_repeats = record
-        .get("stopMessageMaxRepeats")
-        .and_then(|v| v.as_f64())
-        .and_then(|v| {
-            if v.is_finite() {
-                Some(v.floor() as i64)
-            } else {
-                None
-            }
-        })
-        .map(|v| if v < 1 { 1 } else { v })
-        .unwrap_or(0);
-    let stage_mode = record
-        .get("stopMessageStageMode")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    if stage_mode == "off" {
-        return false;
-    }
-    max_repeats > 0 && (!text.is_empty() || stage_mode == "on")
-}
-
-fn resolve_has_active_stop_message_for_continue_execution(
-    runtime_state: &Value,
-    persisted_state: &Value,
-) -> bool {
-    is_stop_message_state_active(runtime_state) || is_stop_message_state_active(persisted_state)
-}
-
 fn read_runtime_metadata_bool(runtime_metadata: &Value, key: &str) -> bool {
     runtime_metadata
         .as_object()
@@ -1430,17 +1390,6 @@ pub fn plan_chat_web_search_operations_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn plan_continue_execution_operations_json(
-    runtime_metadata_json: String,
-    has_active_stop_message: bool,
-) -> NapiResult<String> {
-    let runtime_metadata: Value = serde_json::from_str(&runtime_metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_continue_execution_plan(&runtime_metadata, has_active_stop_message);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 pub(crate) fn plan_chat_servertool_orchestration_bundle(
     request: &Value,
     runtime_metadata: &Value,
@@ -1470,42 +1419,6 @@ pub fn detect_provider_response_shape_json(payload_json: String) -> NapiResult<S
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = detect_provider_response_shape(&payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn is_canonical_chat_completion_payload_json(payload_json: String) -> NapiResult<String> {
-    let payload: Value =
-        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = is_canonical_chat_completion_payload(&payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn build_continue_execution_operations_json(should_inject: bool) -> NapiResult<String> {
-    let output = build_continue_execution_operations(should_inject);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn is_stop_message_state_active_json(raw_json: String) -> NapiResult<String> {
-    let raw: Value =
-        serde_json::from_str(&raw_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = is_stop_message_state_active(&raw);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn resolve_has_active_stop_message_for_continue_execution_json(
-    runtime_state_json: String,
-    persisted_state_json: String,
-) -> NapiResult<String> {
-    let runtime_state: Value = serde_json::from_str(&runtime_state_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let persisted_state: Value = serde_json::from_str(&persisted_state_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output =
-        resolve_has_active_stop_message_for_continue_execution(&runtime_state, &persisted_state);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
