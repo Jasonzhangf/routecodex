@@ -6,6 +6,8 @@ use crate::outcome_contract::{
     ServertoolHubRespChatProcess03Input, ServertoolOutcomeError,
 };
 
+// feature_id: hub.servertool_backend_route_runtime
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolBackendRoutePolicyInput {
@@ -195,6 +197,30 @@ pub struct ServertoolFollowupRuntimeMetadataPlan {
     pub root_set: Value,
     pub root_delete: Vec<String>,
     pub runtime_set: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupMaterializationInput {
+    pub followup_plan: Value,
+    pub entry_endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolFollowupPayloadSource {
+    Payload,
+    Injection,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupMaterializationPlan {
+    pub entry_endpoint: String,
+    pub payload_source: ServertoolFollowupPayloadSource,
+    pub payload: Option<Value>,
+    pub injection: Option<Value>,
 }
 
 pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
@@ -555,6 +581,45 @@ pub fn plan_followup_runtime_metadata(
     }
 }
 
+pub fn plan_followup_materialization(
+    input: ServertoolFollowupMaterializationInput,
+) -> ServertoolFollowupMaterializationPlan {
+    let entry_endpoint =
+        resolve_followup_entry_endpoint(&input.followup_plan, input.entry_endpoint.as_deref());
+    let Some(plan_object) = input.followup_plan.as_object() else {
+        return ServertoolFollowupMaterializationPlan {
+            entry_endpoint,
+            payload_source: ServertoolFollowupPayloadSource::None,
+            payload: None,
+            injection: None,
+        };
+    };
+    if plan_object.contains_key("payload") {
+        return ServertoolFollowupMaterializationPlan {
+            entry_endpoint,
+            payload_source: ServertoolFollowupPayloadSource::Payload,
+            payload: plan_object.get("payload").and_then(clone_plain_json_object),
+            injection: None,
+        };
+    }
+    if plan_object.contains_key("injection") {
+        return ServertoolFollowupMaterializationPlan {
+            entry_endpoint,
+            payload_source: ServertoolFollowupPayloadSource::Injection,
+            payload: None,
+            injection: plan_object
+                .get("injection")
+                .and_then(clone_plain_json_object),
+        };
+    }
+    ServertoolFollowupMaterializationPlan {
+        entry_endpoint,
+        payload_source: ServertoolFollowupPayloadSource::None,
+        payload: None,
+        injection: None,
+    }
+}
+
 fn normalize_backend_route_input(
     tool_name: &str,
     input: Value,
@@ -736,6 +801,26 @@ fn resolve_original_entry_endpoint(original: Option<&str>, followup: Option<&str
         .or_else(|| followup.map(str::trim).filter(|value| !value.is_empty()))
         .unwrap_or("/v1/chat/completions")
         .to_string()
+}
+
+fn resolve_followup_entry_endpoint(followup_plan: &Value, entry_endpoint: Option<&str>) -> String {
+    followup_plan
+        .as_object()
+        .and_then(|plan| read_trimmed_string(plan.get("entryEndpoint")))
+        .or_else(|| {
+            entry_endpoint
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "/v1/chat/completions".to_string())
+}
+
+fn clone_plain_json_object(value: &Value) -> Option<Value> {
+    match value {
+        Value::Object(_) => Some(value.clone()),
+        _ => None,
+    }
 }
 
 fn merge_loop_state(root_loop_state: Option<&Value>, runtime: &Value, loop_state: Value) -> Value {
@@ -1303,5 +1388,89 @@ mod tests {
             plan.runtime_set["serverToolOriginalEntryEndpoint"],
             "/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn followup_materialization_uses_plan_entry_endpoint_before_request_default() {
+        let plan = plan_followup_materialization(ServertoolFollowupMaterializationInput {
+            followup_plan: json!({
+                "entryEndpoint": " /v1/responses ",
+                "payload": {
+                    "model": "gpt-test",
+                    "input": "hello"
+                }
+            }),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+        });
+        assert_eq!(plan.entry_endpoint, "/v1/responses");
+        assert_eq!(
+            plan.payload_source,
+            ServertoolFollowupPayloadSource::Payload
+        );
+        assert_eq!(plan.payload.as_ref().unwrap()["input"], "hello");
+        assert!(plan.injection.is_none());
+    }
+
+    #[test]
+    fn followup_materialization_uses_request_endpoint_then_chat_default() {
+        let request_endpoint =
+            plan_followup_materialization(ServertoolFollowupMaterializationInput {
+                followup_plan: json!({}),
+                entry_endpoint: Some(" /v1/responses ".to_string()),
+            });
+        assert_eq!(request_endpoint.entry_endpoint, "/v1/responses");
+        assert_eq!(
+            request_endpoint.payload_source,
+            ServertoolFollowupPayloadSource::None
+        );
+
+        let default_endpoint =
+            plan_followup_materialization(ServertoolFollowupMaterializationInput {
+                followup_plan: Value::Null,
+                entry_endpoint: Some(" ".to_string()),
+            });
+        assert_eq!(default_endpoint.entry_endpoint, "/v1/chat/completions");
+        assert_eq!(
+            default_endpoint.payload_source,
+            ServertoolFollowupPayloadSource::None
+        );
+    }
+
+    #[test]
+    fn followup_materialization_preserves_injection_as_native_plan() {
+        let plan = plan_followup_materialization(ServertoolFollowupMaterializationInput {
+            followup_plan: json!({
+                "injection": {
+                    "ops": [{ "op": "append_user_text", "text": "next" }]
+                }
+            }),
+            entry_endpoint: None,
+        });
+        assert_eq!(plan.entry_endpoint, "/v1/chat/completions");
+        assert_eq!(
+            plan.payload_source,
+            ServertoolFollowupPayloadSource::Injection
+        );
+        assert!(plan.payload.is_none());
+        assert!(plan.injection.as_ref().unwrap()["ops"].is_array());
+    }
+
+    #[test]
+    fn followup_materialization_payload_property_wins_and_invalid_value_stays_null() {
+        let plan = plan_followup_materialization(ServertoolFollowupMaterializationInput {
+            followup_plan: json!({
+                "payload": "not-object",
+                "injection": {
+                    "ops": []
+                }
+            }),
+            entry_endpoint: None,
+        });
+        assert_eq!(
+            plan.payload_source,
+            ServertoolFollowupPayloadSource::Payload
+        );
+        assert!(plan.payload.is_none());
+        assert!(plan.injection.is_none());
     }
 }

@@ -2,12 +2,12 @@
 
 use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context, plan_followup_execution_mode,
-    plan_followup_runtime_action, plan_followup_runtime_metadata,
+    plan_followup_materialization, plan_followup_runtime_action, plan_followup_runtime_metadata,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
-    ServertoolFollowupExecutionModeInput, ServertoolFollowupRuntimeActionInput,
-    ServertoolFollowupRuntimeMetadataInput,
+    ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
+    ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
 };
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -420,6 +420,13 @@ pub fn plan_followup_runtime_metadata_json(input_json: &str) -> Result<String, S
     serde_json::to_string(&output).map_err(|e| format!("serialize runtime metadata plan: {e}"))
 }
 
+pub fn plan_followup_materialization_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupMaterializationInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup materialization input: {e}"))?;
+    let output = plan_followup_materialization(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize materialization plan: {e}"))
+}
+
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
     let payload: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize text extraction payload: {e}"))?;
@@ -711,6 +718,28 @@ mod tests {
             1
         );
         assert_eq!(parsed["rootDelete"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn plans_followup_materialization_via_servertool_core_bridge() {
+        let raw = plan_followup_materialization_json(
+            &json!({
+                "followupPlan": {
+                    "entryEndpoint": " /v1/responses ",
+                    "injection": {
+                        "ops": [{ "op": "append_user_text", "text": "next" }]
+                    }
+                },
+                "entryEndpoint": "/v1/chat/completions"
+            })
+            .to_string(),
+        )
+        .expect("materialization bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["entryEndpoint"], "/v1/responses");
+        assert_eq!(parsed["payloadSource"], "injection");
+        assert!(parsed["payload"].is_null());
+        assert!(parsed["injection"]["ops"].is_array());
     }
 
     #[test]

@@ -1714,6 +1714,7 @@ function checkBackendRoutePolicyRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const flowPolicyShell = readRequired(TS_BACKEND_ROUTE_FLOW_POLICY);
+  const runtimeShell = readRequired(TS_BACKEND_ROUTE_RUNTIME);
   const loopStateShell = readRequired(TS_LOOP_STATE_BLOCK);
 
   if (existsSync(TS_BACKEND_ROUTE_SHAPE_GUARD)) {
@@ -1878,6 +1879,44 @@ function checkBackendRoutePolicyRustOwner() {
     'planFollowupRuntimeMetadataJson'
   );
   assertContains(
+    'backend-route-followup-materialization-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_materialization'
+  );
+  assertContains(
+    'backend-route-followup-materialization-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planFollowupMaterializationWithNative'
+  );
+  assertContains(
+    'backend-route-followup-materialization-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planFollowupMaterializationJson'
+  );
+  for (const keyword of [
+    'resolveFollowupEntryEndpoint',
+    'resolveFollowupPayloadFromPlan',
+    'resolveFollowupPayloadSource',
+    "hasOwnProperty.call(followupPlan, 'payload')",
+    "hasOwnProperty.call(followupPlan, 'injection')",
+    "typeof (followupPlan as { entryEndpoint?: unknown }).entryEndpoint",
+    "'/v1/chat/completions'"
+  ]) {
+    if (runtimeShell.includes(keyword)) {
+      fail(
+        'backend-route-followup-materialization-no-ts-owner',
+        `Forbidden TS followup materialization semantic "${keyword}" found in backend-route-runtime-block.ts`
+      );
+    }
+  }
+  pass(
+    'backend-route-followup-materialization-no-ts-owner',
+    'backend-route-runtime-block.ts consumes native materialization plan without local followupPlan field policy'
+  );
+  assertContains(
     'backend-route-loop-state-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
     servertoolCoreLib,
@@ -1963,7 +2002,6 @@ function checkBackendRoutePolicyRustOwner() {
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
-  const runtimeShell = readRequired(TS_BACKEND_ROUTE_RUNTIME);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
     TS_BACKEND_ROUTE_ORIGIN_DELTA,

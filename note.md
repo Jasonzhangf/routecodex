@@ -1,5 +1,13 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-09 servertool backend-route materialization Rust slice
+
+- 发现 `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts` 仍有 followup materialization TS 语义：本地读取 `followupPlan.entryEndpoint` 并默认 `/v1/chat/completions`，本地判断 `payload` / `injection` source，并用对象检查决定 raw payload / injection plan。
+- 已迁到 Rust owner `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs::plan_followup_materialization`；Rust 现在输出 `entryEndpoint`、`payloadSource`、`payload`、`injection`，TS 只调用 native plan、执行 injection IO builder、按 Rust plan 写 metadata / 抛 Rust-described error。
+- Native bridge/export 链已接入 `servertool_core_blocks.rs`、`router-hotpath-napi/src/lib.rs`、`native-servertool-core-semantics.ts`、`native-router-hotpath-required-exports.ts`，新增 required export `planFollowupMaterializationJson`；直接 `.node` probe 已确认该 export 返回 `/v1/responses` + `payloadSource=injection`。
+- `verify:servertool-rust-only` 已增加 `backend-route-followup-materialization-*` gate，阻止 TS 恢复 `resolveFollowupEntryEndpoint`、`resolveFollowupPayloadFromPlan`、`resolveFollowupPayloadSource`、本地 `followupPlan.payload/injection/entryEndpoint` 扫描和 chat endpoint 默认。
+- 新增 feature-map 条目 `hub.servertool_backend_route_runtime`，owner 为 `servertool-core/src/backend_route_contract.rs`，验证映射覆盖 web_search / vision backend-route 集成。
+
 ## 2026-06-09 servertool loop warning TS duplicate cleanup
 
 - 发现 `sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts` 中 `appendStopMessageLoopWarning` 是旧 TS 语义残留：本地拼 warning 文本、`Number.isFinite` / `Math.floor` / `Math.max` clamp repeat count，但 live mainline 已通过 `backend-route-mainline-block.ts::appendLoopWarning` 调 `injectLoopWarningWithNative`。
@@ -12,6 +20,14 @@
 - 已迁到 Rust owner `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`，TS 文件只读 env/metadata/value 并调用 native wrappers；`containsSyntheticRouteCodexControlText` 继续走既有 native chat-process wrapper。
 - Native required exports 新增并实测存在：`parseServertoolTimeoutMsJson`、`readClientInjectOnlyJson`、`normalizeClientInjectTextJson`、`compactFollowupErrorReasonJson`、`resolveAdapterContextProviderKeyJson`。
 - `verify:servertool-rust-only` 新增 `servertool-orchestration-policy-rust-owner` gate，阻止 TS 恢复 `parseTimeoutMs`、`parseBooleanLike`、`sanitizeFollowupText`、`FOLLOWUP_ERROR_REASON_MAX_LENGTH`、HTTP regex、providerKey walker、stop-gateway wrapper等本地语义。
+
+## 2026-06-09 servertool backend-route runtime/materialization Rust slice
+
+- 发现 backend-route followup materialization 已有 TS 调用 native 的未提交收口：`backend-route-mainline-block.ts` 不再直接扫描 `followupPlan.payload/injection/entryEndpoint`，改由 `planFollowupMaterializationWithNative` 返回 `entryEndpoint/payloadSource/payload/injection`。
+- Rust owner 是 `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs::plan_followup_materialization`，同文件继续拥有 `plan_followup_runtime_action` 与 `plan_followup_runtime_metadata`。
+- Native bridge/required export 链为 `servertool_core_blocks.rs::plan_followup_materialization_json` -> `router-hotpath-napi/src/lib.rs::plan_followup_materialization_json` -> `native-servertool-core-semantics.ts::planFollowupMaterializationWithNative` -> `backend-route-runtime-block.ts::planFollowupMaterialization`。
+- `verify:servertool-rust-only` 新增 `backend-route-followup-materialization-*` gate，阻止 TS 恢复 `resolveFollowupEntryEndpoint`、`resolveFollowupPayloadFromPlan`、`resolveFollowupPayloadSource`、本地 `followupPlan.payload/injection/entryEndpoint` 扫描和 `/v1/chat/completions` 默认。
+- Function map 新增 `hub.servertool_backend_route_runtime`，覆盖 materialization/runtime action/runtime metadata 三个 Rust-owned builders。
 
 ## 2026-06-09 5555 forwarder route_failed closeout
 
@@ -18423,3 +18439,8 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - `/v1/responses` 当前对外协议是 OpenAI Responses SSE，不是 Vercel AI SDK UI message stream；现存漂移点是把 chat-style `[DONE]` 混进了 Responses 终止链。
 - 已收口 owner：`src/server/handlers/handler-response-utils.ts`、`shared_responses_response_utils.rs`、`ResponsesEventSerializer`。Responses terminal 统一为 `response.completed` / `response.done`，不再输出或 repair `[DONE]`。
 - relay/direct 切换一致性补丁：`RouteCodexHttpServer.buildProviderDirectResult()` 现在与 `buildRouterDirectResult()` 同步执行 `recordResponsesResponseForRequest` 和 `finalizeResponsesConversationRequestRetention`；provider-direct 在 5xx 或 SSE wrapper 无 canonical body 时显式清理 retention，避免 submit_tool_outputs/续轮在直连切换后丢链。
+
+## 2026-06-09 SSE client_close断联修复工作台
+- 当前定位：client close before Responses terminal 时，handler-response-utils 旧 cleanup 会记录 response.sse.client_close 后继续 logResponseCompleted/request.usage_log；restore Transform destroy 未稳定携带 CLIENT_RESPONSE_CLOSED 到原始 upstream，导致 provider 可能继续跑完并 usage 记 fail=0 finish_reason=unknown。
+- 已加红测：client_close before terminal 不应进入 request.usage_log；原始 upstream 必须以 code=CLIENT_DISCONNECTED/message=CLIENT_RESPONSE_CLOSED destroy。
+- 待收口：当前实现仍导致 required_action close persistence / client-response snapshot / DONE terminal 单测回归，需保持正常 terminal 流程不被 close-abort 修改影响。

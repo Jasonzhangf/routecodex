@@ -4,13 +4,17 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   planFollowupExecutionModeWithNative,
+  planFollowupMaterializationWithNative,
   planFollowupRuntimeMetadataWithNative,
-  planFollowupRuntimeActionWithNative
+  planFollowupRuntimeActionWithNative,
+  type ServertoolFollowupMaterializationPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   resolveFollowupFlowDecision,
   type FollowupFlowDecision
 } from './backend-route-flow-policy.js';
+
+export const SERVERTOOL_BACKEND_ROUTE_RUNTIME_FEATURE_ID = 'feature_id: hub.servertool_backend_route_runtime';
 
 export type ServerToolLoopStateLike = {
   flowId?: string;
@@ -25,69 +29,37 @@ export type ServerToolLoopStateLike = {
 
 export type FollowupPayloadSource = 'payload' | 'injection' | 'none';
 
-export function resolveFollowupEntryEndpoint(
-  followupPlan: unknown,
-  entryEndpoint: string | undefined
-): string {
-  return (
-    (followupPlan &&
-    typeof followupPlan === 'object' &&
-    !Array.isArray(followupPlan) &&
-    typeof (followupPlan as { entryEndpoint?: unknown }).entryEndpoint === 'string'
-      ? String((followupPlan as { entryEndpoint?: string }).entryEndpoint).trim()
-      : '') ||
-    entryEndpoint ||
-    '/v1/chat/completions'
-  );
-}
+export type FollowupMaterializationPlan = ServertoolFollowupMaterializationPlan;
 
-export function resolveFollowupPayloadFromPlan(args: {
+export function planFollowupMaterialization(args: {
   followupPlan: unknown;
-  buildInjectionPayload: (injection: JsonObject) => JsonObject | null;
-}): JsonObject | null {
-  const { followupPlan } = args;
-  if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {
-    return null;
-  }
-  if (Object.prototype.hasOwnProperty.call(followupPlan, 'payload')) {
-    const candidate = (followupPlan as { payload?: unknown }).payload;
-    return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? (candidate as JsonObject) : null;
-  }
-  if (Object.prototype.hasOwnProperty.call(followupPlan, 'injection')) {
-    const injection = (followupPlan as { injection?: unknown }).injection;
-    if (!injection || typeof injection !== 'object' || Array.isArray(injection)) {
-      return null;
-    }
-    return args.buildInjectionPayload(injection as JsonObject);
-  }
-  return null;
-}
-
-export function resolveFollowupPayloadSource(followupPlan: unknown): FollowupPayloadSource {
-  if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {
-    return 'none';
-  }
-  if (Object.prototype.hasOwnProperty.call(followupPlan, 'payload')) {
-    return 'payload';
-  }
-  if (Object.prototype.hasOwnProperty.call(followupPlan, 'injection')) {
-    return 'injection';
-  }
-  return 'none';
+  entryEndpoint: string | undefined;
+}): FollowupMaterializationPlan {
+  return planFollowupMaterializationWithNative({
+    followupPlan: args.followupPlan,
+    ...(args.entryEndpoint ? { entryEndpoint: args.entryEndpoint } : {})
+  });
 }
 
 export function materializeFollowupPayload(args: {
-  followupPlan: unknown;
+  materializationPlan: FollowupMaterializationPlan;
   buildInjectionPayload: (injection: JsonObject) => JsonObject | null;
 }): { source: FollowupPayloadSource; payload: JsonObject | null } {
-  const source = resolveFollowupPayloadSource(args.followupPlan);
-  if (source === 'none') {
-    return { source, payload: null };
+  const source = args.materializationPlan.payloadSource;
+  if (source === 'payload') {
+    return {
+      source,
+      payload: (args.materializationPlan.payload ?? null) as JsonObject | null
+    };
   }
-  return {
-    source,
-    payload: resolveFollowupPayloadFromPlan(args)
-  };
+  if (source === 'injection') {
+    const injection = args.materializationPlan.injection;
+    return {
+      source,
+      payload: injection ? args.buildInjectionPayload(injection as JsonObject) : null
+    };
+  }
+  return { source, payload: null };
 }
 
 export function resolveFollowupExecutionMode(args: {

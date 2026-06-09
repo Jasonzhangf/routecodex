@@ -8,8 +8,8 @@ import {
   applyFollowupRuntimeMetadata,
   assertAutoLimitNotExceeded,
   materializeFollowupPayload,
+  planFollowupMaterialization,
   resolveFollowupExecutionMode,
-  resolveFollowupEntryEndpoint,
   resolveLoopPayload
 } from './backend-route-runtime-block.js';
 import { evaluateStopMessageLoopGuard } from './stop-message-loop-guard-block.js';
@@ -185,13 +185,12 @@ export async function runFollowupMainline(args: {
 
   const isStopMessageFlow = args.execution.flowId === 'stop_message_flow';
   const followupPlan = args.execution.followup;
-  const followupEntryEndpoint = resolveFollowupEntryEndpoint(args.execution.followup, args.entryEndpoint);
-  let followupPayloadRaw: JsonObject | null =
-    followupPlan && typeof followupPlan === 'object' && !Array.isArray(followupPlan) && 'payload' in followupPlan
-      ? (((followupPlan as { payload?: unknown }).payload && typeof (followupPlan as { payload?: unknown }).payload === 'object' && !Array.isArray((followupPlan as { payload?: unknown }).payload))
-        ? ((followupPlan as { payload: JsonObject }).payload)
-        : null)
-      : null;
+  const followupMaterialization = planFollowupMaterialization({
+    followupPlan,
+    entryEndpoint: args.entryEndpoint
+  });
+  const followupEntryEndpoint = followupMaterialization.entryEndpoint;
+  let followupPayloadRaw: JsonObject | null = (followupMaterialization.payload ?? null) as JsonObject | null;
 
   const loopPayload = resolveLoopPayload({
     flowId: args.execution.flowId,
@@ -264,12 +263,7 @@ export async function runFollowupMainline(args: {
   const metadata: JsonObject = {
     ...(args.execution.followup.metadata ?? {})
   };
-  const followupInjectionPlan =
-    followupPlan && typeof followupPlan === 'object' && !Array.isArray(followupPlan) && 'injection' in followupPlan
-      ? (((followupPlan as { injection?: unknown }).injection && typeof (followupPlan as { injection?: unknown }).injection === 'object' && !Array.isArray((followupPlan as { injection?: unknown }).injection))
-        ? ((followupPlan as { injection: JsonObject }).injection)
-        : null)
-      : null;
+  const followupInjectionPlan = (followupMaterialization.injection ?? null) as JsonObject | null;
   const forceTmuxClientInjectFollowup = applyClientInjectOnlyMetadata({
     flowId: args.execution.flowId,
     decision,
@@ -299,7 +293,7 @@ export async function runFollowupMainline(args: {
   });
   if (followupInjectionPlan && executionMode === 'client_inject_only' && !followupPayloadRaw) {
     followupPayloadRaw = materializeFollowupPayload({
-      followupPlan,
+      materializationPlan: followupMaterialization,
       buildInjectionPayload: (injection) => {
         const seed = loadFollowupOriginSeed(args.adapterContext);
         if (!seed) {

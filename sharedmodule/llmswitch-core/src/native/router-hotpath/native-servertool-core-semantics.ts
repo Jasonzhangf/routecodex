@@ -236,6 +236,18 @@ export interface ServertoolFollowupRuntimeMetadataPlan {
   runtimeSet: Record<string, unknown>;
 }
 
+export interface ServertoolFollowupMaterializationInput {
+  followupPlan: unknown;
+  entryEndpoint?: string;
+}
+
+export interface ServertoolFollowupMaterializationPlan {
+  entryEndpoint: string;
+  payloadSource: 'payload' | 'injection' | 'none';
+  payload?: Record<string, unknown> | null;
+  injection?: Record<string, unknown> | null;
+}
+
 export interface ServertoolBackendRouteFinalizeExecution {
   flowId?: string;
   context?: Record<string, unknown>;
@@ -1300,6 +1312,49 @@ export function planFollowupRuntimeMetadataWithNative(
     rootSet: rootSet as Record<string, unknown>,
     rootDelete: rootDelete.map((item) => item.trim()),
     runtimeSet: runtimeSet as Record<string, unknown>
+  };
+}
+
+export function planFollowupMaterializationWithNative(
+  input: ServertoolFollowupMaterializationInput,
+): ServertoolFollowupMaterializationPlan {
+  const capability = 'planFollowupMaterializationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupMaterializationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupMaterializationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupMaterializationJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.entryEndpoint !== 'string' || !record.entryEndpoint.trim()) {
+    throw new Error('planFollowupMaterializationJson native returned invalid entryEndpoint');
+  }
+  if (
+    record.payloadSource !== 'payload' &&
+    record.payloadSource !== 'injection' &&
+    record.payloadSource !== 'none'
+  ) {
+    throw new Error('planFollowupMaterializationJson native returned invalid payloadSource');
+  }
+  const payload = record.payload;
+  const injection = record.injection;
+  if (payload !== null && payload !== undefined && (typeof payload !== 'object' || Array.isArray(payload))) {
+    throw new Error('planFollowupMaterializationJson native returned invalid payload object');
+  }
+  if (injection !== null && injection !== undefined && (typeof injection !== 'object' || Array.isArray(injection))) {
+    throw new Error('planFollowupMaterializationJson native returned invalid injection object');
+  }
+  return {
+    entryEndpoint: record.entryEndpoint.trim(),
+    payloadSource: record.payloadSource,
+    payload: (payload ?? null) as Record<string, unknown> | null,
+    injection: (injection ?? null) as Record<string, unknown> | null
   };
 }
 

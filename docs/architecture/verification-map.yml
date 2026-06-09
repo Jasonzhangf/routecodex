@@ -81,6 +81,26 @@ verification:
     notes:
       - servertool-core owns timeout, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers.
 
+  - feature_id: hub.servertool_backend_route_runtime
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/server-side-web-search.spec.ts
+      - tests/servertool/vision-flow.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns followup materialization and runtime metadata/action plans; TS may only execute IO builders and native plans.
+
   - feature_id: error.provider_failure_policy
     change_risk: high
     unit:

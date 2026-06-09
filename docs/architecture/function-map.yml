@@ -145,6 +145,44 @@ owners:
       - TS orchestration-policy-block may only read env/arguments and call native wrappers.
       - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, or stop-gateway wrapper.
 
+  - feature_id: hub.servertool_backend_route_runtime
+    status: active
+    summary: servertool backend-route followup endpoint, payload, injection, and runtime metadata planning
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
+    canonical_types:
+      - ServertoolFollowupMaterializationInput
+      - ServertoolFollowupMaterializationPlan
+      - ServertoolFollowupRuntimeActionPlan
+      - ServertoolFollowupRuntimeMetadataPlan
+    canonical_builders:
+      - plan_followup_materialization
+      - plan_followup_runtime_action
+      - plan_followup_runtime_metadata
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/server-side-web-search.spec.ts
+      - tests/servertool/vision-flow.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Rust owns followupPlan `entryEndpoint` precedence and payload/injection source recognition.
+      - TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors.
+      - Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning or chat endpoint defaults in TS.
+
   - feature_id: error.provider_failure_policy
     status: active
     summary: provider error cataloging, runtime classification, router policy application
