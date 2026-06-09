@@ -93,6 +93,12 @@ const deletedPathDenylist = [
   'src/modules/pipeline/types/provider-config-types.ts',
   'src/modules/pipeline/types/provider-types.ts',
   'src/modules/pipeline/types/transformation-types.ts',
+  'src/modules/pipeline/utils/preflight-validator.ts',
+  'src/modules/pipeline/utils/tool-result-text.ts',
+  'src/modules/pipeline/utils/transformation-engine.ts',
+  'src/providers/core/utils/preflight-validator.ts',
+  'src/providers/core/utils/tool-result-text.ts',
+  'src/providers/core/utils/transformation-engine.ts',
 ];
 
 function parseOwners(text) {

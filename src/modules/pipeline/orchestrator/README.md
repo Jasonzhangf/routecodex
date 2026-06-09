@@ -1,9 +1,13 @@
-# Pipeline Orchestrator Module
-## Overview
-Pipeline orchestrator module manages the execution context and lifecycle of Hub Pipeline operations, providing coordination between different pipeline stages.
-## Directory Structure
-```src/modules/pipeline/orchestrator/
-└── pipeline- context. ts       # Pipeline execution context management
-```## Key Components### PipelineContextManages:- Request/response context across pipeline stages- State tracking for streaming responses
-- Error propagation and recovery## Usage```typescriptimport { PipelineContext } from './pipeline-context. js';const context = new PipelineContext(requestId);```## Related Documentation
-- `src/modules/llmswitch/bridge. ts` - Main pipeline bridge
+# Pipeline Orchestrator Compatibility
+
+This directory no longer owns Hub Pipeline orchestration.
+
+## Live Files
+
+- `pipeline-context.ts`: exports the `TargetMetadata` compatibility type consumed by provider runtime, debug replay, and llmswitch-core host-effect bridge code.
+
+## Boundary
+
+- Do not add request/response stage execution, lifecycle coordination, retry, recovery, or error policy here.
+- Hub Pipeline orchestration and node semantics are Rust-owned under `sharedmodule/llmswitch-core`.
+- Error policy must follow the explicit `ErrorErr*` chain and current provider failure-policy owners.

@@ -18573,6 +18573,12 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Pruned `pipeline-interfaces.ts` down to the still-live provider/runtime compatibility surface (`ModuleConfig`, `ProviderModule`, `ModuleDependencies`, `PipelineDebugLogger`, `PipelineDispatchCenter`) and removed unused PipelineManager/LLMSwitch/Compatibility/Transformation interfaces.
 - Physically deleted the four legacy type files and added them to the deleted-path gate.
 
+2026-06-09 Hub Pipeline util wrapper cleanup:
+- Exact scan found `src/modules/pipeline/utils/{preflight-validator,tool-result-text,transformation-engine}.ts` had no active runtime/test/script consumers except one-line provider wrappers under `src/providers/core/utils/**`.
+- The deleted implementations were old TS semantic residues: noop OpenAI chat sanitizer/preflight, generic tool-content-to-text degradation helper, and noop transformation engine. These conflict with Rust-owned Hub Pipeline / provider runtime boundaries if preserved as compatibility surfaces.
+- Physically deleted all three pipeline util files plus the three provider re-export wrappers; added them to `verify:architecture-deleted-path`.
+- Updated remaining pipeline util/orchestrator README files to describe only live logging/debug/TargetMetadata compatibility surfaces. Function/verification maps had no active owner entries for these deleted files, so no owner-path migration was needed.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.
