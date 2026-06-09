@@ -491,6 +491,7 @@ verification:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
       - Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native.
+      - `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are not public imports; keep them module-internal while preserving `convertProviderResponse`.
 
   - feature_id: hub.response_provider_context_helpers
     change_risk: medium

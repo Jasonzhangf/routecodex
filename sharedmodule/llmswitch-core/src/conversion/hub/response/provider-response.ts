@@ -387,7 +387,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   };
 }
 
-export interface ProviderResponseConversionOptions {
+interface ProviderResponseConversionOptions {
   providerProtocol: ProviderProtocol;
   providerResponse: JsonObject;
   context: AdapterContext;
@@ -423,7 +423,7 @@ export interface ProviderResponseConversionOptions {
   }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
-export interface ProviderResponseConversionResult {
+interface ProviderResponseConversionResult {
   body?: JsonObject;
   __sse_responses?: Readable;
   format?: string;

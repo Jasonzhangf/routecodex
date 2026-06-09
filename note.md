@@ -18706,3 +18706,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline ChatEnvelope message public surface pruning:
 - Exact scan found `ChatMessage` and `ChatToolCall` are not imported from `chat-envelope.ts` by active source/tests/docs scripts; they only type `ChatEnvelope.messages` in the same file.
 - Made both module-internal and extended `hub.chat_envelope_type_surface` residue docs/gate to block re-export revival.
+
+2026-06-09 HubPipeline provider response conversion type surface pruning:
+- Exact scan found `ProviderResponseConversionOptions` and `ProviderResponseConversionResult` have no external source import; they only name `convertProviderResponse` parameter/return/callback shapes in `provider-response.ts`.
+- Made both module-internal while keeping `convertProviderResponse` exported; added residue gate to block re-export revival.

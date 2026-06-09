@@ -600,6 +600,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-sse-body-text-reader', pattern: /function\s+readProviderResponseSseText\s*\(/ },
       { label: 'ts-sse-marker-classifier', pattern: /function\s+isProviderResponseSseMarker\s*\(/ },
       { label: 'ts-sse-marker-signal', pattern: /function\s+hasProviderSseMarkerSignal\s*\(/ },
+      { label: 'exports zero-consumer provider response options type shell', pattern: /export\s+interface\s+ProviderResponseConversionOptions\b/ },
+      { label: 'exports zero-consumer provider response result type shell', pattern: /export\s+interface\s+ProviderResponseConversionResult\b/ },
       { label: 'ts-top-level-body-text-branch', pattern: /record\.bodyText|record\.raw/ },
       { label: 'ts-nested-body-text-branch', pattern: /nested\.bodyText|nested\.raw/ },
       { label: 'ts-marker-missing-body-error-owner', pattern: /throw\s+new\s+Error\(['"]Provider SSE marker did not include materializable stream or bodyText/ },
@@ -611,6 +613,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('async function materializeProviderResponseSsePayload');
     expect(source).toContain('buildProviderSseStreamReadErrorDescriptorWithNative');
     expect(source).toContain('readProviderResponseSseStreamText');
+    expect(source).toContain('export async function convertProviderResponse');
     expect(findings).toEqual([]);
   });
 
