@@ -44,4 +44,38 @@ describe('servertool CLI native bridge', () => {
     expect(JSON.stringify(shell)).not.toContain('"metadata"');
     expect(JSON.stringify(shell)).not.toContain('"__rt"');
   });
+
+  it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
+    'rejects %s as client exec CLI projection at the Rust bridge',
+    (toolName) => {
+      expect(() => buildClientExecCliProjectionOutputWithNative({
+        toolName,
+        input: { query: 'x' }
+      })).toThrow(`SERVERTOOL_UNSUPPORTED_TOOL: ${toolName}`);
+    }
+  );
+
+  it('rejects additional servertool calls in the client-visible shell', () => {
+    const nativeProjection = buildClientExecCliProjectionOutputWithNative({
+      toolName: 'servertool_fixture',
+      input: { value: 1 }
+    });
+
+    expect(() => buildClientVisibleProjectionShellWithNative({
+      requestId: 'req_native_bridge_extra_tool',
+      clientCallId: 'call_native_bridge_extra_tool',
+      nativeProjection,
+      reasoningText: 'servertool fixture',
+      additionalToolCalls: [
+        {
+          id: 'call_web_search',
+          type: 'function',
+          function: {
+            name: 'web_search',
+            arguments: '{}'
+          }
+        }
+      ]
+    } as any)).toThrow('SERVERTOOL_UNSUPPORTED_TOOL: web_search');
+  });
 });

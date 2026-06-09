@@ -1232,6 +1232,12 @@ export function buildClientExecCliProjectionOutputWithNative(
     throw new Error('buildClientExecCliProjectionOutputJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    if (typeof nativeError.message === 'string' && nativeError.message.trim()) {
+      throw new Error(nativeError.message.trim());
+    }
+  }
   if (typeof resultJson !== 'string') {
     throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
   }
@@ -1344,6 +1350,12 @@ export function buildClientVisibleProjectionShellWithNative(
     throw new Error('buildClientVisibleProjectionShellJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    if (typeof nativeError.message === 'string' && nativeError.message.trim()) {
+      throw new Error(nativeError.message.trim());
+    }
+  }
   if (typeof resultJson !== 'string') {
     throw new Error(`buildClientVisibleProjectionShellJson native returned non-string: ${typeof resultJson}`);
   }
