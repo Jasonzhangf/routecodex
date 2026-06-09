@@ -7,8 +7,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "appendToolParseDiagnosticTextJson",
   "injectToolParseDiagnosticsJson",
   "applyReqProcessToolGovernanceJson",
-  "applyHubOperationsJson",
-  "applyReqProcessRouteSelectionJson",
   "applyReqOutboundContextSnapshotJson",
   "applyClaudeThinkingToolSchemaCompatJson",
   "applyStoplessGoalDirectiveJson",

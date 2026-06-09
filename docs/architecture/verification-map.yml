@@ -359,6 +359,7 @@ verification:
       - Retired mappable-semantics public wrapper must stay deleted; process-mode mappable key detection is internal Rust logic, not standalone TS/NAPI control surface.
       - Retired chat-process sanitize public wrapper must stay deleted; chat-process message sanitization remains private Rust request-governance/responses-context internals, not a standalone TS/NAPI bridge.
       - Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update.
+      - Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.

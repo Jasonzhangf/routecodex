@@ -69,53 +69,6 @@ export function applyReqProcessToolGovernanceWithNative(
   }
 }
 
-export function applyHubOperationsWithNative(
-  request: Record<string, unknown>,
-  operations: unknown[]
-): Record<string, unknown> {
-  const capability = 'applyHubOperationsJson';
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-
-  const fn = readNativeFunction('applyHubOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-
-  const requestJson = safeStringify(request);
-  const operationsJson = safeStringify(operations ?? []);
-  if (!requestJson || !operationsJson) {
-    return fail('json stringify failed');
-  }
-
-  try {
-    const raw = fn(requestJson, operationsJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseOutputRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export interface NativeReqProcessRouteSelectInput {
-  request: Record<string, unknown>;
-  normalizedMetadata: Record<string, unknown>;
-  target: Record<string, unknown>;
-  routeName?: string;
-  originalModel?: string;
-  /** Configurable reasoning effort override (low/medium/high/off). */
-  thinking?: string;
-}
-
-export interface NativeReqProcessRouteSelectOutput {
-  request: Record<string, unknown>;
-  normalizedMetadata: Record<string, unknown>;
-}
-
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -127,70 +80,5 @@ function safeStringify(value: unknown): string | undefined {
     return JSON.stringify(value);
   } catch {
     return undefined;
-  }
-}
-
-function parseOutput(raw: string): NativeReqProcessRouteSelectOutput | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    const row = parsed as Record<string, unknown>;
-    const request = row.request;
-    const normalizedMetadata = row.normalizedMetadata;
-    if (!request || typeof request !== 'object' || Array.isArray(request)) {
-      return null;
-    }
-    if (!normalizedMetadata || typeof normalizedMetadata !== 'object' || Array.isArray(normalizedMetadata)) {
-      return null;
-    }
-    return {
-      request: request as Record<string, unknown>,
-      normalizedMetadata: normalizedMetadata as Record<string, unknown>
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseOutputRecord(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-export function applyReqProcessRouteSelectionWithNative(
-  input: NativeReqProcessRouteSelectInput
-): NativeReqProcessRouteSelectOutput {
-  const capability = 'applyReqProcessRouteSelectionJson';
-  const fail = (reason?: string) => failNativeRequired<NativeReqProcessRouteSelectOutput>(capability, reason);
-
-  const fn = readNativeFunction('applyReqProcessRouteSelectionJson');
-  if (!fn) {
-    return fail();
-  }
-
-  const inputJson = safeStringify(input);
-  if (!inputJson) {
-    return fail('json stringify failed');
-  }
-
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseOutput(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
   }
 }

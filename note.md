@@ -9916,7 +9916,7 @@ Protocol target:
 
 ## 2026-05-24 req-process servertool injection block migration
 - Moved req-process servertool/tool injection helpers into `req_process_stage1_tool_governance_blocks/servertool_injection.rs`: bundle plan parsing/defaults, runtime metadata reads, websearch/clock operation assembly, tool-name detection, and hub operation application.
-- Root `req_process_stage1_tool_governance.rs` now keeps `apply_hub_operations_json` as NAPI parse/serialize wrapper and calls block functions from the main orchestrator.
+- Root `req_process_stage1_tool_governance.rs` originally kept `apply_hub_operations_json` as NAPI parse/serialize wrapper after block extraction; this standalone wrapper was later retired on 2026-06-09, while internal `apply_hub_operations` remains Rust-mainline only.
 - Validation: servertool orchestration targeted tests passed: clock-only hidden review/continue, skip direct websearch, inject servertool websearch, skip mixed direct+servertool websearch, explicit stop-message flag.
 - Validation: apply_patch schema targeted tests passed for declared legacy fields, default client contract, and direct responses tool shape; final `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
 - No TS functional changes. Remaining req root helpers: governed filter payload, sanitizer metadata, processed/node result assembly, public orchestrator wrappers.
@@ -18822,3 +18822,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory picked `native-hub-pipeline-semantic-mappers.ts`: 6/7 wrappers had zero TS/runtime consumers; live one is `normalizeServertoolFollowupPayloadShapeWithNative`.
 - Change: removed dead TS wrappers, `mapOpenaiChat*Json` required exports, Rust modules `hub_semantic_mapper_chat.rs` / `hub_provider_response_helpers.rs`, and the unused submit-tool-output payload builder from `hub_submit_tool_outputs.rs`; retained live followup shape normalizer.
 - Guard: residue gate blocks retired wrapper/export/module names; deleted obsolete `docs/goals/r1-tool-outputs-rustification-plan.md` because it described restoring the now-retired submit payload bridge.
+
+2026-06-09 HubPipeline req-process standalone public wrapper deletion:
+- Inventory picked `native-hub-pipeline-req-process-semantics.ts`: `applyHubOperationsWithNative` and `applyReqProcessRouteSelectionWithNative` had zero TS/runtime consumers; `applyReqProcessToolGovernanceWithNative` stays live for req-process contract tests.
+- Change: removed the two public TS wrappers, required-export entries, Rust NAPI JSON wrappers, and wrapper-only empty-input test. Internal Rust `apply_hub_operations` / `apply_route_selection` remain because active Rust mainline uses them.
+- Guard: residue gate blocks the public wrapper/export names from returning without banning the internal Rust mainline functions.

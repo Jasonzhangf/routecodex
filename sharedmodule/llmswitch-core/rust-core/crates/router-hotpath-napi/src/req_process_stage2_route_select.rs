@@ -1,5 +1,4 @@
 // feature_id: vr.route_selection
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -348,21 +347,6 @@ pub fn apply_route_selection(
     })
 }
 
-#[napi]
-pub fn apply_req_process_route_selection_json(input_json: String) -> napi::Result<String> {
-    if input_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Input JSON is empty"));
-    }
-
-    let input: RouteSelectionApplyInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-
-    let output = apply_route_selection(input).map_err(|e| napi::Error::from_reason(e))?;
-
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,13 +420,4 @@ mod tests {
         assert_eq!(result.request["metadata"]["assignedModelId"], "kimi-k2.5");
     }
 
-    #[test]
-    fn test_error_empty_json_input() {
-        let result = apply_req_process_route_selection_json("".to_string());
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Input JSON is empty"));
-    }
 }
