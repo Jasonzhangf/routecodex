@@ -366,6 +366,27 @@ verification:
       - HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking.
       - HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel.
 
+  - feature_id: hub.stage_timing_observation
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-state-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-log-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-env-blocks.ts
+    contract:
+      - tests/sharedmodule/hub-stage-timing-top-summary.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run verify:llmswitch-core-tsc
+    notes:
+      - Timing top-summary writes only runtime metadata observation, never Hub request/response data payload.
+      - Retired `measureHubStage` wrappers are test-only residue and must not return.
+
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high
     unit:

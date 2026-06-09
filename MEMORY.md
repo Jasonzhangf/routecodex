@@ -2876,3 +2876,9 @@ Tags: hub-pipeline, type-barrel, public-surface, dead-code, residue-gate, thin-s
 - Coverage scripts must exercise recorder behavior through the factory API, not instantiate or mutate the internal recorder class for white-box coverage.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks recorder class/options export and coverage-script consumption of `SnapshotStageRecorder`.
 Tags: hub-pipeline, snapshot-recorder, public-surface, dead-code, residue-gate, thin-shell, 2026-06-09
+
+## 2026-06-09 HubPipeline stage timing measure wrapper removed
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts` public API must stay on production observation calls: `logHubStageTiming`, `clearHubStageTiming`, `peekHubStageTopSummary`, `attachHubStageTopSummary`, and detail/top-summary exports.
+- `measureHubStage` / `measureHubStageExecution` were test-only orchestration wrappers after the old `hub-stage-timing-measure-blocks.ts` deletion and must not be restored.
+- Function/verification map feature: `hub.stage_timing_observation`; gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks measure wrapper revival.
+Tags: hub-pipeline, stage-timing, dead-code, public-surface, residue-gate, observation-glue, 2026-06-09

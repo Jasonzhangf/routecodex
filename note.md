@@ -18673,3 +18673,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `SnapshotStageRecorderOptions` / `SnapshotStageRecorder` only used inside `snapshot-recorder.ts` plus a coverage script that instantiated the class directly. Production/dynamic bridge consumers only need `createSnapshotRecorder`.
 - Made recorder options/class internal and changed `coverage-hub-snapshot-hooks-utils-recorder.mjs` to exercise the recorder only through `createSnapshotRecorder`. Removed the white-box private `writer` mutation branch from the coverage script.
 - Added residue audit gate blocking recorder class/options export and coverage-script consumption of `SnapshotStageRecorder`; updated `snapshot.stage_contract` maps to mark the public surface as factory-only.
+
+2026-06-09 HubPipeline stage timing measure wrapper pruning:
+- Exact scan found `measureHubStage` only consumed by `tests/sharedmodule/hub-stage-timing-top-summary.spec.ts`; production callers use `logHubStageTiming`, `clearHubStageTiming`, `peekHubStageTopSummary`, `attachHubStageTopSummary`, or `isHubStageTimingDetailEnabled`.
+- Removed `measureHubStageExecution` and exported `measureHubStage` from `hub-stage-timing.ts`; changed the top-summary test to record elapsed stages through production `logHubStageTiming`.
+- Added `hub.stage_timing_observation` function/verification map entries and a residue gate blocking measure wrapper revival.

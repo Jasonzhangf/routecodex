@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   clearHubStageTiming,
-  measureHubStage,
+  logHubStageTiming,
   peekHubStageTopSummary
 } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.js';
 
@@ -11,13 +11,11 @@ describe('hub stage timing top summary', () => {
     const requestId = 'req_hub_stage_top_summary';
     clearHubStageTiming(requestId);
 
-    await measureHubStage(requestId, 'req_inbound.stage2_semantic_map', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 18));
-      return true;
+    logHubStageTiming(requestId, 'req_inbound.stage2_semantic_map', 'completed', {
+      elapsedMs: 18
     });
-    await measureHubStage(requestId, 'req_process.stage2_route_select', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 4));
-      return true;
+    logHubStageTiming(requestId, 'req_process.stage2_route_select', 'completed', {
+      elapsedMs: 4
     });
 
     const top = peekHubStageTopSummary(requestId, {

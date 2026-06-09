@@ -676,6 +676,40 @@ owners:
       - Route selection, health, cooldown, and dependency semantics remain in Rust/native owners.
       - HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types.
 
+  - feature_id: hub.stage_timing_observation
+    status: active
+    summary: Hub stage timing observation glue for logs and runtime metadata top-summary attachment
+    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
+    canonical_types:
+      - HubStageTopSummaryEntry
+    canonical_builders:
+      - logHubStageTiming
+      - clearHubStageTiming
+      - peekHubStageTopSummary
+      - attachHubStageTopSummary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-state-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-log-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-env-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-breakdown-state-blocks.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-timeline-state-blocks.ts
+      - tests/sharedmodule
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/sharedmodule/hub-stage-timing-top-summary.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - Stage timing is observation/control metadata glue only; it must not mutate Hub data payloads.
+      - Test-only `measureHubStage` wrappers are retired; tests should exercise the production `logHubStageTiming` API directly.
+
   - feature_id: hub.response_anthropic_client_projection
     status: active
     summary: Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers

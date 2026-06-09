@@ -2204,6 +2204,28 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('hub stage timing must not restore test-only measure wrapper API', () => {
+    const timingSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts'),
+      'utf8',
+    );
+    const topSummaryTest = fs.readFileSync(
+      path.join(process.cwd(), 'tests/sharedmodule/hub-stage-timing-top-summary.spec.ts'),
+      'utf8',
+    );
+    const findings = collectMatches(timingSource, [
+      { label: 'exports test-only measureHubStage wrapper', pattern: /export\s+async\s+function\s+measureHubStage\b/ },
+      { label: 'keeps private measure execution template', pattern: /function\s+measureHubStageExecution\b/ },
+    ]);
+
+    if (/\bmeasureHubStage\b/.test(topSummaryTest)) {
+      findings.push('top summary test consumes measureHubStage wrapper');
+    }
+
+    expect(findings).toEqual([]);
+    expect(timingSource).toContain('feature_id: hub.stage_timing_observation');
+  });
+
   it('active source and tests must not import removed session identifier wrapper', () => {
     const repoRoot = process.cwd();
     const sourceRoots = [
