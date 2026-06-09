@@ -178,9 +178,9 @@ type ClientSseSnapshotRecorder = {
 };
 
 type ResponsesSseClientProjectionState = {
-  pendingApplyPatchArgumentDeltas: Map<string, string>;
-  applyPatchCallIds: Set<string>;
-  emittedApplyPatchDoneCallIds: Set<string>;
+  pendingApplyPatchArgumentDeltas: Record<string, string>;
+  applyPatchCallIds: string[];
+  emittedApplyPatchDoneCallIds: string[];
 };
 
 function updateContractProbeFromSseChunk(
@@ -1256,132 +1256,13 @@ async function normalizeResponsesToolCallsForClientBody(
   if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
     return body;
   }
-  try {
-    const mod = await importCoreDist<{ normalizeResponsesToolCallArgumentsForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
-      'native/router-hotpath/native-hub-pipeline-resp-semantics'
-    );
-    if (typeof mod.normalizeResponsesToolCallArgumentsForClientWithNative !== 'function') {
-      throw new Error('[handler-response] normalizeResponsesToolCallArgumentsForClientWithNative not available');
-    }
-    const normalized = mod.normalizeResponsesToolCallArgumentsForClientWithNative(body, readResponsesClientToolsRaw(requestContext));
-    return isResponsesApplyPatchFreeformTool(requestContext)
-      ? convertApplyPatchFunctionCallsToCustomToolCalls(normalized)
-      : normalized;
-  } catch (error) {
-    logResponseNonBlockingError('normalizeResponsesToolCallsForClientBody', error);
-    return body;
-  }
-}
-
-function isResponsesApplyPatchFreeformTool(requestContext?: DispatchOptions['responsesRequestContext']): boolean {
-  return readResponsesClientToolsRaw(requestContext).some((tool) => {
-    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
-    const record = tool as Record<string, unknown>;
-    return record.type === 'custom'
-      && record.name === 'apply_patch'
-      && (!record.format || typeof record.format === 'object');
-  });
-}
-
-function convertApplyPatchFunctionCallsToCustomToolCalls(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value;
-  if (Array.isArray(value)) {
-    let changed = false;
-    const items = value.map((item) => {
-      const next = convertApplyPatchFunctionCallsToCustomToolCalls(item);
-      if (next !== item) changed = true;
-      return next;
-    });
-    return changed ? items : value;
-  }
-  const record = value as Record<string, unknown>;
-  if (record.type === 'function_call' && record.name === 'apply_patch') {
-    const input = typeof record.arguments === 'string'
-      ? normalizeApplyPatchFreeformInputForClient(record.arguments)
-      : '';
-    const callId = typeof record.call_id === 'string'
-      ? record.call_id
-      : typeof record.id === 'string'
-        ? record.id
-        : 'call_apply_patch';
-    return {
-      type: 'custom_tool_call',
-      name: 'apply_patch',
-      call_id: callId,
-      input,
-    };
-  }
-  if (record.type === 'custom_tool_call' && record.name === 'apply_patch' && typeof record.input === 'string') {
-    const input = normalizeApplyPatchFreeformInputForClient(record.input);
-    if (input !== record.input) {
-      return { ...record, input };
-    }
-  }
-  let changed = false;
-  const out: Record<string, unknown> = { ...record };
-  for (const [key, child] of Object.entries(record)) {
-    const next = convertApplyPatchFunctionCallsToCustomToolCalls(child);
-    if (next !== child) {
-      out[key] = next;
-      changed = true;
-    }
-  }
-  return changed ? out : value;
-}
-
-function normalizeApplyPatchFreeformInputForClient(argumentsText: string): string {
-  try {
-    const parsed = JSON.parse(argumentsText);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const record = parsed as Record<string, unknown>;
-      if (typeof record.patch === 'string') return record.patch;
-      if (typeof record.input === 'string') return record.input;
-    }
-  } catch {
-    return argumentsText;
-  }
-  return argumentsText;
-}
-
-async function normalizeResponsesToolCallsForClientPayloadDeep(
-  value: unknown,
-  entryEndpoint?: string,
-  requestContext?: DispatchOptions['responsesRequestContext'],
-  seen: WeakSet<object> = new WeakSet()
-): Promise<unknown> {
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  if (seen.has(value as object)) {
-    return value;
-  }
-  seen.add(value as object);
-  if (Array.isArray(value)) {
-    let changed = false;
-    const items: unknown[] = [];
-    for (const item of value) {
-      const normalized = await normalizeResponsesToolCallsForClientPayloadDeep(item, entryEndpoint, requestContext, seen);
-      items.push(normalized);
-      if (normalized !== item) changed = true;
-    }
-    return changed ? items : value;
-  }
-  const record = value as Record<string, unknown>;
-  let changed = false;
-  const out: Record<string, unknown> = { ...record };
-  for (const [key, child] of Object.entries(record)) {
-    const normalizedChild = await normalizeResponsesToolCallsForClientPayloadDeep(child, entryEndpoint, requestContext, seen);
-    if (normalizedChild !== child) {
-      out[key] = normalizedChild;
-      changed = true;
-    }
-  }
-  const normalizedSelf = await normalizeResponsesToolCallsForClientBody(
-    changed ? out : record,
-    entryEndpoint,
-    requestContext
+  const mod = await importCoreDist<{ projectResponsesClientBodyForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
+    'native/router-hotpath/native-hub-pipeline-resp-semantics'
   );
-  return normalizedSelf;
+  if (typeof mod.projectResponsesClientBodyForClientWithNative !== 'function') {
+    throw new Error('[handler-response] projectResponsesClientBodyForClientWithNative not available');
+  }
+  return mod.projectResponsesClientBodyForClientWithNative(body, readResponsesClientToolsRaw(requestContext));
 }
 
 async function normalizeResponsesSseFrameForClient(
@@ -1421,144 +1302,35 @@ async function normalizeResponsesSseFrameForClient(
   } catch {
     return frame;
   }
-  const item = data.item && typeof data.item === 'object' && !Array.isArray(data.item)
-    ? data.item as Record<string, unknown>
-    : undefined;
-  if (
-    item
-    && item.type === 'function_call'
-    && item.name === 'apply_patch'
-    && typeof item.call_id === 'string'
-    && projectionState
-  ) {
-    projectionState.applyPatchCallIds.add(item.call_id);
+  const mod = await importCoreDist<{
+    projectResponsesSseFrameForClientWithNative?: (input: {
+      frame: string;
+      eventName?: string;
+      data: Record<string, unknown>;
+      toolsRaw: unknown[];
+      state: ResponsesSseClientProjectionState;
+    }) => { emit: boolean; frame: string; state: ResponsesSseClientProjectionState };
+  }>('native/router-hotpath/native-hub-pipeline-resp-semantics');
+  if (typeof mod.projectResponsesSseFrameForClientWithNative !== 'function') {
+    throw new Error('[handler-response] projectResponsesSseFrameForClientWithNative not available');
   }
-  if (eventName === 'response.function_call_arguments.delta') {
-    const callName = typeof data.name === 'string' ? data.name : undefined;
-    const callId = typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch';
-    const delta = typeof data.delta === 'string' ? data.delta : undefined;
-    if (
-      delta
-      && projectionState
-      && (callName === 'apply_patch' || projectionState.applyPatchCallIds.has(callId))
-    ) {
-      projectionState.pendingApplyPatchArgumentDeltas.set(
-        callId,
-        `${projectionState.pendingApplyPatchArgumentDeltas.get(callId) ?? ''}${delta}`
-      );
-      return '';
-    }
-    return frame;
+  const projected = mod.projectResponsesSseFrameForClientWithNative({
+    frame,
+    eventName,
+    data,
+    toolsRaw: readResponsesClientToolsRaw(requestContext),
+    state: projectionState ?? {
+      pendingApplyPatchArgumentDeltas: {},
+      applyPatchCallIds: [],
+      emittedApplyPatchDoneCallIds: [],
+    },
+  });
+  if (projectionState) {
+    projectionState.pendingApplyPatchArgumentDeltas = projected.state.pendingApplyPatchArgumentDeltas ?? {};
+    projectionState.applyPatchCallIds = projected.state.applyPatchCallIds ?? [];
+    projectionState.emittedApplyPatchDoneCallIds = projected.state.emittedApplyPatchDoneCallIds ?? [];
   }
-  const callName =
-    typeof data.name === 'string'
-      ? data.name
-      : data.item && typeof data.item === 'object' && !Array.isArray(data.item)
-        ? typeof (data.item as Record<string, unknown>).name === 'string'
-          ? (data.item as Record<string, unknown>).name as string
-          : undefined
-        : undefined;
-  const callArguments =
-    typeof data.arguments === 'string'
-      ? data.arguments
-      : data.item && typeof data.item === 'object' && !Array.isArray(data.item)
-        ? typeof (data.item as Record<string, unknown>).arguments === 'string'
-          ? (data.item as Record<string, unknown>).arguments as string
-          : undefined
-        : undefined;
-  if (callName === 'apply_patch' && callArguments) {
-    const normalized = await normalizeResponsesToolCallsForClientBody(
-      {
-        output: [{
-          type: 'function_call',
-          name: callName,
-          call_id: typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch',
-          arguments: callArguments,
-        }],
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: {
-            tool_calls: [{
-              id: typeof data.call_id === 'string' ? data.call_id : 'call_apply_patch',
-              type: 'function',
-              name: callName,
-              arguments: callArguments,
-              function: {
-                name: callName,
-                arguments: callArguments,
-              },
-            }],
-          },
-        },
-      },
-      entryEndpoint,
-      requestContext
-    ) as Record<string, unknown>;
-    const normalizedArguments = normalizeApplyPatchFreeformInputForClient(callArguments);
-    if (typeof data.arguments === 'string') {
-      data.arguments = normalizedArguments;
-    }
-    if (data.item && typeof data.item === 'object' && !Array.isArray(data.item)) {
-      (data.item as Record<string, unknown>).arguments = normalizedArguments;
-    }
-    const clientData = isResponsesApplyPatchFreeformTool(requestContext)
-      ? convertApplyPatchFunctionCallsToCustomToolCalls(data)
-      : data;
-    const normalizedFrame = `${lines.map((line, index) => {
-      if (index === dataIndex) return `data: ${JSON.stringify(clientData)}`;
-      if (index > dataIndex && line.startsWith('data:')) return '';
-      return line;
-    }).filter((line) => line !== '').join('\n')}\n\n`;
-    if (
-      eventName === 'response.function_call_arguments.done'
-      && projectionState
-      && typeof data.call_id === 'string'
-    ) {
-      projectionState.pendingApplyPatchArgumentDeltas.delete(data.call_id);
-      projectionState.applyPatchCallIds.delete(data.call_id);
-      if (projectionState.emittedApplyPatchDoneCallIds.has(data.call_id)) {
-        return '';
-      }
-      projectionState.emittedApplyPatchDoneCallIds.add(data.call_id);
-      const customToolDoneData = {
-        type: 'response.output_item.done',
-        item: {
-          type: 'custom_tool_call',
-          name: 'apply_patch',
-          call_id: data.call_id,
-          input: normalizedArguments,
-        },
-      };
-      return `event: response.output_item.done\ndata: ${JSON.stringify(customToolDoneData)}\n\n`;
-    }
-    if (
-      eventName === 'response.output_item.done'
-      && projectionState
-      && typeof data.item === 'object'
-      && data.item !== null
-      && !Array.isArray(data.item)
-    ) {
-      const callId = typeof (data.item as Record<string, unknown>).call_id === 'string'
-        ? (data.item as Record<string, unknown>).call_id as string
-        : undefined;
-      if (callId) {
-        if (projectionState.emittedApplyPatchDoneCallIds.has(callId)) {
-          return '';
-        }
-        projectionState.emittedApplyPatchDoneCallIds.add(callId);
-      }
-    }
-    return normalizedFrame;
-  }
-  const normalized = await normalizeResponsesToolCallsForClientPayloadDeep(data, entryEndpoint, requestContext);
-  if (normalized === data) {
-    return frame;
-  }
-  return `${lines.map((line, index) => {
-    if (index === dataIndex) return `data: ${JSON.stringify(normalized)}`;
-    if (index > dataIndex && line.startsWith('data:')) return '';
-    return line;
-  }).filter((line) => line !== '').join('\n')}\n\n`;
+  return projected.emit ? projected.frame : '';
 }
 
 function isResponsesJsonBody(body: unknown, entryEndpoint?: string): body is Record<string, unknown> {
@@ -2207,16 +1979,12 @@ export async function sendPipelineResponse(
     let ssePending = '';
     let clientWriteQueue = Promise.resolve();
     const responsesSseProjectionState: ResponsesSseClientProjectionState = {
-      pendingApplyPatchArgumentDeltas: new Map(),
-      applyPatchCallIds: new Set(),
-      emittedApplyPatchDoneCallIds: new Set(),
+      pendingApplyPatchArgumentDeltas: {},
+      applyPatchCallIds: [],
+      emittedApplyPatchDoneCallIds: [],
     };
     const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
       assertClientSseFrameHasNoInternalCarriers(frame, requestLabel);
-      if (!frame.includes('apply_patch') && !frame.includes('function_call') && !frame.includes('required_action')) {
-        writeClientSseFrame(frame, errorLabel, { recordSnapshot: false });
-        return;
-      }
       clientWriteQueue = clientWriteQueue
         .then(async () => normalizeResponsesSseFrameForClient(
           frame,
@@ -2231,8 +1999,13 @@ export async function sendPipelineResponse(
           writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
         })
         .catch((error) => {
-          logResponseNonBlockingError(`${errorLabel}:normalize:${requestLabel}`, error);
-          writeClientSseFrame(frame, errorLabel, { recordSnapshot: false });
+          const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+          const projectionError = Object.assign(
+            new Error(`[server.response_projection] SSE client projection failed: ${reason}`),
+            { code: 'SSE_CLIENT_PROJECTION_FAILED' }
+          );
+          logPipelineStage('response.sse.projection.error', requestLabel, { message: projectionError.message });
+          destroySourceStream(projectionError);
         });
     };
     outboundStream.on('data', (chunk: unknown) => {

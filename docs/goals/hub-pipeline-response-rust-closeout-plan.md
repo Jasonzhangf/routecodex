@@ -380,3 +380,44 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 
 - PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
 - PASS: `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`
+
+## 2026-06-10 Slice: Responses Client Body/SSE Projection
+
+### Audit Result
+
+- `src/server/handlers/handler-response-utils.ts` still owned client-visible Responses projection semantics after Rust body argument normalization:
+  - JSON body `function_call -> custom_tool_call` conversion for freeform `apply_patch`.
+  - Live SSE `response.function_call_arguments.delta/done` suppression and reconstruction.
+  - Apply-patch call id tracking and duplicate done suppression.
+  - A normalization catch path that wrote the original SSE frame after projection failure.
+- The matching Rust owner already handled apply_patch freeform argument normalization in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`, so this slice extended that owner to cover client-visible JSON body and SSE frame projection.
+
+### Implementation Result
+
+- Added Rust owners:
+  - `project_responses_client_body_for_client`
+  - `project_responses_sse_frame_for_client`
+- Added native exports:
+  - `projectResponsesClientBodyForClientJson`
+  - `projectResponsesSseFrameForClientJson`
+- Kept `handler-response-utils.ts` as SSE event/data parse, native invocation, native state holder, and frame writer only.
+- Removed TS apply_patch freeform parser, `function_call -> custom_tool_call` conversion helper, TS delta/done state semantics, frame heuristic routing, and projection fallback that wrote original frames.
+- Updated function/verification maps with `hub.response_responses_client_projection`.
+- Added residue gate coverage in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+
+### Verification Evidence
+
+- PASS: `cargo test -p router-hotpath-napi project_responses --lib -- --nocapture`
+- PASS: `npm run jest:run -- --runTestsByPath tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit` (3 suites / 133 tests)
+- PASS: `cargo test -p router-hotpath-napi hub_resp --lib -- --nocapture` (126 passed)
+- PASS: `cargo test -p router-hotpath-napi resp_process --lib -- --nocapture` (209 passed / 1 ignored)
+- PASS: `cargo test -p router-hotpath-napi hub_pipeline_contracts --lib -- --nocapture` (11 passed)
+- PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- PASS: `npm run verify:hub-response-responses-chat-projection`
+- PASS: `npm run verify:hub-response-provider-sse-materialization`
+- PASS: `npm run verify:function-map-compile-gate`
+- PASS: `npm run verify:servertool-rust-only`
+
+### Review Note
+
+- Fixed one pre-existing Rust test non-determinism in `build_responses_payload_from_chat_json_matches_core_shape`: the JSON wrapper and core path each allocate volatile `resp_<timestamp>` ids when invoked separately. The test now validates both ids are valid Responses ids and compares the stable semantic payload after removing top-level `id` / `created_at`.

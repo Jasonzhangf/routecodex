@@ -206,6 +206,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "mergeGovernanceSummaryIntoMetadataJson",
   "findHeaderValueJson",
   "normalizeAliasMapJson",
+  "projectResponsesClientBodyForClientJson",
+  "projectResponsesSseFrameForClientJson",
   "normalizeMessageReasoningToolsJson",
   "normalizeOpenaiMessageJson",
   "normalizeOpenaiChatMessagesJson",

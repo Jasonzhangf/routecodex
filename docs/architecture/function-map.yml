@@ -870,6 +870,40 @@ owners:
     notes:
       - Post-servertool runtime action planning, missing-executor error descriptors, and client projection decisions belong to Rust; TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors.
 
+  - feature_id: hub.response_responses_client_projection
+    status: active
+    summary: OpenAI Responses client-visible tool-call projection for JSON body and SSE frames, including apply_patch freeform custom tool output
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
+    canonical_types:
+      - HubRespOutbound04ClientSemantic
+      - ServerRespOutbound05ClientFrame
+    canonical_builders:
+      - project_responses_client_body_for_client
+      - project_responses_sse_frame_for_client
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts
+      - src/server/handlers/handler-response-utils.ts
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor/provider-response-converter.ts
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:hub-response-responses-chat-projection
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - JSON body and SSE frame client-visible Responses tool projection must stay Rust-owned; TS handler may parse SSE event/data boundaries, hold opaque native state, and write returned frames only.
+      - TS handler must not restore apply_patch function_call-to-custom_tool_call conversion, freeform argument parsing, delta aggregation, done de-duplication, frame heuristic routing, or projection fallback that writes the original frame on native failure.
+
   - feature_id: hub.response_provider_sse_materialization
     status: active
     summary: Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry

@@ -54,3 +54,15 @@ export interface ResponsesHostPolicyResult {
   shouldStripHostManagedFields: boolean;
   targetProtocol: string;
 }
+
+export interface ResponsesClientSseProjectionState {
+  pendingApplyPatchArgumentDeltas?: Record<string, string>;
+  applyPatchCallIds?: string[];
+  emittedApplyPatchDoneCallIds?: string[];
+}
+
+export interface ResponsesClientSseFrameProjection {
+  emit: boolean;
+  frame: string;
+  state: ResponsesClientSseProjectionState;
+}

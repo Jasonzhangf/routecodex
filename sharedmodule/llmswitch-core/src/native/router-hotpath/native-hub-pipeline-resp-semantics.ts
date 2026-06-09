@@ -34,6 +34,8 @@ export {
   looksLikeJsonStreamPrefixWithNative,
   normalizeResponsesToolCallArgumentsForClientWithNative,
   normalizeResponsesUsageWithNative,
+  projectResponsesClientBodyForClientWithNative,
+  projectResponsesSseFrameForClientWithNative,
   buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
   projectPostServertoolHubRespOutbound04ClientSemanticWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative,

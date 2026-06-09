@@ -1511,6 +1511,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('server response handler Responses apply_patch client projection must stay native-owned', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts apply_patch function-call conversion helper', pattern: /convertApplyPatchFunctionCallsToCustomToolCalls/ },
+      { label: 'ts apply_patch freeform argument parser', pattern: /normalizeApplyPatchFreeformInputForClient|JSON\.parse\(argumentsText\)/ },
+      { label: 'ts apply_patch freeform tool detector', pattern: /isResponsesApplyPatchFreeformTool|record\.name\s*===\s*['"]apply_patch['"]/ },
+      { label: 'ts apply_patch SSE map-state owner', pattern: /new Map\(\)|new Set\(\)/ },
+      { label: 'ts SSE projection fallback writes original frame', pattern: /catch[\s\S]{0,260}writeClientSseFrame\(frame,\s*errorLabel/ },
+      { label: 'ts frame heuristic decides projection necessity', pattern: /frame\.includes\(['"]apply_patch['"]\)|frame\.includes\(['"]function_call['"]\)|frame\.includes\(['"]required_action['"]\)/ },
+    ]);
+    expect(source).toContain('projectResponsesClientBodyForClientWithNative');
+    expect(source).toContain('projectResponsesSseFrameForClientWithNative');
+    expect(findings).toEqual([]);
+  });
+
   it('server response handler must not default missing SSE finish reason to stop', () => {
     const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
     const source = fs.readFileSync(filePath, 'utf8');

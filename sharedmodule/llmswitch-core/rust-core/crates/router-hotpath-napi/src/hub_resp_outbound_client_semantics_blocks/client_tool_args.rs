@@ -1,3 +1,6 @@
+// feature_id: hub.response_responses_client_projection
+// canonical_builders: project_responses_client_body_for_client, project_responses_sse_frame_for_client
+
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -726,4 +729,405 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
     }
 
     Value::Object(payload)
+}
+
+fn has_responses_freeform_apply_patch_tool(tools_raw: &Value) -> bool {
+    let tool_index = build_client_tool_index(tools_raw);
+    tool_index
+        .by_name
+        .get("apply_patch")
+        .map(|entry| is_freeform_tool(Some(entry)))
+        .unwrap_or(false)
+}
+
+fn normalize_apply_patch_freeform_input_for_client(arguments_text: &str) -> String {
+    let parsed = serde_json::from_str::<Value>(arguments_text).ok();
+    let Some(Value::Object(record)) = parsed else {
+        return arguments_text.to_string();
+    };
+    record
+        .get("patch")
+        .or_else(|| record.get("input"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| arguments_text.to_string())
+}
+
+fn read_call_id(record: &Map<String, Value>) -> String {
+    record
+        .get("call_id")
+        .or_else(|| record.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("call_apply_patch")
+        .to_string()
+}
+
+fn convert_apply_patch_function_calls_to_custom_tool_calls(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(convert_apply_patch_function_calls_to_custom_tool_calls)
+                .collect(),
+        ),
+        Value::Object(record) => {
+            if record.get("type").and_then(Value::as_str) == Some("function_call")
+                && record.get("name").and_then(Value::as_str) == Some("apply_patch")
+            {
+                let input = record
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .map(normalize_apply_patch_freeform_input_for_client)
+                    .unwrap_or_default();
+                return serde_json::json!({
+                    "type": "custom_tool_call",
+                    "name": "apply_patch",
+                    "call_id": read_call_id(record),
+                    "input": input,
+                });
+            }
+            let mut out = Map::new();
+            for (key, child) in record {
+                if record.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                    && record.get("name").and_then(Value::as_str) == Some("apply_patch")
+                    && key == "input"
+                    && child.is_string()
+                {
+                    out.insert(
+                        key.clone(),
+                        Value::String(normalize_apply_patch_freeform_input_for_client(
+                            child.as_str().unwrap_or_default(),
+                        )),
+                    );
+                    continue;
+                }
+                out.insert(
+                    key.clone(),
+                    convert_apply_patch_function_calls_to_custom_tool_calls(child),
+                );
+            }
+            Value::Object(out)
+        }
+        _ => value.clone(),
+    }
+}
+
+pub(crate) fn project_responses_client_body_for_client(
+    responses_payload: &Value,
+    tools_raw: &Value,
+) -> Value {
+    let normalized = normalize_responses_tool_call_arguments_for_client(responses_payload, tools_raw);
+    if has_responses_freeform_apply_patch_tool(tools_raw) {
+        convert_apply_patch_function_calls_to_custom_tool_calls(&normalized)
+    } else {
+        normalized
+    }
+}
+
+#[derive(Default)]
+struct ResponsesClientSseProjectionState {
+    pending_apply_patch_argument_deltas: HashMap<String, String>,
+    apply_patch_call_ids: HashSet<String>,
+    emitted_apply_patch_done_call_ids: HashSet<String>,
+}
+
+fn read_string_array(value: Option<&Value>) -> HashSet<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl ResponsesClientSseProjectionState {
+    fn from_value(value: &Value) -> Self {
+        let Some(record) = value.as_object() else {
+            return Self::default();
+        };
+        let mut pending_apply_patch_argument_deltas = HashMap::new();
+        if let Some(pending) = record
+            .get("pendingApplyPatchArgumentDeltas")
+            .and_then(Value::as_object)
+        {
+            for (key, value) in pending {
+                if let Some(text) = value.as_str() {
+                    pending_apply_patch_argument_deltas.insert(key.clone(), text.to_string());
+                }
+            }
+        }
+        Self {
+            pending_apply_patch_argument_deltas,
+            apply_patch_call_ids: read_string_array(record.get("applyPatchCallIds")),
+            emitted_apply_patch_done_call_ids: read_string_array(
+                record.get("emittedApplyPatchDoneCallIds"),
+            ),
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        let mut pending = Map::new();
+        let mut pending_keys = self
+            .pending_apply_patch_argument_deltas
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>();
+        pending_keys.sort();
+        for key in pending_keys {
+            if let Some(value) = self.pending_apply_patch_argument_deltas.get(key.as_str()) {
+                pending.insert(key, Value::String(value.clone()));
+            }
+        }
+        let mut call_ids = self
+            .apply_patch_call_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<String>>();
+        call_ids.sort();
+        let mut emitted = self
+            .emitted_apply_patch_done_call_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<String>>();
+        emitted.sort();
+        serde_json::json!({
+            "pendingApplyPatchArgumentDeltas": pending,
+            "applyPatchCallIds": call_ids,
+            "emittedApplyPatchDoneCallIds": emitted,
+        })
+    }
+}
+
+fn replace_frame_data(frame: &str, data: &Value) -> String {
+    let data_json = serde_json::to_string(data).unwrap_or_else(|_| "null".to_string());
+    let lines = frame.split('\n').collect::<Vec<&str>>();
+    let data_index = lines.iter().position(|line| line.starts_with("data:"));
+    let Some(data_index) = data_index else {
+        return frame.to_string();
+    };
+    let mut out = Vec::<String>::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index == data_index {
+            out.push(format!("data: {}", data_json));
+            continue;
+        }
+        if index > data_index && line.starts_with("data:") {
+            continue;
+        }
+        if !line.is_empty() {
+            out.push((*line).to_string());
+        }
+    }
+    format!("{}\n\n", out.join("\n"))
+}
+
+fn read_data_call_name(data: &Map<String, Value>) -> Option<String> {
+    data.get("name")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| {
+            data.get("item")
+                .and_then(Value::as_object)
+                .and_then(|item| item.get("name"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
+}
+
+fn read_data_call_arguments(data: &Map<String, Value>) -> Option<String> {
+    data.get("arguments")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| {
+            data.get("item")
+                .and_then(Value::as_object)
+                .and_then(|item| item.get("arguments"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
+}
+
+fn read_data_call_id(data: &Map<String, Value>) -> String {
+    data.get("call_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            data.get("item")
+                .and_then(Value::as_object)
+                .and_then(|item| item.get("call_id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| "call_apply_patch".to_string())
+}
+
+fn project_apply_patch_done_frame(data: &Map<String, Value>, normalized_arguments: String) -> String {
+    let call_id = read_data_call_id(data);
+    let custom_tool_done_data = serde_json::json!({
+        "type": "response.output_item.done",
+        "item": {
+            "type": "custom_tool_call",
+            "name": "apply_patch",
+            "call_id": call_id,
+            "input": normalized_arguments,
+        }
+    });
+    format!(
+        "event: response.output_item.done\ndata: {}\n\n",
+        serde_json::to_string(&custom_tool_done_data).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
+fn project_responses_sse_client_payload_deep(value: &Value, tools_raw: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| project_responses_sse_client_payload_deep(item, tools_raw))
+                .collect(),
+        ),
+        Value::Object(record) => {
+            let mut out = Map::new();
+            for (key, child) in record {
+                out.insert(
+                    key.clone(),
+                    project_responses_sse_client_payload_deep(child, tools_raw),
+                );
+            }
+            project_responses_client_body_for_client(&Value::Object(out), tools_raw)
+        }
+        _ => value.clone(),
+    }
+}
+
+pub(crate) fn project_responses_sse_frame_for_client(
+    frame: &str,
+    event_name: Option<&str>,
+    data: &Value,
+    tools_raw: &Value,
+    state_value: &Value,
+) -> Value {
+    let mut state = ResponsesClientSseProjectionState::from_value(state_value);
+    let mut output_frame = frame.to_string();
+    let mut emit = true;
+
+    let event_name = event_name.unwrap_or("").trim();
+    if let Some(item) = data.get("item").and_then(Value::as_object) {
+        if item.get("type").and_then(Value::as_str) == Some("function_call")
+            && item.get("name").and_then(Value::as_str) == Some("apply_patch")
+        {
+            if let Some(call_id) = item
+                .get("call_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                state.apply_patch_call_ids.insert(call_id.to_string());
+            }
+        }
+    }
+
+    let data_record = data.as_object();
+    if event_name == "response.function_call_arguments.delta" {
+        if let Some(record) = data_record {
+            let call_name = record.get("name").and_then(Value::as_str);
+            let call_id = read_data_call_id(record);
+            let delta = record.get("delta").and_then(Value::as_str);
+            if let Some(delta) = delta {
+                if call_name == Some("apply_patch") || state.apply_patch_call_ids.contains(&call_id) {
+                    let entry = state
+                        .pending_apply_patch_argument_deltas
+                        .entry(call_id)
+                        .or_default();
+                    entry.push_str(delta);
+                    emit = false;
+                }
+            }
+        }
+    } else if let Some(record) = data_record {
+        let call_name = read_data_call_name(record);
+        let call_arguments = read_data_call_arguments(record);
+        if call_name.as_deref() == Some("apply_patch") {
+            if let Some(call_arguments) = call_arguments {
+                if call_arguments.is_empty() {
+                    return serde_json::json!({
+                        "emit": emit,
+                        "frame": output_frame,
+                        "state": state.to_value(),
+                    });
+                }
+                let mut next_data = data.clone();
+                let normalized_arguments =
+                    normalize_apply_patch_freeform_input_for_client(call_arguments.as_str());
+                if let Some(next_record) = next_data.as_object_mut() {
+                    if next_record.get("arguments").is_some() {
+                        next_record.insert(
+                            "arguments".to_string(),
+                            Value::String(normalized_arguments.clone()),
+                        );
+                    }
+                    if let Some(item) = next_record.get_mut("item").and_then(Value::as_object_mut) {
+                        if item.get("arguments").is_some() {
+                            item.insert(
+                                "arguments".to_string(),
+                                Value::String(normalized_arguments.clone()),
+                            );
+                        }
+                    }
+                }
+                let client_data = if has_responses_freeform_apply_patch_tool(tools_raw) {
+                    convert_apply_patch_function_calls_to_custom_tool_calls(&next_data)
+                } else {
+                    next_data
+                };
+                output_frame = replace_frame_data(frame, &client_data);
+
+                if event_name == "response.function_call_arguments.done" {
+                    let call_id = read_data_call_id(record);
+                    state
+                        .pending_apply_patch_argument_deltas
+                        .remove(call_id.as_str());
+                    state.apply_patch_call_ids.remove(call_id.as_str());
+                    if state.emitted_apply_patch_done_call_ids.contains(call_id.as_str()) {
+                        emit = false;
+                    } else {
+                        state
+                            .emitted_apply_patch_done_call_ids
+                            .insert(call_id.clone());
+                        output_frame = project_apply_patch_done_frame(record, normalized_arguments);
+                    }
+                } else if event_name == "response.output_item.done" {
+                    let call_id = read_data_call_id(record);
+                    if state.emitted_apply_patch_done_call_ids.contains(call_id.as_str()) {
+                        emit = false;
+                    } else {
+                        state.emitted_apply_patch_done_call_ids.insert(call_id);
+                    }
+                }
+            }
+        } else {
+            let normalized = project_responses_sse_client_payload_deep(data, tools_raw);
+            if normalized != *data {
+                output_frame = replace_frame_data(frame, &normalized);
+            }
+        }
+    }
+
+    serde_json::json!({
+        "emit": emit,
+        "frame": if emit { output_frame } else { String::new() },
+        "state": state.to_value(),
+    })
 }

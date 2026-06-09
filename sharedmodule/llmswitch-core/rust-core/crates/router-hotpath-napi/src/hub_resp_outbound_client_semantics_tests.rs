@@ -893,6 +893,162 @@ fn normalize_responses_tool_call_arguments_for_client_projects_freeform_apply_pa
     );
 }
 
+fn freeform_apply_patch_tool_fixture() -> Value {
+    json!([{
+        "type": "custom",
+        "name": "apply_patch",
+        "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+        "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "start: begin_patch hunk+ end_patch"
+        }
+    }])
+}
+
+#[test]
+fn project_responses_client_body_for_client_projects_freeform_apply_patch_custom_tool_call() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-body.txt\n+hello from body\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let payload = json!({
+        "id": "resp_apply_patch_body",
+        "object": "response",
+        "status": "requires_action",
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_apply_patch",
+            "name": "apply_patch",
+            "arguments": raw_args
+        }],
+        "required_action": {
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": [{
+                    "id": "call_apply_patch",
+                    "type": "function",
+                    "name": "apply_patch",
+                    "arguments": raw_args,
+                    "function": {
+                        "name": "apply_patch",
+                        "arguments": raw_args
+                    }
+                }]
+            }
+        }
+    });
+    let output = project_responses_client_body_for_client(&payload, &freeform_apply_patch_tool_fixture());
+
+    assert_eq!(output["output"][0]["type"], "custom_tool_call");
+    assert_eq!(output["output"][0]["name"], "apply_patch");
+    assert_eq!(output["output"][0]["call_id"], "call_apply_patch");
+    assert_eq!(output["output"][0]["input"], patch);
+    assert_eq!(
+        output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["arguments"],
+        patch
+    );
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_projects_done() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-sse.txt\n+hello from sse\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let mut state = json!({});
+    let added_frame = format!(
+        "event: response.output_item.added\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "apply_patch",
+                "call_id": "call_patch",
+                "arguments": ""
+            }
+        }))
+        .unwrap()
+    );
+    let added = project_responses_sse_frame_for_client(
+        added_frame.as_str(),
+        Some("response.output_item.added"),
+        &json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "apply_patch",
+                "call_id": "call_patch",
+                "arguments": ""
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &state,
+    );
+    assert_eq!(added["emit"], true);
+    state = added["state"].clone();
+    assert_eq!(state["applyPatchCallIds"][0], "call_patch");
+
+    let delta = project_responses_sse_frame_for_client(
+        "event: response.function_call_arguments.delta\ndata: {}\n\n",
+        Some("response.function_call_arguments.delta"),
+        &json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_patch",
+            "delta": raw_args
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &state,
+    );
+    assert_eq!(delta["emit"], false);
+    state = delta["state"].clone();
+
+    let done = project_responses_sse_frame_for_client(
+        "event: response.function_call_arguments.done\ndata: {}\n\n",
+        Some("response.function_call_arguments.done"),
+        &json!({
+            "type": "response.function_call_arguments.done",
+            "name": "apply_patch",
+            "call_id": "call_patch",
+            "arguments": raw_args
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &state,
+    );
+    assert_eq!(done["emit"], true);
+    let frame = done["frame"].as_str().unwrap();
+    assert!(frame.contains("event: response.output_item.done"));
+    assert!(frame.contains("\"type\":\"custom_tool_call\""));
+    assert!(frame.contains("\"input\""));
+    assert!(frame.contains("tmp/apft/01-sse.txt"));
+
+    let duplicate_done = project_responses_sse_frame_for_client(
+        "event: response.function_call_arguments.done\ndata: {}\n\n",
+        Some("response.function_call_arguments.done"),
+        &json!({
+            "type": "response.function_call_arguments.done",
+            "name": "apply_patch",
+            "call_id": "call_patch",
+            "arguments": raw_args
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &done["state"],
+    );
+    assert_eq!(duplicate_done["emit"], false);
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_keeps_terminal_frame_unchanged() {
+    let frame = "event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_1\"}}\n\n";
+    let output = project_responses_sse_frame_for_client(
+        frame,
+        Some("response.done"),
+        &json!({ "type": "response.done", "response": { "id": "resp_1" } }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+    );
+    assert_eq!(output["emit"], true);
+    assert_eq!(output["frame"], frame);
+}
+
 #[test]
 fn normalize_responses_tool_call_arguments_for_client_repairs_exec_command_aliases_by_schema() {
     let responses_payload = serde_json::json!({
@@ -2039,5 +2195,31 @@ fn build_responses_payload_from_chat_json_matches_core_shape() {
             .expect("json"),
     )
     .unwrap();
-    assert_eq!(json_out, core);
+    assert_eq!(json_out["object"], Value::String("response".to_string()));
+    assert_eq!(core["object"], Value::String("response".to_string()));
+    assert!(
+        json_out["id"]
+            .as_str()
+            .map(|value| value.starts_with("resp_"))
+            .unwrap_or(false),
+        "json wrapper should allocate a Responses id"
+    );
+    assert!(
+        core["id"]
+            .as_str()
+            .map(|value| value.starts_with("resp_"))
+            .unwrap_or(false),
+        "core should allocate a Responses id"
+    );
+    let mut stable_json_out = json_out;
+    let mut stable_core = core;
+    if let Some(row) = stable_json_out.as_object_mut() {
+        row.remove("id");
+        row.remove("created_at");
+    }
+    if let Some(row) = stable_core.as_object_mut() {
+        row.remove("id");
+        row.remove("created_at");
+    }
+    assert_eq!(stable_json_out, stable_core);
 }

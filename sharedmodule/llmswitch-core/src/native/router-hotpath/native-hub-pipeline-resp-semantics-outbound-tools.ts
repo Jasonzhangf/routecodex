@@ -5,6 +5,7 @@ import {
   parseProviderResponseContextHelpers,
   parseProviderResponseToolCallSummary,
   parseRecord,
+  parseResponsesClientSseFrameProjection,
   parseResponsesHostPolicyResult,
   parseStringOrUndefined
 } from './native-hub-pipeline-resp-semantics-parsers.js';
@@ -20,6 +21,8 @@ import type {
   AnthropicStopReasonResolution,
   ProviderResponseContextHelpersOutput,
   ProviderResponseToolCallSummary,
+  ResponsesClientSseFrameProjection,
+  ResponsesClientSseProjectionState,
   ResponsesHostPolicyResult
 } from './native-hub-pipeline-resp-semantics-types.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
@@ -219,6 +222,82 @@ export function normalizeResponsesToolCallArgumentsForClientWithNative(
       return fail('empty result');
     }
     const parsed = parseRecord(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function projectResponsesClientBodyForClientWithNative(
+  responsesPayload: unknown,
+  toolsRaw: unknown[]
+): Record<string, unknown> {
+  const capability = 'projectResponsesClientBodyForClientJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(responsesPayload);
+  const toolsRawJson = safeStringify(toolsRaw ?? []);
+  if (!payloadJson || !toolsRawJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, toolsRawJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw, 'parseProjectResponsesClientBodyForClient');
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function projectResponsesSseFrameForClientWithNative(input: {
+  frame: string;
+  eventName?: string;
+  data: Record<string, unknown>;
+  toolsRaw: unknown[];
+  state: ResponsesClientSseProjectionState;
+}): ResponsesClientSseFrameProjection {
+  const capability = 'projectResponsesSseFrameForClientJson';
+  const fail = (reason?: string) => failNative<ResponsesClientSseFrameProjection>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const frameJson = safeStringify(input.frame);
+  const eventNameJson = safeStringify(input.eventName ?? null);
+  const dataJson = safeStringify(input.data);
+  const toolsRawJson = safeStringify(input.toolsRaw ?? []);
+  const stateJson = safeStringify(input.state ?? {});
+  if (!frameJson || !eventNameJson || !dataJson || !toolsRawJson || !stateJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(frameJson, eventNameJson, dataJson, toolsRawJson, stateJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseResponsesClientSseFrameProjection(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

@@ -485,6 +485,27 @@ verification:
     notes:
       - TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust.
 
+  - feature_id: hub.response_responses_client_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - src/server/handlers/handler-response-utils.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
+      - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi project_responses --lib -- --nocapture
+      - npm run verify:hub-response-responses-chat-projection
+    build:
+      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+    notes:
+      - Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames.
+
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high
     unit:

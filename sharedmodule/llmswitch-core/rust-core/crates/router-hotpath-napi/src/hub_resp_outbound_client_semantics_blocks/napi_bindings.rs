@@ -9,7 +9,10 @@ use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_
 use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
     normalize_openai_chat_reasoning_outbound, sanitize_chat_completion_like,
 };
-use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::normalize_responses_tool_call_arguments_for_client;
+use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
+    normalize_responses_tool_call_arguments_for_client, project_responses_client_body_for_client,
+    project_responses_sse_frame_for_client,
+};
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
     resolve_display_model_from_context, resolve_tool_surface_shadow_enabled, resolve_truthy_flag,
@@ -259,6 +262,47 @@ pub fn normalize_responses_tool_call_arguments_for_client_json(
     let tools_raw: Value = serde_json::from_str(&tools_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = normalize_responses_tool_call_arguments_for_client(&responses_payload, &tools_raw);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn project_responses_client_body_for_client_json(
+    responses_payload_json: String,
+    tools_raw_json: String,
+) -> NapiResult<String> {
+    let responses_payload: Value = serde_json::from_str(&responses_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let tools_raw: Value = serde_json::from_str(&tools_raw_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = project_responses_client_body_for_client(&responses_payload, &tools_raw);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn project_responses_sse_frame_for_client_json(
+    frame_json: String,
+    event_name_json: String,
+    data_json: String,
+    tools_raw_json: String,
+    state_json: String,
+) -> NapiResult<String> {
+    let frame: Value = serde_json::from_str(&frame_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let event_name: Value = serde_json::from_str(&event_name_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let data: Value =
+        serde_json::from_str(&data_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let tools_raw: Value = serde_json::from_str(&tools_raw_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let state: Value =
+        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = project_responses_sse_frame_for_client(
+        frame.as_str().unwrap_or_default(),
+        event_name.as_str(),
+        &data,
+        &tools_raw,
+        &state,
+    );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

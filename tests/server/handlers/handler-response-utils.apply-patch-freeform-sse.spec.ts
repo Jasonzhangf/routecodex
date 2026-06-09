@@ -2,7 +2,7 @@ import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
 const convertResponseToJsonToSseMock = jest.fn(async () => Readable.from(['event: response.completed\n', 'data: {}\n\n']));
-const normalizeResponsesToolCallArgumentsForClientWithNativeMock = jest.fn((payload: any, toolsRaw: unknown[]) => {
+const projectResponsesClientBodyForClientWithNativeMock = jest.fn((payload: any, toolsRaw: unknown[]) => {
   const hasFreeformApplyPatch = toolsRaw.some((tool: any) =>
     tool?.name === 'apply_patch' && tool?.format?.type === 'grammar'
   );
@@ -22,13 +22,88 @@ const normalizeResponsesToolCallArgumentsForClientWithNativeMock = jest.fn((payl
   const visit = (value: any): any => {
     if (!value || typeof value !== 'object') return value;
     if (Array.isArray(value)) return value.map(visit);
+    if (value.type === 'function_call' && value.name === 'apply_patch') {
+      return {
+        type: 'custom_tool_call',
+        name: 'apply_patch',
+        call_id: typeof value.call_id === 'string' ? value.call_id : 'call_apply_patch',
+        input: unwrap(value.arguments),
+      };
+    }
     const out: any = {};
     for (const [key, child] of Object.entries(value)) {
-      out[key] = key === 'arguments' ? unwrap(child) : visit(child);
+      out[key] = key === 'arguments' || (value.type === 'custom_tool_call' && value.name === 'apply_patch' && key === 'input')
+        ? unwrap(child)
+        : visit(child);
     }
     return out;
   };
   return visit(payload);
+});
+const projectResponsesSseFrameForClientWithNativeMock = jest.fn((input: any) => {
+  const data = input.data;
+  const hasFreeformApplyPatch = input.toolsRaw.some((tool: any) =>
+    tool?.name === 'apply_patch' && tool?.format?.type === 'grammar'
+  );
+  if (!hasFreeformApplyPatch) {
+    return { emit: true, frame: input.frame, state: input.state };
+  }
+  const state = {
+    pendingApplyPatchArgumentDeltas: { ...(input.state?.pendingApplyPatchArgumentDeltas ?? {}) },
+    applyPatchCallIds: [...(input.state?.applyPatchCallIds ?? [])],
+    emittedApplyPatchDoneCallIds: [...(input.state?.emittedApplyPatchDoneCallIds ?? [])],
+  };
+  const unwrap = (value: unknown) => {
+    if (typeof value !== 'string') return value;
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && typeof (parsed as any).patch === 'string') {
+        return (parsed as any).patch;
+      }
+    } catch {
+      return value;
+    }
+    return value;
+  };
+  const callId = typeof data.call_id === 'string'
+    ? data.call_id
+    : typeof data.item?.call_id === 'string'
+      ? data.item.call_id
+      : 'call_apply_patch';
+  if (data.item?.type === 'function_call' && data.item?.name === 'apply_patch' && !state.applyPatchCallIds.includes(callId)) {
+    state.applyPatchCallIds.push(callId);
+  }
+  if (input.eventName === 'response.function_call_arguments.delta' && state.applyPatchCallIds.includes(callId)) {
+    state.pendingApplyPatchArgumentDeltas[callId] = `${state.pendingApplyPatchArgumentDeltas[callId] ?? ''}${data.delta ?? ''}`;
+    return { emit: false, frame: '', state };
+  }
+  if (data.name === 'apply_patch' || data.item?.name === 'apply_patch') {
+    const rawArguments = typeof data.arguments === 'string' ? data.arguments : data.item?.arguments;
+    const inputText = unwrap(rawArguments);
+    if (input.eventName === 'response.function_call_arguments.done') {
+      if (state.emittedApplyPatchDoneCallIds.includes(callId)) {
+        return { emit: false, frame: '', state };
+      }
+      state.emittedApplyPatchDoneCallIds.push(callId);
+      delete state.pendingApplyPatchArgumentDeltas[callId];
+      state.applyPatchCallIds = state.applyPatchCallIds.filter((id) => id !== callId);
+      const frameData = { type: 'response.output_item.done', item: { type: 'custom_tool_call', name: 'apply_patch', call_id: callId, input: inputText } };
+      return { emit: true, frame: `event: response.output_item.done\ndata: ${JSON.stringify(frameData)}\n\n`, state };
+    }
+    const next = JSON.parse(JSON.stringify(data));
+    if (next.item?.type === 'function_call') {
+      next.item = { type: 'custom_tool_call', name: 'apply_patch', call_id: callId, input: inputText };
+    }
+    if (next.response) {
+      next.response = projectResponsesClientBodyForClientWithNativeMock(next.response, input.toolsRaw);
+    }
+    return { emit: true, frame: `event: ${input.eventName}\ndata: ${JSON.stringify(next)}\n\n`, state };
+  }
+  if (data.response) {
+    const next = { ...data, response: projectResponsesClientBodyForClientWithNativeMock(data.response, input.toolsRaw) };
+    return { emit: true, frame: `event: ${input.eventName}\ndata: ${JSON.stringify(next)}\n\n`, state };
+  }
+  return { emit: true, frame: input.frame, state };
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -43,7 +118,8 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   importCoreDist: jest.fn(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return {
-      normalizeResponsesToolCallArgumentsForClientWithNative: normalizeResponsesToolCallArgumentsForClientWithNativeMock,
+      projectResponsesClientBodyForClientWithNative: projectResponsesClientBodyForClientWithNativeMock,
+      projectResponsesSseFrameForClientWithNative: projectResponsesSseFrameForClientWithNativeMock,
     };
   }),
   isToolCallContinuationResponseNative: jest.fn(() => false),
@@ -125,7 +201,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     );
     await waitForEnd(res);
 
-    expect(normalizeResponsesToolCallArgumentsForClientWithNativeMock).toHaveBeenCalledWith(
+    expect(projectResponsesClientBodyForClientWithNativeMock).toHaveBeenCalledWith(
       expect.any(Object),
       [{ type: 'custom', name: 'apply_patch', format: { type: 'grammar' } }],
     );

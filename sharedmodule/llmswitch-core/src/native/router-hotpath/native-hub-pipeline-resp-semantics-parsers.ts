@@ -6,6 +6,7 @@ import type {
   ProviderSseStreamReadErrorDescriptor,
   ProviderResponseToolCallSummary,
   RespInboundSseErrorDescriptor,
+  ResponsesClientSseFrameProjection,
   ResponsesHostPolicyResult
 } from './native-hub-pipeline-resp-semantics-types.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
@@ -220,6 +221,50 @@ export function parseResponsesHostPolicyResult(raw: string): ResponsesHostPolicy
   return {
     shouldStripHostManagedFields: row.shouldStripHostManagedFields,
     targetProtocol
+  };
+}
+
+export function parseResponsesClientSseFrameProjection(raw: string): ResponsesClientSseFrameProjection | null {
+  const row = parseRecord(raw, 'parseResponsesClientSseFrameProjection');
+  if (!row || typeof row.emit !== 'boolean' || typeof row.frame !== 'string') {
+    return null;
+  }
+  const state = row.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return null;
+  }
+  const stateRecord = state as Record<string, unknown>;
+  const pending = stateRecord.pendingApplyPatchArgumentDeltas;
+  if (pending !== undefined && (!pending || typeof pending !== 'object' || Array.isArray(pending))) {
+    return null;
+  }
+  for (const value of Object.values((pending ?? {}) as Record<string, unknown>)) {
+    if (typeof value !== 'string') {
+      return null;
+    }
+  }
+  const applyPatchCallIds = stateRecord.applyPatchCallIds;
+  const emittedApplyPatchDoneCallIds = stateRecord.emittedApplyPatchDoneCallIds;
+  if (
+    applyPatchCallIds !== undefined
+    && (!Array.isArray(applyPatchCallIds) || !applyPatchCallIds.every((value) => typeof value === 'string'))
+  ) {
+    return null;
+  }
+  if (
+    emittedApplyPatchDoneCallIds !== undefined
+    && (!Array.isArray(emittedApplyPatchDoneCallIds) || !emittedApplyPatchDoneCallIds.every((value) => typeof value === 'string'))
+  ) {
+    return null;
+  }
+  return {
+    emit: row.emit,
+    frame: row.frame,
+    state: {
+      pendingApplyPatchArgumentDeltas: (pending ?? {}) as Record<string, string>,
+      applyPatchCallIds: (applyPatchCallIds ?? []) as string[],
+      emittedApplyPatchDoneCallIds: (emittedApplyPatchDoneCallIds ?? []) as string[],
+    },
   };
 }
 
