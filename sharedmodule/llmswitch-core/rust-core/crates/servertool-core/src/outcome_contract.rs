@@ -65,6 +65,7 @@ pub enum ServertoolOutcomeError {
     },
     DeniedTool(String),
     DeniedMarker(&'static str),
+    DeniedInternalCarrier(&'static str),
     MissingField(&'static str),
     InvalidField(&'static str),
 }
@@ -88,6 +89,9 @@ impl std::fmt::Display for ServertoolOutcomeError {
             }
             ServertoolOutcomeError::DeniedMarker(marker) => {
                 write!(f, "SERVERTOOL_DENIED_CLI_MARKER: {marker}")
+            }
+            ServertoolOutcomeError::DeniedInternalCarrier(carrier) => {
+                write!(f, "SERVERTOOL_DENIED_INTERNAL_CARRIER: {carrier}")
             }
             ServertoolOutcomeError::MissingField(field) => {
                 write!(f, "SERVERTOOL_OUTCOME_MISSING_FIELD: {field}")
@@ -146,6 +150,7 @@ pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_
     input: ServertoolHubRespChatProcess03Input,
 ) -> Result<ServertoolClientExecCliProjection01Planned, ServertoolOutcomeError> {
     validate_outcome(&input.tool_name, ServertoolOutcome::ClientExecCliProjection)?;
+    validate_no_internal_carrier(&input.input)?;
     let flow_id = match input.tool_name.as_str() {
         "stop_message_auto" => {
             let flow_id = resolve_flow_id(&input, "stop_message_flow")?;
@@ -313,6 +318,48 @@ fn validate_no_denied_cli_marker(command: &str) -> Result<(), ServertoolOutcomeE
         if command.contains(marker) {
             return Err(ServertoolOutcomeError::DeniedMarker(marker));
         }
+    }
+    Ok(())
+}
+
+const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
+    "__rt",
+    "__nativeResponsePlan",
+    "metadata",
+    "metaCarrier",
+    "snapshot",
+    "debug",
+    "debugCarrier",
+    "ticket",
+];
+
+fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolOutcomeError> {
+    match value {
+        Value::Object(map) => {
+            for key in map.keys() {
+                for denied in DENIED_INTERNAL_CARRIER_KEYS {
+                    if key == denied {
+                        return Err(ServertoolOutcomeError::DeniedInternalCarrier(denied));
+                    }
+                }
+            }
+            for item in map.values() {
+                validate_no_internal_carrier(item)?;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_no_internal_carrier(item)?;
+            }
+        }
+        Value::String(text) => {
+            for denied in DENIED_INTERNAL_CARRIER_KEYS {
+                if text.contains(denied) {
+                    return Err(ServertoolOutcomeError::DeniedInternalCarrier(denied));
+                }
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -653,6 +700,25 @@ mod tests {
         )
         .expect_err("old marker must be denied");
         assert_eq!(err, ServertoolOutcomeError::DeniedMarker("old_cli_"));
+    }
+
+    #[test]
+    fn internal_carrier_in_projection_input_fails_fast() {
+        let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "servertool_fixture".to_string(),
+                flow_id: None,
+                input: json!({"metadata":{"debug":true}}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("internal carrier must be denied");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::DeniedInternalCarrier("metadata")
+        );
     }
 
     #[test]
