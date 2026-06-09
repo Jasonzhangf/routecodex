@@ -22,6 +22,8 @@ import type {
   ProviderProtocol,
 } from "./hub-pipeline-types.js";
 import type { StageRecorder } from "../format-adapters/index.js";
+
+// feature_id: hub.runtime_ingress_bridge
 export type {
   HubPipelineConfig,
   HubPipelineNodeResult,
@@ -33,30 +35,16 @@ export type {
   ProviderProtocol,
 } from "./hub-pipeline-types.js";
 
-
-
-
-
-
-function logHubPipelineNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
-  const detailText = details && Object.keys(details).length > 0
-    ? ` details=${JSON.stringify(details)}`
-    : "";
-  const reason = error instanceof Error ? error.message : String(error ?? "unknown");
-  console.warn(`[hub-pipeline] ${stage} failed (non-blocking): ${reason}${detailText}`);
-}
-
-function registerProviderRuntimeHooks(args: { owner: unknown; routerEngine: VirtualRouterRuntime; }): void {
+function registerHubPipelineRuntimeIngressBridge(args: { owner: unknown; routerEngine: VirtualRouterRuntime; }): void {
   void args.owner;
   args.routerEngine.registerProviderRuntimeIngress();
 }
 
-function unregisterProviderRuntimeHooks(routerEngine: VirtualRouterRuntime): void {
-  try { routerEngine.unregisterProviderRuntimeIngress(); }
-  catch (disposeError) { logHubPipelineNonBlockingError("dispose.provider-runtime-ingress.unregister", disposeError); }
+function unregisterHubPipelineRuntimeIngressBridge(routerEngine: VirtualRouterRuntime): void {
+  routerEngine.unregisterProviderRuntimeIngress();
 }
 
-function updateRouterRuntimeDeps(args: {
+function updateHubPipelineRuntimeDepsBridge(args: {
   deps: { healthStore?: HubPipelineConfig["healthStore"] | null; routingStateStore?: HubPipelineConfig["routingStateStore"] | null; };
   config: HubPipelineConfig;
   routerEngine: VirtualRouterRuntime;
@@ -78,11 +66,11 @@ function createHubPipelineRouterEngine(config: HubPipelineConfig): VirtualRouter
 }
 
 function registerHubPipelineRuntime(args: { owner: unknown; routerEngine: VirtualRouterRuntime }): void {
-  registerProviderRuntimeHooks(args);
+  registerHubPipelineRuntimeIngressBridge(args);
 }
 
 function disposeHubPipelineRuntime(routerEngine: VirtualRouterRuntime): void {
-  unregisterProviderRuntimeHooks(routerEngine);
+  unregisterHubPipelineRuntimeIngressBridge(routerEngine);
 }
 
 function applyHubPipelineRuntimeDeps(args: {
@@ -93,7 +81,7 @@ function applyHubPipelineRuntimeDeps(args: {
   config: HubPipelineConfig;
   routerEngine: VirtualRouterRuntime;
 }): void {
-  updateRouterRuntimeDeps(args);
+  updateHubPipelineRuntimeDepsBridge(args);
 }
 
 function updateHubPipelineVirtualRouterConfig(args: { nextConfig: VirtualRouterConfig; config: HubPipelineConfig; routerEngine: VirtualRouterRuntime; }): void {

@@ -69,4 +69,31 @@ describe('HubPipeline runtime ingress wiring', () => {
 
     expect(() => pipeline.updateRuntimeDeps({ healthStore: null })).toThrow('native deps rejected');
   });
+
+  it('fails fast when native router runtime ingress unregister fails', () => {
+    const pipeline = new HubPipeline({
+      virtualRouter: {} as any
+    });
+    engineInstances[0]!.unregisterProviderRuntimeIngress.mockImplementationOnce(() => {
+      throw new Error('native unregister rejected');
+    });
+
+    expect(() => pipeline.dispose()).toThrow('native unregister rejected');
+  });
+
+  it('keeps HubPipeline runtime ingress bridge owner names queryable by function map', async () => {
+    const fs = await import('node:fs');
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
+      'utf8'
+    );
+
+    for (const bridgeName of [
+      'registerHubPipelineRuntimeIngressBridge',
+      'unregisterHubPipelineRuntimeIngressBridge',
+      'updateHubPipelineRuntimeDepsBridge',
+    ]) {
+      expect(source).toContain(bridgeName);
+    }
+  });
 });

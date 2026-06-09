@@ -345,6 +345,23 @@ verification:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
       - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
 
+  - feature_id: hub.runtime_ingress_bridge
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/server/runtime/http-server/virtual-router-current-turn.blackbox.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:min
+    notes:
+      - HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking.
+
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high
     unit:

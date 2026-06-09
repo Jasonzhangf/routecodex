@@ -2781,3 +2781,9 @@ Tags: hub-pipeline, dead-code, external-types, compatibility-shim, residue-gate,
 - `data` may only carry business payload and must forbid metadata/control/error carriers such as `metadata`, `metaCarrier`, `runtimeMetadata`, and `errorCarrier`.
 - Gates: Rust contract unit tests plus `tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts` and `tests/red-tests/hub_pipeline_type_topology_contract.test.ts` lock the split; function/verification maps list the contract help as part of `hub.metadata_boundary`.
 Tags: hub-pipeline, control-data, contract-help, rust-owner, metadata-boundary, 2026-06-09
+
+## 2026-06-09 HubPipeline runtime ingress bridge fail-fast
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts` is only TS lifecycle glue for native Virtual Router runtime ingress/deps APIs. Do not restore non-blocking catch/logger around `registerProviderRuntimeIngress`, `unregisterProviderRuntimeIngress`, or `updateDeps`.
+- Native lifecycle/deps failures must surface fail-fast; route selection, health, cooldown, and dependency semantics remain Rust/native owned.
+- Function/verification map feature: `hub.runtime_ingress_bridge`; gates include `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+Tags: hub-pipeline, runtime-ingress, fail-fast, thin-shell, function-map, 2026-06-09

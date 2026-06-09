@@ -2409,6 +2409,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('HubPipeline runtime ingress hooks must not swallow native lifecycle failures', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'keeps non-blocking HubPipeline lifecycle logger', pattern: /logHubPipelineNonBlockingError|failed \(non-blocking\)/ },
+      { label: 'swallows native runtime ingress unregister failure', pattern: /catch\s*\([^)]*\)\s*\{[\s\S]*?unregisterProviderRuntimeIngress/ },
+      { label: 'keeps deleted provider runtime ingress dispose marker', pattern: /dispose\.provider-runtime-ingress\.unregister/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
     const source = fs.readFileSync(filePath, 'utf8');
