@@ -3742,8 +3742,14 @@ function checkStopMessageBlockedReportRustOwner() {
   }
   if (!tsBlockedReport.includes('extractBlockedReportFromMessages')) {
     fail(
-      'stop-message-blocked-report-ts-migration-pending',
+      'stop-message-blocked-report-no-ts-owner',
       'blocked-report.ts must either stay as a callable native thin wrapper or be physically deleted after native wiring'
+    );
+  }
+  if (!tsBlockedReport.includes('extractStopMessageBlockedReportFromMessagesWithNative')) {
+    fail(
+      'stop-message-blocked-report-native-bridge',
+      'blocked-report.ts must delegate blocked-report parsing to native Rust'
     );
   }
   for (const keyword of [
@@ -3754,15 +3760,29 @@ function checkStopMessageBlockedReportRustOwner() {
     'function extractBalancedJsonObjectStrings',
   ]) {
     if (tsBlockedReport.includes(keyword)) {
-      warn(
-        'stop-message-blocked-report-ts-migration-pending',
-        `TS blocked-report semantic remains pending native bridge deletion: ${keyword}`
+      fail(
+        'stop-message-blocked-report-no-ts-owner',
+        `TS blocked-report semantic must not remain after native wiring: ${keyword}`
       );
     }
   }
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  assertContains(
+    'stop-message-blocked-report-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'extractStopMessageBlockedReportFromMessagesWithNative'
+  );
+  assertContains(
+    'stop-message-blocked-report-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'extractStopMessageBlockedReportFromMessagesJson'
+  );
   pass(
     'stop-message-blocked-report-rust-owner',
-    'servertool-core owns blocked-report parser contract; TS semantic deletion is tracked'
+    'servertool-core owns blocked-report parser contract; TS is native thin wrapper only'
   );
 }
 

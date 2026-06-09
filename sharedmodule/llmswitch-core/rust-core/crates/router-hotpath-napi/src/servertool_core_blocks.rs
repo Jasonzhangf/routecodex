@@ -12,6 +12,7 @@ use servertool_core::backend_route_contract::{
     ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
     ServertoolVisionEligibilityInput,
 };
+use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
@@ -56,6 +57,15 @@ pub fn normalize_stop_gateway_context_json(input_json: &str) -> Result<String, S
         .map_err(|e| format!("deserialize stop gateway context input: {e}"))?;
     let context = stop_gateway_context::normalize_stop_gateway_context(&input);
     serde_json::to_string(&context).map_err(|e| format!("serialize stop gateway context: {e}"))
+}
+
+pub fn extract_stop_message_blocked_report_from_messages_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize blocked-report messages input: {e}"))?;
+    serde_json::to_string(&blocked_report_contract::extract_blocked_report_from_messages(&input))
+        .map_err(|e| format!("serialize blocked-report output: {e}"))
 }
 
 pub fn normalize_stop_message_compare_context_json(input_json: &str) -> Result<String, String> {

@@ -307,6 +307,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveStopMessageRouterMetadataJson",
   "resolveGovernanceContextJson",
   "normalizeStopGatewayContextJson",
+  "extractStopMessageBlockedReportFromMessagesJson",
   "normalizeStopMessageCompareContextJson",
   "formatStopMessageCompareContextJson",
   "resolveStopMessageSessionScopeJson",

@@ -31,6 +31,9 @@ export async function runPrimaryServerToolEngineSelection(args: {
 
 function toEngineOverrides(plan: EngineSelectionOverridesPlan): Partial<ServerSideToolEngineOptions> {
   return {
+    ...(Array.isArray(plan.includeAutoHookIds) && plan.includeAutoHookIds.length > 0
+      ? { primaryAutoHookAttempt: true }
+      : {}),
     ...(typeof plan.disableToolCallHandlers === 'boolean'
       ? { disableToolCallHandlers: plan.disableToolCallHandlers }
       : {}),

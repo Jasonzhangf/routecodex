@@ -1300,6 +1300,14 @@ pub fn normalize_stop_gateway_context_json(input_json: String) -> NapiResult<Str
 }
 
 #[napi]
+pub fn extract_stop_message_blocked_report_from_messages_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::extract_stop_message_blocked_report_from_messages_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn normalize_stop_message_compare_context_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::normalize_stop_message_compare_context_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1814,7 +1822,6 @@ pub fn clean_routing_instruction_markers_json(request_json: String) -> NapiResul
     serde_json::to_string(&request).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-
 #[napi]
 pub fn extract_tool_calls_from_reasoning_text_json(
     text: String,
@@ -2323,7 +2330,6 @@ pub fn filter_out_executed_server_tool_calls_json(
     );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-
 
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,

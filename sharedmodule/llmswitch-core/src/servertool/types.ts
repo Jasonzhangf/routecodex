@@ -53,6 +53,7 @@ export interface ServerSideToolEngineOptions {
   requestId: string;
   providerProtocol: string;
   disableToolCallHandlers?: boolean;
+  primaryAutoHookAttempt?: boolean;
   includeAutoHookIds?: string[];
   excludeAutoHookIds?: string[];
   includeToolCallHandlerNames?: string[];

@@ -566,6 +566,14 @@ export interface ServertoolErrorPlan {
   details: Record<string, unknown>;
 }
 
+export interface StopMessageBlockedReport {
+  summary: string;
+  blocker: string;
+  impact?: string;
+  nextAction?: string;
+  evidence: string[];
+}
+
 // ── Stop gateway context ────────────────────────────────────────────────────
 
 export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
@@ -627,6 +635,42 @@ function parseStopGatewayContextPayload(resultJson: string, capability: string):
     reason: record.reason.trim(),
     ...(Number.isInteger(choiceIndex) ? { choiceIndex: choiceIndex as number } : {}),
     ...(typeof hasToolCalls === 'boolean' ? { hasToolCalls } : {}),
+  };
+}
+
+export function extractStopMessageBlockedReportFromMessagesWithNative(messages: unknown[]): StopMessageBlockedReport | null {
+  const capability = 'extractStopMessageBlockedReportFromMessagesJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractStopMessageBlockedReportFromMessagesJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(messages));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractStopMessageBlockedReportFromMessagesJson native returned non-string: ${typeof resultJson}`);
+  }
+  const raw = JSON.parse(resultJson) as unknown;
+  if (raw === null) {
+    return null;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('extractStopMessageBlockedReportFromMessagesJson native returned invalid report');
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.summary !== 'string' ||
+    typeof record.blocker !== 'string' ||
+    !Array.isArray(record.evidence) ||
+    !record.evidence.every((entry) => typeof entry === 'string')
+  ) {
+    throw new Error('extractStopMessageBlockedReportFromMessagesJson native returned invalid fields');
+  }
+  const nextAction = record.nextAction ?? record.next_action;
+  return {
+    summary: record.summary,
+    blocker: record.blocker,
+    ...(typeof record.impact === 'string' ? { impact: record.impact } : {}),
+    ...(typeof nextAction === 'string' ? { nextAction } : {}),
+    evidence: record.evidence
   };
 }
 
@@ -2447,6 +2491,12 @@ export function planServertoolBackendRoutePolicyWithNative(
     throw new Error('planServertoolBackendRoutePolicyJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    if (typeof nativeError.message === 'string' && nativeError.message.trim()) {
+      throw new Error(nativeError.message.trim());
+    }
+  }
   if (typeof resultJson !== 'string') {
     throw new Error(`planServertoolBackendRoutePolicyJson native returned non-string: ${typeof resultJson}`);
   }

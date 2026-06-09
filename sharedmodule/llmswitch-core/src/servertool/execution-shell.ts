@@ -512,6 +512,9 @@ export async function runAutoHookExecutionQueue(args: {
       } catch {
         // best-effort
       }
+      if (args.queueName === 'A_optional' && args.options.primaryAutoHookAttempt === true) {
+        continue;
+      }
       throw error;
     }
 
