@@ -142,7 +142,7 @@
 #### D. web-search / review / media / marker-strip / readiness
 - TS 目标文件：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-review.ts`
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts` 已于 2026-06-09 物理删除；media/image placeholder 语义不得通过 TS process helper 恢复。
 - Rust 真源：
   - `chat_web_search_intent.rs`
   - `chat_web_search_tool_schema.rs`

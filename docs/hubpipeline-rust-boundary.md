@@ -4,7 +4,7 @@
 - L1-L7 `purpose`：本文档用途。
 - L9-L18 `classification`：process/ 目录逐文件分类。
 - L20-L23 `runtime-infra`：runtime 基础设施文件（非 pipeline 语义）。
-- L25-L27 `rust-truth`：Rust 真源路径索引。
+- L25+ `rust-truth`：Rust 真源路径索引。
 
 ## 用途
 记录 `src/conversion/hub/process/` 与 `src/conversion/hub/pipeline/` 下仍保留 TS 文件的语义归属判定。
@@ -20,11 +20,6 @@
 | 文件 | 性质 | Rust 真源 |
 |---|---|---|
 | `chat-process-request-sanitizer.ts` | 消息过滤（空 assistant / 模板 / mirror / tool_call id 归一）→ Rust | `shared_response_compat.rs` |
-
-### 编排薄壳（TS 仅调度 + native 调用，无 payload 语义重写）
-| 文件 | native 调用 | 性质 |
-|---|---|---|
-| `chat-process-media.ts` | `analyzeChatProcessMedia` 等 | 薄壳：media 分析结果透传 |
 
 ### Runtime 基础设施（依赖 Node.js runtime，不属于 pipeline 语义）
 | 文件 | 性质 | 不可迁 Rust 原因 |
@@ -43,3 +38,4 @@
 - 2026-06-07 Phase 0：`hub-stage-timing-measure-blocks.ts` 及同名 generated JS/DTS/map 已删除；`hub-stage-timing.ts` 是 timing measure 唯一 TS owner。
 - 2026-06-08 Phase 0：`chat-process-generic-marker-strip.ts` 已证明为 0 live consumer 的旧 TS wrapper；generic marker strip 与 routing marker 保留判断已由 Rust `req_process_stage1_tool_governance_blocks/request_sanitizer.rs` 主链拥有，文件已物理删除并由 residue audit 锁住不得复活。
 - 2026-06-08 Phase 0：`chat-process-node-result.ts` runtime functions 已无 live caller；唯一 type-only metadata 引用已内联到 `hub-pipeline-types.ts`，Rust/native `chat_node_result_semantics.rs` 与 `native-chat-process-node-result-semantics.ts` 继续作为 active owner。
+- 2026-06-09 Phase 0：`chat-process-media.ts` 已证明为 0 live consumer 的旧 TS media wrapper；media/image placeholder 语义由 Rust/native `chat_process_media_semantics.rs`、`shared_responses_conversation_utils.rs`、req/outbound format build 和 Virtual Router capability filtering 拥有，文件已物理删除并由 deleted-path gate 锁住不得复活。

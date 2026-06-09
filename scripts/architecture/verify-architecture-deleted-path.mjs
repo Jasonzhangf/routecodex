@@ -99,6 +99,7 @@ const deletedPathDenylist = [
   'src/providers/core/utils/preflight-validator.ts',
   'src/providers/core/utils/tool-result-text.ts',
   'src/providers/core/utils/transformation-engine.ts',
+  'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts',
 ];
 const deletedContentDenylist = [
   {

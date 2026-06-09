@@ -21,12 +21,10 @@
 - 风险：若 native 路径已有 protocol 解析，TS 侧 fallback 会绕过真源。
 - 修复：`fallbackProtocol` 重命名为 `plannedProtocol`，并去除“兜底语义”表述；协议选择改为确定性优先级：`target.outboundProfile -> metadata.providerProtocol -> plannedProtocol`。
 
-### B2. `repairIncompleteToolCalls`
-- 文件：`hub/process/chat-process-media.ts:34`
-- 语义：修复不完整 tool_calls（TS 端 repair）。
-- 风险：与 native tool governor 可能重复。
-- 建议：确认 Rust 端 tool governance 是否已覆盖，若已覆盖则删除。
- 修复：**函数已物理删除**（原本恒等返回，无实际语义）；调用处已清除。
+### B2. `chat-process-media.ts`（已删除）
+- 文件：`hub/process/chat-process-media.ts`
+- 原风险：保留 TS media/image placeholder helper 会和 Rust media/capability 真源重复。
+- 修复：**文件已物理删除**。media/image placeholder 语义由 Rust/native `chat_process_media_semantics.rs`、`shared_responses_conversation_utils.rs`、req/outbound format build 和 Virtual Router capability filtering 拥有。
 
 ### B3. `normalizeAssistantToolCallsFast` / `normalizeToolDefinitionsFast`
 - 文件：`hub/operation-table/semantic-mappers/chat-mapper-fastpath.ts`

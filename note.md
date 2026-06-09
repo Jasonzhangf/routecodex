@@ -18613,3 +18613,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline compat type residue pruning:
 - Exact consumer scan showed `compat/compat-types.ts` only has live exports `AnthropicClaudeCodeSystemPromptConfig` and `CompatApplicationResult`; old compat profile/stage/mapping/filter/protocol/action config type shells had no source/test/script consumers.
 - Pruned `compat-types.ts` to live exports only and added residue audit gate to block restoring retired profile/mapping aliases.
+
+2026-06-09 HubPipeline chat-process-media dead file deletion:
+- Exact symbol/path scan showed `stripHistoricalImageAttachments`, `stripHistoricalVisualToolOutputs`, `containsImageAttachment`, and `chat-process-media.ts` had no source/test/script runtime consumer.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts`; current media/image placeholder semantics remain Rust-owned in `chat_process_media_semantics.rs`, `shared_responses_conversation_utils.rs`, and outbound/native route capability logic. Added deleted-path gate.

@@ -2793,3 +2793,9 @@ Tags: hub-pipeline, runtime-ingress, fail-fast, thin-shell, function-map, 2026-0
 - Do not restore retired compat profile/stage/mapping/filter/protocol/action config shells (`CompatProfileConfig`, `CompatStageConfig`, `MappingInstruction`, `FilterInstruction`, `CompatDirection`, `CompatNativeProtocolToken`, or action config aliases).
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` scans `compat-types.ts` for these retired type shells.
 Tags: hub-pipeline, compat-types, dead-code, type-shell-pruning, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline chat-process-media TS shell removed
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts` was zero-consumer TS media shell and is physically deleted. Do not restore `stripHistoricalImageAttachments`, `stripHistoricalVisualToolOutputs`, or `containsImageAttachment` there.
+- Media/image placeholder behavior belongs in Rust/native owners (`chat_process_media_semantics.rs`, `shared_responses_conversation_utils.rs`, req/outbound format build, and Virtual Router capability filtering), not in a TS chat-process helper.
+- Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` keeps the deleted file absent.
+Tags: hub-pipeline, multimodal, image-placeholder, dead-code, rust-owner, residue-gate, 2026-06-09
