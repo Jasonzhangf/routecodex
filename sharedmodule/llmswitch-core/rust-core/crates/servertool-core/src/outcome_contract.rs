@@ -333,6 +333,8 @@ const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
     "debug",
     "debugCarrier",
     "ticket",
+    "restorationHandle",
+    "restorationStore",
 ];
 
 fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolOutcomeError> {
@@ -784,6 +786,28 @@ mod tests {
             err,
             ServertoolOutcomeError::DeniedInternalCarrier("snapshot")
         );
+    }
+
+    #[test]
+    fn restoration_handles_are_rejected_by_outcome_builders() {
+        for (key, expected) in [
+            ("ticket", "ticket"),
+            ("restorationHandle", "restorationHandle"),
+            ("restorationStore", "restorationStore"),
+        ] {
+            let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+                ServertoolHubRespChatProcess03Input {
+                    tool_name: "servertool_fixture".to_string(),
+                    flow_id: None,
+                    input: json!({ key: "legacy" }),
+                    repeat_count: None,
+                    max_repeats: None,
+                    reasoning_text: None,
+                },
+            )
+            .expect_err("restoration carrier must be denied");
+            assert_eq!(err, ServertoolOutcomeError::DeniedInternalCarrier(expected));
+        }
     }
 
     #[test]
