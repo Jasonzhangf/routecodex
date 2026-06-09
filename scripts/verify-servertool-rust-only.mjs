@@ -782,6 +782,7 @@ function checkStandaloneServertoolBinary() {
     assertContains('servertool-cli-input-contract-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, needle);
   }
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
+  assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn unknown_tool_fails_fast_without_client_stdout');
   for (const toolName of ['web_search', 'vision_auto', 'memory_cache_auto']) {
     assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, toolName);
     assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, `SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}`);
