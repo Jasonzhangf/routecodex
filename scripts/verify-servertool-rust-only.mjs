@@ -763,6 +763,21 @@ function checkStandaloneServertoolBinary() {
     assertContains('servertool-cli-denied-marker-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, needle);
   }
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'SERVERTOOL_DENIED_INTERNAL_CARRIER: serverToolFollowup');
+  for (const needle of [
+    'fn missing_continuation_prompt_fails_fast',
+    'fn invalid_stop_message_flow_id_fails_fast',
+    'fn invalid_stop_message_repeat_budget_fails_fast',
+    'fn invalid_explicit_repeat_args_fail_fast',
+    'fn non_object_input_json_fails_fast',
+    'fn malformed_input_json_fails_fast',
+    'SERVERTOOL_CLI_MISSING_FIELD: continuationPrompt',
+    'SERVERTOOL_CLI_INVALID_FIELD: flowId',
+    'SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats',
+    'SERVERTOOL_CLI_INVALID_FIELD: inputJson',
+    'SERVERTOOL_CLI_INVALID_JSON:',
+  ]) {
+    assertContains('servertool-cli-input-contract-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, needle);
+  }
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
   for (const toolName of ['web_search', 'vision_auto', 'memory_cache_auto']) {
     assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, toolName);
