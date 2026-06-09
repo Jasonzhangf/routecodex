@@ -234,8 +234,8 @@ fn extract_json_code_blocks(text: &str) -> Vec<String> {
     let mut rest = text;
     while let Some(start) = rest.find("```") {
         rest = &rest[start + 3..];
-        if let Some(after_lang) = rest.strip_prefix("json") {
-            rest = after_lang;
+        if rest.len() >= 4 && rest[..4].eq_ignore_ascii_case("json") {
+            rest = &rest[4..];
         }
         rest = rest.trim_start();
         let Some(end) = rest.find("```") else {
@@ -381,5 +381,23 @@ mod tests {
         ]))
         .expect("report");
         assert_eq!(report.evidence, vec!["quota=0"]);
+    }
+
+    #[test]
+    fn extracts_uppercase_json_code_block_language() {
+        let report = extract_blocked_report_from_messages(&json!([
+            {
+                "content": concat!(
+                    "blocked detail\n",
+                    "```JSON\n",
+                    "{\"type\":\"blocked\",\"title\":\"auth blocked\",\"reason\":\"token expired\"}\n",
+                    "```"
+                )
+            }
+        ]))
+        .expect("report");
+
+        assert_eq!(report.summary, "auth blocked");
+        assert_eq!(report.blocker, "token expired");
     }
 }

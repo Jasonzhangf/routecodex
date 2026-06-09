@@ -3703,6 +3703,7 @@ function checkStopMessageBlockedReportRustOwner() {
     'pub fn extract_captured_message_text',
     'pub fn extract_text_from_message_content',
     'StopMessageBlockedReport',
+    'fn extracts_uppercase_json_code_block_language',
   ]) {
     assertContains(
       'stop-message-blocked-report-rust-owner',
