@@ -7,9 +7,6 @@ import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 import type { HttpRequestExecutorDeps, PreparedHttpRequest, PreparedRequestExecutor } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import {
-  delayBeforeProviderHttpRetry,
-  getProviderHttpRetryLimit,
-  shouldRetryProviderHttpError,
   tryRecoverOAuthAndReplay as tryRecoverProviderOAuthAndReplay
 } from './provider-http-executor-utils.js';
 
@@ -56,9 +53,6 @@ export function buildProviderRequestExecutorDeps(args: BuildProviderRequestExecu
     getClientRequestIdFromContext: (context) => ProviderPayloadUtils.getClientRequestIdFromContext(context),
     wrapUpstreamSseResponse: args.wrapUpstreamSseResponse,
     executePreparedRequest: args.executePreparedRequest,
-    getHttpRetryLimit: () => getProviderHttpRetryLimit(),
-    shouldRetryHttpError: (error, attempt, maxAttempts) => shouldRetryProviderHttpError(error, attempt, maxAttempts),
-    delayBeforeHttpRetry: (attempt) => delayBeforeProviderHttpRetry(attempt),
     tryRecoverOAuthAndReplay: (error, requestInfo, processedRequest, captureSse, context) => tryRecoverProviderOAuthAndReplay({
       error,
       requestInfo,

@@ -12,16 +12,15 @@ jest.unstable_mockModule('../../src/providers/core/utils/snapshot-writer.js', ()
 
 const { HttpRequestExecutor } = await import('../../src/providers/core/runtime/http-request-executor.ts');
 
-describe('HttpRequestExecutor retry request materialization', () => {
+describe('HttpRequestExecutor provider HTTP retry boundary', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     shouldCaptureProviderStreamSnapshots.mockReturnValue(false);
   });
 
-  it('re-prepares headers and body for retry attempts instead of reusing stale request material', async () => {
+  it('does not retry provider HTTP failures locally', async () => {
     const post = jest.fn()
-      .mockRejectedValueOnce(Object.assign(new Error('HTTP 502'), { statusCode: 502 }))
-      .mockResolvedValueOnce({ status: 200, data: { ok: true } });
+      .mockRejectedValue(Object.assign(new Error('HTTP 502'), { statusCode: 502 }));
 
     const httpClient = { post } as any;
     let sequence = 0;
@@ -41,14 +40,11 @@ describe('HttpRequestExecutor retry request materialization', () => {
       getEntryEndpointFromPayload: () => '/v1/chat/completions',
       getClientRequestIdFromContext: () => 'req_client_retry',
       wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ __sse_responses: stream }),
-      getHttpRetryLimit: () => 2,
-      shouldRetryHttpError: () => true,
-      delayBeforeHttpRetry: async () => {},
       normalizeHttpError: async (error: unknown) => error
     } as any;
 
     const executor = new HttpRequestExecutor(httpClient, deps);
-    const result = await executor.execute(
+    await expect(executor.execute(
       { data: { prompt: 'hello' } } as any,
       {
         requestId: 'req_retry_pow_refresh',
@@ -57,13 +53,10 @@ describe('HttpRequestExecutor retry request materialization', () => {
         providerKey: 'deepseek-web.3.deepseek-v4-pro',
         providerId: 'deepseek-web'
       } as any
-    );
+    )).rejects.toMatchObject({ statusCode: 502 });
 
-    expect(result).toEqual({ status: 200, data: { ok: true } });
-    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledTimes(1);
     expect(post.mock.calls[0]?.[2]?.['x-ds-pow-response']).toBe('pow-1');
-    expect(post.mock.calls[1]?.[2]?.['x-ds-pow-response']).toBe('pow-2');
-    expect(post.mock.calls[0]?.[1]).toEqual({ session_marker: 'session-1' });
-    expect(post.mock.calls[1]?.[1]).toEqual({ session_marker: 'session-2' });
+    expect(post.mock.calls[0]?.[1]).toEqual({ session_marker: 'session-0' });
   });
 });

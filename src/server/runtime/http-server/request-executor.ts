@@ -702,11 +702,6 @@ export class HubRequestExecutor implements RequestExecutor {
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
           requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
           retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
-          if (!requestLocalProviderRetryState) {
-            metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
-          } else {
-            delete metadataForAttempt.excludedProviderKeys;
-          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -1284,11 +1279,6 @@ export class HubRequestExecutor implements RequestExecutor {
               });
             }
             recordScopedErrorBackoff(scopedBackoffKey);
-          }
-          if (!requestLocalProviderRetryState) {
-            metadataForAttempt.excludedProviderKeys = Array.from(excludedProviderKeys);
-          } else {
-            delete metadataForAttempt.excludedProviderKeys;
           }
           retryAfterProviderFailure = true;
         } finally {

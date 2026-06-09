@@ -36,9 +36,6 @@ function createExecutor() {
     getEntryEndpointFromPayload: () => '/v1/responses',
     getClientRequestIdFromContext: () => 'req_client_sse',
     wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ __sse_responses: stream }),
-    getHttpRetryLimit: () => 1,
-    shouldRetryHttpError: () => false,
-    delayBeforeHttpRetry: async () => {},
     normalizeHttpError: async (error: unknown) => error
   } as any;
 
@@ -67,9 +64,6 @@ function createExecutorWithPreparedSseResponse() {
         headers: { 'content-type': 'text/event-stream' }
       };
     },
-    getHttpRetryLimit: () => 1,
-    shouldRetryHttpError: () => false,
-    delayBeforeHttpRetry: async () => {},
     normalizeHttpError: async (error: unknown) => error
   } as any;
 

@@ -1938,7 +1938,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     }));
     expect((fakePipeline.execute as jest.Mock).mock.calls[2][0].metadata).not.toHaveProperty('__routecodexRetryProviderKey');
     const stages = logStage.mock.calls.map((call) => call[0]);
-    expect(stages).not.toContain('provider.transport_backoff.recorded');
+    const secondPipelineStartIndex = stages.findIndex((stage, index) => index > 0 && stage === 'hub.start');
+    expect(stages.slice(0, secondPipelineStartIndex)).not.toContain('provider.transport_backoff.recorded');
+    expect(stages.filter((stage) => stage === 'provider.transport_backoff.recorded')).toHaveLength(1);
     expect(stages).not.toContain('server.global_error_backoff_wait');
   });
 

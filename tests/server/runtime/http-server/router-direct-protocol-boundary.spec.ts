@@ -5,10 +5,6 @@ describe('router direct protocol boundary', () => {
   afterEach(() => {
     jest.useRealTimers();
     resetSessionStormBackoffStateForTests();
-    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS;
-    delete process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS;
-    delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
   });
 
   function createRouterServer() {
@@ -89,8 +85,6 @@ describe('router direct protocol boundary', () => {
   it('does not record router-direct storm backoff when protocol mismatch is relayed', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
 
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());
@@ -132,9 +126,6 @@ describe('router direct protocol boundary', () => {
   });
 
   it('fails fast and records storm backoff for non-relayable router-direct skip errors', async () => {
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
-
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());
     attachRouterPort(server as any);
@@ -158,8 +149,6 @@ describe('router direct protocol boundary', () => {
   it('backs off repeated router-direct VR provider-unavailable failures without rewriting the error', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
 
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());

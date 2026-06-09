@@ -1,8 +1,17 @@
 import { jest } from '@jest/globals';
 import { resolveProviderRetryExecutionPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js';
 import { createRequestLocalTransientRetryTracker } from '../../../../../src/server/runtime/http-server/executor/request-executor-transient-retry-tracker.js';
+import { resetRequestExecutorRetryStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-state.js';
 
 describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
+  beforeEach(() => {
+    resetRequestExecutorRetryStateForTests();
+  });
+
+  afterEach(() => {
+    resetRequestExecutorRetryStateForTests();
+  });
+
   it('never retries the same provider for recoverable 429 when retrying', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 429'), {
@@ -42,7 +51,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toContain('minimax.key1.MiniMax-M3');
   });
 
-  it('switches recoverable HTTP 502 to an alternative provider without same-provider retry', async () => {
+  it('retries recoverable HTTP 502 on the same provider once before reroute', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
@@ -75,13 +84,14 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
-    expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
+    expect(plan.requestLocalTransient).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('recoverable_backoff_same_provider');
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
-  it('excludes current provider immediately for recoverable HTTP 502 when alternatives exist', async () => {
+  it('excludes current provider when recoverable HTTP 502 repeats for the same provider', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
@@ -111,15 +121,25 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       transientRetryTracker
     };
 
-    const plan = await resolveProviderRetryExecutionPlan({
+    const firstPlan = await resolveProviderRetryExecutionPlan({
       ...commonArgs,
       attempt: 1
     });
 
-    expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
-    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(firstPlan.shouldRetry).toBe(true);
+    expect(firstPlan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
+    expect(firstPlan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
+
+    const repeatPlan = await resolveProviderRetryExecutionPlan({
+      ...commonArgs,
+      attempt: 2
+    });
+
+    expect(repeatPlan.shouldRetry).toBe(true);
+    expect(repeatPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(repeatPlan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
+    expect(repeatPlan.excludedCurrentProvider).toBe(true);
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 

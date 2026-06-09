@@ -2994,6 +2994,7 @@ describe('HubRequestExecutor failover', () => {
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
 
     try {
+      const logStage = jest.fn();
       const deps = {
         runtimeManager,
         getHubPipeline: () => pipeline,
@@ -3002,7 +3003,7 @@ describe('HubRequestExecutor failover', () => {
             handleError: jest.fn(async () => undefined)
           }
         }),
-        logStage: jest.fn(),
+        logStage,
         stats: new StatsManager()
       };
 
@@ -3023,7 +3024,14 @@ describe('HubRequestExecutor failover', () => {
       expect(processB).toHaveBeenCalledTimes(1);
 
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-      expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
+      expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
+      const retryEvents = logStage.mock.calls
+        .filter((call) => call[0] === 'provider.retry')
+        .map((call) => call[2] as Record<string, unknown>);
+      expect(retryEvents.at(-1)).toEqual(expect.objectContaining({
+        providerKey: providerB,
+        excluded: [providerA, providerB]
+      }));
     } finally {
       if (previousAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -3232,11 +3240,11 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toMatch(/backoff=\d+ms/);
-      expect(switchLines[0]).toContain('switch=exclude_and_reroute');
-      expect(switchLines[0]).toContain('backoffScope=provider');
-      expect(switchLines[0]).toContain('decision=provider_backoff_then_reroute');
-      expect(processA).toHaveBeenCalledTimes(1);
-      expect(processB).toHaveBeenCalledTimes(1);
+      expect(switchLines[0]).toContain('switch=retry_same_provider_once');
+      expect(switchLines[0]).toContain('backoffScope=attempt');
+      expect(switchLines[0]).toContain('decision=recoverable_backoff_same_provider');
+      expect(processA).toHaveBeenCalledTimes(2);
+      expect(processB).toHaveBeenCalledTimes(0);
       expect(processC).toHaveBeenCalledTimes(0);
     } finally {
       warnSpy.mockRestore();

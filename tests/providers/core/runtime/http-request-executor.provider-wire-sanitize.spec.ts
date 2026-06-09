@@ -51,9 +51,6 @@ describe('HttpRequestExecutor provider wire sanitize', () => {
       getEntryEndpointFromPayload: () => '/v1/responses',
       getClientRequestIdFromContext: () => 'client_req',
       wrapUpstreamSseResponse: async () => ({}),
-      getHttpRetryLimit: () => 1,
-      shouldRetryHttpError: () => false,
-      delayBeforeHttpRetry: async () => undefined,
       resolveBusinessResponseError: () => undefined,
       normalizeHttpError: async (error: unknown) => error as any,
     });

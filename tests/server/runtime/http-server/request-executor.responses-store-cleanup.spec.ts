@@ -217,10 +217,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
   it('clears captured responses request on provider 502 error responses to avoid orphan pending entries', async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     const previousLogicalLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
-    const previousBackoffMaxMs = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
     captureResponsesRequestContext({
       requestId,
       sessionId: 'sess-cleanup-502',
@@ -274,11 +272,6 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
         delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
       } else {
         process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = previousLogicalLimit;
-      }
-      if (previousBackoffMaxMs === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousBackoffMaxMs;
       }
     }
   }, 15000);

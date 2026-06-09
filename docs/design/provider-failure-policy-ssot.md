@@ -143,12 +143,12 @@ provider/runtime/send/convert/direct error
 
 ### Rule 2: 可恢复错误
 - 必须先进入统一错误动作队列做 blocking wait，等待序列固定 `1s -> 2s -> 3s -> repeat`
-- 等待后按 Router policy / executor decision 显式 reroute 到未排除候选
+- 等待后按 Router policy / executor decision 执行：容量类错误显式 reroute 到未排除候选；普通 recoverable transport/5xx 可 same-provider retry 一次，重复后 reroute
 - 如果没有未排除候选，必须 fail-fast 返回最后一个 provider error
-- 禁止同请求内等待 provider 冷却、重打同 provider，或恢复 env/exponential/Retry-After 分散 backoff
+- 禁止同请求内等待 provider 冷却、无限重打同 provider，或恢复 env/exponential/Retry-After 分散 backoff
 
 ### Rule 3: reroute 是唯一恢复执行动作
-只允许 `reroute_explicit_alternative`；无候选时不能通过等待 provider 冷却、same-provider retry 或 `PROVIDER_NOT_AVAILABLE` 循环伪造恢复。防风暴等待只属于统一 error action queue，不是 provider 成功兜底。
+容量类错误只允许 `reroute_explicit_alternative`；普通 recoverable transport/5xx 只允许一次 same-provider blocking retry，重复失败必须 reroute 或 fail-fast。无候选时不能通过等待 provider 冷却或 `PROVIDER_NOT_AVAILABLE` 循环伪造恢复。防风暴等待只属于统一 error action queue，不是 provider 成功兜底。
 
 ### Rule 4: recoverable 默认 health-neutral
 只要是 recoverable provider 执行期错误，默认不毒化 provider health。

@@ -83,7 +83,7 @@ function isProviderTrafficSaturatedRetryError(args: {
   return args.status === 429 && code === 'PROVIDER_TRAFFIC_SATURATED';
 }
 
-function isImmediateProviderSwitch429(args: {
+function isImmediateProviderSwitchRecoverableError(args: {
   status?: number;
   error: unknown;
 }): boolean {
@@ -92,6 +92,9 @@ function isImmediateProviderSwitch429(args: {
   return args.status === 429
     || code === 'HTTP_429'
     || upstreamCode === 'HTTP_429'
+    || args.status === 503
+    || code === 'HTTP_503'
+    || upstreamCode === 'HTTP_503'
     || isProviderTrafficSaturatedRetryError(args);
 }
 
@@ -120,12 +123,11 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
 
-  const isImmediate429 = isImmediateProviderSwitch429({ status: args.status, error: args.error });
+  const isImmediateSwitchError = isImmediateProviderSwitchRecoverableError({ status: args.status, error: args.error });
   if (
     args.classification === 'recoverable'
     && !args.promptTooLong
-    && !isImmediate429
-    && typeof args.status !== 'number'
+    && !isImmediateSwitchError
     && args.retryError
     && args.transientRetryTracker
   ) {

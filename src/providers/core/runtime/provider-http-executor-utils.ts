@@ -39,25 +39,6 @@ function logProviderOAuthRecoveryNonBlocking(
   }
 }
 
-export function getProviderHttpRetryLimit(): number {
-  // Provider 层禁止重复尝试；失败后由虚拟路由负责 failover。
-  return 1;
-}
-
-export async function delayBeforeProviderHttpRetry(attempt: number): Promise<void> {
-  const delay = Math.min(500 * attempt, 2000);
-  await new Promise((resolve) => setTimeout(resolve, delay));
-}
-
-export function shouldRetryProviderHttpError(error: unknown, attempt: number, maxAttempts: number): boolean {
-  if (attempt >= maxAttempts) {
-    return false;
-  }
-  const normalized = error as ProviderErrorAugmented;
-  const statusCode = extractStatusCodeFromError(normalized);
-  return Boolean(statusCode && statusCode >= 500);
-}
-
 export async function tryRecoverOAuthAndReplay(options: {
   error: unknown;
   requestInfo: PreparedHttpRequest;

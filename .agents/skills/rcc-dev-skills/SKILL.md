@@ -1019,7 +1019,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 可复用动作：不要只做 session/request 内 backoff；必须额外加 **provider-scoped 全局等待闸门**，让 fresh requests 在 `provider.send` 前先阻塞，避免匿名请求或 `unknown-unknown` 会话绕过 session backoff 继续打风暴。
 - 触发信号：recoverable 失败后，fresh requests 还没到 `provider.send` 就直接连刷 `unknown-unknown + PROVIDER_NOT_AVAILABLE`。
 - 可复用动作：先查 **Rust virtual-router hotpath** 是否把 `minRecoverableCooldownMs / recoverableCooldownHints` 通过 `VirtualRouterError.details` 回传给 host；如果 native 只回 bare `PROVIDER_NOT_AVAILABLE` 字符串，host 就拿不到 `route_pool_cooldown_wait` 线索，前门一定会空池风暴。
-- 全局判定铁律（2026-04-27）：**不可恢复错误 = 直接返回，不得 retry / reroute；可恢复错误 = 只能 block + 指数 backoff。** 先判断 recoverability，再决定是否等待；禁止把“所有错误都先切 provider 试试”当默认策略。
+- 全局判定铁律（2026-04-27，2026-06-09 修订）：**不可恢复错误 = 直接返回，不得 retry / reroute；可恢复错误 = 先进入统一 error action queue 做固定 blocking `1s -> 2s -> 3s -> repeat`。** 先判断 recoverability，再决定是否等待/同 provider retry/切 provider；禁止把“所有错误都先切 provider 试试”当默认策略，也禁止恢复指数退避。
 - 触发信号：Node 进程 **虚拟内存/常驻内存随运行时间单调上涨**，但 FD / TCP 连接数基本平稳，同时日志里长期存在 `429` / timeout / aborted / provider error。
 - 可复用动作：优先排查 **requestId → meta/context** 的内存 Map（如 codec `ctxMap`、v2 pipeline `requestMetaStore`）；凡是“只在 `convertResponse` 删除、错误路径不清理”的，都必须补 **TTL + 容量上限 + 写入前 prune**，否则失败/中断请求会永久滞留并把 VM 慢慢顶高。
 - 触发信号：热路径里的“仅供观测/调度”的 request Map（如 `StatsManager.inflight`、`RequestActivityTracker.byRequestId`）在长时间运行后缓慢变大，且正常路径理论上应在 `finally/end` 删除。
@@ -1059,7 +1059,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 错误收口主链（2026-04-16）：排查 provider 执行期错误时，先确认主路径是否仍是 **`provider-error-reporter -> reportProviderErrorToRouterPolicy -> Virtual Router policy`**；如果又看到 `providerErrorCenter` + `RouteErrorHub` 双上报、或 HubPipeline 重新直接订阅 legacy center，优先判定为“第二中心回流”。
 - stopless 硬校验（2026-04-16）：若 `stopless=on/endless` 但响应已 `completed/stop` 且缺 `[app.finished:reasoning.stop]` finalized marker，Host `RequestExecutor` 必须抛 `STOPLESS_FINALIZATION_MISSING`；不要把这种“完成但未 finalize”的响应当成功，避免客户端静默停住。
 - provider-switch 退避边界（2026-04-16）：若 retry 已经决定 `exclude_and_reroute`，generic 401/403/非 blocking 错误的 backoff 也必须按 **provider 维度**计数，不能沿用全请求 `attempt` 指数增长；否则不同 provider 会被无端抬高 backoff，看起来像调度在“全局连坐”。
-- provider-switch 观测口径（2026-04-16，2026-06-06 修订）：provider 错误不得同 provider retry；日志只允许 `switch=exclude_and_reroute`，`decisionLabel + backoffScope + stage` 至少要能证明是 `provider_backoff_then_reroute`，不得再出现 `retry_same_provider` / `*_same_provider` 标签。
+- provider-switch 观测口径（2026-04-16，2026-06-09 修订）：429 / 503 / `PROVIDER_TRAFFIC_SATURATED` 这类容量错误必须 `exclude_and_reroute`；普通 recoverable transport/5xx 可在统一 blocking backoff 后 same-provider retry 一次，重复后再 `exclude_and_reroute`。日志必须带 `switchAction + decisionLabel + backoffScope + stage`，用于区分 `recoverable_backoff_same_provider` 与 `provider_backoff_then_reroute`。
 - provider-switch 执行边界（2026-06-06）：`exclude_and_reroute` 后若路由池已耗尽，必须 fail-fast 返回最后一个 provider error；禁止在同一请求内 `provider.route_pool_cooldown_wait` 等待冷却，否则会表现为客户端 60s 超时 / `CLIENT_RESPONSE_CLOSED`。
 - provider-switch 装配真源（2026-04-16）：`switchAction + decisionLabel + runtimeScopeExcludedCount` 不要在 `runtime_resolve`、`provider.send`、followup 各自手拼；优先收口到单点 helper（当前 `resolveProviderRetrySwitchPlan(...)`），否则日志口径和 reroute 排除策略会再次分叉。
 - provider exclusion 真源（2026-04-16）：`promptTooLong`、Antigravity `verify/429`、`reauth`、alias rotate 这些“是否排除当前 provider / 是否把 antigravity 标成 `avoidAllOnRetry`”的规则，也要单点 helper 化（当前 `resolveProviderRetryExclusionPlan(...)`）；否则 reroute 行为会在 send/followup 边界重新分叉。
@@ -1794,7 +1794,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## 2026-06-06 provider switch / retry 经验
 - 若线上日志出现同一 provider 错误反复打或 `No available providers`，先用同一 `clientRequestId` 查 `~/.rcc/codex-samples/.../ports/<port>/**`：必须看到失败 provider request 后有另一个 provider response；没有第二 provider 样本，优先查 executor 是否把 provider-switch 预算错误绑定到 `maxAttempts`。
-- provider 切换不是同 provider retry：任意 provider 错误只要 route pool 有未排除候选，就应写入 `excludedProviderKeys` 并 `exclude_and_reroute`；日志应包含 `[provider-switch] ... decision=provider_backoff_then_reroute`，避免模型/用户看到无反馈循环。
+- provider 切换不是无限同 provider retry：容量类错误（429 / 503 / `PROVIDER_TRAFFIC_SATURATED`）只要 route pool 有未排除候选，就应写入 `excludedProviderKeys` 并 `exclude_and_reroute`；普通 recoverable transport/5xx 允许一次 `recoverable_backoff_same_provider`，重复后才排除当前 provider。日志应包含 `[provider-switch] ... switch=<action> decision=<label> backoffScope=<scope>`，避免模型/用户看到无反馈循环。
 
 ### 2026-06-06 direct retry wrapper 红线（2026-06-08 修正）
 - router-direct 只能做 same-protocol provider passthrough + hooks；禁止本地重写 recoverable/affectsHealth/cooldown/reroute policy，禁止 provider-specific fallback，禁止把 429/5xx 投到 `ErrorHandlingCenter` 后直返。

@@ -116,7 +116,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && !hostContractFailure
     && !args.forceExcludeCurrentProviderOnRetry
     && !args.promptTooLong
-    && typeof args.retryError.statusCode !== 'number'
+    && !exclusionPlan.excludedCurrentProvider
     && shouldApplyProviderTransportBackoff({
       error: args.error,
       retryError: args.retryError,

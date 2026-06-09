@@ -83,9 +83,6 @@ describe('opencode DeepSeek outbound request blackbox', () => {
       getClientRequestIdFromContext: () => 'req_blackbox_deepseek_1',
       wrapUpstreamSseResponse: async () => ({}),
       executePreparedRequest: (requestInfo, context, captureSse) => transport.executePreparedRequest(requestInfo, context, captureSse),
-      getHttpRetryLimit: () => 1,
-      shouldRetryHttpError: () => false,
-      delayBeforeHttpRetry: async () => undefined,
       resolveBusinessResponseError: () => undefined,
       normalizeHttpError: async (error) => { throw error; }
     });

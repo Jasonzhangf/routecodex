@@ -1612,9 +1612,8 @@ export class RouteCodexHttpServer {
         const retryPlan = directFailurePlan.retryExecutionPlan;
         if (
           !retryPlan.shouldRetry
-          || !retryPlan.requestLocalTransient
           || !retryPlan.retrySwitchPlan
-          || !directFailurePlan.requestLocalProviderRetryState
+          || (!retryPlan.requestLocalTransient && !retryPlan.blockingRecoverable)
           || directAttempt >= retryState.maxAttempts
         ) {
           return;
@@ -1633,7 +1632,8 @@ export class RouteCodexHttpServer {
         }
         retryState.lastError = error;
         directRetryRequested = true;
-        if (directFailurePlan.requestLocalProviderRetryState.switchAction === 'retry_same_provider_once') {
+        const switchAction = retryPlan.retrySwitchPlan.switchAction;
+        if (switchAction === 'retry_same_provider_once') {
           retryState.retryProviderKey = ctx.providerKey;
           retryState.excludedProviderKeys.delete(ctx.providerKey);
         } else {
@@ -1642,7 +1642,7 @@ export class RouteCodexHttpServer {
         this.logStage('router-direct.retry.requested', input.requestId, {
           providerKey: ctx.providerKey,
           routeName: ctx.routingDecision?.routeName,
-          switchAction: directFailurePlan.requestLocalProviderRetryState.switchAction,
+          switchAction,
           excluded: Array.from(retryState.excludedProviderKeys),
           directAttempt,
           nextDirectAttempt: directAttempt + 1,

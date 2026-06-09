@@ -1101,160 +1101,141 @@ describe('direct passthrough route-level', () => {
   });
 
   it('router-direct retries same provider once for repeated recoverable 502 before VR-selected switch', async () => {
-    const oldEnv = {
-      RCC_PROVIDER_RETRY_BACKOFF_BASE_MS: process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS,
-      RCC_PROVIDER_RETRY_BACKOFF_MAX_MS: process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS,
-    };
-    process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
-    process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS = '1';
-    try {
-      jest.resetModules();
-      const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
-      const server = new RouteCodexHttpServer({
-        configPath: '/tmp/routecodex-test-config.json',
-        server: { host: '127.0.0.1', port: 5555 },
-        pipeline: {},
-        logging: { level: 'error', enableConsole: false },
-        providers: {},
-      } as any);
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
 
-      const firstProviderKey = 'sdfv.key1.gpt-5.5';
-      const secondProviderKey = 'llmgate.key1.gpt-5.5';
-      const direct502 = () => Object.assign(new Error('HTTP 502: upstream stream incomplete'), {
-        statusCode: 502,
-        status: 502,
-        code: 'HTTP_502',
-        upstreamCode: 'HTTP_502',
-      });
-      const firstDirectSend = jest.fn(async () => { throw direct502(); });
-      const secondDirectSend = jest.fn(async () => ({
-        status: 200,
-        data: {
-          id: 'resp_router_direct_502_switched_after_repeat',
-          object: 'response',
-          status: 'completed',
-          output_text: 'ok',
-        },
-      }));
-      const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-        const retryProviderKey = typeof metadata.__routecodexRetryProviderKey === 'string'
-          ? metadata.__routecodexRetryProviderKey
-          : undefined;
-        const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
-        const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
-        return {
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey,
-            modelId: 'gpt-5.5',
-          },
-          decision: { routeName: 'longcontext', pool: [firstProviderKey, secondProviderKey], reason: 'longcontext:test' },
-          diagnostics: {},
-        };
-      });
-
-      (server as any).userConfig = {
-        httpserver: {
-          ports: [{
-            port: 5555,
-            host: '127.0.0.1',
-            mode: 'router',
-            routingPolicyGroup: 'gateway_priority_5555',
-            sameProtocolBehavior: 'direct',
-          }],
-        },
-      };
-      (server as any).hubPipeline = {
-        execute: jest.fn(async () => { throw new Error('router-direct recoverable retry must not enter HubPipeline'); }),
-        getVirtualRouter: jest.fn(() => ({ route })),
-        updateVirtualRouterConfig: jest.fn(),
-      };
-      (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-        ['gateway_priority_5555', (server as any).hubPipeline]
-      ]);
-      (server as any).providerHandles = new Map([
-        [firstProviderKey, {
-          runtimeKey: firstProviderKey,
-          providerId: 'sdfv',
+    const firstProviderKey = 'sdfv.key1.gpt-5.5';
+    const secondProviderKey = 'llmgate.key1.gpt-5.5';
+    const direct502 = () => Object.assign(new Error('HTTP 502: upstream stream incomplete'), {
+      statusCode: 502,
+      status: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+    });
+    const firstDirectSend = jest.fn(async () => { throw direct502(); });
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_502_switched_after_repeat',
+        object: 'response',
+        status: 'completed',
+        output_text: 'ok',
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const retryProviderKey = typeof metadata.__routecodexRetryProviderKey === 'string'
+        ? metadata.__routecodexRetryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
           providerType: 'openai',
-          providerFamily: 'openai',
-          providerProtocol: 'openai-responses',
-          runtime: { modelId: 'gpt-5.5' },
-          instance: {
-            initialize: async () => {},
-            cleanup: async () => {},
-            processIncoming: jest.fn(),
-            processIncomingDirect: firstDirectSend,
-          },
-        }],
-        [secondProviderKey, {
-          runtimeKey: secondProviderKey,
-          providerId: 'llmgate',
-          providerType: 'openai',
-          providerFamily: 'openai',
-          providerProtocol: 'openai-responses',
-          runtime: { modelId: 'gpt-5.5' },
-          instance: {
-            initialize: async () => {},
-            cleanup: async () => {},
-            processIncoming: jest.fn(),
-            processIncomingDirect: secondDirectSend,
-          },
-        }],
-      ]);
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: 'gpt-5.5',
+        },
+        decision: { routeName: 'longcontext', pool: [firstProviderKey, secondProviderKey], reason: 'longcontext:test' },
+        diagnostics: {},
+      };
+    });
 
-      const outcome = await (server as any).executeRouterDirectPipelineForPort(
-        {
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
           port: 5555,
           host: '127.0.0.1',
           mode: 'router',
           routingPolicyGroup: 'gateway_priority_5555',
           sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct recoverable retry must not enter HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'sdfv',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
         },
-        {
-          requestId: 'req_router_direct_502_retry_then_switch',
-          entryEndpoint: '/v1/responses',
-          method: 'POST',
-          headers: {},
-          query: {},
-          body: {
-            model: 'router-gpt-5.5',
-            stream: false,
-            input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
-          },
-          metadata: {},
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'llmgate',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
         },
-      );
+      }],
+    ]);
 
-      expect(outcome.used).toBe(true);
-      expect(outcome.auditContext.providerKey).toBe(secondProviderKey);
-      expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_502_switched_after_repeat' });
-      expect(firstDirectSend).toHaveBeenCalledTimes(2);
-      expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect(route).toHaveBeenCalledTimes(3);
-      expect(route.mock.calls[0]?.[1]).toEqual(expect.not.objectContaining({ __routecodexRetryProviderKey: expect.anything() }));
-      expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
-        __routecodexRetryProviderKey: firstProviderKey,
-      }));
-      expect(route.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
-        excludedProviderKeys: [firstProviderKey],
-      }));
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
-    } finally {
-      if (oldEnv.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS === undefined) {
-        delete process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
-      } else {
-        process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS = oldEnv.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
-      }
-      if (oldEnv.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS === undefined) {
-        delete process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS;
-      } else {
-        process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS = oldEnv.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS;
-      }
-    }
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5555,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5555',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_502_retry_then_switch',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'router-gpt-5.5',
+          stream: false,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        },
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(outcome.auditContext.providerKey).toBe(secondProviderKey);
+    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_502_switched_after_repeat' });
+    expect(firstDirectSend).toHaveBeenCalledTimes(2);
+    expect(secondDirectSend).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledTimes(3);
+    expect(route.mock.calls[0]?.[1]).toEqual(expect.not.objectContaining({ __routecodexRetryProviderKey: expect.anything() }));
+    expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      __routecodexRetryProviderKey: firstProviderKey,
+    }));
+    expect(route.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
+      excludedProviderKeys: [firstProviderKey],
+    }));
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
   it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {

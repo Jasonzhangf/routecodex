@@ -158,9 +158,6 @@ export type HttpRequestExecutorDeps = {
   getClientRequestIdFromContext(context: ProviderContext): string | undefined;
   wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, context: ProviderContext): Promise<UnknownObject>;
   executePreparedRequest?: PreparedRequestExecutor;
-  getHttpRetryLimit(): number;
-  shouldRetryHttpError(error: unknown, attempt: number, maxAttempts: number): boolean;
-  delayBeforeHttpRetry(attempt: number): Promise<void>;
   tryRecoverOAuthAndReplay?(
     error: unknown,
     requestInfo: PreparedHttpRequest,
@@ -187,7 +184,7 @@ export class HttpRequestExecutor {
     const prepared = await this.prepareHttpRequest(processedRequest, context);
     await this.snapshotProviderRequest(prepared, context);
     try {
-      return await this.executeHttpRequestWithRetries(processedRequest, context, prepared);
+      return await this.executeHttpRequestAcrossTargets(processedRequest, context, prepared);
     } catch (error) {
       const requestInfoOverride =
         error && typeof error === 'object' && '__routecodexRequestInfo' in error
@@ -403,67 +400,56 @@ export class HttpRequestExecutor {
     }
   }
 
-  private async executeHttpRequestWithRetries(
+  private async executeHttpRequestAcrossTargets(
     processedRequest: UnknownObject,
     context: ProviderContext,
     initialRequestInfo: PreparedHttpRequest
   ): Promise<unknown> {
     const captureSse = shouldCaptureProviderStreamSnapshots();
-    const maxAttempts = this.deps.getHttpRetryLimit();
     let lastRequestInfo: PreparedHttpRequest = initialRequestInfo;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const requestInfo = attempt === 1 ? initialRequestInfo : await this.prepareHttpRequest(processedRequest, context);
-      lastRequestInfo = requestInfo;
-      if (requestInfo.abortSignal?.aborted) {
-        const reason = (requestInfo.abortSignal as { reason?: unknown }).reason;
-        throw reason instanceof Error
-          ? reason
-          : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
-              code: 'CLIENT_DISCONNECTED',
-              name: 'AbortError'
-            });
-      }
-      const targets =
-        requestInfo.targetUrls && requestInfo.targetUrls.length ? requestInfo.targetUrls : [requestInfo.targetUrl];
-      for (let idx = 0; idx < targets.length; idx += 1) {
-        const candidate = idx === 0 ? requestInfo : { ...requestInfo, targetUrl: targets[idx] };
-        lastRequestInfo = candidate;
-        try {
-          return await this.executeHttpRequestOnce(candidate, context, captureSse);
-        } catch (error) {
-          if (this.deps.tryRecoverOAuthAndReplay) {
-            const oauthReplay = await this.deps.tryRecoverOAuthAndReplay(
-              error,
-              candidate,
-              processedRequest,
-              captureSse,
-              context
-            );
-            if (oauthReplay) {
-              return oauthReplay;
-            }
+    if (initialRequestInfo.abortSignal?.aborted) {
+      const reason = (initialRequestInfo.abortSignal as { reason?: unknown }).reason;
+      throw reason instanceof Error
+        ? reason
+        : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
+            code: 'CLIENT_DISCONNECTED',
+            name: 'AbortError'
+          });
+    }
+    const targets =
+      initialRequestInfo.targetUrls && initialRequestInfo.targetUrls.length ? initialRequestInfo.targetUrls : [initialRequestInfo.targetUrl];
+    for (let idx = 0; idx < targets.length; idx += 1) {
+      const candidate = idx === 0 ? initialRequestInfo : { ...initialRequestInfo, targetUrl: targets[idx] };
+      lastRequestInfo = candidate;
+      try {
+        return await this.executeHttpRequestOnce(candidate, context, captureSse);
+      } catch (error) {
+        if (this.deps.tryRecoverOAuthAndReplay) {
+          const oauthReplay = await this.deps.tryRecoverOAuthAndReplay(
+            error,
+            candidate,
+            processedRequest,
+            captureSse,
+            context
+          );
+          if (oauthReplay) {
+            return oauthReplay;
           }
-
-          const canTryNext = idx + 1 < targets.length && this.shouldTryNextTarget(error, context);
-          if (canTryNext) {
-            continue;
-          }
-
-          const shouldRetry = this.deps.shouldRetryHttpError(error, attempt, maxAttempts);
-          if (shouldRetry) {
-            await this.deps.delayBeforeHttpRetry(attempt);
-            break;
-          }
-
-          if (error && typeof error === 'object') {
-            (error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo = candidate;
-          }
-          throw error;
         }
+
+        const canTryNext = idx + 1 < targets.length && this.shouldTryNextTarget(error, context);
+        if (canTryNext) {
+          continue;
+        }
+
+        if (error && typeof error === 'object') {
+          (error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo = candidate;
+        }
+        throw error;
       }
     }
     const finalError: Error & { __routecodexRequestInfo?: PreparedHttpRequest } = Object.assign(
-      new Error('provider-runtime-error: http retries exhausted'),
+      new Error('provider-runtime-error: no provider HTTP target executed'),
       { __routecodexRequestInfo: lastRequestInfo }
     );
     throw finalError;
