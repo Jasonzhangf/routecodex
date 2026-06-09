@@ -18,7 +18,7 @@ pub struct StoplessDecisionContextGoalPlan {
 pub fn plan_stopless_decision_context_goal_status(
     input: &StoplessDecisionContextGoalInput,
 ) -> StoplessDecisionContextGoalPlan {
-    let direct_state = read_direct_goal_state(&input.adapter_context);
+    let direct_state: Option<&Value> = read_direct_goal_state(&input.adapter_context);
     let source = input
         .adapter_context
         .get("__rt")
