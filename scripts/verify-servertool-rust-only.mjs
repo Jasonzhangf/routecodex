@@ -481,6 +481,19 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     'quote_posix_single_argument(&input_json)'
   );
+  for (const needle of [
+    'fn web_search_cannot_build_client_exec_projection_plan',
+    'fn vision_auto_cannot_build_client_exec_projection_plan',
+    'fn memory_cache_auto_is_rejected_by_client_projection_builder',
+    'fn memory_cache_auto_is_rejected_by_backend_route_builder',
+  ]) {
+    assertContains(
+      'servertool-outcome-negative-rust-tests',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+      rustOutcomeContract,
+      needle
+    );
+  }
   for (const [file, content] of [
     [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, rustOutcomeContract],
     [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract],
