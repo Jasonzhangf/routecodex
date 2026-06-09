@@ -2969,6 +2969,17 @@ function checkBackendRoutePolicyRustOwner() {
     'planFollowupRuntimeActionJson'
   );
   const backendRouteMainlineShell = readRequired(`${SERVERTOOL_TS_DIR}/backend-route-mainline-block.ts`);
+  const backendRouteMainlineFunctionNames = Array.from(
+    backendRouteMainlineShell.matchAll(/export (?:async\s+)?function\s+([A-Za-z0-9_]+)/g)
+  )
+    .map((match) => match[1])
+    .sort();
+  if (backendRouteMainlineFunctionNames.join(',') !== 'runFollowupMainline') {
+    fail(
+      'backend-route-mainline-ts-surface',
+      `backend-route-mainline-block.ts must expose only runFollowupMainline orchestration; found exports: ${backendRouteMainlineFunctionNames.join(',') || '(none)'}`
+    );
+  }
   if (backendRouteMainlineShell.includes("args.execution.flowId === 'stop_message_flow'")) {
     fail(
       'backend-route-followup-runtime-action-no-ts-flow-owner',
