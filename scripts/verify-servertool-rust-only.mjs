@@ -74,6 +74,7 @@ const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin
 const TS_BACKEND_ROUTE_RUNTIME = `${SERVERTOOL_TS_DIR}/backend-route-runtime-block.ts`;
 const TS_BACKEND_ROUTE_REENTER = `${SERVERTOOL_TS_DIR}/backend-route-reenter-block.ts`;
 const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
+const TS_BACKEND_ROUTE_RESPONSE = `${SERVERTOOL_TS_DIR}/backend-route-response-block.ts`;
 const TS_VISION_ELIGIBILITY = `${SERVERTOOL_TS_DIR}/handlers/vision-eligibility.ts`;
 const TS_LOOP_STATE_BLOCK = `${SERVERTOOL_TS_DIR}/loop-state-block.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
@@ -3135,6 +3136,7 @@ function checkBackendRoutePolicyRustOwner() {
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
   const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
+  const responseShell = readRequired(TS_BACKEND_ROUTE_RESPONSE);
   const visionEligibilityShell = readRequired(TS_VISION_ELIGIBILITY);
   const finalizeFunctionNames = Array.from(finalizeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
     .map((match) => match[1])
@@ -3233,6 +3235,38 @@ function checkBackendRoutePolicyRustOwner() {
       nativeCall
     );
   }
+  const responseFunctionNames = Array.from(responseShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (
+    responseFunctionNames.join(',') !==
+    [
+      'choosePreferredFinalChatResponse',
+      'coerceFollowupPayloadStream',
+      'createEmptyFollowupError',
+      'createMissingFollowupPayloadError',
+      'extractAppendUserTextFromFollowupPlan',
+      'hasRequiresActionShape',
+      'isEmptyClientResponsePayload',
+    ].sort().join(',')
+  ) {
+    fail(
+      'backend-route-response-ts-surface',
+      `backend-route-response-block.ts exported function surface changed; found exports: ${responseFunctionNames.join(',') || '(none)'}`
+    );
+  }
+  assertContains(
+    'backend-route-response-ts-thin-shell',
+    TS_BACKEND_ROUTE_RESPONSE,
+    extractFunctionBlock(responseShell, 'isEmptyClientResponsePayload'),
+    'isEmptyClientResponsePayloadWithNative'
+  );
+  assertContains(
+    'backend-route-response-ts-thin-shell',
+    TS_BACKEND_ROUTE_RESPONSE,
+    extractFunctionBlock(responseShell, 'hasRequiresActionShape'),
+    'isToolCallContinuationResponseWithNative'
+  );
   for (const keyword of [
     'function cloneJson',
     'JSON.parse(JSON.stringify',
