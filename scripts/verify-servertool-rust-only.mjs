@@ -1872,12 +1872,18 @@ function checkOrchestrationPolicyRustOwner() {
     'replace(STOPMESSAGE_MARKER_RE',
   ]) {
     if (followupSanitize.includes(keyword)) {
-      warn(
-        'servertool-followup-sanitize-ts-migration-pending',
-        `TS followup sanitize semantic remains pending native bridge deletion: ${keyword}`
+      fail(
+        'servertool-followup-sanitize-ts-thin-shell',
+        `Forbidden TS followup sanitize semantic "${keyword}" found in followup-sanitize.ts`
       );
     }
   }
+  assertContains(
+    'servertool-followup-sanitize-ts-thin-shell',
+    `${SERVERTOOL_TS_DIR}/handlers/followup-sanitize.ts`,
+    followupSanitize,
+    'normalizeClientInjectTextWithNative'
+  );
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
     'readClientInjectOnlyWithNative',
