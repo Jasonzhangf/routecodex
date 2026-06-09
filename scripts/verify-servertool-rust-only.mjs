@@ -126,6 +126,23 @@ const DELETED_AI_FOLLOWUP_FILES = [
   `${ROOT}/tests/servertool/stopmessage-response-snapshot.spec.ts`,
   `${ROOT}/tests/servertool/stop-message-auto-followup-extraction.spec.ts`,
 ];
+const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
+  'hub.servertool_cli_projection': [
+    'tests/cli/servertool-command.spec.ts',
+    'tests/servertool/servertool-cli-projection.spec.ts',
+    'tests/servertool/servertool-cli-result-restore.spec.ts',
+    'tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts',
+    'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+  ],
+  'hub.servertool_backend_route_runtime': [
+    'tests/servertool/server-side-web-search.spec.ts',
+    'tests/servertool/vision-flow.spec.ts',
+  ],
+  'hub.servertool_stopless_cli_projection_seed': [
+    'tests/servertool/stop-message-auto.spec.ts',
+    'tests/servertool/servertool-cli-projection.spec.ts',
+  ],
+});
 
 // ── Issues accumulator ─────────────────────────────────────────
 const issues = [];
@@ -529,6 +546,37 @@ function checkServertoolCliProjectionMap() {
     }
   }
   pass('cli-projection-output-rust-owner', 'servertool-core owns client exec CLI projection output planning');
+}
+
+function checkServertoolRustificationVerificationRegistry() {
+  const verificationMap = readRequired(VERIFICATION_MAP);
+  for (const [featureId, requiredTests] of Object.entries(SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION)) {
+    assertContains(
+      'servertool-rustification-verification-registry',
+      VERIFICATION_MAP,
+      verificationMap,
+      `feature_id: ${featureId}`
+    );
+    for (const relativePath of requiredTests) {
+      if (!existsSync(`${ROOT}/${relativePath}`)) {
+        fail(
+          'servertool-rustification-verification-registry',
+          `${relativePath} is required by ${featureId} but is missing`
+        );
+        continue;
+      }
+      if (!verificationMap.includes(relativePath)) {
+        fail(
+          'servertool-rustification-verification-registry',
+          `${relativePath} must be listed in docs/architecture/verification-map.yml for ${featureId}`
+        );
+      }
+    }
+  }
+  pass(
+    'servertool-rustification-verification-registry',
+    'servertool rustification features keep explicit feature-to-test mapping'
+  );
 }
 
 // ── Check 5: Build must run this gate ──────────────────────────
@@ -3793,6 +3841,7 @@ checkNoBakFiles();
 checkNoTSHandlerRuntimeImport();
 checkNoDuplicateSemantics();
 checkServertoolCliProjectionMap();
+checkServertoolRustificationVerificationRegistry();
 checkBuildIncludesServertoolGate();
 checkNoOldCliRestorationRuntime();
 checkMigratedProjectionDoesNotReenter();
