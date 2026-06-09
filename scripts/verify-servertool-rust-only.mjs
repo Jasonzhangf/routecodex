@@ -768,6 +768,8 @@ function checkStandaloneServertoolBinary() {
     'fn invalid_stop_message_flow_id_fails_fast',
     'fn invalid_stop_message_repeat_budget_fails_fast',
     'fn invalid_explicit_repeat_args_fail_fast',
+    'fn stop_message_auto_explicit_repeat_args_override_input_json',
+    'fn explicit_flow_arg_overrides_input_json_flow_id',
     'fn non_object_input_json_fails_fast',
     'fn malformed_input_json_fails_fast',
     'SERVERTOOL_CLI_MISSING_FIELD: continuationPrompt',
