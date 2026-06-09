@@ -12,14 +12,6 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FollowupSnapshotOutput {
-    provider_protocol: String,
-    #[serde(rename = "tool_outputs")]
-    tool_outputs: Vec<Value>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResponsesContextCaptureInput {
@@ -40,65 +32,6 @@ struct ResponsesHostPolicyInput {
 struct ResponsesHostPolicyOutput {
     should_strip_host_managed_fields: bool,
     target_protocol: String,
-}
-
-fn is_servertool_followup(adapter_context: &Value) -> bool {
-    let rt = adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("__rt"))
-        .and_then(|v| v.as_object());
-    let flag = rt.and_then(|row| row.get("serverToolFollowup"));
-    match flag {
-        Some(Value::Bool(true)) => true,
-        Some(Value::String(v)) if v.trim().eq_ignore_ascii_case("true") => true,
-        _ => false,
-    }
-}
-
-fn resolve_server_tool_followup_snapshot(
-    adapter_context: &Value,
-) -> Option<FollowupSnapshotOutput> {
-    if !is_servertool_followup(adapter_context) {
-        return None;
-    }
-    let provider_protocol = adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("providerProtocol"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    Some(FollowupSnapshotOutput {
-        provider_protocol,
-        tool_outputs: Vec::new(),
-    })
-}
-
-fn augment_context_snapshot(context: &Value, fallback: &Value) -> Value {
-    let mut context_obj: Map<String, Value> = context.as_object().cloned().unwrap_or_default();
-
-    let fallback_outputs = fallback
-        .as_object()
-        .and_then(|obj| obj.get("tool_outputs"))
-        .and_then(|v| v.as_array())
-        .cloned();
-
-    if fallback_outputs.is_none() {
-        return Value::Object(context_obj);
-    }
-
-    let context_has_array = context_obj
-        .get("tool_outputs")
-        .and_then(|v| v.as_array())
-        .is_some();
-    if context_has_array {
-        return Value::Object(context_obj);
-    }
-
-    context_obj.insert(
-        "tool_outputs".to_string(),
-        Value::Array(fallback_outputs.unwrap_or_default()),
-    );
-    Value::Object(context_obj)
 }
 
 fn normalize_tool_call_id_style_candidate(value: &Value) -> Option<String> {
@@ -1015,7 +948,7 @@ fn pick_boolean(value: Option<&Value>) -> Option<bool> {
     }
 }
 
-fn resolve_client_inject_ready(metadata: &Value) -> bool {
+pub(crate) fn resolve_client_inject_ready(metadata: &Value) -> bool {
     let row = match metadata.as_object() {
         Some(v) => v,
         None => return true,
@@ -1023,20 +956,6 @@ fn resolve_client_inject_ready(metadata: &Value) -> bool {
     pick_boolean(row.get("clientInjectReady"))
         .or_else(|| pick_boolean(row.get("client_inject_ready")))
         .unwrap_or(true)
-}
-
-fn normalize_context_capture_label(label: Option<String>) -> String {
-    let normalized = label.unwrap_or_default().trim().to_string();
-    if normalized.is_empty() {
-        return "context_capture".to_string();
-    }
-    normalized
-}
-
-fn should_run_hub_chat_process(request_id: String, entry_endpoint: String) -> bool {
-    let req = request_id.trim();
-    let endpoint = entry_endpoint.trim();
-    !req.is_empty() || !endpoint.is_empty()
 }
 
 fn normalize_provider_protocol_token(value: Option<String>) -> Option<String> {
@@ -1074,66 +993,10 @@ fn evaluate_responses_host_policy(input: ResponsesHostPolicyInput) -> ResponsesH
 }
 
 #[napi]
-pub fn resolve_server_tool_followup_snapshot_json(
-    adapter_context_json: String,
-) -> NapiResult<String> {
-    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_server_tool_followup_snapshot(&adapter_context);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn augment_context_snapshot_json(
-    context_json: String,
-    fallback_json: String,
-) -> NapiResult<String> {
-    let context: Value =
-        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let fallback: Value = serde_json::from_str(&fallback_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = augment_context_snapshot(&context, &fallback);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn normalize_tool_call_id_style_candidate_json(value_json: String) -> NapiResult<String> {
-    let value: Value =
-        serde_json::from_str(&value_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_tool_call_id_style_candidate(&value);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn sanitize_format_envelope_json(candidate_json: String) -> NapiResult<String> {
     let candidate: Value = serde_json::from_str(&candidate_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = sanitize_format_envelope(&candidate);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn resolve_client_inject_ready_json(metadata_json: String) -> NapiResult<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_client_inject_ready(&metadata);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn normalize_context_capture_label_json(label_json: String) -> NapiResult<String> {
-    let label: Option<String> =
-        serde_json::from_str(&label_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_context_capture_label(label);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn should_run_hub_chat_process_json(
-    request_id: String,
-    entry_endpoint: String,
-) -> NapiResult<String> {
-    let output = should_run_hub_chat_process(request_id, entry_endpoint);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

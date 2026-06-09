@@ -34,13 +34,6 @@ pub(crate) fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String
     Some(record)
 }
 
-pub(crate) fn parse_json_bool(raw: &str) -> Option<bool> {
-    match serde_json::from_str::<Value>(raw) {
-        Ok(Value::Bool(v)) => Some(v),
-        _ => None,
-    }
-}
-
 pub(crate) fn parse_js_number_like(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(num)) => num.as_f64(),
@@ -281,7 +274,7 @@ mod tests {
     use super::{
         as_object, extract_balanced_json_array_at, extract_balanced_json_candidate_at,
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
-        parse_js_number_like, parse_json_bool, read_first_object_trimmed_string,
+        parse_js_number_like, read_first_object_trimmed_string,
         read_object_trimmed_string, read_string_array_command, read_trimmed_string,
         read_workdir_from_args, split_command_string, value_as_object_or_empty,
     };
@@ -428,14 +421,6 @@ mod tests {
         assert_eq!(normalize_record_ref(&array).len(), 0);
         assert_eq!(value_as_object_or_empty(&object).get("a"), Some(&json!(1)));
         assert_eq!(value_as_object_or_empty(&array).len(), 0);
-    }
-
-    #[test]
-    fn parse_json_bool_accepts_only_json_boolean_literals() {
-        assert_eq!(parse_json_bool("true"), Some(true));
-        assert_eq!(parse_json_bool("false"), Some(false));
-        assert_eq!(parse_json_bool("\"true\""), None);
-        assert_eq!(parse_json_bool("not-json"), None);
     }
 
     #[test]

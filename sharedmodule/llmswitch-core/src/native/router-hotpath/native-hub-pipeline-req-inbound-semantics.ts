@@ -4,12 +4,6 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { sanitizeFormatEnvelopeWithNative } from './native-hub-pipeline-edge-stage-semantics.js';
-import {
-  augmentContextSnapshotWithNative,
-  mapResumeToolOutputsDetailedWithNative,
-  normalizeToolCallIdStyleCandidateWithNative,
-  resolveServerToolFollowupSnapshotWithNative
-} from './native-hub-pipeline-inbound-outbound-semantics.js';
 
 
 import type {
@@ -20,14 +14,12 @@ import type {
 } from './native-hub-pipeline-req-inbound-semantics-types.js';
 import {
   parseOptionalString,
-  parseBoolean,
   parseUnknown,
   parseRecord
 } from './native-hub-pipeline-req-inbound-semantics-parsers.js';
 
 export type {
   NativeContextToolOutput,
-  NativeResumeToolOutput,
   NativeReqInboundSemanticLiftApplyInput,
   NativeProviderProtocolToken,
   NativeReqInboundChatToStandardizedInput,
@@ -183,99 +175,6 @@ export function shouldNormalizeReasoningPayloadWithNative(
   }
 }
 
-export function mapReqInboundResumeToolOutputsDetailedWithNative(
-  responsesResume: unknown
-): Array<{ tool_call_id: string; content: string }> {
-  return mapResumeToolOutputsDetailedWithNative(responsesResume);
-}
-
-export function resolveClientInjectReadyWithNative(
-  metadata: Record<string, unknown>
-): boolean {
-  const capability = 'resolveClientInjectReadyJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('resolveClientInjectReadyJson');
-  if (!fn) {
-    return fail();
-  }
-  const metadataJson = safeStringify(metadata);
-  if (!metadataJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(metadataJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseBoolean(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function normalizeContextCaptureLabelWithNative(
-  label: string | undefined
-): string {
-  const capability = 'normalizeContextCaptureLabelJson';
-  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('normalizeContextCaptureLabelJson');
-  if (!fn) {
-    return fail();
-  }
-  const labelJson = safeStringify(label ?? null);
-  if (!labelJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(labelJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseOptionalString(raw);
-    if (parsed === null) {
-      return fail('invalid payload');
-    }
-    return parsed ?? 'context_capture';
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function shouldRunHubChatProcessWithNative(
-  requestId: string,
-  entryEndpoint: string
-): boolean {
-  const capability = 'shouldRunHubChatProcessJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('shouldRunHubChatProcessJson');
-  if (!fn) {
-    return fail();
-  }
-  try {
-    const raw = fn(requestId, entryEndpoint);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseBoolean(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function normalizeProviderProtocolTokenWithNative(
   value: string | undefined
 ): string | undefined {
@@ -298,35 +197,6 @@ export function normalizeProviderProtocolTokenWithNative(
       return fail('empty result');
     }
     const parsed = parseOptionalString(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function isShellLikeToolNameTokenWithNative(
-  name: string | undefined
-): boolean {
-  const capability = 'isShellLikeToolNameTokenJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('isShellLikeToolNameTokenJson');
-  if (!fn) {
-    return fail();
-  }
-  const nameJson = safeStringify(name ?? null);
-  if (!nameJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(nameJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseBoolean(raw);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -409,25 +279,6 @@ export function chatEnvelopeToStandardizedWithNative(
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
-}
-
-export function resolveReqInboundServerToolFollowupSnapshotWithNative(
-  adapterContext: unknown
-): Record<string, unknown> | undefined {
-  return resolveServerToolFollowupSnapshotWithNative(adapterContext);
-}
-
-export function augmentReqInboundContextSnapshotWithNative(
-  context: Record<string, unknown>,
-  fallbackSnapshot: Record<string, unknown>
-): Record<string, unknown> {
-  return augmentContextSnapshotWithNative(context, fallbackSnapshot);
-}
-
-export function normalizeReqInboundToolCallIdStyleWithNative(
-  value: unknown
-): 'fc' | 'preserve' | undefined {
-  return normalizeToolCallIdStyleCandidateWithNative(value);
 }
 
 export {

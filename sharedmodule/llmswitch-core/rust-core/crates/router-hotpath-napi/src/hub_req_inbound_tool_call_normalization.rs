@@ -759,14 +759,6 @@ pub fn normalize_shell_like_tool_calls_before_governance_json(
     serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn is_shell_like_tool_name_token_json(name_json: String) -> NapiResult<String> {
-    let name: Option<String> =
-        serde_json::from_str(&name_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = is_shell_like_tool_name_token(name);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

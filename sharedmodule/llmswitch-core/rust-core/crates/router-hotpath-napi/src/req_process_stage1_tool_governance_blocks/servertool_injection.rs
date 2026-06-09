@@ -1,12 +1,10 @@
-use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 
 use crate::chat_servertool_orchestration::{
     build_continue_execution_operations, plan_chat_servertool_orchestration_bundle,
 };
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations;
-use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;
-use crate::shared_json_utils::parse_json_bool;
+use crate::hub_req_inbound_context_capture::resolve_client_inject_ready as resolve_client_inject_ready_from_metadata;
 use crate::web_search_mode::{
     resolve_web_search_execution_mode_from_value, WebSearchExecutionMode,
 };
@@ -20,9 +18,7 @@ pub(crate) fn read_runtime_metadata(metadata: &Map<String, Value>) -> Map<String
 }
 
 pub(crate) fn resolve_client_inject_ready(metadata: &Map<String, Value>) -> bool {
-    let metadata_json = serde_json::to_string(&Value::Object(metadata.clone()))
-        .unwrap_or_else(|_| "{}".to_string());
-    parse_bool_or_default(resolve_client_inject_ready_json(metadata_json), true)
+    resolve_client_inject_ready_from_metadata(&Value::Object(metadata.clone()))
 }
 
 fn read_selected_web_search_engines(
@@ -198,26 +194,12 @@ pub(crate) fn apply_hub_operations(request: &mut Map<String, Value>, operations:
     }
 }
 
-fn parse_bool_or_default(raw: NapiResult<String>, default: bool) -> bool {
-    match raw {
-        Ok(payload) => parse_json_bool(&payload).unwrap_or(default),
-        Err(_) => default,
-    }
-}
-
 pub(crate) fn maybe_apply_servertool_orchestration(
     request: &mut Map<String, Value>,
     metadata: &Map<String, Value>,
     has_active_stop_message_for_continue_execution: bool,
 ) {
-    let metadata_json = match serde_json::to_string(&Value::Object(metadata.clone())) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let client_inject_ready = parse_bool_or_default(
-        resolve_client_inject_ready_json(metadata_json.clone()),
-        true,
-    );
+    let client_inject_ready = resolve_client_inject_ready(metadata);
     if !client_inject_ready {
         return;
     }

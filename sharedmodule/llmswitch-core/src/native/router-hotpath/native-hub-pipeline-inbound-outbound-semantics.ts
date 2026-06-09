@@ -5,7 +5,6 @@ import {
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
 
-export type NativeResumeToolOutput = { tool_call_id: string; content: string };
 export type NativeContextToolOutput = { tool_call_id: string; call_id: string; output?: string; name?: string };
 
 const NON_BLOCKING_INBOUND_OUTBOUND_LOG_THROTTLE_MS = 60_000;
@@ -47,46 +46,6 @@ function safeStringify(value: unknown): string | undefined {
     logNativeInboundOutboundNonBlocking('safeStringify', error);
     return undefined;
   }
-}
-
-function parseRecord(raw: string): Record<string, unknown> | null {
-  const parsed = parseJson('parseRecord', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function parseOptionalRecord(raw: string): Record<string, unknown> | undefined | null {
-  const parsed = parseJson('parseOptionalRecord', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function parseStyle(raw: string): 'fc' | 'preserve' | undefined | null {
-  const parsed = parseJson('parseStyle', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null || parsed === undefined) {
-    return undefined;
-  }
-  if (typeof parsed !== 'string') {
-    return null;
-  }
-  const normalized = parsed.trim().toLowerCase();
-  if (normalized === 'fc' || normalized === 'preserve') {
-    return normalized;
-  }
-  return null;
 }
 
 function parseToolOutputEntry(raw: unknown): NativeContextToolOutput | null {
@@ -131,29 +90,6 @@ function parseToolOutputEntry(raw: unknown): NativeContextToolOutput | null {
   };
 }
 
-function parseResumeToolOutputs(raw: string): NativeResumeToolOutput[] | null {
-  const parsed = parseJson('parseResumeToolOutputs', raw);
-  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
-    return null;
-  }
-  const out: NativeResumeToolOutput[] = [];
-  for (const entry of parsed) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      continue;
-    }
-    const row = entry as Record<string, unknown>;
-    const toolCallId =
-      (typeof row.tool_call_id === 'string' && row.tool_call_id.trim()) ||
-      (typeof row.toolCallId === 'string' && row.toolCallId.trim()) ||
-      '';
-    if (!toolCallId || typeof row.content !== 'string') {
-      continue;
-    }
-    out.push({ tool_call_id: toolCallId, content: row.content });
-  }
-  return out;
-}
-
 function parseCollectedToolOutputs(raw: string): NativeContextToolOutput[] | null {
   const parsed = parseJson('parseCollectedToolOutputs', raw);
   if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
@@ -167,124 +103,6 @@ function parseCollectedToolOutputs(raw: string): NativeContextToolOutput[] | nul
     }
   }
   return out;
-}
-
-export function mapResumeToolOutputsDetailedWithNative(
-  responsesResume: unknown
-): NativeResumeToolOutput[] {
-  const capability = 'mapResumeToolOutputsDetailedJson';
-  const fail = (reason?: string) => failNativeRequired<NativeResumeToolOutput[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('mapResumeToolOutputsDetailedJson');
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(responsesResume ?? null);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseResumeToolOutputs(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveServerToolFollowupSnapshotWithNative(
-  adapterContext: unknown
-): Record<string, unknown> | undefined {
-  const capability = 'resolveServerToolFollowupSnapshotJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('resolveServerToolFollowupSnapshotJson');
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(adapterContext ?? null);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseOptionalRecord(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function augmentContextSnapshotWithNative(
-  context: Record<string, unknown>,
-  fallbackSnapshot: Record<string, unknown>
-): Record<string, unknown> {
-  const capability = 'augmentContextSnapshotJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('augmentContextSnapshotJson');
-  if (!fn) {
-    return fail();
-  }
-  const contextJson = safeStringify(context);
-  const fallbackJson = safeStringify(fallbackSnapshot);
-  if (!contextJson || !fallbackJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(contextJson, fallbackJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function normalizeToolCallIdStyleCandidateWithNative(
-  value: unknown
-): 'fc' | 'preserve' | undefined {
-  const capability = 'normalizeToolCallIdStyleCandidateJson';
-  const fail = (reason?: string) => failNativeRequired<'fc' | 'preserve' | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('normalizeToolCallIdStyleCandidateJson');
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(value ?? null);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseStyle(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
 }
 
 export function collectToolOutputsWithNative(

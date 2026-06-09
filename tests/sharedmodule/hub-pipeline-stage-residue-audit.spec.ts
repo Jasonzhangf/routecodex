@@ -2920,6 +2920,78 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired req_inbound standalone public bridges must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-semantic-lift.mjs',
+    ];
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/servertool_injection.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs',
+    ];
+    const retiredSymbols = [
+      'mapReqInboundResumeToolOutputsDetailedWithNative',
+      'resolveClientInjectReadyWithNative',
+      'normalizeContextCaptureLabelWithNative',
+      'shouldRunHubChatProcessWithNative',
+      'isShellLikeToolNameTokenWithNative',
+      'resolveReqInboundServerToolFollowupSnapshotWithNative',
+      'augmentReqInboundContextSnapshotWithNative',
+      'normalizeReqInboundToolCallIdStyleWithNative',
+      'mapResumeToolOutputsDetailedWithNative',
+      'resolveServerToolFollowupSnapshotWithNative',
+      'augmentContextSnapshotWithNative',
+      'normalizeToolCallIdStyleCandidateWithNative',
+      'NativeResumeToolOutput',
+      'parseResumeToolOutputs',
+      'parse_json_bool',
+      'parseBoolean',
+      'mapResumeToolOutputsDetailedJson',
+      'resolveServerToolFollowupSnapshotJson',
+      'augmentContextSnapshotJson',
+      'normalizeToolCallIdStyleCandidateJson',
+      'isShellLikeToolNameTokenJson',
+      'resolveClientInjectReadyJson',
+      'normalizeContextCaptureLabelJson',
+      'shouldRunHubChatProcessJson',
+      'map_resume_tool_outputs_detailed_json',
+      'is_shell_like_tool_name_token_json',
+      'resolve_client_inject_ready_json',
+      'resolve_server_tool_followup_snapshot_json',
+      'augment_context_snapshot_json',
+      'normalize_tool_call_id_style_candidate_json',
+      'normalize_context_capture_label_json',
+      'should_run_hub_chat_process_json',
+      'coverage-hub-req-inbound-semantic-lift',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = existingRetiredFiles.map((relativePath) => `${relativePath}:file exists`);
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [

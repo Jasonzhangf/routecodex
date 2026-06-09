@@ -43,6 +43,17 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveSseTimeoutOptionsJson');
   });
 
+  test('does not require retired req_inbound standalone helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('mapResumeToolOutputsDetailedJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveClientInjectReadyJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeContextCaptureLabelJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('shouldRunHubChatProcessJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isShellLikeToolNameTokenJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveServerToolFollowupSnapshotJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentContextSnapshotJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeToolCallIdStyleCandidateJson');
+  });
+
   test('native resume helper returns protocol error envelope instead of napi generic failure', () => {
     const binding = nodeRequire(
       path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')

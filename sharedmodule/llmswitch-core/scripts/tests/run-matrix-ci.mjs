@@ -235,12 +235,6 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:coverage-hub-req-inbound-semantic-lift',
-      'scripts/tests/coverage-hub-req-inbound-semantic-lift.mjs'
-    )
-  );
-  results.push(
-    await run(
       'matrix:coverage-hub-req-outbound-context-merge',
       'scripts/tests/coverage-hub-req-outbound-context-merge.mjs'
     )
