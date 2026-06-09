@@ -24,11 +24,19 @@ export function createServertoolCommand(
     .description('Run a RouteCodex servertool')
     .requiredOption('--input-json <json>', 'servertool input JSON object')
     .option('--flow <flowId>', 'servertool flow id')
-    .action(async (toolName: string, options: { inputJson: string; flow?: string }) => {
+    .option('--repeat-count <count>', 'stopless repeat count')
+    .option('--max-repeats <count>', 'stopless max repeats')
+    .action(async (toolName: string, options: { inputJson: string; flow?: string; repeatCount?: string; maxRepeats?: string }) => {
       try {
         const args = ['run', toolName, '--input-json', options.inputJson];
         if (typeof options.flow === 'string') {
           args.push('--flow', options.flow);
+        }
+        if (typeof options.repeatCount === 'string') {
+          args.push('--repeat-count', options.repeatCount);
+        }
+        if (typeof options.maxRepeats === 'string') {
+          args.push('--max-repeats', options.maxRepeats);
         }
         const result = execFileSync(
           resolveServertoolBinary(),

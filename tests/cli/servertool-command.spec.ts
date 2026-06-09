@@ -58,6 +58,47 @@ describe('servertool CLI command', () => {
     });
   });
 
+  it('passes explicit repeat flags through to the standalone Rust binary', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'stop_message_auto',
+      '--repeat-count',
+      '2',
+      '--max-repeats',
+      '5',
+      '--input-json',
+      '{"flowId":"stop_message_flow","continuationPrompt":"继续执行原任务","repeatCount":1,"maxRepeats":3}'
+    ]);
+
+    expect(errors).toEqual([]);
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload).toMatchObject({
+      toolName: 'stop_message_auto',
+      flowId: 'stop_message_flow',
+      repeatCount: 2,
+      maxRepeats: 5,
+      input: {
+        repeatCount: 1,
+        maxRepeats: 3
+      }
+    });
+  });
+
   it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
     'fails fast for non client-exec servertool %s',
     async (toolName) => {
