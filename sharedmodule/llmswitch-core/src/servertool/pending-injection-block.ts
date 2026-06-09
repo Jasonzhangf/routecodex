@@ -1,48 +1,50 @@
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineResult } from './types.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import {
+  planPendingInjectionPersistErrorWithNative,
+  planPendingInjectionPersistWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
+import type { PendingServerToolInjection } from './pending-session.js';
 import { savePendingServerToolInjection } from './pending-session.js';
+
+export const SERVERTOOL_PENDING_SESSION_FEATURE_ID = 'feature_id: hub.servertool_pending_session';
 
 export async function persistPendingServerToolInjection(args: {
   pendingInjection: NonNullable<ServerSideToolEngineResult['pendingInjection']>;
   requestId: string;
   flowId: string;
 }): Promise<boolean> {
-  const sessionIds = [
-    args.pendingInjection.sessionId,
-    ...(Array.isArray(args.pendingInjection.aliasSessionIds)
-      ? args.pendingInjection.aliasSessionIds
-      : [])
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim());
-  const uniqueSessionIds = Array.from(new Set(sessionIds));
-  if (uniqueSessionIds.length === 0) {
+  const plan = planPendingInjectionPersistWithNative({
+    pendingInjection: args.pendingInjection,
+    requestId: args.requestId,
+    flowId: args.flowId,
+    createdAtMs: Date.now()
+  });
+  if (plan.action === 'skip') {
     return false;
   }
   try {
-    for (const sessionId of uniqueSessionIds) {
-      await savePendingServerToolInjection(sessionId, {
-        createdAtMs: Date.now(),
-        afterToolCallIds: args.pendingInjection.afterToolCallIds,
-        messages: args.pendingInjection.messages,
-        sourceRequestId: args.requestId
-      });
+    for (const record of plan.records) {
+      await savePendingServerToolInjection(
+        record.sessionId,
+        record.pending as Omit<PendingServerToolInjection, 'version' | 'sessionId'>
+      );
     }
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-    const wrapped = new ProviderProtocolError('[servertool] pending injection persistence failed', {
-      code: 'SERVERTOOL_PENDING_INJECTION_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
-        requestId: args.requestId,
-        flowId: args.flowId,
-        sessionIds: uniqueSessionIds,
-        reason: message
-      }
+    const errorPlan = planPendingInjectionPersistErrorWithNative({
+      requestId: args.requestId,
+      flowId: args.flowId,
+      sessionIds: plan.sessionIds,
+      reason: message
+    });
+    const wrapped = new ProviderProtocolError(errorPlan.message, {
+      code: errorPlan.code as 'SERVERTOOL_PENDING_INJECTION_FAILED',
+      category: errorPlan.category as 'INTERNAL_ERROR',
+      details: errorPlan.details
     }) as ProviderProtocolError & { status?: number; cause?: unknown };
-    wrapped.status = 502;
+    wrapped.status = errorPlan.status;
     wrapped.cause = error;
     throw wrapped;
   }

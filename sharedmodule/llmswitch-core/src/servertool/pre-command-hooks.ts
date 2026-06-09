@@ -2,8 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
+import {
+  planPreCommandHooksConfigWithNative,
+  planRuntimePreCommandRuleWithNative,
+  type PreCommandHookRulePlan
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { isPreCommandScriptPathAllowedWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
+
+export const SERVERTOOL_PRE_COMMAND_HOOKS_FEATURE_ID = 'feature_id: hub.servertool_pre_command_hooks';
 
 interface PreCommandHookRule {
   id: string;
@@ -43,8 +50,6 @@ const DEFAULT_PRE_COMMAND_HOOKS_FILE = path.join(
   'hooks',
   'pre-command-hooks.json'
 );
-const DEFAULT_TIMEOUT_MS = 2000;
-const DEFAULT_TOOLS = ['exec_command', 'shell', 'shell_command'];
 
 let cachedConfig: {
   filePath: string;
@@ -185,22 +190,12 @@ function resolveRuntimePreCommandRule(rawState: unknown): PreCommandHookRule | n
   if (!scriptPath) {
     return null;
   }
-  if (!isPreCommandScriptPathAllowedWithNative(scriptPath)) {
-    return null;
-  }
-
-  const timeoutMs = normalizeTimeoutMs(
-    record.timeoutMs ?? record.timeout_ms ?? process.env.ROUTECODEX_PRE_COMMAND_TIMEOUT_MS
-  );
-
-  return {
-    id: `runtime_precommand:${sanitizeHookId(path.basename(scriptPath) || 'script')}`,
-    toolNames: new Set(DEFAULT_TOOLS),
-    runtimeScriptPath: scriptPath,
-    timeoutMs,
-    priority: -1000,
-    order: -1
-  };
+  const plan = planRuntimePreCommandRuleWithNative({
+    rawState,
+    envTimeoutMs: process.env.ROUTECODEX_PRE_COMMAND_TIMEOUT_MS,
+    scriptPathAllowed: isPreCommandScriptPathAllowedWithNative(scriptPath)
+  });
+  return plan ? materializePreCommandHookRule(plan) : null;
 }
 
 function resolvePreCommandHooksFilePath(): string {
@@ -261,155 +256,40 @@ function loadPreCommandHooksConfig(): PreCommandHooksConfig {
 }
 
 function normalizePreCommandHooksConfig(raw: unknown): PreCommandHooksConfig {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { enabled: false, hooks: [] };
-  }
-  const record = raw as Record<string, unknown>;
-  const enabled = record.enabled !== false;
-  if (!enabled) {
-    return { enabled: false, hooks: [] };
-  }
-
-  const hooksRaw = Array.isArray(record.hooks) ? record.hooks : [];
-  const hooks: PreCommandHookRule[] = [];
-  for (let idx = 0; idx < hooksRaw.length; idx += 1) {
-    const normalized = normalizePreCommandHookRule(hooksRaw[idx], idx);
-    if (normalized) {
-      hooks.push(normalized);
-    }
-  }
-
-  hooks.sort((left, right) => {
-    if (left.priority !== right.priority) {
-      return left.priority - right.priority;
-    }
-    if (left.order !== right.order) {
-      return left.order - right.order;
-    }
-    return left.id.localeCompare(right.id);
-  });
-
+  const plan = planPreCommandHooksConfigWithNative(raw);
   return {
-    enabled: true,
-    hooks
+    enabled: plan.enabled,
+    hooks: plan.hooks.map(materializePreCommandHookRule)
   };
 }
 
-function normalizePreCommandHookRule(raw: unknown, order: number): PreCommandHookRule | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  if (record.enabled === false) {
-    return null;
-  }
-
-  const id = normalizeHookId(record.id, order);
-  const toolNames = normalizeToolSet(record.tool ?? record.tools);
-  const cmdRegex = parseRegex(record.cmdRegex ?? record.commandRegex ?? record.matchCommand);
-  const jqExpression = readString(record.jq ?? record.jqTransform ?? record.expression);
-  const shellCommand = readString(record.shell ?? record.command);
-  const hasAction = Boolean(jqExpression || shellCommand);
-  if (!hasAction) {
-    return null;
-  }
-
-  const timeoutMs = normalizeTimeoutMs(record.timeoutMs ?? record.timeout_ms);
-  const priority = normalizePriority(record.priority);
-
+function materializePreCommandHookRule(plan: PreCommandHookRulePlan): PreCommandHookRule {
   return {
-    id,
-    toolNames,
-    cmdRegex,
-    jqExpression,
-    shellCommand,
-    timeoutMs,
-    priority,
-    order
+    id: plan.id,
+    toolNames: new Set(plan.toolNames),
+    cmdRegex: materializeRegex(plan.cmdRegex),
+    jqExpression: plan.jqExpression,
+    shellCommand: plan.shellCommand,
+    runtimeScriptPath: plan.runtimeScriptPath,
+    timeoutMs: plan.timeoutMs,
+    priority: plan.priority,
+    order: plan.order
   };
 }
 
-function sanitizeHookId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.-]+/g, '_');
-}
-
-function normalizeHookId(value: unknown, order: number): string {
-  const text = readString(value);
-  if (!text) {
-    return `pre_command_hook_${order + 1}`;
-  }
-  return sanitizeHookId(text);
-}
-
-function normalizeToolName(value: string): string {
-  return (value || '').trim().toLowerCase();
-}
-
-function normalizeToolSet(raw: unknown): Set<string> {
-  const out = new Set<string>();
-  const push = (value: unknown): void => {
-    if (typeof value !== 'string') {
-      return;
-    }
-    const normalized = normalizeToolName(value);
-    if (normalized) {
-      out.add(normalized);
-    }
-  };
-
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      push(item);
-    }
-  } else {
-    push(raw);
-  }
-
-  if (out.size === 0) {
-    for (const tool of DEFAULT_TOOLS) {
-      out.add(tool);
-    }
-  }
-
-  return out;
-}
-
-function parseRegex(raw: unknown): RegExp | undefined {
-  if (typeof raw !== 'string' || !raw.trim()) {
+function materializeRegex(plan: PreCommandHookRulePlan['cmdRegex']): RegExp | undefined {
+  if (!plan) {
     return undefined;
   }
-  const value = raw.trim();
-  const slashMatch = value.match(/^\/(.*)\/([a-z]*)$/i);
-  if (slashMatch) {
-    const pattern = slashMatch[1];
-    const flags = slashMatch[2] || 'i';
-    try {
-      return new RegExp(pattern, flags);
-    } catch {
-      return undefined;
-    }
-  }
   try {
-    return new RegExp(value, 'i');
+    return new RegExp(plan.source, plan.flags);
   } catch {
     return undefined;
   }
 }
 
-function normalizeTimeoutMs(raw: unknown): number {
-  const num = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(num) || num <= 0) {
-    return DEFAULT_TIMEOUT_MS;
-  }
-  return Math.floor(Math.min(num, 30_000));
-}
-
-function normalizePriority(raw: unknown): number {
-  const num = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(num)) {
-    return 100;
-  }
-  return Math.floor(num);
+function normalizeToolName(value: string): string {
+  return (value || '').trim().toLowerCase();
 }
 
 function readString(raw: unknown): string {

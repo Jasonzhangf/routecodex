@@ -18,6 +18,7 @@ use servertool_core::loop_state_contract;
 use servertool_core::orchestration_policy_contract;
 use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
+use servertool_core::pre_command_hook_contract;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
@@ -255,6 +256,42 @@ pub fn plan_pending_session_load_json(input_json: &str) -> Result<String, String
         .map_err(|e| format!("deserialize pending session load input: {e}"))?;
     serde_json::to_string(&pending_session_contract::plan_pending_session_load(input))
         .map_err(|e| format!("serialize pending session load plan: {e}"))
+}
+
+pub fn plan_pending_injection_persist_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingInjectionPersistInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pending injection persist input: {e}"))?;
+    let plan = pending_session_contract::plan_pending_injection_persist(input)?;
+    serde_json::to_string(&plan).map_err(|e| format!("serialize pending injection plan: {e}"))
+}
+
+pub fn plan_pending_injection_persist_error_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingInjectionPersistErrorInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pending injection persist error input: {e}"))?;
+    serde_json::to_string(&pending_session_contract::plan_pending_injection_persist_error(input))
+        .map_err(|e| format!("serialize pending injection error plan: {e}"))
+}
+
+pub fn plan_pre_command_hooks_config_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandHooksConfigPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command hooks config input: {e}"))?;
+    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hooks_config(
+        &input,
+    ))
+    .map_err(|e| format!("serialize pre-command hooks config plan: {e}"))
+}
+
+pub fn plan_runtime_pre_command_rule_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::RuntimePreCommandRulePlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize runtime pre-command rule input: {e}"))?;
+    serde_json::to_string(&pre_command_hook_contract::plan_runtime_pre_command_rule(
+        &input,
+    ))
+    .map_err(|e| format!("serialize runtime pre-command rule plan: {e}"))
 }
 
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
@@ -1465,5 +1502,82 @@ mod tests {
         let load_plan: serde_json::Value = serde_json::from_str(&load).expect("load json");
         assert_eq!(load_plan["action"], "use");
         assert_eq!(load_plan["pending"]["afterToolCallIds"], json!(["call-1"]));
+
+        let persist = plan_pending_injection_persist_json(
+            &json!({
+                "pendingInjection": {
+                    "sessionId": " sess-1 ",
+                    "aliasSessionIds": ["sess-2", "sess-1"],
+                    "afterToolCallIds": [" call-2 "],
+                    "messages": [{ "role": "assistant" }]
+                },
+                "requestId": " req-1 ",
+                "flowId": " flow-1 ",
+                "createdAtMs": 2000
+            })
+            .to_string(),
+        )
+        .expect("persist injection plan");
+        let persist_plan: serde_json::Value =
+            serde_json::from_str(&persist).expect("persist injection json");
+        assert_eq!(persist_plan["action"], "persist");
+        assert_eq!(persist_plan["sessionIds"], json!(["sess-1", "sess-2"]));
+        assert_eq!(
+            persist_plan["records"][0]["pending"]["sourceRequestId"],
+            "req-1"
+        );
+
+        let error = plan_pending_injection_persist_error_json(
+            &json!({
+                "requestId": "req-1",
+                "flowId": "flow-1",
+                "sessionIds": ["sess-1"],
+                "reason": "disk full"
+            })
+            .to_string(),
+        )
+        .expect("persist injection error plan");
+        let error_plan: serde_json::Value =
+            serde_json::from_str(&error).expect("persist injection error json");
+        assert_eq!(error_plan["status"], 502);
+        assert_eq!(error_plan["details"]["sessionIds"], json!(["sess-1"]));
+    }
+
+    #[test]
+    fn plans_pre_command_hooks_via_servertool_core_bridge() {
+        let config = plan_pre_command_hooks_config_json(
+            &json!({
+                "raw": {
+                    "enabled": true,
+                    "hooks": [
+                        { "id": "second hook", "tool": "exec_command", "priority": 20, "jq": ".cmd = .cmd" },
+                        { "id": "first-hook", "tools": ["shell"], "priority": 10, "cmdRegex": "/^npm\\s+/g", "shell": "echo ok" }
+                    ]
+                }
+            })
+            .to_string(),
+        )
+        .expect("pre-command config plan");
+        let config_plan: serde_json::Value =
+            serde_json::from_str(&config).expect("pre-command config json");
+        assert_eq!(config_plan["enabled"], true);
+        assert_eq!(config_plan["hooks"][0]["id"], "first-hook");
+        assert_eq!(config_plan["hooks"][0]["cmdRegex"]["source"], "^npm\\s+");
+        assert_eq!(config_plan["hooks"][1]["id"], "second_hook");
+
+        let runtime = plan_runtime_pre_command_rule_json(
+            &json!({
+                "rawState": { "preCommandScriptPath": "/tmp/rewrite.sh" },
+                "envTimeoutMs": "1500",
+                "scriptPathAllowed": true
+            })
+            .to_string(),
+        )
+        .expect("runtime pre-command plan");
+        let runtime_plan: serde_json::Value =
+            serde_json::from_str(&runtime).expect("runtime pre-command json");
+        assert_eq!(runtime_plan["id"], "runtime_precommand:rewrite.sh");
+        assert_eq!(runtime_plan["timeoutMs"], 1500);
+        assert_eq!(runtime_plan["runtimeScriptPath"], "/tmp/rewrite.sh");
     }
 }

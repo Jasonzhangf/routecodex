@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// feature_id: hub.servertool_pending_session
 const DEFAULT_PENDING_MAX_AGE_MS: i64 = 30 * 60 * 1000;
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +51,66 @@ pub struct PendingSessionLoadInput {
     pub max_age_ms: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingInjectionPersistInput {
+    pub pending_injection: Value,
+    pub request_id: String,
+    pub flow_id: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingInjectionPersistRecord {
+    pub session_id: String,
+    pub pending: PendingServerToolInjectionDraft,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingServerToolInjectionDraft {
+    pub created_at_ms: i64,
+    pub after_tool_call_ids: Vec<String>,
+    pub messages: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_request_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "action")]
+pub enum PendingInjectionPersistPlan {
+    #[serde(rename = "skip")]
+    Skip,
+    #[serde(rename = "persist")]
+    Persist {
+        #[serde(rename = "sessionIds")]
+        session_ids: Vec<String>,
+        records: Vec<PendingInjectionPersistRecord>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingInjectionPersistErrorInput {
+    pub request_id: String,
+    pub flow_id: String,
+    #[serde(default)]
+    pub session_ids: Vec<Value>,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingInjectionPersistErrorPlan {
+    pub message: String,
+    pub code: String,
+    pub category: String,
+    pub status: i64,
+    pub details: Value,
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "action")]
@@ -85,13 +146,7 @@ pub fn resolve_pending_max_age_ms(input: &PendingSessionMaxAgeInput) -> i64 {
         }
     }
     if let Some(text) = raw.as_str() {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return DEFAULT_PENDING_MAX_AGE_MS;
-        }
-        return trimmed
-            .parse::<i64>()
-            .ok()
+        return parse_js_int_prefix(text)
             .map(positive_or_default)
             .unwrap_or(DEFAULT_PENDING_MAX_AGE_MS);
     }
@@ -130,6 +185,88 @@ pub fn plan_pending_session_load(input: PendingSessionLoadInput) -> PendingSessi
         };
     }
     PendingSessionLoadPlan::Use { pending }
+}
+
+pub fn plan_pending_injection_persist(
+    input: PendingInjectionPersistInput,
+) -> Result<PendingInjectionPersistPlan, String> {
+    let record = input
+        .pending_injection
+        .as_object()
+        .ok_or_else(|| "pending injection input must be an object".to_string())?;
+    let session_ids = collect_unique_pending_session_ids(record);
+    if session_ids.is_empty() {
+        return Ok(PendingInjectionPersistPlan::Skip);
+    }
+    let created_at_ms = if input.created_at_ms > 0 {
+        input.created_at_ms
+    } else {
+        return Err("pending injection createdAtMs must be positive".to_string());
+    };
+    let after_tool_call_ids = read_trimmed_string_array(record.get("afterToolCallIds"));
+    if after_tool_call_ids.is_empty() {
+        return Err("pending injection afterToolCallIds must contain at least one id".to_string());
+    }
+    let messages = record
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.as_object().is_some())
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if messages.is_empty() {
+        return Err("pending injection messages must contain at least one object".to_string());
+    }
+    let source_request_id = trim_to_non_empty(input.request_id);
+    let draft = PendingServerToolInjectionDraft {
+        created_at_ms,
+        after_tool_call_ids,
+        messages,
+        source_request_id,
+    };
+    let records = session_ids
+        .iter()
+        .map(|session_id| PendingInjectionPersistRecord {
+            session_id: session_id.clone(),
+            pending: draft.clone(),
+        })
+        .collect::<Vec<_>>();
+    let _ = input.flow_id;
+    Ok(PendingInjectionPersistPlan::Persist {
+        session_ids,
+        records,
+    })
+}
+
+pub fn plan_pending_injection_persist_error(
+    input: PendingInjectionPersistErrorInput,
+) -> PendingInjectionPersistErrorPlan {
+    let session_ids = input
+        .session_ids
+        .iter()
+        .filter_map(|item| read_trimmed_string(Some(item)))
+        .fold(Vec::<String>::new(), |mut acc, item| {
+            if !acc.iter().any(|existing| existing == &item) {
+                acc.push(item);
+            }
+            acc
+        });
+    PendingInjectionPersistErrorPlan {
+        message: "[servertool] pending injection persistence failed".to_string(),
+        code: "SERVERTOOL_PENDING_INJECTION_FAILED".to_string(),
+        category: "INTERNAL_ERROR".to_string(),
+        status: 502,
+        details: serde_json::json!({
+            "requestId": input.request_id.trim(),
+            "flowId": input.flow_id.trim(),
+            "sessionIds": session_ids,
+            "reason": input.reason.trim(),
+        }),
+    }
 }
 
 fn positive_or_default(value: i64) -> i64 {
@@ -209,12 +346,53 @@ fn coerce_pending_injection(value: &Value) -> Option<PendingServerToolInjectionP
     })
 }
 
+fn collect_unique_pending_session_ids(record: &serde_json::Map<String, Value>) -> Vec<String> {
+    let mut output = Vec::new();
+    push_unique_trimmed(&mut output, record.get("sessionId"));
+    if let Some(alias_session_ids) = record.get("aliasSessionIds").and_then(Value::as_array) {
+        for item in alias_session_ids {
+            push_unique_trimmed(&mut output, Some(item));
+        }
+    }
+    output
+}
+
+fn push_unique_trimmed(output: &mut Vec<String>, value: Option<&Value>) {
+    let Some(next) = read_trimmed_string(value) else {
+        return;
+    };
+    if !output.iter().any(|existing| existing == &next) {
+        output.push(next);
+    }
+}
+
+fn read_trimmed_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn trim_to_non_empty(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn read_floor_i64(value: Option<&Value>) -> Option<i64> {
@@ -233,12 +411,43 @@ fn read_floor_i64(value: Option<&Value>) -> Option<i64> {
     None
 }
 
+fn parse_js_int_prefix(value: &str) -> Option<i64> {
+    let trimmed = value.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut chars = trimmed.char_indices();
+    let mut end = 0usize;
+    if let Some((index, ch)) = chars.next() {
+        if ch == '+' || ch == '-' {
+            end = index + ch.len_utf8();
+        } else if ch.is_ascii_digit() {
+            end = index + ch.len_utf8();
+        } else {
+            return None;
+        }
+    }
+    for (index, ch) in chars {
+        if !ch.is_ascii_digit() {
+            break;
+        }
+        end = index + ch.len_utf8();
+    }
+    let candidate = &trimmed[..end];
+    if candidate == "+" || candidate == "-" {
+        return None;
+    }
+    candidate.parse::<i64>().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
+        plan_pending_injection_persist, plan_pending_injection_persist_error,
         plan_pending_session_load, plan_pending_session_save, resolve_pending_file_name,
-        resolve_pending_max_age_ms, PendingSessionFileInput, PendingSessionLoadInput,
-        PendingSessionMaxAgeInput, PendingSessionSaveInput,
+        resolve_pending_max_age_ms, PendingInjectionPersistErrorInput,
+        PendingInjectionPersistInput, PendingInjectionPersistPlan, PendingSessionFileInput,
+        PendingSessionLoadInput, PendingSessionMaxAgeInput, PendingSessionSaveInput,
     };
     use serde_json::json;
 
@@ -265,6 +474,12 @@ mod tests {
                 raw: Some(json!("2500"))
             }),
             2500
+        );
+        assert_eq!(
+            resolve_pending_max_age_ms(&PendingSessionMaxAgeInput {
+                raw: Some(json!("45000ms"))
+            }),
+            45_000
         );
         assert_eq!(
             resolve_pending_max_age_ms(&PendingSessionMaxAgeInput {
@@ -315,5 +530,67 @@ mod tests {
             stale,
             super::PendingSessionLoadPlan::Drop { reason, .. } if reason == "stale"
         ));
+    }
+
+    #[test]
+    fn plans_pending_injection_persist_records_and_dedupes_sessions() {
+        let plan = plan_pending_injection_persist(PendingInjectionPersistInput {
+            pending_injection: json!({
+                "sessionId": " sess-1 ",
+                "aliasSessionIds": ["sess-2", " sess-1 ", "", 7],
+                "afterToolCallIds": [" call-1 ", ""],
+                "messages": [{ "role": "assistant" }, null],
+            }),
+            request_id: " req-1 ".to_string(),
+            flow_id: " flow-1 ".to_string(),
+            created_at_ms: 2000,
+        })
+        .expect("persist plan");
+
+        let PendingInjectionPersistPlan::Persist {
+            session_ids,
+            records,
+        } = plan
+        else {
+            panic!("expected persist plan");
+        };
+        assert_eq!(session_ids, vec!["sess-1", "sess-2"]);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].session_id, "sess-1");
+        assert_eq!(records[0].pending.created_at_ms, 2000);
+        assert_eq!(records[0].pending.after_tool_call_ids, vec!["call-1"]);
+        assert_eq!(
+            records[0].pending.source_request_id.as_deref(),
+            Some("req-1")
+        );
+    }
+
+    #[test]
+    fn plans_pending_injection_skip_and_error_envelope() {
+        let skip = plan_pending_injection_persist(PendingInjectionPersistInput {
+            pending_injection: json!({
+                "sessionId": " ",
+                "aliasSessionIds": [" "],
+                "afterToolCallIds": ["call-1"],
+                "messages": [{ "role": "assistant" }],
+            }),
+            request_id: "req-1".to_string(),
+            flow_id: "flow-1".to_string(),
+            created_at_ms: 2000,
+        })
+        .expect("skip plan");
+        assert!(matches!(skip, PendingInjectionPersistPlan::Skip));
+
+        let error = plan_pending_injection_persist_error(PendingInjectionPersistErrorInput {
+            request_id: " req-1 ".to_string(),
+            flow_id: " flow-1 ".to_string(),
+            session_ids: vec![json!(" sess-1 "), json!("sess-1"), json!("sess-2")],
+            reason: " disk full ".to_string(),
+        });
+        assert_eq!(error.status, 502);
+        assert_eq!(error.code, "SERVERTOOL_PENDING_INJECTION_FAILED");
+        assert_eq!(error.details["requestId"], json!("req-1"));
+        assert_eq!(error.details["sessionIds"], json!(["sess-1", "sess-2"]));
+        assert_eq!(error.details["reason"], json!("disk full"));
     }
 }

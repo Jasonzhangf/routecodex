@@ -23,6 +23,47 @@ verification:
       - If provider/client protocol shape changes, add targeted followup entry smoke.
       - Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers.
 
+  - feature_id: hub.servertool_pending_session
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/pending-session.ts
+      - sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/sharedmodule/servertool-pending-session.spec.ts
+      - tests/servertool/pending-session.spec.ts
+      - tests/servertool/pending-injection-block.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns pending-session and pending-injection persist planning; TS may only execute env/file/save IO from native plans.
+
+  - feature_id: hub.servertool_pre_command_hooks
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/pre-command-hooks.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO.
+
   - feature_id: hub.servertool_cli_projection
     change_risk: high
     unit:

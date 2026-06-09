@@ -1,16 +1,38 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  clearPendingServerToolInjection,
-  loadPendingServerToolInjection,
-  savePendingServerToolInjection
-} from '../../sharedmodule/llmswitch-core/src/servertool/pending-session.js';
+import { afterAll, beforeAll } from '@jest/globals';
+
+let clearPendingServerToolInjection: typeof import('../../sharedmodule/llmswitch-core/src/servertool/pending-session.js').clearPendingServerToolInjection;
+let loadPendingServerToolInjection: typeof import('../../sharedmodule/llmswitch-core/src/servertool/pending-session.js').loadPendingServerToolInjection;
+let savePendingServerToolInjection: typeof import('../../sharedmodule/llmswitch-core/src/servertool/pending-session.js').savePendingServerToolInjection;
+
+function nativePath(): string {
+  return path.join(
+    process.cwd(),
+    'sharedmodule/llmswitch-core/rust-core/target/release/router_hotpath_napi.node'
+  );
+}
 
 describe('servertool pending session store', () => {
   const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
   const prevPendingMaxAge = process.env.ROUTECODEX_SERVERTOOL_PENDING_MAX_AGE_MS;
+  const prevNativePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH;
   let tempRoot = '';
+
+  beforeAll(async () => {
+    process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativePath();
+    ({
+      clearPendingServerToolInjection,
+      loadPendingServerToolInjection,
+      savePendingServerToolInjection
+    } = await import('../../sharedmodule/llmswitch-core/src/servertool/pending-session.js'));
+  });
+
+  afterAll(() => {
+    if (prevNativePath === undefined) delete process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH;
+    else process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = prevNativePath;
+  });
 
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-pending-session-'));

@@ -46,11 +46,14 @@ const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-
 const RUST_SERVERTOOL_LOOP_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`;
 const RUST_SERVERTOOL_ORCHESTRATION_POLICY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`;
 const RUST_SERVERTOOL_PENDING_SESSION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs`;
+const RUST_SERVERTOOL_PRE_COMMAND = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`;
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
+const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
 const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
+const TS_PRE_COMMAND_HOOKS = `${SERVERTOOL_TS_DIR}/pre-command-hooks.ts`;
 const TS_FLOW_PRESENTATION = `${SERVERTOOL_TS_DIR}/flow-presentation-block.ts`;
 const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
@@ -1901,6 +1904,8 @@ function checkPendingSessionRustOwner() {
     'pub fn resolve_pending_max_age_ms',
     'pub fn plan_pending_session_save',
     'pub fn plan_pending_session_load',
+    'pub fn plan_pending_injection_persist',
+    'pub fn plan_pending_injection_persist_error',
   ]) {
     assertContains(
       'servertool-pending-session-rust-owner',
@@ -1920,6 +1925,8 @@ function checkPendingSessionRustOwner() {
     'resolve_pending_session_max_age_ms_json',
     'plan_pending_session_save_json',
     'plan_pending_session_load_json',
+    'plan_pending_injection_persist_json',
+    'plan_pending_injection_persist_error_json',
   ]) {
     assertContains(
       'servertool-pending-session-native-export',
@@ -1933,6 +1940,8 @@ function checkPendingSessionRustOwner() {
     'pub fn resolve_pending_session_max_age_ms_json',
     'pub fn plan_pending_session_save_json',
     'pub fn plan_pending_session_load_json',
+    'pub fn plan_pending_injection_persist_json',
+    'pub fn plan_pending_injection_persist_error_json',
   ]) {
     assertContains(
       'servertool-pending-session-native-export',
@@ -1946,6 +1955,8 @@ function checkPendingSessionRustOwner() {
     'resolvePendingSessionMaxAgeMsJson',
     'planPendingSessionSaveJson',
     'planPendingSessionLoadJson',
+    'planPendingInjectionPersistJson',
+    'planPendingInjectionPersistErrorJson',
   ]) {
     assertContains(
       'servertool-pending-session-required-export',
@@ -1973,6 +1984,48 @@ function checkPendingSessionRustOwner() {
       needle
     );
   }
+  const pendingInjectionShell = readRequired(TS_PENDING_INJECTION);
+  for (const needle of [
+    'planPendingInjectionPersistWithNative',
+    'planPendingInjectionPersistErrorWithNative',
+  ]) {
+    assertContains(
+      'servertool-pending-injection-native-bridge',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+    assertContains(
+      'servertool-pending-injection-ts-thin-shell',
+      TS_PENDING_INJECTION,
+      pendingInjectionShell,
+      needle
+    );
+  }
+  for (const keyword of [
+    'aliasSessionIds',
+    'Array.from(new Set',
+    '.filter((value)',
+    '.map((value) => value.trim())',
+    'sessionIds: uniqueSessionIds',
+    'afterToolCallIds: args.pendingInjection.afterToolCallIds',
+    'messages: args.pendingInjection.messages',
+    'sourceRequestId: args.requestId',
+    "code: 'SERVERTOOL_PENDING_INJECTION_FAILED'",
+    "category: 'INTERNAL_ERROR'",
+    'status = 502',
+  ]) {
+    if (pendingInjectionShell.includes(keyword)) {
+      fail(
+        'servertool-pending-injection-no-ts-owner',
+        `Forbidden TS pending-injection semantic "${keyword}" found in pending-injection-block.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-pending-injection-no-ts-owner',
+    'pending-injection-block.ts is native-plan shell for session dedupe, save payload, and error envelope decisions'
+  );
   for (const keyword of [
     'DEFAULT_PENDING_MAX_AGE_MS',
     'function sanitizeSegment',
@@ -1994,6 +2047,117 @@ function checkPendingSessionRustOwner() {
   pass(
     'servertool-pending-session-no-ts-owner',
     'pending-session.ts is native-only shell for max-age, session file, payload coercion, and stale/malformed load decisions'
+  );
+}
+
+function checkPreCommandHooksRustOwner() {
+  const rustPreCommand = readRequired(RUST_SERVERTOOL_PRE_COMMAND);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const preCommandShell = readRequired(TS_PRE_COMMAND_HOOKS);
+
+  for (const needle of [
+    'feature_id: hub.servertool_pre_command_hooks',
+    'pub struct PreCommandHooksConfigPlanInput',
+    'pub struct PreCommandHooksConfigPlan',
+    'pub struct PreCommandHookRulePlan',
+    'pub struct PreCommandRegexPlan',
+    'pub struct RuntimePreCommandRulePlanInput',
+    'pub fn plan_pre_command_hooks_config',
+    'pub fn plan_runtime_pre_command_rule',
+  ]) {
+    assertContains(
+      'servertool-pre-command-hooks-rust-owner',
+      RUST_SERVERTOOL_PRE_COMMAND,
+      rustPreCommand,
+      needle
+    );
+  }
+  assertContains(
+    'servertool-pre-command-hooks-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod pre_command_hook_contract'
+  );
+  for (const needle of [
+    'plan_pre_command_hooks_config_json',
+    'plan_runtime_pre_command_rule_json',
+  ]) {
+    assertContains(
+      'servertool-pre-command-hooks-native-export',
+      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+      napiBlocks,
+      needle
+    );
+  }
+  for (const needle of [
+    'pub fn plan_pre_command_hooks_config_json',
+    'pub fn plan_runtime_pre_command_rule_json',
+  ]) {
+    assertContains(
+      'servertool-pre-command-hooks-native-export',
+      RUST_ROUTER_HOTPATH_NAPI_LIB,
+      napiLib,
+      needle
+    );
+  }
+  for (const needle of [
+    'planPreCommandHooksConfigJson',
+    'planRuntimePreCommandRuleJson',
+  ]) {
+    assertContains(
+      'servertool-pre-command-hooks-required-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      needle
+    );
+  }
+  for (const needle of [
+    'planPreCommandHooksConfigWithNative',
+    'planRuntimePreCommandRuleWithNative',
+  ]) {
+    assertContains(
+      'servertool-pre-command-hooks-native-bridge',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+    assertContains(
+      'servertool-pre-command-hooks-ts-thin-shell',
+      TS_PRE_COMMAND_HOOKS,
+      preCommandShell,
+      needle
+    );
+  }
+  for (const keyword of [
+    'function normalizePreCommandHookRule',
+    'function sanitizeHookId',
+    'function normalizeHookId',
+    'function normalizeToolSet',
+    'function parseRegex',
+    'function normalizeTimeoutMs',
+    'function normalizePriority',
+    'Number.parseInt',
+    'Number.isFinite',
+    'Math.floor',
+    'Math.min',
+    'DEFAULT_TIMEOUT_MS',
+    'DEFAULT_TOOLS',
+    '.replace(/[^a-zA-Z0-9_.-]+/g',
+  ]) {
+    if (preCommandShell.includes(keyword)) {
+      fail(
+        'servertool-pre-command-hooks-no-ts-owner',
+        `Forbidden TS pre-command hook semantic "${keyword}" found in pre-command-hooks.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-pre-command-hooks-no-ts-owner',
+    'pre-command-hooks.ts is native-plan shell for config/rule normalization, hook id, tools, regex plan, timeout, and priority policy'
   );
 }
 
@@ -2969,6 +3133,7 @@ checkStopMessageCounterRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
 checkPendingSessionRustOwner();
+checkPreCommandHooksRustOwner();
 checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();

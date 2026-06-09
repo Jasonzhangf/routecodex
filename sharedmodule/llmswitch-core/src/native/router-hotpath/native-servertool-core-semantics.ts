@@ -131,6 +131,54 @@ export type PendingSessionLoadPlan =
       message: string;
     };
 
+export interface PendingInjectionPersistInput {
+  pendingInjection: unknown;
+  requestId: string;
+  flowId: string;
+  createdAtMs: number;
+}
+
+export type PendingInjectionPersistPlan =
+  | { action: 'skip' }
+  | {
+      action: 'persist';
+      sessionIds: string[];
+      records: Array<{
+        sessionId: string;
+        pending: Omit<PendingServerToolInjectionPlan, 'version' | 'sessionId'>;
+      }>;
+    };
+
+export interface PendingInjectionPersistErrorPlan {
+  message: string;
+  code: string;
+  category: string;
+  status: number;
+  details: Record<string, unknown>;
+}
+
+export interface PreCommandRegexPlan {
+  source: string;
+  flags: string;
+}
+
+export interface PreCommandHookRulePlan {
+  id: string;
+  toolNames: string[];
+  cmdRegex?: PreCommandRegexPlan;
+  jqExpression?: string;
+  shellCommand?: string;
+  runtimeScriptPath?: string;
+  timeoutMs: number;
+  priority: number;
+  order: number;
+}
+
+export interface PreCommandHooksConfigPlan {
+  enabled: boolean;
+  hooks: PreCommandHookRulePlan[];
+}
+
 export interface ClientExecCliProjectionInput {
   toolName: string;
   flowId?: string;
@@ -1077,6 +1125,230 @@ export function planPendingSessionLoadWithNative(input: {
     };
   }
   throw new Error('planPendingSessionLoadJson native returned invalid action');
+}
+
+export function planPendingInjectionPersistWithNative(
+  input: PendingInjectionPersistInput,
+): PendingInjectionPersistPlan {
+  const capability = 'planPendingInjectionPersistJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPendingInjectionPersistJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPendingInjectionPersistJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPendingInjectionPersistJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action === 'skip') {
+    return { action: 'skip' };
+  }
+  if (record.action !== 'persist') {
+    throw new Error('planPendingInjectionPersistJson native returned invalid action');
+  }
+  if (
+    !Array.isArray(record.sessionIds) ||
+    !record.sessionIds.every((item) => typeof item === 'string' && item.trim()) ||
+    !Array.isArray(record.records)
+  ) {
+    throw new Error('planPendingInjectionPersistJson native returned invalid persist plan');
+  }
+  return {
+    action: 'persist',
+    sessionIds: record.sessionIds.map((item) => String(item).trim()),
+    records: record.records.map((item) => parsePendingInjectionPersistRecord(item, capability))
+  };
+}
+
+export function planPendingInjectionPersistErrorWithNative(input: {
+  requestId: string;
+  flowId: string;
+  sessionIds: unknown[];
+  reason: string;
+}): PendingInjectionPersistErrorPlan {
+  const capability = 'planPendingInjectionPersistErrorJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPendingInjectionPersistErrorJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPendingInjectionPersistErrorJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPendingInjectionPersistErrorJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.message !== 'string' ||
+    !record.message.trim() ||
+    typeof record.code !== 'string' ||
+    !record.code.trim() ||
+    typeof record.category !== 'string' ||
+    !record.category.trim() ||
+    !Number.isInteger(record.status) ||
+    typeof record.details !== 'object' ||
+    record.details === null ||
+    Array.isArray(record.details)
+  ) {
+    throw new Error('planPendingInjectionPersistErrorJson native returned invalid error plan');
+  }
+  return {
+    message: record.message.trim(),
+    code: record.code.trim(),
+    category: record.category.trim(),
+    status: record.status as number,
+    details: record.details as Record<string, unknown>
+  };
+}
+
+export function planPreCommandHooksConfigWithNative(raw: unknown): PreCommandHooksConfigPlan {
+  const capability = 'planPreCommandHooksConfigJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreCommandHooksConfigJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ raw }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreCommandHooksConfigJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parsePreCommandHooksConfigPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
+export function planRuntimePreCommandRuleWithNative(input: {
+  rawState: unknown;
+  envTimeoutMs?: unknown;
+  scriptPathAllowed: boolean;
+}): PreCommandHookRulePlan | null {
+  const capability = 'planRuntimePreCommandRuleJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planRuntimePreCommandRuleJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planRuntimePreCommandRuleJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  return parsePreCommandHookRulePlan(parsed, capability);
+}
+
+function parsePreCommandHooksConfigPlan(value: unknown, capability: string): PreCommandHooksConfigPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid config plan`);
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.enabled !== 'boolean' || !Array.isArray(record.hooks)) {
+    throw new Error(`${capability} native returned incomplete config plan`);
+  }
+  return {
+    enabled: record.enabled,
+    hooks: record.hooks.map((item) => parsePreCommandHookRulePlan(item, capability))
+  };
+}
+
+function parsePreCommandHookRulePlan(value: unknown, capability: string): PreCommandHookRulePlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid hook rule`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string' ||
+    !record.id.trim() ||
+    !Array.isArray(record.toolNames) ||
+    !record.toolNames.every((item) => typeof item === 'string' && item.trim()) ||
+    !Number.isInteger(record.timeoutMs) ||
+    !Number.isInteger(record.priority) ||
+    !Number.isInteger(record.order)
+  ) {
+    throw new Error(`${capability} native returned incomplete hook rule`);
+  }
+  const cmdRegex = parsePreCommandRegexPlan(record.cmdRegex, capability);
+  const jqExpression = typeof record.jqExpression === 'string' && record.jqExpression.trim()
+    ? record.jqExpression.trim()
+    : undefined;
+  const shellCommand = typeof record.shellCommand === 'string' && record.shellCommand.trim()
+    ? record.shellCommand.trim()
+    : undefined;
+  const runtimeScriptPath = typeof record.runtimeScriptPath === 'string' && record.runtimeScriptPath.trim()
+    ? record.runtimeScriptPath.trim()
+    : undefined;
+  return {
+    id: record.id.trim(),
+    toolNames: record.toolNames.map((item) => String(item).trim()),
+    ...(cmdRegex ? { cmdRegex } : {}),
+    ...(jqExpression ? { jqExpression } : {}),
+    ...(shellCommand ? { shellCommand } : {}),
+    ...(runtimeScriptPath ? { runtimeScriptPath } : {}),
+    timeoutMs: record.timeoutMs as number,
+    priority: record.priority as number,
+    order: record.order as number
+  };
+}
+
+function parsePreCommandRegexPlan(value: unknown, capability: string): PreCommandRegexPlan | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid regex plan`);
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.source !== 'string' || typeof record.flags !== 'string') {
+    throw new Error(`${capability} native returned incomplete regex plan`);
+  }
+  return {
+    source: record.source,
+    flags: record.flags
+  };
+}
+
+function parsePendingInjectionPersistRecord(value: unknown, capability: string): {
+  sessionId: string;
+  pending: Omit<PendingServerToolInjectionPlan, 'version' | 'sessionId'>;
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid persist record`);
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.sessionId !== 'string' || !record.sessionId.trim()) {
+    throw new Error(`${capability} native returned invalid persist sessionId`);
+  }
+  const pending = record.pending;
+  if (!pending || typeof pending !== 'object' || Array.isArray(pending)) {
+    throw new Error(`${capability} native returned invalid persist pending payload`);
+  }
+  const pendingRecord = pending as Record<string, unknown>;
+  if (!Number.isInteger(pendingRecord.createdAtMs) || (pendingRecord.createdAtMs as number) <= 0) {
+    throw new Error(`${capability} native returned invalid persist createdAtMs`);
+  }
+  if (
+    !Array.isArray(pendingRecord.afterToolCallIds) ||
+    !pendingRecord.afterToolCallIds.every((item) => typeof item === 'string' && item.trim()) ||
+    !Array.isArray(pendingRecord.messages) ||
+    !pendingRecord.messages.every((item) => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+  ) {
+    throw new Error(`${capability} native returned invalid persist pending data`);
+  }
+  return {
+    sessionId: record.sessionId.trim(),
+    pending: {
+      createdAtMs: pendingRecord.createdAtMs as number,
+      afterToolCallIds: pendingRecord.afterToolCallIds.map((item) => String(item).trim()),
+      messages: pendingRecord.messages as Record<string, unknown>[],
+      ...(typeof pendingRecord.sourceRequestId === 'string' && pendingRecord.sourceRequestId.trim()
+        ? { sourceRequestId: pendingRecord.sourceRequestId.trim() }
+        : {})
+    }
+  };
 }
 
 function parsePendingServerToolInjectionPlan(value: unknown, capability: string): PendingServerToolInjectionPlan {

@@ -35,6 +35,91 @@ owners:
       - Rust owns orchestration semantics; TS only bridge/reentry/IO.
       - Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner.
 
+  - feature_id: hub.servertool_pending_session
+    status: active
+    summary: servertool pending-session store and pending injection persist planning
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
+    canonical_types:
+      - PendingServerToolInjectionPlan
+      - PendingInjectionPersistPlan
+      - PendingInjectionPersistErrorPlan
+      - PendingSessionLoadPlan
+    canonical_builders:
+      - resolve_pending_file_name
+      - resolve_pending_max_age_ms
+      - plan_pending_session_save
+      - plan_pending_session_load
+      - plan_pending_injection_persist
+      - plan_pending_injection_persist_error
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/pending-session.ts
+      - sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts
+      - tests/sharedmodule/servertool-pending-session.spec.ts
+      - tests/servertool/pending-session.spec.ts
+      - tests/servertool/pending-injection-block.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/sharedmodule/servertool-pending-session.spec.ts
+      - tests/servertool/pending-session.spec.ts
+      - tests/servertool/pending-injection-block.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - servertool-core owns pending file-name sanitization, max-age parsing/defaulting, save/load payload coercion, stale/malformed/drop decisions, pending injection session dedupe, persist record planning, and persistence error envelope construction.
+      - TS pending-session may only read env/session dir and execute file IO using native plans.
+      - TS pending-injection-block may only call native persist/error planners and execute save IO.
+      - Do not restore local max-age parsing, segment sanitization, payload coercion, stale/malformed drop policy, aliasSessionIds dedupe, pending injection payload construction, or `SERVERTOOL_PENDING_INJECTION_FAILED` envelope assembly in TS.
+
+  - feature_id: hub.servertool_pre_command_hooks
+    status: active
+    summary: servertool pre-command hook config and runtime-rule normalization
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
+    canonical_types:
+      - PreCommandHooksConfigPlanInput
+      - PreCommandHooksConfigPlan
+      - PreCommandHookRulePlan
+      - PreCommandRegexPlan
+      - RuntimePreCommandRulePlanInput
+    canonical_builders:
+      - plan_pre_command_hooks_config
+      - plan_runtime_pre_command_rule
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts
+      - tests/servertool/pre-command-hooks.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/pre-command-hooks.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning, timeout clamp/default, priority parsing, and runtime pre-command rule planning.
+      - TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO.
+      - Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS.
+
   - feature_id: hub.servertool_cli_projection
     status: active
     summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input

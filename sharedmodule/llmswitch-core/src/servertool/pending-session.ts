@@ -10,6 +10,8 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
 
+export const SERVERTOOL_PENDING_SESSION_FEATURE_ID = 'feature_id: hub.servertool_pending_session';
+
 export interface PendingServerToolInjection {
   version: 1;
   sessionId: string;

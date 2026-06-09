@@ -1461,6 +1461,30 @@ pub fn plan_pending_session_load_json(input_json: String) -> NapiResult<String> 
 }
 
 #[napi]
+pub fn plan_pending_injection_persist_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pending_injection_persist_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_pending_injection_persist_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pending_injection_persist_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_pre_command_hooks_config_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pre_command_hooks_config_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_runtime_pre_command_rule_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_runtime_pre_command_rule_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn resolve_default_stop_message_snapshot_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::resolve_default_stop_message_snapshot_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
