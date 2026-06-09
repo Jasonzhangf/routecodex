@@ -2990,3 +2990,9 @@ Tags: hub-pipeline, passthrough, dead-code, napi-export, rust-only, residue-gate
 - Removed the public NAPI wrappers, the internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, their legacy DTOs, and tests that existed only to exercise the retired stage API.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now fails if the legacy stage bridge API symbols return anywhere in active Rust source.
 Tags: hub-pipeline, stage-bridge, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-10 Hub response Responses client projection Rust owner
+- Responses client-visible JSON body/SSE projection for freeform `apply_patch` is Rust-owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs` via `project_responses_client_body_for_client` and `project_responses_sse_frame_for_client`.
+- `src/server/handlers/handler-response-utils.ts` may parse SSE event/data, hold native projection state, and write returned frames only. It must not restore TS `apply_patch` freeform parsing, `function_call -> custom_tool_call` conversion, delta/done aggregation, duplicate-done suppression, frame heuristic routing, or fallback that writes the original frame after native projection failure.
+- Verified runtime closeout: installed `0.90.3051`; health green on 5555/5520/10000 non-loopback; live 5555 and 5520 `/v1/responses` smokes emitted `response.completed` + `response.done` with `RCC_BUILD_5555_3051_OK` / `RCC_BUILD_5520_3051_OK`.
+Tags: hub-response, responses, apply_patch, rust-owner, client-projection, live-smoke, 2026-06-10
