@@ -111,6 +111,12 @@ const DELETED_STOP_VISIBLE_TEXT_TS_FILES = [
 const DELETED_CLI_RESULT_GUARD_TS_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-result-guard.ts`,
 ];
+const DELETED_AI_FOLLOWUP_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`,
+  `${ROOT}/tests/servertool/stopmessage-response-snapshot.spec.ts`,
+  `${ROOT}/tests/servertool/stop-message-auto-followup-extraction.spec.ts`,
+];
 
 // ── Issues accumulator ─────────────────────────────────────────
 const issues = [];
@@ -3287,6 +3293,61 @@ function checkDeletedEmptyReplyContinueAbsent() {
   pass('deleted-empty-reply-continue-absent', 'deleted empty-reply continue path is absent from servertool runtime gates');
 }
 
+// ── Check 18: deleted AI followup path stays absent ───────────
+function checkDeletedAiFollowupAbsent() {
+  for (const file of DELETED_AI_FOLLOWUP_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'deleted-ai-followup-absent',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; stopless now uses Rust-owned CLI projection, not AI followup`
+      );
+    }
+  }
+
+  const activeRuntimeFiles = ACTIVE_RUNTIME_SCAN_PATHS.flatMap((dir) => listFiles(dir));
+  for (const file of activeRuntimeFiles) {
+    const content = readFileSync(file, 'utf8');
+    for (const keyword of [
+      'ai-followup',
+      'aiFollowup',
+      'AiFollowup',
+      'STOPMESSAGE_AI_FOLLOWUP',
+      'STOPMESSAGE_AUTOMESSAGE',
+      'renderStopMessageAutoFollowupViaAi',
+      'buildStopMessageAutoMessagePrompt',
+    ]) {
+      if (content.includes(keyword)) {
+        fail(
+          'deleted-ai-followup-absent',
+          `Forbidden AI followup runtime semantic "${keyword}" found in ${file.replace(`${ROOT}/`, '')}`
+        );
+      }
+    }
+  }
+
+  const stopMessageConfig = readRequired(`${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`);
+  const stopMessageSpecPath = `${ROOT}/tests/servertool/stop-message-auto.spec.ts`;
+  const stopMessageSpec = existsSync(stopMessageSpecPath)
+    ? readFileSync(stopMessageSpecPath, 'utf8')
+    : '';
+  for (const keyword of [
+    'aiFollowup',
+    'StopMessageAi',
+    'resolveStopMessageAi',
+    'STOPMESSAGE_AI_FOLLOWUP',
+    'STOPMESSAGE_AUTOMESSAGE',
+  ]) {
+    if (stopMessageConfig.includes(keyword) || stopMessageSpec.includes(keyword)) {
+      fail(
+        'deleted-ai-followup-absent',
+        `Forbidden AI followup config/test residue "${keyword}" found`
+      );
+    }
+  }
+
+  pass('deleted-ai-followup-absent', 'AI followup files, runtime branch, config schema, and focused tests are absent');
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -3319,6 +3380,7 @@ checkStopVisibleTextRustOwner();
 checkStopMessageCliProjectionSeedRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
+checkDeletedAiFollowupAbsent();
 
 console.log();
 

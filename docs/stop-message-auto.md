@@ -71,9 +71,6 @@
     "enabled": true,
     "text": "继续执行",
     "maxRepeats": 2
-  },
-  "aiFollowup": {
-    "enabled": false
   }
 }
 ```

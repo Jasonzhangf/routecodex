@@ -152,7 +152,6 @@ describe("stop_message_flow reentry", () => {
       STOPMESSAGE_CONFIG_PATH,
       JSON.stringify({
         default: { enabled: true, text: "继续执行", maxRepeats: 3 },
-        aiFollowup: { enabled: false },
       }),
       "utf8",
     );

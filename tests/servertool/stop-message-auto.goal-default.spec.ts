@@ -188,9 +188,6 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
           text: "继续执行",
           maxRepeats: 3,
         },
-        aiFollowup: {
-          enabled: false,
-        },
       }),
       "utf8",
     );

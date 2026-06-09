@@ -69,32 +69,7 @@ const supportsProgressConsoleLogs =
   fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool]');
 const testIfProgressConsoleLogs = supportsProgressConsoleLogs ? test : test.skip;
 
-const PROGRESS_MOCK_CODEX_BIN_PATH = path.join(process.cwd(), 'tmp', 'jest-progress-mock-codex.sh');
-const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
-const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-
 beforeAll(async () => {
-  fs.writeFileSync(
-    PROGRESS_MOCK_CODEX_BIN_PATH,
-    [
-      '#!/usr/bin/env bash',
-      'if [ "$1" = "-p" ]; then',
-      '  candidate="$(printf \'%s\\n\' "$2" | sed -n \'s/^candidateFollowup: //p\' | head -n1)"',
-      '  if [ -n "$candidate" ] && [ "$candidate" != "n/a" ]; then',
-      '    printf \'%s\\n\' "$candidate"',
-      '  else',
-      "    echo '继续执行'",
-      '  fi',
-      '  exit 0',
-      'fi',
-      'exit 2'
-    ].join('\n'),
-    { encoding: 'utf8' }
-  );
-  fs.chmodSync(PROGRESS_MOCK_CODEX_BIN_PATH, 0o755);
-  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = '1';
-  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = PROGRESS_MOCK_CODEX_BIN_PATH;
-
   if (!supportsProgressFileLogger) {
     return;
   }
@@ -108,19 +83,6 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX === undefined) {
-    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX;
-  } else {
-    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX;
-  }
-  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN === undefined) {
-    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-  } else {
-    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
-  }
-  if (fs.existsSync(PROGRESS_MOCK_CODEX_BIN_PATH)) {
-    fs.unlinkSync(PROGRESS_MOCK_CODEX_BIN_PATH);
-  }
 });
 
 describe('servertool progress logging', () => {

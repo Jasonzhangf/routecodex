@@ -26,7 +26,7 @@
 6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
 7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。
 8. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 provided schema 与 missing schema 都按连续 3 次 stop 收敛；非 stop 响应、工具调用或正常进展必须 reset budget。旧的“missing schema 不计数 / 10 次 missing”文档视为过期。
-9. 任何系统提示词/ai-followup 若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。
+9. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
 10. 注入失败必须清理状态，防止循环。
 
 ## followup 边界

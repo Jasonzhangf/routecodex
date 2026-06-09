@@ -265,9 +265,6 @@ function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (text.includes('[virtual-router][instruction_parse]') || text.includes('[virtual-router][stop_scope]')) {
     return false;
   }
-  if (text.includes('[servertool][ai-followup]')) {
-    return false;
-  }
   if (text.includes('[servertool][reasoning.stop.finalized]')) {
     return false;
   }
