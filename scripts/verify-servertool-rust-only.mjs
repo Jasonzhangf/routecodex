@@ -2930,6 +2930,8 @@ function checkBackendRoutePolicyRustOwner() {
   for (const keyword of [
     'function readPreflightStatus',
     'function buildReplayPayload',
+    'extractCapturedChatSeed',
+    './backend-route-seed.js',
     'Number.isFinite',
     'Math.floor',
     '/^HTTP_\\d{3}$/i',

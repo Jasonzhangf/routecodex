@@ -4,7 +4,6 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { applyFollowupRuntimeMetadata } from './backend-route-runtime-block.js';
 import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
-import { extractCapturedChatSeed } from './backend-route-seed.js';
 import { buildFollowupRequestIdWithNative } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   planBootstrapReplayWithNative,
@@ -111,10 +110,9 @@ export async function maybeRunTransparentBootstrapReplay(args: {
   }
 
   const preflight = args.followupBody;
-  const replaySeed = extractCapturedChatSeed((args.adapterContext as any)?.capturedChatRequest);
   const replayPlan = planBootstrapReplayWithNative({
     preflightBody: preflight ?? null,
-    replaySeed: replaySeed ?? null
+    adapterContext: args.adapterContext
   });
   if (replayPlan.preflightFailure) {
     throw createBootstrapPreflightFailedError({

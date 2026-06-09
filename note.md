@@ -18648,3 +18648,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - `backend-route-runtime-block.ts::resolveFollowupRuntimeActionPlan` is the only TS helper calling the native runtime action plan; mainline/runtime consumers read that plan instead of duplicating decision payload assembly.
 - Gate strengthened in `verify:servertool-rust-only` to require Rust owner/native bridge/thin shell and block TS flow-id semantic revival.
 - Verification PASS: servertool Rust focused/full suites, NAPI bridge, native probe, servertool Jest, llmswitch-core/root tsc, `verify:servertool-rust-only`, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health` ready version 0.90.3036, `/v1/models` non-empty, and real `/v1/responses` exact output `routecodex-e2e-3036`.
+
+2026-06-09 servertool backend-route bootstrap replay seed Rust closeout:
+- `servertool-core::backend_route_contract::plan_bootstrap_replay` now owns replay seed selection from `adapter_context.capturedChatRequest`; TS bootstrap replay shell passes `adapterContext` to native and no longer imports `extractCapturedChatSeed`.
+- `verify:servertool-rust-only` now blocks `extractCapturedChatSeed` / `./backend-route-seed.js` inside `backend-route-bootstrap-replay-block.ts`.
+- Verification PASS: focused/full servertool Rust suites, NAPI bridge bootstrap tests, native wrapper probe, bootstrap Jest, required servertool Jest bundle, root `tsc`, `verify:servertool-rust-only`, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health` ready version 0.90.3037, `/v1/models` count 292, and real `/v1/responses` exact output `routecodex-e2e-3037`.

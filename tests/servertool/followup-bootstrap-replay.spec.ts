@@ -8,13 +8,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/backend-route-seed.js',
-  () => ({
-    extractCapturedChatSeed: jest.fn((source: any) => source ?? null)
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
   () => ({
     readRuntimeMetadata: jest.fn((carrier?: Record<string, unknown> | null) => {
@@ -63,17 +56,20 @@ jest.unstable_mockModule(
         ...(input.loopState ? { serverToolLoopState: input.loopState } : {})
       }
     })),
-    planBootstrapReplayWithNative: jest.fn((input: any) => ({
-      preflightFailure: null,
-      replayPayload: input.replaySeed
+    planBootstrapReplayWithNative: jest.fn((input: any) => {
+      const seed = input.replaySeed ?? input.adapterContext?.capturedChatRequest ?? null;
+      return {
+        preflightFailure: null,
+        replayPayload: seed
         ? {
-            ...(input.replaySeed.model ? { model: input.replaySeed.model } : {}),
-            messages: Array.isArray(input.replaySeed.messages) ? input.replaySeed.messages : [],
-            ...(Array.isArray(input.replaySeed.tools) ? { tools: input.replaySeed.tools } : {}),
-            ...(input.replaySeed.parameters ? { parameters: input.replaySeed.parameters } : {}),
+            ...(seed.model ? { model: seed.model } : {}),
+            messages: Array.isArray(seed.messages) ? seed.messages : [],
+            ...(Array.isArray(seed.tools) ? { tools: seed.tools } : {}),
+            ...(seed.parameters ? { parameters: seed.parameters } : {}),
           }
-        : null,
-    })),
+        : null
+      };
+    }),
   })
 );
 

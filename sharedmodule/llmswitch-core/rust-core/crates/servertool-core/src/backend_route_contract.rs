@@ -245,6 +245,7 @@ pub struct ServertoolFollowupErrorEnvelopePlan {
 pub struct ServertoolBootstrapReplayPlanInput {
     pub preflight_body: Option<Value>,
     pub replay_seed: Option<Value>,
+    pub adapter_context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -754,13 +755,16 @@ pub fn plan_bootstrap_replay(
         .as_ref()
         .and_then(|body| body.get("error"))
         .and_then(plan_bootstrap_preflight_failure);
+    let replay_seed = input.replay_seed.as_ref().or_else(|| {
+        input
+            .adapter_context
+            .as_ref()
+            .and_then(extract_captured_chat_seed)
+    });
     let replay_payload = if preflight_failure.is_some() {
         None
     } else {
-        input
-            .replay_seed
-            .as_ref()
-            .and_then(build_bootstrap_replay_payload)
+        replay_seed.and_then(build_bootstrap_replay_payload)
     };
     ServertoolBootstrapReplayPlan {
         preflight_failure,
@@ -2072,6 +2076,7 @@ mod tests {
                 "model": "gpt-test",
                 "messages": [{ "role": "user", "content": "hello" }]
             })),
+            adapter_context: None,
         });
         let failure = plan.preflight_failure.expect("preflight failure");
         assert_eq!(failure.status, Some(400));
@@ -2090,6 +2095,7 @@ mod tests {
                 "tools": [{ "type": "function", "function": { "name": "search" } }],
                 "parameters": { "temperature": 0.2 }
             })),
+            adapter_context: None,
         });
         assert!(plan.preflight_failure.is_none());
         let payload = plan.replay_payload.expect("replay payload");
@@ -2097,5 +2103,27 @@ mod tests {
         assert_eq!(payload["messages"][0]["role"], "user");
         assert_eq!(payload["tools"][0]["type"], "function");
         assert_eq!(payload["parameters"]["temperature"], 0.2);
+    }
+
+    #[test]
+    fn bootstrap_replay_plan_builds_payload_from_adapter_context_seed() {
+        let plan = plan_bootstrap_replay(ServertoolBootstrapReplayPlanInput {
+            preflight_body: Some(json!({ "status": "ok" })),
+            replay_seed: None,
+            adapter_context: Some(json!({
+                "capturedChatRequest": {
+                    "model": " gpt-adapter ",
+                    "messages": [{ "role": "user", "content": "from adapter" }],
+                    "tools": [{ "type": "function", "function": { "name": "inspect" } }],
+                    "parameters": { "temperature": 0.4 }
+                }
+            })),
+        });
+        assert!(plan.preflight_failure.is_none());
+        let payload = plan.replay_payload.expect("adapter replay payload");
+        assert_eq!(payload["model"], "gpt-adapter");
+        assert_eq!(payload["messages"][0]["content"], "from adapter");
+        assert_eq!(payload["tools"][0]["function"]["name"], "inspect");
+        assert_eq!(payload["parameters"]["temperature"], 0.4);
     }
 }

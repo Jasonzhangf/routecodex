@@ -2838,3 +2838,9 @@ Tags: hub-pipeline, anthropic-response, ignored-option, dead-code, rust-owner, r
 - Gate: `npm run verify:servertool-rust-only` requires Rust owner/native bridge/thin shell and blocks TS flow-id semantic revival.
 - Verified on 2026-06-09: Rust/NAPI focused tests, native probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool-core and servertool-cli Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3036`.
 Tags: servertool, backend-route, stopless, runtime-action, rust-owner, thin-shell, 2026-06-09
+
+## 2026-06-09 Servertool backend-route bootstrap replay seed Rust owner
+- `servertool-core::backend_route_contract::plan_bootstrap_replay` owns transparent bootstrap replay seed selection from `adapter_context.capturedChatRequest`; TS `backend-route-bootstrap-replay-block.ts` must pass `adapterContext` to native and must not import `extractCapturedChatSeed`.
+- Gate: `npm run verify:servertool-rust-only` blocks `extractCapturedChatSeed` and `./backend-route-seed.js` in the bootstrap replay shell.
+- Verified on 2026-06-09: focused/full servertool Rust suites, NAPI bootstrap bridge tests, native wrapper probe, bootstrap Jest, required servertool Jest bundle, root `tsc`, servertool rust-only gate, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3037`.
+Tags: servertool, backend-route, bootstrap-replay, captured-seed, rust-owner, thin-shell, 2026-06-09

@@ -1075,7 +1075,8 @@ mod tests {
                     "model": "gpt-test",
                     "messages": [{ "role": "user", "content": "hello" }],
                     "parameters": { "temperature": 0.1 }
-                }
+                },
+                "adapterContext": null
             })
             .to_string(),
         )
@@ -1085,6 +1086,33 @@ mod tests {
         assert_eq!(parsed["replayPayload"]["model"], "gpt-test");
         assert_eq!(parsed["replayPayload"]["messages"][0]["role"], "user");
         assert_eq!(parsed["replayPayload"]["parameters"]["temperature"], 0.1);
+    }
+
+    #[test]
+    fn plans_bootstrap_replay_from_adapter_context_seed_via_servertool_core_bridge() {
+        let raw = plan_bootstrap_replay_json(
+            &json!({
+                "preflightBody": { "ok": true },
+                "replaySeed": null,
+                "adapterContext": {
+                    "capturedChatRequest": {
+                        "model": "gpt-adapter",
+                        "messages": [{ "role": "user", "content": "hello from adapter" }],
+                        "parameters": { "temperature": 0.3 }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("bootstrap replay bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert!(parsed["preflightFailure"].is_null());
+        assert_eq!(parsed["replayPayload"]["model"], "gpt-adapter");
+        assert_eq!(
+            parsed["replayPayload"]["messages"][0]["content"],
+            "hello from adapter"
+        );
+        assert_eq!(parsed["replayPayload"]["parameters"]["temperature"], 0.3);
     }
 
     #[test]

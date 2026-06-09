@@ -2367,6 +2367,7 @@ export function planFollowupErrorEnvelopeWithNative(error: unknown): ServertoolF
 export function planBootstrapReplayWithNative(input: {
   preflightBody?: unknown;
   replaySeed?: unknown;
+  adapterContext?: unknown;
 }): ServertoolBootstrapReplayPlan {
   const capability = 'planBootstrapReplayJson';
   const fn = readNativeFunction(capability);
@@ -2375,7 +2376,8 @@ export function planBootstrapReplayWithNative(input: {
   }
   const resultJson = fn(JSON.stringify({
     preflightBody: input.preflightBody ?? null,
-    replaySeed: input.replaySeed ?? null
+    replaySeed: input.replaySeed ?? null,
+    adapterContext: input.adapterContext ?? null
   }));
   if (typeof resultJson !== 'string') {
     throw new Error(`planBootstrapReplayJson native returned non-string: ${typeof resultJson}`);
