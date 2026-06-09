@@ -3041,3 +3041,9 @@ Tags: hub-pipeline, edge-stage, dead-code, napi-export, rust-only, residue-gate,
 - Removed the zero-consumer TS helpers, required-export entry, and standalone Rust NAPI cleanup wrapper. Kept Rust `clean_routing_instruction_markers` internal because the active Virtual Router route mainline still calls it.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired routing-instruction public helper/export names from returning.
 Tags: virtual-router, routing-instructions, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Hub protocol spec public wrappers removed
+- Exact scan found `resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, and `resolveHubProtocolAllowlistsJson` had no runtime consumer; remaining references were wrapper definitions, required-export entries, root NAPI exports, and historical memory.
+- Removed the zero-consumer TS protocol-spec/allowlist wrappers, TS-only protocol spec parser/types, required-export entries, and Rust public NAPI wrappers. Kept Rust protocol spec/allowlist builders internal because `sanitizeProviderOutboundPayloadJson` still uses them.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired Hub protocol spec wrapper/export names from returning.
+Tags: hub-pipeline, bridge-policy, provider-outbound, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

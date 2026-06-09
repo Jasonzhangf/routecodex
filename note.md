@@ -18845,3 +18845,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 VR routing-instruction public helper deletion:
 - Inventory: `cleanRoutingInstructionMarkersWithNative`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, and `applyRoutingInstructionsToStateWithNative` had zero external consumers. `cleanRoutingInstructionMarkersJson` only existed as a standalone required-export/NAPI bridge. Live `parseRoutingInstructions` / `applyRoutingInstructionsWithNative` remain consumed by routing-instruction tests, and Rust cleanup remains used by VR route mainline.
 - Change: removed zero-consumer TS helpers, removed required-export entry and Rust NAPI wrapper for `cleanRoutingInstructionMarkersJson`, and added residue/map/memory notes.
+
+2026-06-09 Hub bridge policy protocol-spec wrapper deletion:
+- Inventory: `resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, and `resolveHubProtocolAllowlistsJson` had no live runtime consumer. Active bridge-policy consumers use `resolveBridgePolicy*` and `sanitizeProviderOutboundPayloadWithNative`.
+- Change: removed dead TS wrappers/types/parsers, required-export entries, and Rust public NAPI wrappers; kept Rust protocol spec/allowlist builders internal for `sanitizeProviderOutboundPayloadJson`.

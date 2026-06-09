@@ -267,8 +267,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveClientToolsRawFromRespSemanticsJson",
   "resolveHasActiveStopMessageForContinueExecutionJson",
   "runServertoolResponseStageJson",
-  "resolveHubProtocolSpecJson",
-  "resolveHubProtocolAllowlistsJson",
   "sanitizeProviderOutboundPayloadJson",
   "resolveSseTimeoutOptionsJson",
   "extractModelHintFromMetadataJson",
