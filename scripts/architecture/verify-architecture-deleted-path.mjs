@@ -73,6 +73,11 @@ const deletedPathDenylist = [
   p('tests/server/runtime/http-server/executor/request-executor-', removedProviderToken, '-response-protocol.spec.ts'),
   p('tests/server/runtime/http-server/request-executor.', removedProviderToken, '-route-pool.spec.ts'),
   p('tests/sharedmodule/', removedProviderToken, '-submit-stopmessage.spec.ts'),
+  'src/modules/pipeline/modules/provider/interfaces/pipeline-interfaces.ts',
+  'src/modules/pipeline/modules/provider/utils/debug-logger.ts',
+  'src/modules/pipeline/modules/provider/utils/preflight-validator.ts',
+  'src/modules/pipeline/modules/provider/utils/tool-result-text.ts',
+  'src/modules/pipeline/modules/provider/utils/transformation-engine.ts',
 ];
 
 function parseOwners(text) {
