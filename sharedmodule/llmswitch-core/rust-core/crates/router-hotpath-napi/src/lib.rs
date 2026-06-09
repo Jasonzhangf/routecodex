@@ -2226,22 +2226,6 @@ pub fn compute_provider_backoff_ms_json(
     Ok(failure_policy::compute_backoff(classification, attempt) as i64)
 }
 
-#[napi(js_name = "filterOutExecutedServerToolCallsJson")]
-pub fn filter_out_executed_server_tool_calls_json(
-    finalized_payload_json: String,
-    orchestration_payload_json: String,
-) -> NapiResult<String> {
-    let finalized_payload: Value = serde_json::from_str(&finalized_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let orchestration_payload: Value = serde_json::from_str(&orchestration_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls(
-        &finalized_payload,
-        &orchestration_payload,
-    );
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,

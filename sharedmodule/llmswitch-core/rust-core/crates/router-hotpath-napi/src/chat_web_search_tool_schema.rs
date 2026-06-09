@@ -1,6 +1,4 @@
 use crate::shared_json_utils::read_object_trimmed_string;
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde_json::{Map, Value};
 
 const SERVERTOOL_WEB_SEARCH_TOOL_NAME: &str = "web_search";
@@ -17,7 +15,7 @@ fn read_engine_description(entry: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
+pub(crate) fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
     let rows = engines.as_array()?;
     let mut engine_ids: Vec<Value> = Vec::new();
     let mut engine_desc_parts: Vec<String> = Vec::new();
@@ -147,15 +145,6 @@ fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
         Value::Object(metadata_op),
         Value::Object(append_op),
     ]))
-}
-
-#[napi]
-pub fn build_web_search_tool_append_operations_json(engines_json: String) -> NapiResult<String> {
-    let engines: Value =
-        serde_json::from_str(&engines_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output =
-        build_web_search_tool_append_operations(&engines).unwrap_or(Value::Array(Vec::new()));
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]

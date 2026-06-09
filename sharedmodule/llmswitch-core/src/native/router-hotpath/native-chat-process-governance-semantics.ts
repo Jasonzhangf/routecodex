@@ -24,14 +24,6 @@ export type NativeRespProcessToolGovernanceOutput = {
     applyPatchRepaired: number;
   };
 };
-export type NativeRespProcessToolGovernancePreparationOutput = {
-  preparedPayload: Record<string, unknown>;
-  summary: {
-    converted: boolean;
-    shapeSanitized: boolean;
-    harvestedToolCalls: number;
-  };
-};
 export type NativeRespProcessFinalizeInput = {
   payload: Record<string, unknown>;
   stream: boolean;
@@ -65,13 +57,6 @@ function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAIL
   }
 }
 
-function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
-  const parsed = parseJson('parseWebSearchOperationsPayload', raw);
-  if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
-    return null;
-  }
-  return parsed;
-}
 function parseRecord(raw: string): Record<string, unknown> | null {
   const parsed = parseJson('parseRecord', raw);
   if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -120,47 +105,6 @@ function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessTo
       applied,
       toolCallsNormalized: Math.floor(toolCallsNormalizedRaw),
       applyPatchRepaired: Math.floor(applyPatchRepairedRaw)
-    }
-  };
-}
-function parseRespProcessToolGovernancePreparationPayload(
-  raw: string
-): NativeRespProcessToolGovernancePreparationOutput | null {
-  const parsed = parseJson('parseRespProcessToolGovernancePreparationPayload', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  const preparedPayloadRaw =
-    row.prepared_payload && typeof row.prepared_payload === 'object' && !Array.isArray(row.prepared_payload)
-      ? (row.prepared_payload as Record<string, unknown>)
-      : row.preparedPayload && typeof row.preparedPayload === 'object' && !Array.isArray(row.preparedPayload)
-        ? (row.preparedPayload as Record<string, unknown>)
-        : null;
-  const summaryRaw =
-    row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
-      ? (row.summary as Record<string, unknown>)
-      : null;
-  if (!preparedPayloadRaw || !summaryRaw) {
-    return null;
-  }
-  const converted = summaryRaw.converted === true;
-  const shapeSanitized = summaryRaw.shape_sanitized === true || summaryRaw.shapeSanitized === true;
-  const harvestedToolCallsRaw =
-    typeof summaryRaw.harvested_tool_calls === 'number'
-      ? summaryRaw.harvested_tool_calls
-      : typeof summaryRaw.harvestedToolCalls === 'number'
-        ? summaryRaw.harvestedToolCalls
-        : NaN;
-  if (!Number.isFinite(harvestedToolCallsRaw)) {
-    return null;
-  }
-  return {
-    preparedPayload: preparedPayloadRaw,
-    summary: {
-      converted,
-      shapeSanitized,
-      harvestedToolCalls: Math.floor(harvestedToolCallsRaw)
     }
   };
 }
@@ -225,20 +169,6 @@ function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unkn
     args.map((arg) => encodeJsonArg(capability, arg))
   );
 }
-export function buildWebSearchToolAppendOperationsWithNative(
-  engines: unknown
-): unknown[] {
-  const capability = 'buildWebSearchToolAppendOperationsJson';
-  const fail = (reason?: string): unknown[] => failNativeRequired<unknown[]>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [engines ?? null]);
-    const parsed = parseWebSearchOperationsPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 export function applyRespProcessToolGovernanceWithNative(
   input: NativeRespProcessToolGovernanceInput
 ): NativeRespProcessToolGovernanceOutput {
@@ -270,29 +200,6 @@ export function applyRespProcessToolGovernanceWithNative(
     return fail(reason);
   }
 }
-export function prepareRespProcessToolGovernancePayloadWithNative(
-  payload: Record<string, unknown>,
-  options?: {
-    requestedToolNames?: string[];
-  }
-): NativeRespProcessToolGovernancePreparationOutput {
-  const capability = 'prepareRespProcessToolGovernancePayloadJson';
-  const fail = (reason?: string): NativeRespProcessToolGovernancePreparationOutput =>
-    failNativeRequired<NativeRespProcessToolGovernancePreparationOutput>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
-      payload: payload ?? {},
-      requested_tool_names: Array.isArray(options?.requestedToolNames)
-        ? options?.requestedToolNames
-        : []
-    }]);
-    const parsed = parseRespProcessToolGovernancePreparationPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 export function stripOrphanFunctionCallsTagWithNative(
   payload: Record<string, unknown>
 ): Record<string, unknown> {
@@ -301,26 +208,6 @@ export function stripOrphanFunctionCallsTagWithNative(
     failNativeRequired<Record<string, unknown>>(capability, reason);
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload]);
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function filterOutExecutedServerToolCallsWithNative(
-  finalizedPayload: Record<string, unknown>,
-  orchestrationPayload: Record<string, unknown>
-): Record<string, unknown> {
-  const capability = 'filterOutExecutedServerToolCallsJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
-      finalizedPayload ?? {},
-      orchestrationPayload ?? {}
-    ]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -350,39 +237,6 @@ export async function finalizeRespProcessChatResponseWithNative(
     return fail(reason);
   }
 }
-export function resolveRequestedToolNamesWithNative(
-  options: {
-    requestSemantics?: Record<string, unknown>;
-    adapterContext?: Record<string, unknown>;
-  }
-): string[] {
-  const names = new Set<string>();
-  const capability = 'resolveRequestedToolNamesJson';
-  if (isNativeDisabledByEnv()) {
-    return [];
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return [];
-  }
-  const inputJson = safeStringify(options);
-  if (!inputJson) {
-    return [];
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw === 'string' && raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
-
 export function normalizeApplyPatchArgumentsWithNative(
   argumentsValue: unknown
 ): { normalizedArguments: string; repaired: boolean } {

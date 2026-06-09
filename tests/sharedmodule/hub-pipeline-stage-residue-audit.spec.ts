@@ -2812,6 +2812,62 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingRetiredFiles, findings }).toEqual({ existingRetiredFiles: [], findings: [] });
   });
 
+  it('retired response-governance utility public bridges must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_web_search_tool_schema.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/mod.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/finalize_strip.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/napi_bindings.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/orchestrator.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/napi_utilities.rs',
+    ];
+    const retiredSymbols = [
+      'buildWebSearchToolAppendOperationsWithNative',
+      'prepareRespProcessToolGovernancePayloadWithNative',
+      'filterOutExecutedServerToolCallsWithNative',
+      'resolveRequestedToolNamesWithNative',
+      'buildWebSearchToolAppendOperationsJson',
+      'prepareRespProcessToolGovernancePayloadJson',
+      'filterOutExecutedServerToolCallsJson',
+      'resolveRequestedToolNamesJson',
+      'build_web_search_tool_append_operations_json',
+      'prepare_resp_process_tool_governance_payload_json',
+      'filter_out_executed_server_tool_calls_json',
+      'resolve_requested_tool_names_json',
+      'mod finalize_strip',
+      'pub mod finalize_strip',
+      'servertool_skeleton::finalize_strip',
+      'fn filter_out_executed_servertool_calls',
+      'fn resolve_requested_tool_names',
+      'fn collect_tool_names_from_candidate',
+      'NativeRespProcessToolGovernancePreparationOutput',
+      'parseWebSearchOperationsPayload',
+      'parseRespProcessToolGovernancePreparationPayload',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [

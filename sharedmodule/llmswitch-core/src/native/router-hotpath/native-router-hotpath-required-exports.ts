@@ -89,7 +89,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeRespInboundReasoningPayloadJson",
   "buildContinueExecutionOperationsJson",
   "buildGovernedFilterPayloadJson",
-  "buildWebSearchToolAppendOperationsJson",
   "clampResponsesInputItemIdJson",
   "collectToolOutputsJson",
   "buildReqInboundToolOutputSnapshotJson",

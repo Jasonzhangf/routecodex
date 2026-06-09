@@ -1,11 +1,11 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 use crate::chat_servertool_orchestration::{
     build_continue_execution_operations_json, plan_chat_servertool_orchestration_bundle_json,
 };
-use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations_json;
+use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;
 use crate::shared_json_utils::parse_json_bool;
 use crate::web_search_mode::{
@@ -378,10 +378,8 @@ pub(crate) fn maybe_apply_servertool_orchestration(
             &runtime_metadata,
             &bundle_plan.web_search.selected_engine_indexes,
         );
-        if let Ok(engines_json) = serde_json::to_string(&engines) {
-            operations.extend(parse_ops_or_empty(
-                build_web_search_tool_append_operations_json(engines_json),
-            ));
+        if let Some(Value::Array(ops)) = build_web_search_tool_append_operations(&engines) {
+            operations.extend(ops);
         }
     }
 

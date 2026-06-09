@@ -1432,20 +1432,11 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_object_trimmed_string_deletion_gate_removed_finalize_strip_local_wrapper() {
+    fn shared_read_object_trimmed_string_deletion_gate_removed_finalize_strip_module() {
         let path = crate_src_path("servertool_skeleton/finalize_strip.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_string(record: &Map<String, Value>, key: &str) -> String {"),
-            "local read_string wrapper still present in {}",
-            path.display()
-        );
-        assert!(
-            source.contains("read_object_trimmed_string(row, \"name\").unwrap_or_default()")
-                || source.contains("read_object_trimmed_string(row, \"tool_call_id\").unwrap_or_default()")
-                || source.contains("read_object_trimmed_string(row, \"id\").unwrap_or_default()"),
-            "servertool_skeleton/finalize_strip.rs must use shared read_object_trimmed_string truth directly"
+            !path.exists(),
+            "retired servertool_skeleton/finalize_strip.rs must stay physically deleted"
         );
     }
 

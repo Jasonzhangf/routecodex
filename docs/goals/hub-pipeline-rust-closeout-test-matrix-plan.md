@@ -157,6 +157,8 @@ Phase 0 deletion note (2026-06-07): `chat-process-web-search.ts`、`chat-process
 
 Phase 0 deletion note (2026-06-09): `chat_governance_context.rs`、`chat_governance_finalize.rs` 与对应 request-governance public bridge (`resolveGovernanceContext*` / `applyGoverned*` / `mergeGovernanceSummary*` / `finalizeGovernedRequest*`) 后续证明无 live consumer 并物理删除；请求治理语义保留在 active Rust Hub mainline / `req_process_stage1_tool_governance*` owners。
 
+Phase 0 deletion note (2026-06-09): response-governance utility public bridges (`buildWebSearchToolAppendOperations*` / `prepareRespProcessToolGovernancePayload*` / `filterOutExecutedServerToolCalls*` / `resolveRequestedToolNames*`) 后续证明无 live TS/runtime consumer 并物理删除，旧 `servertool_skeleton/finalize_strip.rs` Rust bridge module 也已删除；live response path 保留 `governResponseJson` / `finalizeChatResponseJson` / apply_patch wrappers，web_search append operations 只作为 Rust-internal req-process helper。
+
 Phase 0 deletion note (2026-06-08): `chat-process-generic-marker-strip.ts` 已证明无 live consumer 并物理删除；generic marker strip / routing marker 保留判断由 Rust `request_sanitizer.rs` 主链拥有，并由 `tests/servertool/chat-request-marker-strip.spec.ts` 通过 Rust total HubPipeline 覆盖。
 
 ### Cross-cutting Stage Gate
