@@ -6,7 +6,7 @@ import type { StoredOAuthToken } from './token-helpers.js';
 import type { OAuthEndpoints } from '../../core/config/oauth-flows.js';
 import { logOAuthLifecycleNonBlocking } from './oauth-lifecycle-logger.js';
 import { logOAuthDebug } from '../oauth-logger.js';
-import type { UnknownObject } from '../../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 import {
   hasApiKeyField,
   hasAccessToken,

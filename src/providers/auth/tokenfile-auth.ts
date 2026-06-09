@@ -12,7 +12,7 @@ import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import { expandHome } from '../../utils/common-utils.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
-import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../types/common-types.js';
 import { resolveRccAuthDirForRead, resolveRccTokensDirForRead } from '../../config/user-data-paths.js';
 
 type TokenPayload = UnknownObject & {

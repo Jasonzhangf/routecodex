@@ -5,7 +5,7 @@
  */
 
 import fs from 'fs/promises';
-import type { UnknownObject } from '../../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 import { logOAuthDebug } from '../oauth-logger.js';
 import {
   type StoredOAuthToken,

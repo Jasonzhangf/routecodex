@@ -18564,8 +18564,17 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scans found no active import/runtime/test consumer for `src/modules/pipeline/validation/config-validator.ts`; only its own README and `src/core/README.md` referenced the directory. The validator used old TS `PipelineConfig/ModuleConfig/ProviderConfig` and is not current Rust/Hub config truth.
 - Physically deleted `oauth-helpers.ts` and the `src/modules/pipeline/validation/**` directory files; added them to the deleted-path gate.
 
+2026-06-09 Hub Pipeline type alias cleanup:
+- `src/modules/pipeline/types/common-types.ts`, `module.types.ts`, and `shared-dtos.ts` were pure one-line re-export aliases to `src/types/**`. `module.types.ts` and `shared-dtos.ts` had no consumers; `common-types.ts` only had six provider auth imports.
+- Repointed those provider auth imports to `src/types/common-types.js` and physically deleted the three alias files; added them to the deleted-path gate.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.
 - Strengthened `verify:servertool-rust-only` to require Rust owner/native wrapper/required export/TS thin shell and ban TS revival of `extractCapturedChatSeed`, `capturedEntryRequest`, and `capturedChatRequest` in origin-delta.
 - Verification PASS: native hotpath build; direct `.node` probe for `resolveFollowupOriginSeedJson`; `cargo fmt --package router-hotpath-napi --check`; focused router-hotpath-napi origin-seed test 1/1; `npm run verify:servertool-rust-only`; focused Jest origin/backend-route suites 33/33; llmswitch-core/root tsc; `cargo test -p servertool-core --lib` 194/194; `cargo test -p servertool-cli` 8/8; `git diff --check`.
+
+2026-06-09 error/backoff unified queue handoff audit continuation:
+- Confirmed `request-executor-error-action-queue.ts` is now present and owns fixed blocking `1s -> 2s -> 3s -> repeat`, categories, hooks, and waiter cap. Active global/session/recoverable/provider-transport/provider-traffic/servertool followup waits consume `recordErrorActionBackoff` + `waitErrorActionBackoffWithGate`.
+- Residual active source issue found: `HttpRequestExecutorDeps` still exposed provider-local `getHttpRetryLimit` / `shouldRetryHttpError` / `delayBeforeHttpRetry`; even with default limit 1, that preserved dead retry/backoff semantics outside the unified error chain. Removed those deps and changed HTTP executor to only try current target URLs; provider failures now return to upper ErrorErr chain for retry/reroute/backoff.
+- Updated local skill/docs stale guidance: capacity errors (429 / 503 / `PROVIDER_TRAFFIC_SATURATED`) reroute after unified blocking wait; ordinary recoverable transport/5xx may same-provider retry once through unified blocking backoff, repeated failure reroutes or fail-fast. Removed stale "all provider errors immediately reroute" and "exponential backoff" guidance.

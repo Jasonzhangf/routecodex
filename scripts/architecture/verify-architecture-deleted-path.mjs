@@ -86,6 +86,9 @@ const deletedPathDenylist = [
   'src/modules/pipeline/utils/oauth-helpers.ts',
   'src/modules/pipeline/validation/config-validator.ts',
   'src/modules/pipeline/validation/README.md',
+  'src/modules/pipeline/types/common-types.ts',
+  'src/modules/pipeline/types/module.types.ts',
+  'src/modules/pipeline/types/shared-dtos.ts',
 ];
 
 function parseOwners(text) {

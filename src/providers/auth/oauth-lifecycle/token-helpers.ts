@@ -4,7 +4,7 @@
  * Token extraction and validation utilities.
  */
 
-import type { UnknownObject } from '../../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../../types/common-types.js';
 
 export type StoredOAuthToken = UnknownObject & {
   access_token?: string;

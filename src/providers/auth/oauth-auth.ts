@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { resolveRccTokensDir } from '../../config/user-data-paths.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
-import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
 
 type ExtendedOAuthAuth = OAuthAuth & {

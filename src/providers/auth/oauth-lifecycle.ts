@@ -8,7 +8,7 @@ import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawnSync } from 'node:child_process';
-import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import type { UnknownObject } from '../../types/common-types.js';
 import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
