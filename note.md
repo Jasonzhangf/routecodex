@@ -18683,3 +18683,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `ChatContinuationScope`, `ChatContinuationStateOrigin`, `ChatContinuationPointer`, `ChatToolContinuation`, protocol mapping/audit namespace types, and provider semantic namespace detail types are only used inside `chat-envelope.ts`.
 - Kept externally consumed public types (`AdapterContext`, `ChatContinuationSemantics`, `ChatSemantics`, `ChatEnvelope`, message/tool types) and made zero-consumer nested aliases module-internal.
 - Added `hub.chat_envelope_type_surface` function/verification map entries and a residue gate blocking nested semantic type export revival.
+
+2026-06-09 HubPipeline provider SSE materializer public surface pruning:
+- Exact scan found `materializeProviderResponseSsePayload` only called inside `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` by `convertProviderResponse`; external public response entry remains `convertProviderResponse`.
+- Removed the exported standalone materializer API while keeping the same Node stream read + `materializeProviderResponseSsePayloadWithNative` invocation path.
+- Added residue gate blocking `export async function materializeProviderResponseSsePayload` revival under `hub.response_provider_sse_materialization`.

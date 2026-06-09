@@ -429,7 +429,7 @@ export interface ProviderResponseConversionResult {
   format?: string;
 }
 
-export async function materializeProviderResponseSsePayload(
+async function materializeProviderResponseSsePayload(
   payload: unknown
 ): Promise<Record<string, unknown>> {
   const stream = extractProviderResponseSseStream(payload);

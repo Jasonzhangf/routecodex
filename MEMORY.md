@@ -2888,3 +2888,9 @@ Tags: hub-pipeline, stage-timing, dead-code, public-surface, residue-gate, obser
 - Zero-consumer nested semantic aliases (`ChatContinuationScope`, `ChatContinuationPointer`, protocol mapping/audit namespace types, provider semantic namespace detail types, etc.) are module-internal TS type shells and must not be re-exported.
 - Function/verification map feature: `hub.chat_envelope_type_surface`; gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks nested type export revival.
 Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
+
+## 2026-06-09 HubPipeline provider SSE materializer export narrowed
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` keeps `materializeProviderResponseSsePayload` as an internal IO/native invocation helper only; external public response entry remains `convertProviderResponse`.
+- Rust owner remains `hub.response_provider_sse_materialization`; TS may read Node streams and call native, but must not export a standalone materializer API or restore marker/bodyText classification.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `export async function materializeProviderResponseSsePayload` revival.
+Tags: hub-pipeline, provider-response, sse-materialization, public-surface, dead-code, residue-gate, rust-owned-semantics, 2026-06-09

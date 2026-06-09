@@ -596,6 +596,7 @@ describe('hub pipeline stage residue audit', () => {
     );
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
+      { label: 'exports internal provider SSE materializer', pattern: /export\s+async\s+function\s+materializeProviderResponseSsePayload\b/ },
       { label: 'ts-sse-body-text-reader', pattern: /function\s+readProviderResponseSseText\s*\(/ },
       { label: 'ts-sse-marker-classifier', pattern: /function\s+isProviderResponseSseMarker\s*\(/ },
       { label: 'ts-sse-marker-signal', pattern: /function\s+hasProviderSseMarkerSignal\s*\(/ },
@@ -607,6 +608,7 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
+    expect(source).toContain('async function materializeProviderResponseSsePayload');
     expect(source).toContain('buildProviderSseStreamReadErrorDescriptorWithNative');
     expect(source).toContain('readProviderResponseSseStreamText');
     expect(findings).toEqual([]);
