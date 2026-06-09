@@ -18837,3 +18837,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory confirmed zero-consumer TS wrappers in `native-hub-pipeline-edge-stage-semantics.ts` for chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope surfaces.
 - Change: removed those TS wrappers, the associated required-export entries, the Rust NAPI JSON bridges, and the SSE effect-plan public bridge; kept active TS wrappers `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, `processSseStreamWithNative`, and kept Rust mainline helpers for req/resp parsing and response semantics.
 - Guard: residue gate now blocks the retired edge-stage public wrapper/export names while allowing live mainline helpers and still-consumed public bridges.
+
+2026-06-09 Rust client-semantics flaky test note:
+- While validating edge-stage wrapper deletion, `cargo test -p router-hotpath-napi hub_resp_outbound_client_semantics --lib -- --nocapture` failed only on `build_responses_payload_from_chat_json_matches_core_shape` because the test compares a direct core output and JSON wrapper output that each generate `resp_<now_unix_millis()>`; repeated run reproduced a 1ms id mismatch.
+- This is a pre-existing time-sensitive test design issue, not caused by edge-stage public wrapper deletion. Fix separately by making the test compare stable fields or injecting deterministic id/time into both paths.
