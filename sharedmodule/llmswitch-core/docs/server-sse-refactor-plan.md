@@ -36,7 +36,7 @@
 
 ## Phase 4: Legacy compatibility cleanup
 
-- Once the above path is validated, remove `src/modules/pipeline/modules/compatibility/**` and related docs/examples.
+- Legacy `src/modules/pipeline/modules/**` compatibility examples must stay absent; compatibility profiles live in config-core / llmswitch-core.
 - All compatibility profiles live in config-core and execute inside llmswitch-core.
 
 ## Validation

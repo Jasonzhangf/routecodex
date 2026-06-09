@@ -2746,3 +2746,11 @@ Tags: servertool, cli-projection, stopless, rust-owner, native-bridge, thin-shel
 - Gate: `scripts/verify-servertool-rust-only.mjs::checkDeletedAiFollowupAbsent` keeps deleted files absent and scans active runtime/config/focused tests for AI followup semantic revival.
 - Verified on 2026-06-09: `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused Jest `stop-message-auto`, `stop-message-auto.goal-default`, `stop-message-flow-followup-reentry`, and `servertool-progress-logging` 68 passed / 11 skipped; root `npx tsc --noEmit --pretty false`; `cargo test -p servertool-core --lib -- --nocapture` 194/194; `cargo test -p servertool-cli -- --nocapture` 8/8; `git diff --check`.
 Tags: servertool, stopless, ai-followup, dead-code, rust-owner, residue-gate, 2026-06-09
+
+## 2026-06-09 Legacy Hub Pipeline modules mirror removed
+- `src/modules/pipeline/modules/**` was verified as legacy TS mirror residue and physically deleted. The last tracked files were a README and one-line `interfaces/pipeline-interfaces.ts` re-export; exact scans found no active runtime/test/script consumers.
+- `scripts/enhance-module.js`, `docs/MODULE_ENHANCEMENT_SYSTEM.md`, and `docs/pipeline-routing-report.md` were physically deleted as old module-system residue. The script had no package/runtime caller and failed `node --check` because the `.js` file contained TS-only `as any` syntax.
+- Remaining docs now describe the old `src/modules/pipeline/modules/**` path as absent/forbidden and point implementation truth to llmswitch-core Rust/native Hub Pipeline plus Host bridge (`src/modules/llmswitch/bridge/**`).
+- Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` keeps the deleted module mirror and old enhancement/report files absent.
+- Verified on 2026-06-09: `npm run verify:architecture-deleted-path`, `npm run verify:function-map-compile-gate`, root `npx tsc --noEmit --pretty false`, residue scan for `src/modules/pipeline/modules`, `enhance-module`, `MODULE_ENHANCEMENT_SYSTEM`, and `pipeline-routing-report`, and `git diff --check` all passed. Residue scan only leaves explicit docs saying the old path is absent/forbidden.
+Tags: hub-pipeline, dead-code, legacy-modules, rust-owner, residue-gate, 2026-06-09

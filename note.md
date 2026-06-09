@@ -18550,6 +18550,15 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Physically deleted five unused re-export files under `src/modules/pipeline/modules/provider/**` and removed the stale README `provider/` bullet. This does not delete `src/modules/pipeline/**` wholesale because top-level pipeline types are still referenced by debug harnesses.
 - Added the deleted files to `scripts/architecture/verify-architecture-deleted-path.mjs` so this TS provider mirror cannot silently reappear.
 
+2026-06-09 Hub Pipeline modules mirror cleanup:
+- After provider mirror deletion, `src/modules/pipeline/modules/` only contained `interfaces/pipeline-interfaces.ts` as a one-line re-export and a README. Exact scan for `modules/pipeline/modules/interfaces`, `pipeline/modules/README`, and `pipeline/modules/` returned no active runtime/test/script references.
+- Physically deleted the remaining `src/modules/pipeline/modules/**` tracked files and added them to the deleted-path gate. Top-level `src/modules/pipeline/interfaces/**` remains live because debug harnesses and provider runtime tests import those shared types.
+
+2026-06-09 Hub Pipeline old module-system residue:
+- Residue audit after deleting `src/modules/pipeline/modules/**` still found `scripts/enhance-module.js` and `docs/MODULE_ENHANCEMENT_SYSTEM.md` pointing auto-detection/templates at `src/modules/pipeline/modules/**/*.ts`. The script has no package/runtime caller and `node --check scripts/enhance-module.js` fails with `SyntaxError: Unexpected identifier 'as'`, so it is dead code rather than a live tool.
+- Physically deleted `scripts/enhance-module.js`, `docs/MODULE_ENHANCEMENT_SYSTEM.md`, and stale `docs/pipeline-routing-report.md`; added them to the deleted-path gate.
+- Updated remaining design docs to say old `src/modules/pipeline/modules/**` locations are absent/forbidden and current truth is llmswitch-core Rust/native Hub Pipeline plus Host bridge.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.

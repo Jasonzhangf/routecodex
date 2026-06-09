@@ -40,24 +40,23 @@
   - 续轮工具：
     - `POST <baseUrl>/responses/:id/submit_tool_outputs`，同样走 `Accept: text/event-stream`，返回 Node Readable。
 
-### 3.2 LLM Switch：Responses 直通模块（基于输入/输出形状的默认逻辑）
+### 3.2 Hub Pipeline：Responses 直通契约（基于输入/输出形状的默认逻辑）
 
-- 文件：`src/modules/pipeline/modules/llmswitch/llmswitch-responses-passthrough.ts`
-- 类型：`llmswitch-responses-passthrough`
+- 真源：`sharedmodule/llmswitch-core/src/conversion/hub/**` 与 `sharedmodule/llmswitch-core/src/native/router-hotpath/**`
+- Host 桥接：`src/modules/llmswitch/bridge/**`
 - 行为（设计）：
-  - 同一个 llmswitch-core 模块既支持 **桥接** 又支持 **直通**，通过“输入/输出形状 + provider 类型”决定：
+  - llmswitch-core Hub Pipeline 既支持 **桥接** 又支持 **直通**，通过“入口 endpoint + provider protocol + 请求/响应形状”决定：
     - 若入口为 `/v1/responses` 且 provider 类型为 `responses-standard`，并且请求 payload 已经是标准 Responses 形状（`model + instructions + input[] + tools[] + stream` 等），则视为 **Responses canonical**，只做 schema 校验 & 工具过滤 & 快照，不做 Chat/Anthropic 转换（直通模式）。
     - 若入口为 `/v1/responses`，但 payload 是 Chat/Anthropic 形状（例如 `messages[]`），则仍可按配置启用桥接逻辑（Chat→Responses→上游）。
-  - `processIncoming`：根据 payload 形状与 endpoint/type 决定“是否需要桥接”；  
-  - `processOutgoing`：若 provider 返回的 JSON 已是 `object: "response"` 等标准 Responses 输出，则直接透传；否则才走 Responses bridge。
+  - `req_inbound/req_chatprocess/req_outbound`：根据 payload 形状与 endpoint/type 决定“是否需要桥接”；
+  - `resp_inbound/resp_chatprocess/resp_outbound`：若 provider 返回的 JSON 已是 `object: "response"` 等标准 Responses 输出，则按 Responses client projection 直通；否则才走 Responses bridge。
 
 ### 3.3 路由器（仅选择路由池，不做“是否直通”决策）
 
-- 文件：`src/modules/pipeline/modules/llmswitch-v2-adapters.ts`
+- 真源：Rust Virtual Router / Hub Pipeline contract；Host 只通过 `src/modules/llmswitch/bridge/**` 调用 native/core。
 - 规则（设计）：
   - virtual router 只决定 `routeName`（即进入哪个 route pool），不决定“是否直通”；
-  - PipelineManager 在对应 route pool 内做轮询（与其它流水线平行，没有特殊分支）；  
-  - 是否走 Responses 直通，由 llmswitch-core 在模块内部按照“入口 endpoint + provider 类型 + 请求/响应形状”统一决策，避免多处重复判断。
+  - 是否走 Responses 直通，由 llmswitch-core Hub Pipeline 在模块内部按照“入口 endpoint + provider 类型 + 请求/响应形状”统一决策，避免多处重复判断。
 
 ### 3.4 HTTP Server（SSE 透传与日志）
 
@@ -90,12 +89,12 @@
 
 1) Provider：responses
    - 新增：`src/providers/core/runtime/responses-provider.ts`
-   - 注册：`src/modules/pipeline/core/pipeline-manager.ts` → `this.registry.registerModule('responses', this.createResponsesProviderModule)`
+   - 注册：provider runtime registry / Hub Pipeline bridge，禁止恢复旧 TS PipelineManager 注册链。
    - ServiceProfile（可选）：`src/providers/core/config/service-profiles.ts` → `responses` 默认 `defaultEndpoint: '/responses'`
 
-2) LLM Switch 直通模块
-   - 新增：`src/modules/pipeline/modules/llmswitch/llmswitch-responses-passthrough.ts`
-   - 路由器：`src/modules/pipeline/modules/llmswitch-v2-adapters.ts` 里选择直通。
+2) Hub Pipeline 直通契约
+   - 真源：`sharedmodule/llmswitch-core/src/conversion/hub/**` + Rust native hotpath。
+   - Host 侧只允许 `src/modules/llmswitch/bridge/**` 薄桥接，禁止恢复 `src/modules/pipeline/modules/**`。
 
 3) HTTP 层
    - `src/server/http-server.ts`：

@@ -118,8 +118,9 @@ export class GLMCompatibilityCoordinator {
 ```
 
 #### 简化方案
-**文件**: `src/modules/pipeline/modules/workflow/streaming-control.ts`
-**行数**: 45行
+**旧文件**: `src/modules/pipeline/modules/workflow/streaming-control.ts` 已下线，禁止恢复。
+**当前边界**: streaming control 属于 Hub Pipeline / server frame writer contract；TS 旧 workflow module 不再作为实现位置。
+**目标行数**: 45行以内的唯一真源实现或薄桥接。
 
 ```typescript
 export class StreamingControl {
