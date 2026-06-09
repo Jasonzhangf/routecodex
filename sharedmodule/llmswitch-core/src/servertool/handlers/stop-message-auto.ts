@@ -31,6 +31,7 @@ import {
   resolveDefaultStopMessageSnapshot,
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageStateFromAdapterContext,
+  planStoplessDecisionContextSignals,
   planStopMessagePersistedLookup,
   planStopMessagePersistedStateSelection,
   readRuntimeStopMessageStageMode
@@ -283,52 +284,6 @@ function debugLog(message: string, extra?: JsonObject): void {
   }
 }
 
-function hasResponsesSubmitToolOutputsResume(adapterContext: unknown): boolean {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return false;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const runtime = readRuntimeMetadata(record) ?? {};
-  const metadata =
-    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-      ? (record.metadata as Record<string, unknown>)
-      : {};
-  const candidates = [record.responsesResume, metadata.responsesResume, runtime.responsesResume];
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      continue;
-    }
-    const resume = candidate as Record<string, unknown>;
-    if (Array.isArray(resume.toolOutputsDetailed) && resume.toolOutputsDetailed.length > 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-
-function isStopMessageDisabledByPort(adapterContext: unknown): boolean {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return false;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const runtime = readRuntimeMetadata(record) ?? {};
-  const metadata =
-    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-      ? (record.metadata as Record<string, unknown>)
-      : {};
-  const candidates = [
-    record.stopMessageEnabled,
-    record.routecodexPortStopMessageEnabled,
-    metadata.stopMessageEnabled,
-    metadata.routecodexPortStopMessageEnabled,
-    runtime.stopMessagePortEnabled,
-    runtime.stopMessageEnabled,
-    runtime.routecodexPortStopMessageEnabled
-  ];
-  return candidates.some((value) => value === false);
-}
-
 function isDirectStoplessGoalStateSnapshot(value: unknown): value is {
   status: string;
   objective: string;
@@ -378,21 +333,6 @@ function readRequestScopedGoalState(adapterContext: unknown): {
     ...(directState ? { state: directState } : {}),
     explicit
   };
-}
-
-function isPlanModeActiveFromCapturedRequest(adapterContext: unknown): boolean {
-  const captured = getCapturedRequest(adapterContext as any);
-  if (!captured) {
-    return false;
-  }
-  try {
-    const text = JSON.stringify(captured).toLowerCase();
-    return text.includes('<collaboration_mode>')
-      && text.includes('collaboration mode: plan')
-      && !text.includes('collaboration mode: default');
-  } catch {
-    return false;
-  }
 }
 
 const handler: ServerToolHandler = async (
@@ -455,6 +395,11 @@ const handler: ServerToolHandler = async (
   );
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);
+  const decisionSignals = planStoplessDecisionContextSignals({
+    adapterContext: ctx.adapterContext,
+    runtimeMetadata: rt,
+    capturedRequest: captured
+  });
   const assistantStopText = extractCurrentAssistantStopTextWithNative(ctx.base);
   const goalLoopContext = captured
     ? await evaluateGoalActiveStopLoopGuard({
@@ -465,10 +410,10 @@ const handler: ServerToolHandler = async (
     : undefined;
 
   const decisionCtx: StopMessageDecisionContext = {
-    port_stop_message_disabled: isStopMessageDisabledByPort(ctx.adapterContext),
+    port_stop_message_disabled: decisionSignals.portStopMessageDisabled,
     followup_flow_id: followupFlowId || undefined,
     stop_eligible: stopGateway.eligible,
-    has_responses_submit_tool_outputs_resume: hasResponsesSubmitToolOutputsResume(ctx.adapterContext),
+    has_responses_submit_tool_outputs_resume: decisionSignals.hasResponsesSubmitToolOutputsResume,
     persisted_snapshot: persistedSnap ? {
       text: String(persistedSnap.text ?? ''),
       max_repeats: typeof persistedSnap.maxRepeats === 'number' ? Math.max(0, Math.floor(persistedSnap.maxRepeats)) : 0,
@@ -496,7 +441,7 @@ const handler: ServerToolHandler = async (
       : (!effectiveGoal || effectiveGoal.status === 'idle' || effectiveGoal.status === 'active'
         ? 'idle' as any
         : effectiveGoal.status as any),
-    plan_mode_active: isPlanModeActiveFromCapturedRequest(ctx.adapterContext),
+    plan_mode_active: decisionSignals.planModeActive,
     default_enabled: tombstone.cleared ? false : resolveStopMessageDefaultEnabledLive(),
     default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
     default_text: resolveStopMessageDefaultTextLive(),

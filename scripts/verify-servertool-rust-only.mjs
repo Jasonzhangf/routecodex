@@ -50,6 +50,7 @@ const RUST_SERVERTOOL_PRE_COMMAND = `${ROOT}/sharedmodule/llmswitch-core/rust-co
 const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs`;
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
+const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
@@ -737,6 +738,12 @@ function checkStopMessagePersistedLookupRustOwner() {
     nativeWrapper,
     'planStopMessagePersistedLookupWithNative'
   );
+  assertContains(
+    'stopless-decision-context-signals-rust-owner',
+    RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS,
+    readRequired(RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS),
+    'pub fn plan_stopless_decision_context_signals'
+  );
   for (const needle of [
     'resolveServertoolStateKeyWithNative',
     'resolveRuntimeStopMessageStateWithNative',
@@ -748,6 +755,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     'planStopMessagePersistedStateSelectionWithNative',
     'planStopMessageRoutingStateApplyWithNative',
     'planStopMessageRoutingStateClearWithNative',
+    'planStoplessDecisionContextSignalsWithNative',
     'readServertoolFollowupFlowIdWithNative',
     'resolveBdWorkingDirectoryForRecordWithNative',
     'resolveStopMessageFollowupProviderKeyWithNative',
@@ -778,6 +786,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"planStopMessagePersistedStateSelectionJson"',
     '"planStopMessageRoutingStateApplyJson"',
     '"planStopMessageRoutingStateClearJson"',
+    '"planStoplessDecisionContextSignalsJson"',
     '"readServertoolFollowupFlowIdJson"',
     '"resolveBdWorkingDirectoryForRecordJson"',
     '"resolveStopMessageFollowupProviderKeyJson"',
@@ -894,12 +903,24 @@ function checkStopMessagePersistedLookupRustOwner() {
       'stop-message-auto.ts must pass candidateKeys to Rust-owned persisted state selection'
     );
   }
+  if (!stopMessageAuto.includes('planStoplessDecisionContextSignals({')) {
+    fail(
+      'stopless-decision-context-signals-ts-thin-shell',
+      'stop-message-auto.ts must consume Rust-owned stopless decision context signal plan'
+    );
+  }
   for (const keyword of [
     'readPersistedStopMessageSnapshotFromCandidateKeys',
     'readPersistedStopMessageStageModeFromCandidateKeys',
     'readPersistedStopMessageTombstoneFromCandidateKeys',
     'isDefaultStopMessageExhausted',
     'isStopMessageClearedTombstone',
+    'function hasResponsesSubmitToolOutputsResume',
+    'function isStopMessageDisabledByPort',
+    'function isPlanModeActiveFromCapturedRequest',
+    'toolOutputsDetailed.length',
+    'routecodexPortStopMessageEnabled',
+    'collaboration mode: plan',
     'resolveStopMessageSnapshot(loadRoutingInstructionStateSync',
     'normalizeStopMessageStageMode(state?.stopMessageStageMode',
     'stopMessageSource ===',

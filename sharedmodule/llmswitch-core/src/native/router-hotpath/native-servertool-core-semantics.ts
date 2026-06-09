@@ -446,6 +446,12 @@ export interface StopMessageRoutingStateClearPlan {
   timestamp: number;
 }
 
+export interface StoplessDecisionContextSignals {
+  portStopMessageDisabled: boolean;
+  hasResponsesSubmitToolOutputsResume: boolean;
+  planModeActive: boolean;
+}
+
 export interface RuntimeStopMessageStateFromAdapterContextInput {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
@@ -966,6 +972,39 @@ export function planStopMessageRoutingStateClearWithNative(
     throw new Error(`${capability} native returned invalid timestamp`);
   }
   return { timestamp: timestamp as number };
+}
+
+export function planStoplessDecisionContextSignalsWithNative(input: {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+  capturedRequest?: unknown;
+}): StoplessDecisionContextSignals {
+  const capability = 'planStoplessDecisionContextSignalsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessDecisionContextSignalsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStoplessDecisionContextSignalsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.portStopMessageDisabled !== 'boolean' ||
+    typeof record.hasResponsesSubmitToolOutputsResume !== 'boolean' ||
+    typeof record.planModeActive !== 'boolean'
+  ) {
+    throw new Error(`${capability} native returned invalid signal fields`);
+  }
+  return {
+    portStopMessageDisabled: record.portStopMessageDisabled,
+    hasResponsesSubmitToolOutputsResume: record.hasResponsesSubmitToolOutputsResume,
+    planModeActive: record.planModeActive,
+  };
 }
 
 export function readServertoolFollowupFlowIdWithNative(runtimeMetadata: unknown): string {

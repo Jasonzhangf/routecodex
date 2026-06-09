@@ -26,6 +26,7 @@ use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
 use servertool_core::stop_visible_text;
+use servertool_core::stopless_decision_context_signals;
 use servertool_core::stopless_goal_state_contract;
 use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
@@ -210,6 +211,16 @@ pub fn plan_stop_message_routing_state_clear_json(input_json: &str) -> Result<St
         &input,
     ))
     .map_err(|e| format!("serialize stop-message routing clear plan: {e}"))
+}
+
+pub fn plan_stopless_decision_context_signals_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_decision_context_signals::StoplessDecisionContextSignalsInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless decision context signals input: {e}"))?;
+    serde_json::to_string(
+        &stopless_decision_context_signals::plan_stopless_decision_context_signals(&input),
+    )
+    .map_err(|e| format!("serialize stopless decision context signals: {e}"))
 }
 
 pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, String> {
@@ -1982,6 +1993,34 @@ mod tests {
         assert_eq!(plan["snapshot"]["text"], "continue");
         assert_eq!(plan["stageMode"], "auto");
         assert_eq!(plan["tombstone"]["exhaustedDefault"], true);
+    }
+
+    #[test]
+    fn plans_stopless_decision_context_signals_via_servertool_core_bridge() {
+        let output = plan_stopless_decision_context_signals_json(
+            &json!({
+                "adapterContext": {
+                    "metadata": {
+                        "routecodexPortStopMessageEnabled": false
+                    }
+                },
+                "runtimeMetadata": {
+                    "responsesResume": {
+                        "toolOutputsDetailed": [{ "tool_call_id": "call_1" }]
+                    }
+                },
+                "capturedRequest": {
+                    "system": "<collaboration_mode>Collaboration Mode: Plan</collaboration_mode>"
+                }
+            })
+            .to_string(),
+        )
+        .expect("stopless decision context signals");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("stopless decision context signals json");
+        assert_eq!(plan["portStopMessageDisabled"], true);
+        assert_eq!(plan["hasResponsesSubmitToolOutputsResume"], true);
+        assert_eq!(plan["planModeActive"], true);
     }
 
     #[test]

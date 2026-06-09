@@ -1414,6 +1414,12 @@ pub fn plan_stop_message_routing_state_clear_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn plan_stopless_decision_context_signals_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_decision_context_signals_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn read_servertool_followup_flow_id_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::read_servertool_followup_flow_id_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

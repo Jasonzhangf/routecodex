@@ -6,6 +6,7 @@ import {
   planPersistStopMessageStateWithNative,
   planStopMessagePersistedLookupWithNative,
   planStopMessagePersistedStateSelectionWithNative,
+  planStoplessDecisionContextSignalsWithNative,
   readRuntimeStopMessageStageModeWithNative,
   readServertoolFollowupFlowIdWithNative,
   resolveBdWorkingDirectoryForRecordWithNative,
@@ -166,6 +167,18 @@ export function resolveRuntimeStopMessageStateFromAdapterContext(adapterContext:
 
 export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' | 'off' | 'auto' | undefined {
   return readRuntimeStopMessageStageModeWithNative(runtimeMetadata);
+}
+
+export function planStoplessDecisionContextSignals(args: {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+  capturedRequest?: unknown;
+}): {
+  portStopMessageDisabled: boolean;
+  hasResponsesSubmitToolOutputsResume: boolean;
+  planModeActive: boolean;
+} {
+  return planStoplessDecisionContextSignalsWithNative(args);
 }
 
 function buildServertoolRoutingMetadata(
