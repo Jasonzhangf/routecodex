@@ -2343,6 +2343,47 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired session header helper public NAPI wrappers must stay internal to session identifier extraction', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_session_identifiers.rs',
+    ];
+    const retiredSymbols = [
+      'coerceClientHeadersWithNative',
+      'findHeaderValueWithNative',
+      'pickHeaderWithNative',
+      'normalizeHeaderKeyWithNative',
+      'coerceClientHeadersJson',
+      'findHeaderValueJson',
+      'pickHeaderJson',
+      'normalizeHeaderKeyJson',
+      'coerce_client_headers_json',
+      'find_header_value_json',
+      'pick_header_json',
+      'normalize_header_key_json',
+      'coerce_client_headers_public',
+      'normalize_header_key_public',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

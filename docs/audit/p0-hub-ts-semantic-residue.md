@@ -50,7 +50,8 @@
 
 ## A 类（允许保留）
 
-- `coerceClientHeadersWithNative` / `coerceStandardizedRequestFromPayloadWithNative`：native 调用壳，透传参数，不含 fallback。
+- `coerceStandardizedRequestFromPayloadWithNative`：native 调用壳，透传参数，不含 fallback。
+- `coerceClientHeadersWithNative` 已退休；session/conversation ID header 解析只通过 `extractSessionIdentifiersJson` 公开桥，内部 header helper 不再单独暴露。
 - `hub-stage-timing-env-blocks.ts`：读取环境变量默认值，非运行时降级。
 - `hub-pipeline-heavy-input-fastpath-config.ts`：环境配置读取，非运行时 fallback。
 
@@ -68,7 +69,8 @@
 ## 当前残留分类（A/D 允许保留）
 
 **A 类（桥接壳，允许）**
-- `coerceClientHeadersWithNative` / `coerceStandardizedRequestFromPayloadWithNative`：`native` 调用壳，透传参数。
+- `coerceStandardizedRequestFromPayloadWithNative`：`native` 调用壳，透传参数。
+- `coerceClientHeadersWithNative` 已退休；禁止恢复 standalone session header helper public wrapper。
 - `hub-stage-timing-env-blocks.ts` / `hub-pipeline-heavy-input-fastpath-config.ts`：环境变量默认值，非运行时 fallback。
 - `tool-governance/rules.ts`：`mapNativeRules` 参数含默认值（native 校验失败时安全默认值，非绕过真源）。
 - `chat-process-heartbeat-directives.ts`：`fallback` 参数用于 heartbeat 指令上下文合并，可选参数非 fallback。

@@ -65,13 +65,6 @@ fn normalize_header_key(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn normalize_header_key_public(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '_' && *ch != '-')
-        .collect::<String>()
-}
-
 fn coerce_client_headers_from_map(
     obj: Option<&Map<String, Value>>,
 ) -> Option<Vec<(String, String)>> {
@@ -94,23 +87,6 @@ fn coerce_client_headers_from_map(
 
 fn coerce_client_headers(raw: Option<&Value>) -> Option<Vec<(String, String)>> {
     coerce_client_headers_from_map(raw.and_then(|value| value.as_object()))
-}
-
-fn coerce_client_headers_public(raw: Option<&Value>) -> Option<Map<String, Value>> {
-    let obj = raw?.as_object()?;
-    let mut out = Map::<String, Value>::new();
-    for (key, value) in obj {
-        if let Some(raw_value) = value.as_str() {
-            if !raw_value.trim().is_empty() {
-                out.insert(key.clone(), Value::String(raw_value.to_string()));
-            }
-        }
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
 }
 
 fn find_header_value(headers: &[(String, String)], target: &str) -> Option<String> {
@@ -238,62 +214,6 @@ pub fn extract_session_identifiers_json(metadata_json: String) -> NapiResult<Str
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
 }
 
-#[napi]
-pub fn coerce_client_headers_json(raw_json: String) -> NapiResult<String> {
-    let raw: Value = serde_json::from_str(&raw_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse raw JSON: {}", e)))?;
-    let output = coerce_client_headers_public(Some(&raw)).map(Value::Object);
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
-}
-
-#[napi]
-pub fn find_header_value_json(headers_json: String, target: String) -> NapiResult<String> {
-    let headers_value: Value = serde_json::from_str(&headers_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse headers JSON: {}", e)))?;
-    let headers_obj = headers_value.as_object();
-    let headers = coerce_client_headers_from_map(headers_obj);
-    let output = headers
-        .as_ref()
-        .and_then(|rows| find_header_value(rows.as_slice(), target.as_str()));
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
-}
-
-#[napi]
-pub fn pick_header_json(headers_json: String, candidates_json: String) -> NapiResult<String> {
-    let headers_value: Value = serde_json::from_str(&headers_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse headers JSON: {}", e)))?;
-    let candidates_value: Value = serde_json::from_str(&candidates_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse candidates JSON: {}", e)))?;
-    let headers_obj = headers_value.as_object();
-    let headers = coerce_client_headers_from_map(headers_obj);
-    let candidates: Vec<String> = match candidates_value.as_array() {
-        Some(items) => items
-            .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
-            .collect(),
-        None => Vec::new(),
-    };
-    let output = if candidates.is_empty() {
-        None
-    } else {
-        headers.as_ref().and_then(|rows| {
-            let refs: Vec<&str> = candidates.iter().map(|item| item.as_str()).collect();
-            pick_header(rows.as_slice(), refs.as_slice())
-        })
-    };
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
-}
-
-#[napi]
-pub fn normalize_header_key_json(value: String) -> NapiResult<String> {
-    let output = normalize_header_key_public(value.as_str());
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output JSON: {}", e)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,24 +267,4 @@ mod tests {
         assert_eq!(result.conversation_id.as_deref(), Some("conv-norm"));
     }
 
-    #[test]
-    fn normalize_header_key_public_removes_spaces_underscore_hyphen_only() {
-        assert_eq!(normalize_header_key_public(" X-Session_Id "), "XSessionId");
-    }
-
-    #[test]
-    fn coerce_client_headers_public_preserves_original_string_value() {
-        let raw = json!({
-          "x-session-id": "  sess-1  ",
-          "x-empty": "   ",
-          "x-number": 1
-        });
-        let result = coerce_client_headers_public(Some(&raw)).expect("headers");
-        assert_eq!(
-            result.get("x-session-id").and_then(|v| v.as_str()),
-            Some("  sess-1  ")
-        );
-        assert!(result.get("x-empty").is_none());
-        assert!(result.get("x-number").is_none());
-    }
 }

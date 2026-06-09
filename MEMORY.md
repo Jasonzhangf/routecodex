@@ -2993,3 +2993,9 @@ Tags: hub-pipeline, stage-bridge, dead-code, napi-export, rust-only, residue-gat
 - Removed `native-hub-pipeline-orchestration-semantics-search-resume.ts`, the zero-consumer TS `*WithNative` exports, their required-export entries, and their Rust NAPI JSON wrapper/re-export surface. Kept internal Rust helper functions private because active Rust Hub tests/mainline still exercise those semantics.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired wrapper/export symbol set from returning in active TS/Rust public surfaces.
 Tags: hub-pipeline, orchestration-wrapper, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline session header helper public wrappers removed
+- Exact scan found `coerceClientHeadersWithNative`, `findHeaderValueWithNative`, `pickHeaderWithNative`, `normalizeHeaderKeyWithNative` and their `*Json` NAPI exports only in wrapper/required-export surfaces; no runtime/test consumer imported the standalone public helpers.
+- Removed only the public TS/NAPI helper surface and helper-only public Rust functions/tests. Kept internal Rust header parsing helpers because `extractSessionIdentifiersJson` still uses them to derive session/conversation IDs from request metadata headers.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired helper wrapper/export symbols from returning; `extractSessionIdentifiersJson` remains the sole public session identifier bridge.
+Tags: hub-pipeline, session-identifiers, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
