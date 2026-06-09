@@ -11,6 +11,15 @@
 5. Metadata、Error、Debug、Snapshot、Provider runtime state 不能伪装成正常 req/resp payload。
 6. 新增中间节点默认禁止；确需改变中段语义时只能开启新 chain version 或链尾追加，并写清旧链物理删除计划。
 
+## 1.1 Control / Data 双接口
+
+每个标准节点必须同时声明两个接口：
+
+- `ControlIn` / `ControlOut`：只允许承载 `metadata`、`route`、`error`、`policy`、`effect` 指令。禁止出现 `body`、`payload`、`messages`、`input`、`tools`、`tool_calls`、`providerPayload`、`wirePayload`、`clientPayload`、`responsePayload`。
+- `DataIn` / `DataOut`：只允许承载业务 payload。禁止混入 `metadata`、`metaCarrier`、`runtimeMetadata`、`errorCarrier`、debug/snapshot carrier 或 provider runtime state。
+
+Rust online contract help 是双接口真源：`describeHubPipelineContractsJson`、`describeVirtualRouterContractsJson`、`describePipelineContractJson(nodeId)` 必须返回 `controlIn`、`controlOut`、`dataIn`、`dataOut`。TS 只能读取这些 contract 结果做测试/诊断，不得重建 contract 语义。
+
 ## 2. 命名规范
 
 ### 2.1 类型命名模板

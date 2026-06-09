@@ -2774,3 +2774,10 @@ Tags: hub-pipeline, dead-code, util-wrapper, sanitizer-deletion, rust-owner, res
 - Do not restore generic TS abstractions in that file: `RCCBaseModule`, `HttpClient`, `ConfigManager`, `Logger`, `DispatchCenter`, or `DispatchNotification`. Current HTTP client, config, logging, and dispatch contracts have their own owners and must not be reintroduced through the legacy pipeline type directory.
 - Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` now includes deleted-content checks for these removed symbols.
 Tags: hub-pipeline, dead-code, external-types, compatibility-shim, residue-gate, 2026-06-09
+
+## 2026-06-09 Hub Pipeline control/data contract help locked
+- Rust contract help in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs` owns the standard Hub/VR node `controlIn` / `controlOut` and `dataIn` / `dataOut` interface contract.
+- `control` may only carry metadata, route, error, policy, or effect instructions and must forbid business payload fields such as `body`, `payload`, `messages`, `input`, `tools`, `tool_calls`, `providerPayload`, `wirePayload`, `clientPayload`, and `responsePayload`.
+- `data` may only carry business payload and must forbid metadata/control/error carriers such as `metadata`, `metaCarrier`, `runtimeMetadata`, and `errorCarrier`.
+- Gates: Rust contract unit tests plus `tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts` and `tests/red-tests/hub_pipeline_type_topology_contract.test.ts` lock the split; function/verification maps list the contract help as part of `hub.metadata_boundary`.
+Tags: hub-pipeline, control-data, contract-help, rust-owner, metadata-boundary, 2026-06-09

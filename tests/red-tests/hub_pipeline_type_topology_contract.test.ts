@@ -104,6 +104,11 @@ describe('Hub Pipeline request type topology contract', () => {
       'describe_meta_carrier_contracts',
       'describe_pipeline_contract',
       'validate_pipeline_node_contract_boundary',
+      'ControlContractShape',
+      'control_in',
+      'control_out',
+      'CONTROL_ALLOWED_KINDS',
+      'CONTROL_FORBIDDEN_FIELDS',
     ]) {
       expect(registry).toContain(token);
     }

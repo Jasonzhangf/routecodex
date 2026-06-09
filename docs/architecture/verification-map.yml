@@ -326,8 +326,11 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_inbound_02_standardized.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
     contract:
       - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
+      - tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts
+      - tests/red-tests/hub_pipeline_type_topology_contract.test.ts
       - tests/red-tests/server_sse_metadata_guard_e2e.test.ts
     integration:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
@@ -340,6 +343,7 @@ verification:
       - npm run build:min
     notes:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
+      - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
 
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high

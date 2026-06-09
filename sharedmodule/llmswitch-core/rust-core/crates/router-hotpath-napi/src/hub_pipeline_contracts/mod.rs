@@ -1,7 +1,8 @@
+// feature_id: hub.metadata_boundary
 use serde::Serialize;
 use serde_json::{json, Value};
 
-const CONTRACT_VERSION: &str = "2026-06-03.hub-vr-node-contract.v1";
+const CONTRACT_VERSION: &str = "2026-06-09.hub-vr-control-data-contract.v2";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -13,11 +14,24 @@ pub(crate) struct ContractShape {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ControlContractShape {
+    interface_name: &'static str,
+    allowed_kinds: &'static [&'static str],
+    read_fields: &'static [&'static str],
+    write_fields: &'static [&'static str],
+    effects: &'static [&'static str],
+    forbidden_fields: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct NodeContract {
     node_id: &'static str,
     version: &'static str,
     phase: &'static str,
     owner_builder: &'static str,
+    control_in: ControlContractShape,
+    control_out: ControlContractShape,
     data_in: ContractShape,
     data_out: ContractShape,
     meta_read: &'static [&'static str],
@@ -138,6 +152,30 @@ fn hub_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "req_inbound",
             owner_builder: "build_hub_req_inbound_02_from_payload",
+            control_in: control(
+                "HubReqInbound02StandardizedControlIn",
+                &[
+                    "requestId",
+                    "pipelineId",
+                    "entryEndpoint",
+                    "providerProtocol",
+                    "clientStream",
+                    "inboundStream",
+                    "outboundStream",
+                ],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubReqInbound02StandardizedControlOut",
+                &[],
+                &["entryEndpoint", "providerProtocol", "clientProtocol"],
+                &[
+                    "standardize_request_shape",
+                    "preserve_client_payload_semantics",
+                    "tool_surface_validate",
+                ],
+            ),
             data_in: shape("ServerReqInbound01ClientRaw", &["body"], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubReqInbound02Standardized", &["model"], COMMON_DATA_FORBIDDEN),
             meta_read: &[
@@ -163,6 +201,35 @@ fn hub_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "req_chatprocess",
             owner_builder: "run_hub_req_chatprocess_03_governed_entrypoint",
+            control_in: control(
+                "HubReqChatProcess03GovernedControlIn",
+                &[
+                    "routeHint",
+                    "serverToolRequired",
+                    "hasImageAttachment",
+                    "processMode",
+                    "responsesResume",
+                    "webSearchIntent",
+                ],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubReqChatProcess03GovernedControlOut",
+                &[],
+                &[
+                    "serverToolRuntimeAction",
+                    "estimatedInputTokens",
+                    "processMode",
+                    "hasImageAttachment",
+                ],
+                &[
+                    "tool_surface_validate",
+                    "tool_governance",
+                    "servertool_effect_plan",
+                    "chat_history_governance",
+                ],
+            ),
             data_in: shape("HubReqInbound02Standardized", &["model"], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubReqChatProcess03Governed", &["model"], COMMON_DATA_FORBIDDEN),
             meta_read: &[
@@ -193,6 +260,18 @@ fn hub_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "req_outbound",
             owner_builder: "run_hub_req_outbound_05_provider_semantic_entrypoint",
+            control_in: control(
+                "HubReqOutbound05ProviderSemanticControlIn",
+                &["providerProtocol", "outboundStream", "routecodexRoutingPolicyGroup"],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubReqOutbound05ProviderSemanticControlOut",
+                &[],
+                &[],
+                &["provider_neutral_semantic_projection", "tool_surface_validate"],
+            ),
             data_in: shape("HubReqChatProcess03Governed", &["model"], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubReqOutbound05ProviderSemantic", &["model"], COMMON_DATA_FORBIDDEN),
             meta_read: &["providerProtocol", "outboundStream", "routecodexRoutingPolicyGroup"],
@@ -206,6 +285,17 @@ fn hub_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "req_outbound",
             owner_builder: "build_provider_req_outbound_06_from_hub_req_outbound_05",
+            control_in: control("ProviderReqOutbound06WirePayloadControlIn", &[], &[], &[]),
+            control_out: control(
+                "ProviderReqOutbound06WirePayloadControlOut",
+                &[],
+                &[],
+                &[
+                    "provider_wire_build",
+                    "sdk_options_encoding",
+                    "tool_surface_validate_provider_wire",
+                ],
+            ),
             data_in: shape("HubReqOutbound05ProviderSemantic", &["model"], PROVIDER_WIRE_FORBIDDEN),
             data_out: shape("ProviderReqOutbound06WirePayload", &[], PROVIDER_WIRE_FORBIDDEN),
             meta_read: &[],
@@ -228,6 +318,22 @@ fn response_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "resp_inbound",
             owner_builder: "parse_hub_resp_inbound_02_from_provider_resp_inbound_01",
+            control_in: control(
+                "HubRespInbound02ParsedControlIn",
+                &["requestId", "pipelineId", "providerProtocol"],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubRespInbound02ParsedControlOut",
+                &[],
+                &["providerProtocol"],
+                &[
+                    "parse_provider_response_shape",
+                    "preserve_response_semantics",
+                    "tool_surface_validate",
+                ],
+            ),
             data_in: shape("ProviderRespInbound01Raw", &[], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubRespInbound02Parsed", &[], COMMON_DATA_FORBIDDEN),
             meta_read: &["requestId", "pipelineId", "providerProtocol"],
@@ -245,6 +351,23 @@ fn response_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "resp_chatprocess",
             owner_builder: "build_hub_resp_chatprocess_03_from_hub_resp_inbound_02",
+            control_in: control(
+                "HubRespChatProcess03GovernedControlIn",
+                &["requestId", "pipelineId", "entryEndpoint", "providerProtocol"],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubRespChatProcess03GovernedControlOut",
+                &[],
+                &["serverToolRuntimeAction", "stopMessageState"],
+                &[
+                    "tool_surface_validate",
+                    "tool_result_harvest",
+                    "servertool_followup_plan",
+                    "internal_tool_strip",
+                ],
+            ),
             data_in: shape("HubRespInbound02Parsed", &[], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubRespChatProcess03Governed", &[], COMMON_DATA_FORBIDDEN),
             meta_read: &["requestId", "pipelineId", "entryEndpoint", "providerProtocol"],
@@ -263,6 +386,22 @@ fn response_pipeline_contracts() -> Vec<NodeContract> {
             version: CONTRACT_VERSION,
             phase: "resp_outbound",
             owner_builder: "project_hub_resp_outbound_04_from_hub_resp_chatprocess_03",
+            control_in: control(
+                "HubRespOutbound04ClientSemanticControlIn",
+                &["requestId", "pipelineId", "entryEndpoint", "clientProtocol"],
+                &[],
+                &[],
+            ),
+            control_out: control(
+                "HubRespOutbound04ClientSemanticControlOut",
+                &[],
+                &["clientProtocol"],
+                &[
+                    "client_protocol_projection",
+                    "responses_shape_build",
+                    "tool_surface_validate",
+                ],
+            ),
             data_in: shape("HubRespChatProcess03Governed", &[], COMMON_DATA_FORBIDDEN),
             data_out: shape("HubRespOutbound04ClientSemantic", &[], COMMON_DATA_FORBIDDEN),
             meta_read: &["requestId", "pipelineId", "entryEndpoint", "clientProtocol"],
@@ -284,6 +423,25 @@ fn virtual_router_contracts() -> Vec<NodeContract> {
         version: CONTRACT_VERSION,
         phase: "vr_route",
         owner_builder: "build_vr_route_04_from_hub_req_chatprocess_03",
+        control_in: control(
+            "VrRoute04SelectedTargetControlIn",
+            &[
+                "allowedProviders",
+                "excludedProviderKeys",
+                "disabledProviderKeyAliases",
+                "__shadowCompareForcedProviderKey",
+                "__routecodexRetryProviderKey",
+                "routecodexRoutingPolicyGroup",
+            ],
+            &[],
+            &[],
+        ),
+        control_out: control(
+            "VrRoute04SelectedTargetControlOut",
+            &[],
+            &["selectedProviderKey", "selectedRouteId", "routingDecisionRecord"],
+            &["route_classify", "candidate_select", "quota_health_policy_consume"],
+        ),
         data_in: shape("HubReqChatProcess03Governed", &["model"], COMMON_DATA_FORBIDDEN),
         data_out: shape("VrRoute04SelectedTarget", &["providerKey"], VR_DECISION_FORBIDDEN),
         meta_read: &[
@@ -399,6 +557,22 @@ fn shape(
     }
 }
 
+fn control(
+    interface_name: &'static str,
+    read_fields: &'static [&'static str],
+    write_fields: &'static [&'static str],
+    effects: &'static [&'static str],
+) -> ControlContractShape {
+    ControlContractShape {
+        interface_name,
+        allowed_kinds: CONTROL_ALLOWED_KINDS,
+        read_fields,
+        write_fields,
+        effects,
+        forbidden_fields: CONTROL_FORBIDDEN_FIELDS,
+    }
+}
+
 fn top_level_field_exists(value: &Value, field: &str) -> bool {
     value
         .as_object()
@@ -445,6 +619,8 @@ const VR_DECISION_FORBIDDEN: &[&str] = &[
     "metaCarrier",
     "metadataCarrier",
     "runtimeMetadata",
+    "errorCarrier",
+    "classifiedError",
     "payload",
     "patchedPayload",
     "providerPayload",
@@ -452,6 +628,21 @@ const VR_DECISION_FORBIDDEN: &[&str] = &[
     "messages",
     "tools",
     "tool_calls",
+];
+
+const CONTROL_ALLOWED_KINDS: &[&str] = &["metadata", "route", "error", "policy", "effect"];
+
+const CONTROL_FORBIDDEN_FIELDS: &[&str] = &[
+    "body",
+    "payload",
+    "messages",
+    "input",
+    "tools",
+    "tool_calls",
+    "providerPayload",
+    "wirePayload",
+    "clientPayload",
+    "responsePayload",
 ];
 
 const COMMON_FORBIDDEN_PATHS: &[&str] = &[
@@ -529,9 +720,61 @@ mod tests {
         assert_eq!(output["nodes"].as_array().unwrap().len(), 7);
         assert_eq!(output["metaCarriers"].as_array().unwrap().len(), 5);
         assert_eq!(
+            output["nodes"][0]["controlIn"]["interfaceName"],
+            "HubReqInbound02StandardizedControlIn"
+        );
+        assert_eq!(
+            output["nodes"][0]["controlOut"]["interfaceName"],
+            "HubReqInbound02StandardizedControlOut"
+        );
+        assert_eq!(
             output["metaCarriers"][2]["carrierId"],
             "MetaRoute03RouteCarrier"
         );
+    }
+
+    #[test]
+    fn all_nodes_expose_standard_control_data_split() {
+        for contract in all_node_contracts() {
+            assert!(
+                contract.control_in.interface_name.ends_with("ControlIn"),
+                "{} missing standard ControlIn interface",
+                contract.node_id
+            );
+            assert!(
+                contract.control_out.interface_name.ends_with("ControlOut"),
+                "{} missing standard ControlOut interface",
+                contract.node_id
+            );
+            assert!(
+                contract.data_in.type_name.contains("Req")
+                    || contract.data_in.type_name.contains("Resp")
+                    || contract.data_in.type_name.contains("Route")
+                    || contract.data_in.type_name.contains("Server"),
+                "{} dataIn must be a pipeline data type",
+                contract.node_id
+            );
+            for forbidden in CONTROL_FORBIDDEN_FIELDS {
+                assert!(
+                    contract.control_in.forbidden_fields.contains(forbidden),
+                    "{} controlIn must forbid {forbidden}",
+                    contract.node_id
+                );
+                assert!(
+                    contract.control_out.forbidden_fields.contains(forbidden),
+                    "{} controlOut must forbid {forbidden}",
+                    contract.node_id
+                );
+            }
+            for forbidden in ["metadata", "metaCarrier", "runtimeMetadata", "errorCarrier"] {
+                assert!(
+                    contract.data_in.forbidden_fields.contains(&forbidden)
+                        || contract.data_out.forbidden_fields.contains(&forbidden),
+                    "{} data interfaces must keep control carriers out",
+                    contract.node_id
+                );
+            }
+        }
     }
 
     #[test]

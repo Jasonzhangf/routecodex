@@ -18584,6 +18584,12 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Removed unused old mock abstractions from `external-types.ts`: `RCCBaseModule`, `HttpClient`, `ConfigManager`, `Logger`, `DispatchCenter`, and `DispatchNotification`.
 - Strengthened `verify:architecture-deleted-path` with content residue checks so those removed generic abstractions cannot be restored inside the still-live file.
 
+2026-06-09 Hub Pipeline control/data contract audit:
+- Dead-code inventory concluded remaining `src/modules/pipeline/**` files are live compatibility surfaces: provider/server/debug imports still consume `ModuleDependencies`, `PipelineDebugLogger`, `TargetMetadata`, `DebugCenter`, `DebugEvent`, and logger implementations.
+- Gap found in Rust contract help: it exposed `dataIn/dataOut + metaRead/metaWrite/effects`, but not standard `controlIn/controlOut` interfaces.
+- Added Rust `ControlContractShape` to `hub_pipeline_contracts/mod.rs`; every Hub/VR node now reports `controlIn`, `controlOut`, `dataIn`, and `dataOut`. Control allows only metadata/route/error/policy/effect kinds and forbids business payload fields; data forbids metadata/meta/runtime/error carriers.
+- Updated red tests and function/verification maps to lock the control/data split owner and gates.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.

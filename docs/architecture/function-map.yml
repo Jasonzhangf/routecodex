@@ -620,6 +620,8 @@ owners:
       - assert_no_inline_metadata
       - ensure_runtime_metadata_json
       - read_runtime_metadata_json
+      - describe_hub_pipeline_contracts
+      - describe_pipeline_contract
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/providers/core/runtime
@@ -629,6 +631,8 @@ owners:
       - src/providers/profile
     required_tests:
       - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
+      - tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts
+      - tests/red-tests/hub_pipeline_type_topology_contract.test.ts
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
       - tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts
@@ -638,6 +642,7 @@ owners:
     migration_target: rust
     notes:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
+      - Rust contract help owns the standard control/data split for Hub and VR nodes.
 
   - feature_id: hub.response_anthropic_client_projection
     status: active

@@ -74,8 +74,58 @@ describe('hub pipeline live runtime typed entrypoints e2e (Phase 6A/6B/6B-2)', (
         expect(Array.isArray(detail?.node?.metaRead)).toBe(true);
         expect(Array.isArray(detail?.node?.metaWrite)).toBe(true);
         expect(Array.isArray(detail?.node?.forbiddenPaths)).toBe(true);
+        expect((detail?.node?.controlIn as { interfaceName?: string } | undefined)?.interfaceName).toBe(`${nodeId}ControlIn`);
+        expect((detail?.node?.controlOut as { interfaceName?: string } | undefined)?.interfaceName).toBe(`${nodeId}ControlOut`);
         expect((detail?.node?.dataIn as { typeName?: string } | undefined)?.typeName).toBeTruthy();
         expect((detail?.node?.dataOut as { typeName?: string } | undefined)?.typeName).toBeTruthy();
+      }
+    });
+
+    it('locks standard control/data split for every typed node', () => {
+      const controlAllowedKinds = ['metadata', 'route', 'error', 'policy', 'effect'];
+      const controlForbiddenFields = [
+        'body',
+        'payload',
+        'messages',
+        'input',
+        'tools',
+        'tool_calls',
+        'providerPayload',
+        'wirePayload',
+        'clientPayload',
+        'responsePayload',
+      ];
+      const dataForbiddenFields = ['metadata', 'metaCarrier', 'runtimeMetadata', 'errorCarrier'];
+      for (const nodeId of [...REQUIRED_HUB_NODES, ...REQUIRED_VR_NODES]) {
+        const detail = describePipelineContractWithNative(nodeId);
+        const controlIn = detail?.node?.controlIn as {
+          allowedKinds?: string[];
+          readFields?: string[];
+          writeFields?: string[];
+          forbiddenFields?: string[];
+        };
+        const controlOut = detail?.node?.controlOut as {
+          allowedKinds?: string[];
+          readFields?: string[];
+          writeFields?: string[];
+          effects?: string[];
+          forbiddenFields?: string[];
+        };
+        const dataIn = detail?.node?.dataIn as { forbiddenFields?: string[] };
+        const dataOut = detail?.node?.dataOut as { forbiddenFields?: string[] };
+        expect(controlIn.allowedKinds).toEqual(controlAllowedKinds);
+        expect(controlOut.allowedKinds).toEqual(controlAllowedKinds);
+        expect(controlIn.writeFields).toEqual([]);
+        expect(controlOut.readFields).toEqual([]);
+        expect(controlOut.effects).toEqual(detail?.node?.effects);
+        for (const forbidden of controlForbiddenFields) {
+          expect(controlIn.forbiddenFields).toContain(forbidden);
+          expect(controlOut.forbiddenFields).toContain(forbidden);
+        }
+        for (const forbidden of dataForbiddenFields) {
+          expect(dataIn.forbiddenFields).toContain(forbidden);
+          expect(dataOut.forbiddenFields).toContain(forbidden);
+        }
       }
     });
 
