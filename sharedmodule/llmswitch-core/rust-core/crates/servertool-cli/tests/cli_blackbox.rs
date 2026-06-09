@@ -13,6 +13,8 @@ fn assert_no_internal_or_restoration_carrier(value: &serde_json::Value) {
         "\"debug\"",
         "\"debugCarrier\"",
         "\"ticket\"",
+        "\"restorationHandle\"",
+        "\"restorationStore\"",
         "--ticket",
         "stcli_",
         "rcc_cli_",
@@ -155,10 +157,7 @@ fn invalid_stop_message_repeat_budget_fails_fast() {
             .args(["run", "stop_message_auto", "--input-json", input_json])
             .output()
             .expect("run routecodex-servertool");
-        assert!(
-            !output.status.success(),
-            "{input_json} must fail-fast"
-        );
+        assert!(!output.status.success(), "{input_json} must fail-fast");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats"),
@@ -222,7 +221,12 @@ fn non_client_exec_servertools_fail_fast() {
 #[test]
 fn unknown_tool_fails_fast_without_client_stdout() {
     let output = Command::new(bin())
-        .args(["run", "unknown_servertool", "--input-json", r#"{"value":1}"#])
+        .args([
+            "run",
+            "unknown_servertool",
+            "--input-json",
+            r#"{"value":1}"#,
+        ])
         .output()
         .expect("run routecodex-servertool");
     assert!(!output.status.success());
@@ -279,7 +283,12 @@ fn non_object_input_json_fails_fast() {
 #[test]
 fn malformed_input_json_fails_fast() {
     let output = Command::new(bin())
-        .args(["run", "stop_message_auto", "--input-json", r#"{"bad":"json""#])
+        .args([
+            "run",
+            "stop_message_auto",
+            "--input-json",
+            r#"{"bad":"json""#,
+        ])
         .output()
         .expect("run routecodex-servertool");
     assert!(!output.status.success());
@@ -370,4 +379,30 @@ fn internal_carrier_fails_fast() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("SERVERTOOL_DENIED_INTERNAL_CARRIER: metadata"));
+}
+
+#[test]
+fn restoration_handle_carrier_fails_fast() {
+    for (input_json, carrier) in [
+        (
+            r#"{"restorationHandle":"legacy_handle"}"#,
+            "restorationHandle",
+        ),
+        (
+            r#"{"restorationStore":{"id":"legacy_store"}}"#,
+            "restorationStore",
+        ),
+    ] {
+        let output = Command::new(bin())
+            .args(["run", "servertool_fixture", "--input-json", input_json])
+            .output()
+            .expect("run routecodex-servertool");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("SERVERTOOL_DENIED_INTERNAL_CARRIER: {carrier}")),
+            "stderr={stderr}"
+        );
+        assert!(output.stdout.is_empty());
+    }
 }
