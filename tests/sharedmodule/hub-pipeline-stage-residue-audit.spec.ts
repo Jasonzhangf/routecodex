@@ -1811,6 +1811,7 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
     );
+    const repoRoot = process.cwd();
     const testRoot = path.join(process.cwd(), 'tests');
     const legacyFiles = [
       'hub-pipeline-chat-process-governance-utils.ts',
@@ -1821,12 +1822,36 @@ describe('hub pipeline stage residue audit', () => {
     const legacyTests = [
       'sharedmodule/hub-pipeline-chat-process-governance-utils.spec.ts',
       'sharedmodule/hub-pipeline-max-tokens-policy.spec.ts',
+      'sharedmodule/native-router-heavy-input-fastpath.spec.ts',
+    ];
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_unified_fastpath.rs',
     ];
 
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
     const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const nativeWrapper = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts'),
+      'utf8',
+    );
+    const nativeAnalysis = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts'),
+      'utf8',
+    );
+    const requiredExports = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      'utf8',
+    );
 
-    expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
+    expect({ existingFiles, existingTests, existingRetiredFiles }).toEqual({
+      existingFiles: [],
+      existingTests: [],
+      existingRetiredFiles: [],
+    });
+    for (const source of [nativeWrapper, nativeAnalysis, requiredExports]) {
+      expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
+    }
   });
 
   it('legacy TS chat-process request utility residue must be physically removed', () => {

@@ -18714,3 +18714,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline provider response hubStageTop dead-code pruning:
 - Internal dead-code scan found `attachHubStageTopToContext` was defined but never called; its local `HubStageTopEntry` normalize/merge helpers and `peekHubStageTopSummary` import existed only for that dead helper.
 - Removed the dead provider-response-local helpers; hub stage top context attachment remains owned by `hub-stage-timing.ts`; added residue gate to block revival.
+
+2026-06-09 HubPipeline heavy-input fastpath dead export removal:
+- Exact scan found `hub_req_inbound_unified_fastpath.rs` was only referenced by `lib.rs` module declaration for `decideHeavyInputFastpathJson`; TS had only `decideHeavyInputFastpath` wrapper/parser and a wrapper-only test, with no runtime consumer.
+- Removed the Rust module, NAPI required export, TS wrapper/parser, and wrapper-only Jest test; added residue gate to block `decideHeavyInputFastpathJson` / wrapper/parser/test/module revival.

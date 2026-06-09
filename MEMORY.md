@@ -2910,3 +2910,9 @@ Tags: hub-pipeline, standardized-request, public-surface, dead-code, type-shell,
 - Follow-up dead-code inventory confirmed provider-response-local `attachHubStageTopToContext`, `HubStageTopEntry`, `normalizeHubStageTopEntries`, and `mergeHubStageTopEntries` were uncalled residue; hub stage top context attachment remains owned by `hub-stage-timing.ts`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `export async function materializeProviderResponseSsePayload` revival.
 Tags: hub-pipeline, provider-response, sse-materialization, public-surface, dead-code, residue-gate, rust-owned-semantics, 2026-06-09
+
+## 2026-06-09 HubPipeline heavy-input fastpath dead export removed
+- Exact scan found `hub_req_inbound_unified_fastpath.rs` was only pulled in by `lib.rs` for `decideHeavyInputFastpathJson`; TS had only a wrapper parser and wrapper-only Jest test, with no runtime consumer.
+- Removed the Rust module, `decideHeavyInputFastpathJson` required export, TS `decideHeavyInputFastpath` wrapper, parser type/function, and `tests/sharedmodule/native-router-heavy-input-fastpath.spec.ts`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the native export/wrapper/parser/test and Rust module from returning.
+Tags: hub-pipeline, heavy-input-fastpath, dead-code, napi-export, rust-owned-semantics, residue-gate, 2026-06-09

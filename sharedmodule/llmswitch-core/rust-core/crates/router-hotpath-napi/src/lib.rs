@@ -2226,8 +2226,6 @@ pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<Stri
     Ok("true".to_string())
 }
 
-mod hub_req_inbound_unified_fastpath;
-
 #[napi(js_name = "classifyProviderFailureJson")]
 pub fn classify_provider_failure_json(
     status_code: Option<u16>,

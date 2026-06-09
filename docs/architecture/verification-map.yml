@@ -347,6 +347,7 @@ verification:
     notes:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
       - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
+      - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
 
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium

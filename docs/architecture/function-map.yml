@@ -645,6 +645,7 @@ owners:
       - Metadata is side-channel only; leak to provider/client payload must fail-fast.
       - Rust contract help owns the standard control/data split for Hub and VR nodes.
       - TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired.
+      - Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath.
 
   - feature_id: hub.runtime_ingress_bridge
     status: active
