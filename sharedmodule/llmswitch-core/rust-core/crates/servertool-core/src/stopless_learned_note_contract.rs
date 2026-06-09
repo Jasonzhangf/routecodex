@@ -151,6 +151,72 @@ mod tests {
     }
 
     #[test]
+    fn skips_write_when_schema_report_is_missing() {
+        let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+            adapter_context: json!({
+                "workdir": "/repo",
+                "sessionId": "session-3"
+            }),
+            request_id: "req_3".to_string(),
+            parsed: None,
+            timestamp_ms: Some(json!(9000)),
+        });
+
+        assert!(!plan.should_write);
+        assert_eq!(plan.working_directory.as_deref(), Some("/repo"));
+        assert_eq!(plan.session_id.as_deref(), Some("session-3"));
+        assert_eq!(plan.timestamp_ms, 9000);
+        assert_eq!(plan.learned, None);
+        assert_eq!(plan.reason, None);
+        assert_eq!(plan.evidence, None);
+    }
+
+    #[test]
+    fn skips_write_when_learned_is_not_a_string() {
+        for learned in [
+            json!(true),
+            json!(123),
+            json!(["not", "string"]),
+            json!({"text": "not string"}),
+        ] {
+            let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+                adapter_context: json!({}),
+                request_id: "req_non_string".to_string(),
+                parsed: Some(json!({
+                    "learned": learned,
+                    "reason": "ignored when learned missing",
+                    "evidence": "ignored when learned missing"
+                })),
+                timestamp_ms: Some(json!(1)),
+            });
+
+            assert!(!plan.should_write);
+            assert_eq!(plan.learned, None);
+        }
+    }
+
+    #[test]
+    fn rejects_negative_or_non_finite_timestamp_values_to_zero() {
+        for timestamp_ms in [
+            json!(-1),
+            json!("-1"),
+            json!("NaN"),
+            json!("Infinity"),
+            json!({ "bad": 1 }),
+        ] {
+            let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+                adapter_context: json!({}),
+                request_id: "req_time".to_string(),
+                parsed: Some(json!({ "learned": "fact" })),
+                timestamp_ms: Some(timestamp_ms),
+            });
+
+            assert!(plan.should_write);
+            assert_eq!(plan.timestamp_ms, 0);
+        }
+    }
+
+    #[test]
     fn adapter_context_workdir_precedes_runtime_metadata_workdir() {
         let workdir = resolve_working_directory_from_adapter_context(&json!({
             "cwd": "/adapter",
@@ -160,5 +226,29 @@ mod tests {
         }));
 
         assert_eq!(workdir.as_deref(), Some("/adapter"));
+    }
+
+    #[test]
+    fn resolves_working_directory_by_explicit_field_order() {
+        let workdir = resolve_working_directory_from_adapter_context(&json!({
+            "cwd": "   ",
+            "workdir": "/workdir",
+            "workingDirectory": "/working-directory",
+            "clientWorkdir": "/client-workdir"
+        }));
+        assert_eq!(workdir.as_deref(), Some("/workdir"));
+
+        let workdir = resolve_working_directory_from_adapter_context(&json!({
+            "workingDirectory": "/working-directory",
+            "clientWorkdir": "/client-workdir"
+        }));
+        assert_eq!(workdir.as_deref(), Some("/working-directory"));
+
+        let workdir = resolve_working_directory_from_adapter_context(&json!({
+            "__rt": {
+                "clientWorkdir": "/runtime-client"
+            }
+        }));
+        assert_eq!(workdir.as_deref(), Some("/runtime-client"));
     }
 }

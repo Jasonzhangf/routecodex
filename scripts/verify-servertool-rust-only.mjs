@@ -3754,6 +3754,10 @@ function checkStoplessLearnedNoteRustOwner() {
     'pub struct StoplessLearnedNoteWritePlan',
     'pub fn plan_stopless_learned_note_write',
     'pub fn resolve_working_directory_from_adapter_context',
+    'fn skips_write_when_schema_report_is_missing',
+    'fn skips_write_when_learned_is_not_a_string',
+    'fn rejects_negative_or_non_finite_timestamp_values_to_zero',
+    'fn resolves_working_directory_by_explicit_field_order',
   ]) {
     assertContains(
       'stopless-learned-note-rust-owner',
