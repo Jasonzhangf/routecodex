@@ -76,6 +76,24 @@ fn missing_continuation_prompt_fails_fast() {
 }
 
 #[test]
+fn invalid_stop_message_flow_id_fails_fast() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "stop_message_auto",
+            "--flow",
+            "not_stop_message_flow",
+            "--input-json",
+            r#"{"continuationPrompt":"continue","repeatCount":1,"maxRepeats":3}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("SERVERTOOL_CLI_INVALID_FIELD: flowId"));
+}
+
+#[test]
 fn non_client_exec_servertools_fail_fast() {
     for tool_name in ["web_search", "vision_auto", "memory_cache_auto"] {
         let output = Command::new(bin())
