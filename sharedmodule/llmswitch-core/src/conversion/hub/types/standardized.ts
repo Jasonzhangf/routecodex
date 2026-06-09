@@ -1,14 +1,14 @@
 import type { ChatMessageContentPart, ChatSemantics } from './chat-envelope.js';
 import type { JsonObject } from './json.js';
 
-export type ToolChoice =
+type ToolChoice =
   | 'none'
   | 'auto'
   | 'required'
   | { type: 'function'; function: { name: string } }
   | Record<string, unknown>;
 
-export interface StandardizedTool {
+interface StandardizedTool {
   type: 'function';
   function: {
     name: string;
@@ -33,7 +33,7 @@ export interface ToolCall {
   };
 }
 
-export interface ToolCallResult {
+interface ToolCallResult {
   tool_call_id: string;
   status: 'success' | 'error' | 'timeout' | 'pending';
   result?: JsonObject | JsonObject[] | string | number | boolean | null;
@@ -41,7 +41,7 @@ export interface ToolCallResult {
   executionTime?: number;
 }
 
-export type StandardizedMessageContent = string | ChatMessageContentPart[] | null;
+type StandardizedMessageContent = string | ChatMessageContentPart[] | null;
 
 export interface StandardizedMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -52,7 +52,7 @@ export interface StandardizedMessage {
   metadata?: Record<string, unknown>;
 }
 
-export interface StandardizedParameters {
+interface StandardizedParameters {
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
@@ -63,7 +63,7 @@ export interface StandardizedParameters {
   [key: string]: unknown;
 }
 
-export interface StandardizedMetadata {
+interface StandardizedMetadata {
   originalEndpoint: string;
   capturedContext?: Record<string, unknown>;
   requestId?: string;

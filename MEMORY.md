@@ -2895,6 +2895,12 @@ Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residu
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` includes `ChatToolOutput` in the `hub.chat_envelope_type_surface` forbidden export list.
 Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
 
+## 2026-06-09 HubPipeline StandardizedRequest nested type surface narrowed
+- `ToolChoice`, `StandardizedTool`, `ToolCallResult`, `StandardizedMessageContent`, `StandardizedParameters`, and `StandardizedMetadata` in `sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts` have no external source consumer; they only type `StandardizedRequest` / `ProcessedRequest` fields.
+- Public TS standardized type surface must remain limited to externally consumed `StandardizedMessage`, `StandardizedRequest`, and `ProcessedRequest`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the zero-consumer standardized field-detail aliases from being re-exported.
+Tags: hub-pipeline, standardized-request, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
+
 ## 2026-06-09 HubPipeline provider SSE materializer export narrowed
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` keeps `materializeProviderResponseSsePayload` as an internal IO/native invocation helper only; external public response entry remains `convertProviderResponse`.
 - Rust owner remains `hub.response_provider_sse_materialization`; TS may read Node streams and call native, but must not export a standalone materializer API or restore marker/bodyText classification.

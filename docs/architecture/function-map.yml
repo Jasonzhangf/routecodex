@@ -678,13 +678,16 @@ owners:
 
   - feature_id: hub.chat_envelope_type_surface
     status: active
-    summary: Hub ChatEnvelope TS bridge type surface for still-consumed envelope/context aliases
+    summary: Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases
     owner_module: sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
     canonical_types:
       - AdapterContext
       - ChatContinuationSemantics
       - ChatSemantics
       - ChatEnvelope
+      - StandardizedMessage
+      - StandardizedRequest
+      - ProcessedRequest
     canonical_builders:
       - chatEnvelopeToStandardized
       - standardizedToChatEnvelope
@@ -706,8 +709,8 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - ChatEnvelope TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned.
-      - Zero-consumer nested semantic aliases and tool-output detail aliases must stay module-internal and absent from the public type surface.
+      - ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned.
+      - Zero-consumer nested semantic aliases, tool-output detail aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface.
 
   - feature_id: hub.stage_timing_observation
     status: active

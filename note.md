@@ -18693,3 +18693,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `ChatToolOutput` only used inside `chat-envelope.ts` as the `ChatEnvelope.toolOutputs` field type; no external source import exists.
 - Made `ChatToolOutput` module-internal while preserving the `ChatEnvelope.toolOutputs` field shape.
 - Extended the `hub.chat_envelope_type_surface` residue gate to block standalone `ChatToolOutput` export revival.
+
+2026-06-09 HubPipeline StandardizedRequest nested type surface pruning:
+- Exact scan found `ToolChoice`, `StandardizedTool`, `ToolCallResult`, `StandardizedMessageContent`, `StandardizedParameters`, and `StandardizedMetadata` only used inside `standardized.ts`.
+- Kept externally consumed `StandardizedMessage`, `StandardizedRequest`, and `ProcessedRequest` public; made zero-consumer field-detail aliases module-internal.
+- Extended `hub.chat_envelope_type_surface` docs/gate to cover StandardizedRequest field-detail alias export revival.

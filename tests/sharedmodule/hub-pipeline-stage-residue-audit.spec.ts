@@ -2630,6 +2630,32 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface ChatEnvelope');
   });
 
+  it('StandardizedRequest type surface must not export zero-consumer nested field shells', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const forbidden = [
+      'ToolChoice',
+      'StandardizedTool',
+      'ToolCallResult',
+      'StandardizedMessageContent',
+      'StandardizedParameters',
+      'StandardizedMetadata',
+    ];
+    const findings: string[] = [];
+
+    for (const name of forbidden) {
+      const exportedDeclaration = new RegExp(`export\\s+(?:type|interface)\\s+${name}\\b`);
+      if (exportedDeclaration.test(source)) {
+        findings.push(`exported zero-consumer standardized nested type ${name}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export interface StandardizedMessage');
+    expect(source).toContain('export interface StandardizedRequest');
+    expect(source).toContain('export interface ProcessedRequest');
+  });
+
   it('chat process session usage bridge must not restore retired token estimate branch', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
     const source = fs.readFileSync(filePath, 'utf8');
