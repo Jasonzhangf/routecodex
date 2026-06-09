@@ -18759,3 +18759,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson` had no TS runtime consumer; lowercase-ai `normalizeReasoningInOpenaiPayloadJson` remains live and retained.
 - Change: removed standalone web-search hint helper/export, uppercase OpenAI alias export, response-only tool-name governance DTO/helper/export/tests, default-rules NAPI export, and added residue/map/memory docs.
 - Verification: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust hub_tool_governance_semantics 3/3; Rust hub_pipeline_contracts 11/11; `git diff --check` PASS.
+
+## 2026-06-09 stopless decision context goal Rust slice
+- Slice: moved request-scoped/persisted stopless goal status normalization from `stop-message-auto.ts` into Rust `servertool-core::stopless_decision_context_goal::plan_stopless_decision_context_goal_status`.
+- TS now only passes `adapterContext` and persisted goal state to native, then uses Rust `goalStatus` for `StopMessageDecisionContext.goal_status`.
+- Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, and focused stop-message Jest suites.

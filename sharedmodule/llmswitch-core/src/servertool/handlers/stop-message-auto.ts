@@ -32,6 +32,7 @@ import {
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageStateFromAdapterContext,
   planStopMessageDefaultConfig,
+  planStoplessDecisionContextGoalStatus,
   planStoplessDecisionContextSignals,
   planStopMessagePersistedLookup,
   planStopMessagePersistedStateSelection,
@@ -260,57 +261,6 @@ function debugLog(message: string, extra?: JsonObject): void {
   }
 }
 
-function isDirectStoplessGoalStateSnapshot(value: unknown): value is {
-  status: string;
-  objective: string;
-  updatedAt: number;
-  createdAt: number;
-} {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.status === 'string' &&
-    typeof record.objective === 'string' &&
-    typeof record.updatedAt === 'number' &&
-    Number.isFinite(record.updatedAt) &&
-    typeof record.createdAt === 'number' &&
-    Number.isFinite(record.createdAt)
-  );
-}
-
-function readRequestScopedGoalState(adapterContext: unknown): {
-  state?: {
-    status: string;
-    objective: string;
-    updatedAt: number;
-    createdAt: number;
-  };
-  explicit: boolean;
-} {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return { explicit: false };
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const directState = isDirectStoplessGoalStateSnapshot(record.stoplessGoalState)
-    ? record.stoplessGoalState
-    : undefined;
-  const rt =
-    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-      ? (record.__rt as Record<string, unknown>)
-      : undefined;
-  const source =
-    typeof rt?.stoplessGoalStateSource === 'string'
-      ? rt.stoplessGoalStateSource.trim().toLowerCase()
-      : '';
-  const explicit = Boolean(directState) && source !== 'persisted';
-  return {
-    ...(directState ? { state: directState } : {}),
-    explicit
-  };
-}
-
 const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
@@ -356,10 +306,11 @@ const handler: ServerToolHandler = async (
     ? persistedStateSelection.snapshot ?? null
     : null;
   const runtimeSnap = resolveRuntimeStopMessageStateFromAdapterContext(ctx.adapterContext);
-  const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
   const persistedGoalRead = readStoplessGoalState(ctx.adapterContext);
-  const effectiveGoal = requestScopedGoal.state ?? persistedGoalRead.state;
-  const hasExplicitGoalState = requestScopedGoal.explicit;
+  const goalStatusPlan = planStoplessDecisionContextGoalStatus({
+    adapterContext: ctx.adapterContext,
+    persistedGoalState: persistedGoalRead.state
+  });
   const tombstone = persistedLookupPlan.readStopMessageTombstone
     ? persistedStateSelection.tombstone
     : { exhaustedDefault: false, cleared: false };
@@ -420,11 +371,7 @@ const handler: ServerToolHandler = async (
         : explicitMode === 'off'
           ? 'off' as any
           : undefined,
-    goal_status: hasExplicitGoalState && effectiveGoal?.status === 'active'
-      ? 'active' as any
-      : (!effectiveGoal || effectiveGoal.status === 'idle' || effectiveGoal.status === 'active'
-        ? 'idle' as any
-        : effectiveGoal.status as any),
+    goal_status: goalStatusPlan.goalStatus as any,
     plan_mode_active: decisionSignals.planModeActive,
     default_enabled: defaultConfig.enabled,
     default_max_repeats: defaultConfig.maxRepeats,

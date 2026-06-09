@@ -452,6 +452,11 @@ export interface StoplessDecisionContextSignals {
   planModeActive: boolean;
 }
 
+export interface StoplessDecisionContextGoalStatusPlan {
+  goalStatus: string;
+  hasRequestScopedGoalState: boolean;
+}
+
 export interface StopMessageDefaultConfigPlan {
   enabled: boolean;
   text: string;
@@ -1010,6 +1015,37 @@ export function planStoplessDecisionContextSignalsWithNative(input: {
     portStopMessageDisabled: record.portStopMessageDisabled,
     hasResponsesSubmitToolOutputsResume: record.hasResponsesSubmitToolOutputsResume,
     planModeActive: record.planModeActive,
+  };
+}
+
+export function planStoplessDecisionContextGoalStatusWithNative(input: {
+  adapterContext: unknown;
+  persistedGoalState?: unknown;
+}): StoplessDecisionContextGoalStatusPlan {
+  const capability = 'planStoplessDecisionContextGoalStatusJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessDecisionContextGoalStatusJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStoplessDecisionContextGoalStatusJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.goalStatus !== 'string' ||
+    !record.goalStatus.trim() ||
+    typeof record.hasRequestScopedGoalState !== 'boolean'
+  ) {
+    throw new Error(`${capability} native returned invalid goal status fields`);
+  }
+  return {
+    goalStatus: record.goalStatus,
+    hasRequestScopedGoalState: record.hasRequestScopedGoalState,
   };
 }
 

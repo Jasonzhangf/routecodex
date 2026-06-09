@@ -27,6 +27,7 @@ use servertool_core::stop_message_counter;
 use servertool_core::stop_message_default_config;
 use servertool_core::stop_message_loop_guard;
 use servertool_core::stop_visible_text;
+use servertool_core::stopless_decision_context_goal;
 use servertool_core::stopless_decision_context_signals;
 use servertool_core::stopless_goal_state_contract;
 use servertool_core::stopless_orchestration_contract;
@@ -222,6 +223,16 @@ pub fn plan_stopless_decision_context_signals_json(input_json: &str) -> Result<S
         &stopless_decision_context_signals::plan_stopless_decision_context_signals(&input),
     )
     .map_err(|e| format!("serialize stopless decision context signals: {e}"))
+}
+
+pub fn plan_stopless_decision_context_goal_status_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_decision_context_goal::StoplessDecisionContextGoalInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless decision context goal input: {e}"))?;
+    serde_json::to_string(
+        &stopless_decision_context_goal::plan_stopless_decision_context_goal_status(&input),
+    )
+    .map_err(|e| format!("serialize stopless decision context goal plan: {e}"))
 }
 
 pub fn plan_stop_message_default_config_json(input_json: &str) -> Result<String, String> {
@@ -2030,6 +2041,32 @@ mod tests {
         assert_eq!(plan["portStopMessageDisabled"], true);
         assert_eq!(plan["hasResponsesSubmitToolOutputsResume"], true);
         assert_eq!(plan["planModeActive"], true);
+    }
+
+    #[test]
+    fn plans_stopless_decision_context_goal_status_via_servertool_core_bridge() {
+        let output = plan_stopless_decision_context_goal_status_json(
+            &json!({
+                "adapterContext": {
+                    "stoplessGoalState": {
+                        "status": "active",
+                        "objective": "old",
+                        "createdAt": 1,
+                        "updatedAt": 2
+                    },
+                    "__rt": {
+                        "stoplessGoalStateSource": "persisted"
+                    }
+                },
+                "persistedGoalState": null
+            })
+            .to_string(),
+        )
+        .expect("stopless decision context goal plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("stopless decision context goal json");
+        assert_eq!(plan["goalStatus"], "idle");
+        assert_eq!(plan["hasRequestScopedGoalState"], false);
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub mod stop_message_counter;
 pub mod stop_message_default_config;
 pub mod stop_message_loop_guard;
 pub mod stop_visible_text;
+pub mod stopless_decision_context_goal;
 pub mod stopless_decision_context_signals;
 pub mod stopless_goal_state_contract;
 pub mod stopless_orchestration_contract;
