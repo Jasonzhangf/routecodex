@@ -10,9 +10,12 @@
 pub mod backend_route_contract;
 pub mod cli_contract;
 pub mod cli_result_guard;
+pub mod loop_state_contract;
+pub mod orchestration_policy_contract;
 pub mod outcome_contract;
 pub mod persisted_lookup;
 pub mod stop_gateway_context;
+pub mod stop_message_compare_context;
 pub mod stop_message_counter;
 pub mod stop_message_loop_guard;
 pub mod stop_visible_text;

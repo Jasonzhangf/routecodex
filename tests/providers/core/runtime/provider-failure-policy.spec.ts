@@ -90,40 +90,12 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies quota cooldown windows as periodic recovery without changing short-lived 429 recovery', () => {
-    const dailyLimitError = Object.assign(new Error('weekly quota exhausted'), {
-      code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
-      statusCode: 429,
-      rateLimitKind: 'daily_limit'
-    });
-    const syntheticCooldownError = Object.assign(new Error('provider account pool cooling down'), {
-      code: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
-      statusCode: 429,
-      rateLimitKind: 'synthetic_cooldown'
-    });
+  it('keeps short-lived 429 recovery classified as recoverable', () => {
     const shortLivedError = Object.assign(new Error('HTTP 429: saturated'), {
       code: 'HTTP_429',
       statusCode: 429,
       rateLimitKind: 'short_lived'
     });
-
-    expect(resolveProviderFailureClassification({
-      error: dailyLimitError,
-      stage: 'provider.send',
-      statusCode: 429,
-      errorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
-      reason: 'weekly quota exhausted',
-      rateLimitKind: 'daily_limit'
-    })).toBe('periodic_recovery');
-
-    expect(resolveProviderFailureClassification({
-      error: syntheticCooldownError,
-      stage: 'provider.send',
-      statusCode: 429,
-      errorCode: 'WINDSURF_ACCOUNT_POOL_COOLDOWN',
-      reason: 'provider account pool cooling down',
-      rateLimitKind: 'synthetic_cooldown'
-    })).toBe('periodic_recovery');
 
     expect(resolveProviderFailureClassification({
       error: shortLivedError,
@@ -133,23 +105,6 @@ describe('provider failure policy ssot', () => {
       reason: 'HTTP 429: saturated',
       rateLimitKind: 'short_lived'
     })).toBe('recoverable');
-
-    expect(resolveProviderFailureActionPlan({
-      error: dailyLimitError,
-      stage: 'provider.send',
-      statusCode: 429,
-      errorCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
-      reason: 'weekly quota exhausted',
-      rateLimitKind: 'daily_limit',
-      attempt: 1,
-      maxAttempts: 6
-    })).toEqual(expect.objectContaining({
-      classification: 'periodic_recovery',
-      affectsHealth: true,
-      shouldRetry: false,
-      action: 'direct_return',
-      decisionLabel: 'direct_return'
-    }));
   });
 
   it('classifies DeepSeek file upload failure as unrecoverable direct-return', () => {
@@ -498,46 +453,6 @@ describe('provider failure policy ssot', () => {
     }
   });
 
-  it('classifies windsurf repeated tool call after tool_result as special_400', () => {
-    const error = Object.assign(new Error('[windsurf] upstream repeated prior tool call after tool_result'), {
-      code: 'WINDSURF_SERVICE_UNREACHABLE',
-      statusCode: 502
-    });
-    const classification = resolveProviderFailureClassification({
-      error,
-      stage: 'provider.send',
-      statusCode: 502,
-      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
-      reason: '[windsurf] upstream repeated prior tool call after tool_result'
-    });
-
-    expect(classification).toBe('special_400');
-    expect(isProviderFailureHealthNeutral({
-      stage: 'provider.send',
-      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
-      statusCode: 502,
-      classification
-    })).toBe(true);
-    expect(resolveProviderFailureActionPlan({
-      error,
-      stage: 'provider.send',
-      statusCode: 502,
-      errorCode: 'WINDSURF_SERVICE_UNREACHABLE',
-      reason: '[windsurf] upstream repeated prior tool call after tool_result',
-      attempt: 1,
-      maxAttempts: 6
-    })).toEqual(expect.objectContaining({
-      classification: 'special_400',
-      affectsHealth: false,
-      shouldRetry: false,
-      action: 'direct_return',
-      decisionLabel: 'direct_return',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
-    }));
-  });
-
   it('classifies sqlite busy 500 as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
       code: 'new_api_error',
@@ -791,21 +706,5 @@ describe('provider failure policy ssot', () => {
       statusCode: 502,
       classification: undefined
     })).toBe(false);
-  });
-});
-
-describe('WINDSURF_CASCADE_BUSY health-neutrality', () => {
-  it('treats WINDSURF_CASCADE_BUSY as health-neutral (affectsHealth=false)', () => {
-    expect(isProviderFailureHealthNeutral({
-      errorCode: 'WINDSURF_CASCADE_BUSY',
-      classification: 'unrecoverable'
-    })).toBe(true);
-  });
-
-  it('treats WINDSURF_CASCADE_NO_PROGRESS as health-neutral (affectsHealth=false)', () => {
-    expect(isProviderFailureHealthNeutral({
-      errorCode: 'WINDSURF_CASCADE_NO_PROGRESS',
-      classification: 'unrecoverable'
-    })).toBe(true);
   });
 });

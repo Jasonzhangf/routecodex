@@ -1,7 +1,7 @@
 import type { ChatMessageContentPart } from '../hub/types/chat-envelope.js';
-import type { StandardizedMessage, StandardizedRequest } from '../hub/types/standardized.js';
+import type { StandardizedMessage } from '../hub/types/standardized.js';
 
-export interface MarkerSyntaxMatch<T = unknown> {
+interface MarkerSyntaxMatch<T = unknown> {
   raw: string;
   body: string;
   start: number;
@@ -10,7 +10,7 @@ export interface MarkerSyntaxMatch<T = unknown> {
   parsed?: T;
 }
 
-export interface StripMarkerSyntaxResult<T = unknown> {
+interface StripMarkerSyntaxResult<T = unknown> {
   text: string;
   markers: MarkerSyntaxMatch<T>[];
 }
@@ -22,7 +22,7 @@ function compactMarkerWhitespace(raw: string): string {
     .trim();
 }
 
-export function stripMarkerSyntaxFromText<T = unknown>(
+function stripMarkerSyntaxFromText<T = unknown>(
   raw: string,
   options?: {
     parse?: (body: string, marker: Omit<MarkerSyntaxMatch<T>, 'parsed'>) => T | undefined;
@@ -93,7 +93,7 @@ function stripMarkerSyntaxField<T = unknown>(
   return { changed: true, markers: stripped.markers };
 }
 
-export function stripMarkerSyntaxFromContent<T = unknown>(
+function stripMarkerSyntaxFromContent<T = unknown>(
   content: StandardizedMessage['content'],
   options?: {
     parse?: (body: string, marker: Omit<MarkerSyntaxMatch<T>, 'parsed'>) => T | undefined;
@@ -147,7 +147,7 @@ export function stripMarkerSyntaxFromContent<T = unknown>(
   };
 }
 
-export function stripMarkerSyntaxFromMessages<T = unknown>(
+function stripMarkerSyntaxFromMessages<T = unknown>(
   messages: StandardizedMessage[],
   options?: {
     parse?: (body: string, marker: Omit<MarkerSyntaxMatch<T>, 'parsed'>) => T | undefined;
@@ -176,20 +176,6 @@ export function stripMarkerSyntaxFromMessages<T = unknown>(
     messages: changed ? nextMessages : messages,
     markers,
     changed
-  };
-}
-
-export function stripMarkerSyntaxFromRequest(
-  request: StandardizedRequest
-): StandardizedRequest {
-  const messages = Array.isArray(request.messages) ? request.messages : [];
-  const stripped = stripMarkerSyntaxFromMessages(messages);
-  if (!stripped.changed) {
-    return request;
-  }
-  return {
-    ...request,
-    messages: stripped.messages
   };
 }
 

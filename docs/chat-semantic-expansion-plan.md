@@ -25,7 +25,7 @@
      - **providerExtras** 仅用于临时透传，默认禁止业务逻辑读取，后续接线完成后应趋近于空。
    - `chatEnvelopeToStandardized` / `standardizedToChatEnvelope` 深拷贝 `semantics`。
 2. **chat process 适配**  
-   - `runHubChatProcess`、工具治理、路由决策只读 `request.semantics`；除 mapper/bridge 外，任何模块不得写入 `semantics`。  
+   - Rust total HubPipeline request entry、工具治理、路由决策只读 `request.semantics`；除 mapper/bridge 外，任何模块不得写入 `semantics`。
    - Metadata 退回诊断角色：仅保留 `missingFields/providerMetadata` 等调试字段，`capturedContext` 禁止再夹带业务语义。
 3. **模块测试**  
    - 新增 spec：构造 `ChatEnvelope` (含 system/responses/anthropic/gemini)，执行标准化→还原→chat process，断言 `semantics` 原样保留。
@@ -64,7 +64,7 @@
 2. **回归测试矩阵**  
    - `npm run test:sharedmodule`  
    - `npm run verify:e2e-toolcall`（覆盖 responses tool loop）  
-   - `scripts/tests/apply-patch-loop.mjs` / `responses-submit` 样本回放  
+   - `sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` / `responses-submit` 样本回放
    - Anthropic / Gemini 专属 dry-run（若有）。
 3. **文档更新**  
    - `docs/responses-...`, `docs/pipeline/...` 添加新语义字段说明。  

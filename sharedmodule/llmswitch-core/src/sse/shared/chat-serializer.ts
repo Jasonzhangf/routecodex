@@ -1,15 +1,4 @@
-import { PassThrough, Readable } from 'node:stream';
 import type { ChatSseEvent } from '../types/index.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
-
-
-function logChatSerializerNonBlocking(stage: string, error: unknown): void {
-  try {
-    console.warn(`[chat-serializer] ${stage} failed (non-blocking): ${formatUnknownError(error)}`);
-  } catch {
-    // Never throw from non-blocking logging.
-  }
-}
 
 // Serialize an internal ChatSseEvent (object-mode) to SSE wire frames
 export function serializeChatEventToSSE(evt: ChatSseEvent): string {
@@ -19,32 +8,4 @@ export function serializeChatEventToSSE(evt: ChatSseEvent): string {
   if (typeof evt.data === 'string') lines.push(`data: ${evt.data}`);
   else lines.push(`data: ${JSON.stringify(evt.data ?? {})}`);
   return lines.join('\n') + '\n\n';
-}
-
-// Convert a Readable of ChatSseEvent objects into a text SSE stream
-export function toSSETextStream(objectEventStream: Readable): PassThrough {
-  const out = new PassThrough();
-  (async () => {
-    try {
-      for await (const evt of objectEventStream as any as AsyncIterable<ChatSseEvent>) {
-        const frame = serializeChatEventToSSE(evt);
-        if (!out.write(frame)) await new Promise(r => out.once('drain', r));
-      }
-    } catch (error) {
-      // emit minimal error frame, then close
-      logChatSerializerNonBlocking('stream.serialize', error);
-      try {
-        out.write('data: {"error":"chat sse serialization failed"}\n\n');
-      } catch (writeError) {
-        logChatSerializerNonBlocking('stream.write_error_frame', writeError);
-      }
-    } finally {
-      try {
-        out.end();
-      } catch (endError) {
-        logChatSerializerNonBlocking('stream.end', endError);
-      }
-    }
-  })();
-  return out;
 }

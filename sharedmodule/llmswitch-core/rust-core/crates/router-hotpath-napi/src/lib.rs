@@ -113,7 +113,6 @@ mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;
 mod vr_route_04_selection_boundary;
 mod web_search_mode;
-mod windsurf_tool_history_projection;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
 use crate::virtual_router_engine::routing::resolve_stop_message_scope as resolve_virtual_router_stop_message_scope;
 #[derive(Debug, Deserialize)]
@@ -472,11 +471,6 @@ pub fn repair_find_meta_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi]
-pub fn split_command_string_json(input_json: String) -> NapiResult<String> {
-    shared_tooling::split_command_string_json(input_json)
-}
-
-#[napi]
 pub fn normalize_id_value_json(input_json: String) -> NapiResult<String> {
     shared_tool_call_id_manager::normalize_id_value_json(input_json)
 }
@@ -507,21 +501,6 @@ pub fn prune_chat_request_payload_json(input_json: String) -> NapiResult<String>
 }
 
 #[napi]
-pub fn pack_shell_args_json(input_json: String) -> NapiResult<String> {
-    shared_tooling::pack_shell_args_json(input_json)
-}
-
-#[napi]
-pub fn flatten_by_comma_json(input_json: String) -> NapiResult<String> {
-    shared_tooling::flatten_by_comma_json(input_json)
-}
-
-#[napi]
-pub fn chunk_string_json(input_json: String) -> NapiResult<String> {
-    shared_tooling::chunk_string_json(input_json)
-}
-
-#[napi]
 pub fn extract_streaming_tool_calls_json(input_json: String) -> NapiResult<String> {
     streaming_tool_extractor::extract_streaming_tool_calls_json(input_json)
 }
@@ -541,16 +520,6 @@ pub fn reset_streaming_tool_extractor_state_json(state_json: String) -> NapiResu
 #[napi(js_name = "feedStreamingToolExtractorJson")]
 pub fn feed_streaming_tool_extractor_json(input_json: String) -> NapiResult<String> {
     streaming_tool_extractor::feed_streaming_tool_extractor_json(input_json)
-}
-
-#[napi]
-pub fn bridge_tool_to_chat_definition_json(input_json: String) -> NapiResult<String> {
-    shared_tool_mapping::bridge_tool_to_chat_definition_json(input_json)
-}
-
-#[napi]
-pub fn chat_tool_to_bridge_definition_json(input_json: String) -> NapiResult<String> {
-    shared_tool_mapping::chat_tool_to_bridge_definition_json(input_json)
 }
 
 #[napi]
@@ -1338,6 +1307,24 @@ pub fn inspect_stop_gateway_signal(payload_json: String) -> NapiResult<String> {
 }
 
 #[napi]
+pub fn normalize_stop_gateway_context_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::normalize_stop_gateway_context_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn normalize_stop_message_compare_context_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::normalize_stop_message_compare_context_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn format_stop_message_compare_context_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::format_stop_message_compare_context_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn evaluate_loop_guard(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::evaluate_loop_guard(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1362,6 +1349,146 @@ pub fn calculate_budget(
 #[napi]
 pub fn plan_budget_state_update_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_budget_state_update_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_servertool_state_key_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_servertool_state_key_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_runtime_stop_message_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_runtime_stop_message_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_runtime_stop_message_state_from_adapter_context_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::resolve_runtime_stop_message_state_from_adapter_context_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn read_runtime_stop_message_stage_mode_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::read_runtime_stop_message_stage_mode_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn read_servertool_followup_flow_id_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::read_servertool_followup_flow_id_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_bd_working_directory_for_record_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_bd_working_directory_for_record_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_stop_message_followup_provider_key_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_stop_message_followup_provider_key_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn get_captured_request_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::get_captured_request_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_client_connection_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_client_connection_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn has_compaction_flag_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::has_compaction_flag_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_entry_endpoint_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_entry_endpoint_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_stop_message_followup_tool_content_max_chars_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::resolve_stop_message_followup_tool_content_max_chars_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_persist_stop_message_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_persist_stop_message_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_default_stop_message_snapshot_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_default_stop_message_snapshot_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_implicit_gemini_stop_message_snapshot_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::resolve_implicit_gemini_stop_message_snapshot_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn read_servertool_loop_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::read_servertool_loop_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_loop_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_loop_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn parse_servertool_timeout_ms_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::parse_servertool_timeout_ms_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn read_client_inject_only_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::read_client_inject_only_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn normalize_client_inject_text_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::normalize_client_inject_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn compact_followup_error_reason_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::compact_followup_error_reason_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_adapter_context_provider_key_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_adapter_context_provider_key_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1430,6 +1557,18 @@ pub fn plan_followup_runtime_metadata_json(input_json: String) -> NapiResult<Str
 #[napi]
 pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::extract_text_from_chat_like_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn strip_stop_schema_control_text_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::strip_stop_schema_control_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn strip_stop_schema_control_payload_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::strip_stop_schema_control_payload_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -2018,11 +2157,9 @@ pub fn run_hashline_native_edit_json(input_json: String) -> NapiResult<String> {
 }
 
 pub use responses_reasoning_registry::{
-    consume_responses_output_text_meta_json, consume_responses_passthrough_by_aliases_json,
-    consume_responses_passthrough_json, consume_responses_payload_snapshot_by_aliases_json,
-    consume_responses_payload_snapshot_json, consume_responses_reasoning_json,
-    register_responses_output_text_meta_json, register_responses_passthrough_json,
-    register_responses_payload_snapshot_json, register_responses_reasoning_json,
+    consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
+    consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,
+    register_responses_passthrough_json, register_responses_payload_snapshot_json,
 };
 pub use shared_responses_conversation_utils::{
     materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,

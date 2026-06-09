@@ -90,7 +90,6 @@ if available.is_empty() && route_candidates.len() == 1 {
 | `src/server/runtime/http-server/provider-startup-reprobe.ts` | **删除** |
 | `src/server/runtime/http-server/http-server-runtime-providers.ts:449` | 删除 `runStartupProviderReprobe` 调用 |
 | `tests/server/http-server/provider-startup-reprobe.spec.ts` | **删除** |
-| `tests/server/http-server/windsurf-runtime-startup-probe.spec.ts` | **删除** |
 
 ### 3.2 放宽 Rust 选路过滤
 

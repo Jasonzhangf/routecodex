@@ -4,29 +4,8 @@ import assert from 'node:assert/strict';
 
 async function main() {
   const {
-    extractOutputSegments,
-    normalizeContentPart,
     normalizeMessageContentParts
   } = await import('../../dist/conversion/shared/output-content-normalizer.js');
-
-  {
-    const output = extractOutputSegments({
-      output: [
-        { type: 'output_text', text: 'hello' },
-        { type: 'reasoning', content: [{ text: '<think>hidden</think>plan' }] },
-        { type: 'message', content: [{ type: 'text', text: 'world' }] }
-      ]
-    });
-    assert.deepStrictEqual(output.textParts, ['hello', 'world']);
-    assert.deepStrictEqual(output.reasoningParts, ['plan']);
-  }
-
-  {
-    const collector = [];
-    const normalized = normalizeContentPart('<think>internal</think>visible', collector);
-    assert.deepStrictEqual(normalized, { type: 'output_text', text: 'visible' });
-    assert.deepStrictEqual(collector, ['internal']);
-  }
 
   {
     const collector = ['seed'];

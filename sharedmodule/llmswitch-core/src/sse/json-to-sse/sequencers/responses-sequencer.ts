@@ -322,10 +322,8 @@ export async function* sequenceResponse(
       yield buildRequiredActionEvent(response, (response as any).required_action, context, config);
     }
 
-    // 5. 发送终止事件：requires_action 不是 completed，禁止伪造 completed 帧
-    if (!hasRequiredAction) {
-      yield buildResponseCompletedEvent(response, context, config);
-    }
+    // 5. 发送终止事件：Codex 客户端以 response.completed 判定流完成，required_action 后也必须发 completed。
+    yield buildResponseCompletedEvent(response, context, config);
     yield buildResponseDoneEvent(response, context, config);
 
   } catch (error) {

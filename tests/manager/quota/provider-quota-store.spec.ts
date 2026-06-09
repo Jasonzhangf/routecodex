@@ -179,7 +179,7 @@ describe('provider-quota-store snapshot', () => {
           cooldownUntil: null,
           blacklistUntil: null,
           lastErrorSeries: 'E5XX',
-          lastErrorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+          lastErrorCode: 'HTTP_502',
           lastErrorAtMs: now.getTime(),
           consecutiveErrorCount: 4
         }

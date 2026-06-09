@@ -276,7 +276,7 @@ mod tests {
     fn round_robin_covers_all_aliases_in_single_model_pool() {
         let mut lb = RouteLoadBalancer::new(None);
         let candidates = (1..=5)
-            .map(|idx| format!("windsurf.ws-pro-{idx}.gpt-5.4-none"))
+            .map(|idx| format!("provider.key-{idx}.gpt-5.4-none"))
             .collect::<Vec<_>>();
         let mut hits = Vec::new();
         for _ in 0..5 {

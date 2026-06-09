@@ -13,11 +13,27 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
     )).toThrow('[server.req_adapter] forbidden client metadata field: routeHint');
   });
 
-  it('throws on client sessionId metadata (no silent drop, no sessionId in whitelist)', () => {
-    expect(() => mergePipelineMetadata(
-      { sessionId: 'fin' },
+  it('accepts session scope metadata fields and forwards them through carrier only', () => {
+    const merged = mergePipelineMetadata(
+      {
+        sessionId: 'sess-1',
+        session_id: 'sess-legacy',
+        conversationId: 'conv-1',
+        conversation_id: 'conv-legacy',
+        client_tmux_session_id: 'tmux-1',
+        rcc_session_client_tmux_session_id: 'tmux-legacy'
+      },
       { providerProtocol: 'openai-responses' }
-    )).toThrow('[server.req_adapter] unsupported client metadata field: sessionId');
+    );
+    expect(merged).toMatchObject({
+      sessionId: 'sess-1',
+      session_id: 'sess-legacy',
+      conversationId: 'conv-1',
+      conversation_id: 'conv-legacy',
+      client_tmux_session_id: 'tmux-1',
+      rcc_session_client_tmux_session_id: 'tmux-legacy',
+      providerProtocol: 'openai-responses'
+    });
   });
 
   it('throws on client __rt metadata (no merge with internal __rt, no silent drop)', () => {

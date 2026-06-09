@@ -18,24 +18,10 @@ function deepEqual(a, b) {
 }
 
 async function loadModules() {
-  const protocolAllowlists = await import(moduleUrl('conversion/protocol-field-allowlists.js'));
-  const protocolSpec = await import(moduleUrl('conversion/hub/policy/protocol-spec.js'));
   const nativeSemantics = await import(
     moduleUrl('native/router-hotpath/native-hub-bridge-policy-semantics.js')
   );
-  return { protocolAllowlists, protocolSpec, nativeSemantics };
-}
-
-function exportedAllowlists(mod) {
-  return {
-    openaiChatAllowedFields: mod.OPENAI_CHAT_ALLOWED_FIELDS,
-    openaiChatParametersWrapperAllowKeys: mod.OPENAI_CHAT_PARAMETERS_WRAPPER_ALLOW_KEYS,
-    openaiResponsesAllowedFields: mod.OPENAI_RESPONSES_ALLOWED_FIELDS,
-    openaiResponsesParametersWrapperAllowKeys: mod.OPENAI_RESPONSES_PARAMETERS_WRAPPER_ALLOW_KEYS,
-    anthropicAllowedFields: mod.ANTHROPIC_ALLOWED_FIELDS,
-    anthropicParametersWrapperAllowKeys: mod.ANTHROPIC_PARAMETERS_WRAPPER_ALLOW_KEYS,
-    geminiAllowedFields: mod.GEMINI_ALLOWED_FIELDS
-  };
+  return { nativeSemantics };
 }
 
 function runCase(fn) {
@@ -45,7 +31,6 @@ function runCase(fn) {
 
 async function main() {
   const modules = await loadModules();
-  const allowlistsFromModule = exportedAllowlists(modules.protocolAllowlists);
   const allowlistsFromNative = modules.nativeSemantics.resolveHubProtocolAllowlistsWithNative();
   const protocols = ['openai-chat', 'openai-responses', 'anthropic-messages', 'gemini-chat'];
 
@@ -57,85 +42,90 @@ async function main() {
   };
 
   bump(() => {
-    deepEqual(allowlistsFromModule.openaiChatAllowedFields, allowlistsFromNative.openaiChatAllowedFields);
-    deepEqual(
-      allowlistsFromModule.openaiChatParametersWrapperAllowKeys,
-      allowlistsFromNative.openaiChatParametersWrapperAllowKeys
-    );
-    deepEqual(allowlistsFromModule.openaiResponsesAllowedFields, allowlistsFromNative.openaiResponsesAllowedFields);
-    deepEqual(
-      allowlistsFromModule.openaiResponsesParametersWrapperAllowKeys,
-      allowlistsFromNative.openaiResponsesParametersWrapperAllowKeys
-    );
-    deepEqual(allowlistsFromModule.anthropicAllowedFields, allowlistsFromNative.anthropicAllowedFields);
-    deepEqual(
-      allowlistsFromModule.anthropicParametersWrapperAllowKeys,
-      allowlistsFromNative.anthropicParametersWrapperAllowKeys
-    );
-    deepEqual(allowlistsFromModule.geminiAllowedFields, allowlistsFromNative.geminiAllowedFields);
+    assert.ok(Array.isArray(allowlistsFromNative.openaiChatAllowedFields));
+    assert.ok(Array.isArray(allowlistsFromNative.openaiChatParametersWrapperAllowKeys));
+    assert.ok(Array.isArray(allowlistsFromNative.openaiResponsesAllowedFields));
+    assert.ok(Array.isArray(allowlistsFromNative.openaiResponsesParametersWrapperAllowKeys));
+    assert.ok(Array.isArray(allowlistsFromNative.anthropicAllowedFields));
+    assert.ok(Array.isArray(allowlistsFromNative.anthropicParametersWrapperAllowKeys));
+    assert.ok(Array.isArray(allowlistsFromNative.geminiAllowedFields));
   });
 
   bump(() => {
-    assert.equal(Object.isFrozen(modules.protocolAllowlists.OPENAI_CHAT_ALLOWED_FIELDS), true);
-    assert.equal(Object.isFrozen(modules.protocolAllowlists.OPENAI_RESPONSES_ALLOWED_FIELDS), true);
-    assert.equal(Object.isFrozen(modules.protocolAllowlists.ANTHROPIC_ALLOWED_FIELDS), true);
-    assert.equal(Object.isFrozen(modules.protocolAllowlists.GEMINI_ALLOWED_FIELDS), true);
-  });
-
-  bump(() => {
-    assert.ok(modules.protocolAllowlists.OPENAI_CHAT_ALLOWED_FIELDS.includes('messages'));
-    assert.ok(modules.protocolAllowlists.OPENAI_RESPONSES_ALLOWED_FIELDS.includes('input'));
-    assert.ok(modules.protocolAllowlists.ANTHROPIC_ALLOWED_FIELDS.includes('messages'));
-    assert.ok(modules.protocolAllowlists.GEMINI_ALLOWED_FIELDS.includes('contents'));
+    assert.ok(allowlistsFromNative.openaiChatAllowedFields.includes('messages'));
+    assert.ok(allowlistsFromNative.openaiResponsesAllowedFields.includes('input'));
+    assert.ok(allowlistsFromNative.anthropicAllowedFields.includes('messages'));
+    assert.ok(allowlistsFromNative.geminiAllowedFields.includes('contents'));
   });
 
   bump(() => {
     for (const protocol of protocols) {
-      const resolved = modules.protocolSpec.resolveHubProtocolSpec(protocol);
-      const fromMap = modules.protocolSpec.HUB_PROTOCOL_SPECS[protocol];
-      deepEqual(resolved, fromMap);
-    }
-  });
-
-  bump(() => {
-    for (const protocol of protocols) {
-      const fromTs = modules.protocolSpec.resolveHubProtocolSpec(protocol);
       const fromNative = modules.nativeSemantics.resolveHubProtocolSpecWithNative({
         protocol,
-        allowlists: allowlistsFromModule
+        allowlists: allowlistsFromNative
       });
-      deepEqual(fromTs, fromNative);
+      assert.equal(fromNative.id, protocol);
     }
   });
 
   bump(() => {
-    const unknown = modules.protocolSpec.resolveHubProtocolSpec('unknown-protocol');
-    deepEqual(unknown, modules.protocolSpec.HUB_PROTOCOL_SPECS['openai-chat']);
+    const unknown = modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+      protocol: 'unknown-protocol',
+      allowlists: allowlistsFromNative
+    });
     assert.equal(unknown.id, 'openai-chat');
   });
 
   bump(() => {
-    const empty = modules.protocolSpec.resolveHubProtocolSpec('');
-    deepEqual(empty, modules.protocolSpec.HUB_PROTOCOL_SPECS['openai-chat']);
-    const undef = modules.protocolSpec.resolveHubProtocolSpec(undefined);
-    deepEqual(undef, modules.protocolSpec.HUB_PROTOCOL_SPECS['openai-chat']);
+    const empty = modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+      protocol: '',
+      allowlists: allowlistsFromNative
+    });
+    assert.equal(empty.id, 'openai-chat');
+    const undef = modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+      protocol: undefined,
+      allowlists: allowlistsFromNative
+    });
+    assert.equal(undef.id, 'openai-chat');
   });
 
   bump(() => {
-    assert.equal(modules.protocolSpec.resolveHubProtocolSpec('openai-chat').toolSurface.expectedToolFormat, 'openai');
     assert.equal(
-      modules.protocolSpec.resolveHubProtocolSpec('openai-responses').toolSurface.expectedToolFormat,
+      modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+        protocol: 'openai-chat',
+        allowlists: allowlistsFromNative
+      }).toolSurface.expectedToolFormat,
       'openai'
     );
     assert.equal(
-      modules.protocolSpec.resolveHubProtocolSpec('anthropic-messages').toolSurface.expectedToolFormat,
+      modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+        protocol: 'openai-responses',
+        allowlists: allowlistsFromNative
+      }).toolSurface.expectedToolFormat,
+      'openai'
+    );
+    assert.equal(
+      modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+        protocol: 'anthropic-messages',
+        allowlists: allowlistsFromNative
+      }).toolSurface.expectedToolFormat,
       'anthropic'
     );
-    assert.equal(modules.protocolSpec.resolveHubProtocolSpec('gemini-chat').toolSurface.expectedToolFormat, 'gemini');
+    assert.equal(
+      modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+        protocol: 'gemini-chat',
+        allowlists: allowlistsFromNative
+      }).toolSurface.expectedToolFormat,
+      'gemini'
+    );
   });
 
   bump(() => {
-    for (const spec of Object.values(modules.protocolSpec.HUB_PROTOCOL_SPECS)) {
+    for (const protocol of protocols) {
+      const spec = modules.nativeSemantics.resolveHubProtocolSpecWithNative({
+        protocol,
+        allowlists: allowlistsFromNative
+      });
       assert.equal(Array.isArray(spec?.providerOutbound?.reservedKeyPrefixes), true);
       assert.equal(Array.isArray(spec?.providerOutbound?.forbidWrappers), true);
       assert.equal(Array.isArray(spec?.providerOutbound?.flattenWrappers), true);

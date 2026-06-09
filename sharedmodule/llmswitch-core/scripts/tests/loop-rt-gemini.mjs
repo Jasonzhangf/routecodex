@@ -2,27 +2,6 @@
 import assert from 'node:assert/strict';
 
 const { geminiConverters } = await import('../../dist/sse/index.js');
-const { runHubInboundConversion } = await import('../../dist/conversion/hub/node-support.js');
-
-// Minimal Gemini request sample (generateContent) including an inline image block
-const GEMINI_REQ = {
-  model: 'gemini-1.5-flash',
-  contents: [
-    {
-      role: 'user',
-      parts: [
-        { text: 'Say hello from Gemini and describe this image.' },
-        {
-          inlineData: {
-            mimeType: 'image/png',
-            data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'
-          }
-        }
-      ]
-    }
-  ],
-  generationConfig: { temperature: 0.7, maxOutputTokens: 128 }
-};
 
 const GEMINI_RESP = {
   candidates: [
@@ -48,30 +27,6 @@ const GEMINI_RESP = {
   modelVersion: 'gemini-1.5-flash'
 };
 
-async function inboundConversionSmoke() {
-  const inbound = await runHubInboundConversion({
-    protocol: 'gemini-chat',
-    rawRequest: GEMINI_REQ,
-    nodeContext: {
-      request: {
-        id: 'rt-gemini-client',
-        endpoint: '/v1beta/models:generateContent',
-        context: {
-          metadata: {
-            providerProtocol: 'gemini-chat'
-          }
-        }
-      }
-    },
-    nodeId: 'hub-inbound',
-    inputFormat: '/v1beta/models:generateContent',
-    outputFormat: 'standardized-request',
-    startTime: Date.now()
-  });
-  assert.ok(inbound.success !== false && inbound.data?.standardizedRequest, '转换 Gemini 请求失败');
-  console.log('✅ gemini inbound conversion passed');
-}
-
 async function geminiSseRoundtrip() {
   const sseStream = await geminiConverters.jsonToSse.convertResponseToJsonToSse(GEMINI_RESP, {
     requestId: 'rt-gemini',
@@ -91,7 +46,6 @@ async function geminiSseRoundtrip() {
 }
 
 try {
-  await inboundConversionSmoke();
   await geminiSseRoundtrip();
 } catch (e) {
   console.error('❌ loop-rt-gemini failed:', e);

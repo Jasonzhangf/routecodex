@@ -7,7 +7,11 @@ import path from 'node:path';
 
 import { FileSnapshotStore } from '../../../../src/debug/snapshot-store.js';
 import { buildHttpHandlerContext } from '../../../../src/server/runtime/http-server/http-server-lifecycle.js';
-import { closePortLogConsoleRouterFiles, installPortLogConsoleRouter } from '../../../../src/server/runtime/http-server/port-log-context.js';
+import {
+  closePortLogConsoleRouterFiles,
+  installPortLogConsoleRouter,
+  runWithPortRequestContext
+} from '../../../../src/server/runtime/http-server/port-log-context.js';
 import { registerHttpRoutes } from '../../../../src/server/runtime/http-server/routes.js';
 
 function listen(app: express.Application): Promise<{ server: Server; port: number }> {
@@ -136,5 +140,36 @@ describe('http entry port snapshot isolation red tests', () => {
       const portLog = fs.readFileSync(path.join(logRoot, String(port), `server-${port}.log`), 'utf8');
       expect(portLog).toContain(`port=${port}`);
     }
+  });
+
+  it('prints each routed request log with its matched port and policy group', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-entry-port-log-'));
+    const logRoot = path.join(root, 'logs');
+    process.env.ROUTECODEX_PORT_LOG_ROOT = logRoot;
+    installPortLogConsoleRouter();
+
+    runWithPortRequestContext({
+      localPort: 5520,
+      matchedPort: 5520,
+      routingPolicyGroup: 'gateway_priority_5520'
+    }, () => {
+      console.log('[entry-port-test] first-port-line');
+    });
+    runWithPortRequestContext({
+      localPort: 5555,
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    }, () => {
+      console.log('[entry-port-test] second-port-line');
+    });
+    closePortLogConsoleRouterFiles();
+
+    const firstPortLog = fs.readFileSync(path.join(logRoot, '5520', 'server-5520.log'), 'utf8');
+    const secondPortLog = fs.readFileSync(path.join(logRoot, '5555', 'server-5555.log'), 'utf8');
+
+    expect(firstPortLog).toContain('[port:5520 group:gateway_priority_5520] [entry-port-test] first-port-line');
+    expect(firstPortLog).not.toContain('second-port-line');
+    expect(secondPortLog).toContain('[port:5555 group:gateway_priority_5555] [entry-port-test] second-port-line');
+    expect(secondPortLog).not.toContain('first-port-line');
   });
 });

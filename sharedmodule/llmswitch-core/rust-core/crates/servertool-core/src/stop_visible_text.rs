@@ -256,9 +256,18 @@ visible after
             }]
         });
         strip_stop_schema_control_payload(&mut payload);
-        assert_eq!(payload["choices"][0]["message"]["content"][0]["text"], "answer");
-        assert_eq!(payload["choices"][0]["message"]["content"][1]["reasoning_text"], "plan");
-        assert_eq!(payload["choices"][0]["message"]["reasoning"]["summary"][0]["text"], "summary  ok");
+        assert_eq!(
+            payload["choices"][0]["message"]["content"][0]["text"],
+            "answer"
+        );
+        assert_eq!(
+            payload["choices"][0]["message"]["content"][1]["reasoning_text"],
+            "plan"
+        );
+        assert_eq!(
+            payload["choices"][0]["message"]["reasoning"]["summary"][0]["text"],
+            "summary  ok"
+        );
         assert_eq!(payload["output"][0]["content"][0]["output_text"], "ok");
     }
 }

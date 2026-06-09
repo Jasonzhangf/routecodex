@@ -98,6 +98,14 @@ export interface BudgetStateUpdatePlanOutput {
   nextState?: Record<string, unknown> | null;
 }
 
+export interface PersistStopMessageStatePlanInput {
+  state: Record<string, unknown>;
+}
+
+export interface PersistStopMessageStatePlanOutput {
+  action: 'save' | 'clear';
+}
+
 export interface ClientExecCliProjectionInput {
   toolName: string;
   flowId?: string;
@@ -237,6 +245,68 @@ export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMe
   ? Exclude<T, null>
   : never;
 
+export interface RuntimeStopMessageStateSnapshot {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  source?: string;
+  updatedAt?: number;
+  lastUsedAt?: number;
+  stageMode?: 'on' | 'off' | 'auto';
+  aiMode?: 'on' | 'off';
+}
+
+export interface RuntimeStopMessageStateFromAdapterContextInput {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+}
+
+export interface StopMessageDefaultSnapshotInput {
+  base: unknown;
+  adapterContext?: unknown;
+  options?: {
+    text?: unknown;
+    maxRepeats?: unknown;
+  };
+}
+
+export interface StopMessageImplicitGeminiSnapshotInput {
+  base: unknown;
+  adapterContext?: unknown;
+  providerProtocol?: string;
+  record: Record<string, unknown>;
+}
+
+export interface ServertoolRecordRuntimeMetadataInput {
+  record: Record<string, unknown>;
+  runtimeMetadata?: unknown;
+}
+
+export interface ServertoolLoopStateSnapshot {
+  flowId?: string;
+  payloadHash: string;
+  repeatCount?: number;
+  startedAtMs?: number;
+  stopPairHash?: string;
+  stopPairRepeatCount?: number;
+  stopPairWarned?: boolean;
+}
+
+export interface ServertoolLoopStatePlanInput {
+  flowId?: string;
+  decision?: {
+    flowOnlyLoopLimit?: boolean;
+  };
+  previousLoopState?: Record<string, unknown> | null;
+  payloadHash?: string | null;
+  stopPairHash?: string | null;
+  nowMs: number;
+}
+
+export interface ServertoolTimeoutPolicyInput {
+  raw?: unknown;
+}
+
 // ── Stop gateway context ────────────────────────────────────────────────────
 
 export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
@@ -250,14 +320,147 @@ export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewa
   if (typeof resultJson !== 'string') {
     throw new Error(`inspectStopGatewaySignal native returned non-string: ${typeof resultJson}`);
   }
-  const raw = JSON.parse(resultJson);
+  const context = parseStopGatewayContextPayload(resultJson, capability);
+  if (!context) {
+    throw new Error('inspectStopGatewaySignal native returned null context');
+  }
+  return context;
+}
+
+export function normalizeStopGatewayContextWithNative(value: unknown): StopGatewayContext | undefined {
+  const capability = 'normalizeStopGatewayContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('normalizeStopGatewayContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`normalizeStopGatewayContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseStopGatewayContextPayload(resultJson, capability) ?? undefined;
+}
+
+function parseStopGatewayContextPayload(resultJson: string, capability: string): StopGatewayContext | null {
+  const raw = JSON.parse(resultJson) as unknown;
+  if (raw === null) {
+    return null;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${capability} native returned invalid context`);
+  }
+  const record = raw as Record<string, unknown>;
+  if (typeof record.observed !== 'boolean' || typeof record.eligible !== 'boolean') {
+    throw new Error(`${capability} native returned invalid observed/eligible`);
+  }
+  const source = record.source;
+  if (source !== 'chat' && source !== 'responses' && source !== 'none') {
+    throw new Error(`${capability} native returned invalid source`);
+  }
+  if (typeof record.reason !== 'string' || !record.reason.trim()) {
+    throw new Error(`${capability} native returned invalid reason`);
+  }
+  const choiceIndex = record.choice_index ?? record.choiceIndex;
+  const hasToolCalls = record.has_tool_calls ?? record.hasToolCalls;
   return {
-    observed: raw.observed,
-    eligible: raw.eligible,
-    source: raw.source,
-    reason: raw.reason,
-    ...(raw.choice_index !== undefined && raw.choice_index !== null ? { choiceIndex: raw.choice_index } : {}),
-    ...(raw.has_tool_calls !== undefined && raw.has_tool_calls !== null ? { hasToolCalls: raw.has_tool_calls } : {}),
+    observed: record.observed,
+    eligible: record.eligible,
+    source,
+    reason: record.reason.trim(),
+    ...(Number.isInteger(choiceIndex) ? { choiceIndex: choiceIndex as number } : {}),
+    ...(typeof hasToolCalls === 'boolean' ? { hasToolCalls } : {}),
+  };
+}
+
+export function normalizeStopMessageCompareContextWithNative(
+  value: unknown,
+): StopMessageCompareContext | undefined {
+  const capability = 'normalizeStopMessageCompareContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('normalizeStopMessageCompareContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`normalizeStopMessageCompareContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseStopMessageCompareContextPayload(resultJson, capability) ?? undefined;
+}
+
+export function formatStopMessageCompareContextWithNative(value: unknown): string {
+  const capability = 'formatStopMessageCompareContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('formatStopMessageCompareContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`formatStopMessageCompareContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string') {
+    throw new Error('formatStopMessageCompareContextJson native returned invalid summary');
+  }
+  return parsed;
+}
+
+function parseStopMessageCompareContextPayload(resultJson: string, capability: string): StopMessageCompareContext | null {
+  const raw = JSON.parse(resultJson) as unknown;
+  if (raw === null) {
+    return null;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${capability} native returned invalid compare context`);
+  }
+  const record = raw as Record<string, unknown>;
+  const mode = record.mode;
+  const decision = record.decision;
+  if (mode !== 'off' && mode !== 'on' && mode !== 'auto') {
+    throw new Error(`${capability} native returned invalid mode`);
+  }
+  if (decision !== 'trigger' && decision !== 'skip') {
+    throw new Error(`${capability} native returned invalid decision`);
+  }
+  for (const key of [
+    'armed',
+    'allowModeOnly',
+    'active',
+    'stopEligible',
+    'hasCapturedRequest',
+    'compactionRequest',
+    'hasSeed',
+  ]) {
+    if (typeof record[key] !== 'boolean') {
+      throw new Error(`${capability} native returned invalid boolean ${key}`);
+    }
+  }
+  for (const key of ['textLength', 'maxRepeats', 'used', 'remaining']) {
+    if (!Number.isInteger(record[key]) || (record[key] as number) < 0) {
+      throw new Error(`${capability} native returned invalid integer ${key}`);
+    }
+  }
+  if (typeof record.reason !== 'string' || !record.reason.trim()) {
+    throw new Error(`${capability} native returned invalid reason`);
+  }
+  return {
+    armed: record.armed as boolean,
+    mode,
+    allowModeOnly: record.allowModeOnly as boolean,
+    textLength: record.textLength as number,
+    maxRepeats: record.maxRepeats as number,
+    used: record.used as number,
+    remaining: record.remaining as number,
+    active: record.active as boolean,
+    stopEligible: record.stopEligible as boolean,
+    hasCapturedRequest: record.hasCapturedRequest as boolean,
+    compactionRequest: record.compactionRequest as boolean,
+    hasSeed: record.hasSeed as boolean,
+    decision,
+    reason: record.reason.trim(),
+    ...(typeof record.stage === 'string' && record.stage.trim() ? { stage: record.stage.trim() } : {}),
+    ...(typeof record.bdWorkState === 'string' && record.bdWorkState.trim() ? { bdWorkState: record.bdWorkState.trim() } : {}),
+    ...(typeof record.observationHash === 'string' && record.observationHash.trim() ? { observationHash: record.observationHash.trim() } : {}),
+    ...(Number.isInteger(record.observationStableCount) ? { observationStableCount: record.observationStableCount as number } : {}),
+    ...(typeof record.toolSignatureHash === 'string' && record.toolSignatureHash.trim() ? { toolSignatureHash: record.toolSignatureHash.trim() } : {}),
   };
 }
 
@@ -353,6 +556,135 @@ export function resolveServertoolStickyKeyWithNative(
   return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
 }
 
+export function resolveServertoolStateKeyWithNative(
+  metadata: Record<string, unknown>,
+): string {
+  const capability = 'resolveServertoolStateKeyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveServertoolStateKeyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(metadata));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveServertoolStateKeyJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string' || !parsed.trim()) {
+    throw new Error('resolveServertoolStateKeyJson native returned invalid state key');
+  }
+  return parsed.trim();
+}
+
+export function resolveRuntimeStopMessageStateWithNative(
+  runtimeMetadata: unknown,
+): RuntimeStopMessageStateSnapshot | null {
+  const capability = 'resolveRuntimeStopMessageStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveRuntimeStopMessageStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveRuntimeStopMessageStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, 'resolveRuntimeStopMessageStateJson');
+}
+
+function parseRuntimeStopMessageStateSnapshotPayload(
+  resultJson: string,
+  capability: string,
+): RuntimeStopMessageStateSnapshot | null {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.text !== 'string' || !record.text.trim()) {
+    throw new Error(`${capability} native returned invalid text`);
+  }
+  if (!Number.isInteger(record.maxRepeats) || (record.maxRepeats as number) <= 0) {
+    throw new Error(`${capability} native returned invalid maxRepeats`);
+  }
+  if (!Number.isInteger(record.used) || (record.used as number) < 0) {
+    throw new Error(`${capability} native returned invalid used`);
+  }
+  const stageMode = readStopMessageStageModeField(record.stageMode, `${capability} stageMode`);
+  const aiMode = readStopMessageAiModeField(record.aiMode, `${capability} aiMode`);
+  return {
+    text: record.text.trim(),
+    maxRepeats: record.maxRepeats as number,
+    used: record.used as number,
+    ...(typeof record.source === 'string' && record.source.trim() ? { source: record.source.trim() } : {}),
+    ...(typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) ? { updatedAt: record.updatedAt } : {}),
+    ...(typeof record.lastUsedAt === 'number' && Number.isFinite(record.lastUsedAt) ? { lastUsedAt: record.lastUsedAt } : {}),
+    ...(stageMode ? { stageMode } : {}),
+    ...(aiMode ? { aiMode } : {})
+  };
+}
+
+export function readRuntimeStopMessageStageModeWithNative(
+  runtimeMetadata: unknown,
+): 'on' | 'off' | 'auto' | undefined {
+  const capability = 'readRuntimeStopMessageStageModeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('readRuntimeStopMessageStageModeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`readRuntimeStopMessageStageModeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  const stageMode = readStopMessageStageModeField(parsed, 'readRuntimeStopMessageStageModeJson');
+  if (!stageMode) {
+    throw new Error('readRuntimeStopMessageStageModeJson native returned invalid stage mode');
+  }
+  return stageMode;
+}
+
+export function readServertoolFollowupFlowIdWithNative(runtimeMetadata: unknown): string {
+  const capability = 'readServertoolFollowupFlowIdJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('readServertoolFollowupFlowIdJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`readServertoolFollowupFlowIdJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string') {
+    throw new Error('readServertoolFollowupFlowIdJson native returned invalid flow id');
+  }
+  return parsed.trim();
+}
+
+function readStopMessageStageModeField(value: unknown, source: string): 'on' | 'off' | 'auto' | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === 'on' || value === 'off' || value === 'auto') {
+    return value;
+  }
+  throw new Error(`${source} returned invalid stop-message stage mode`);
+}
+
+function readStopMessageAiModeField(value: unknown, source: string): 'on' | 'off' | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === 'on' || value === 'off') {
+    return value;
+  }
+  throw new Error(`${source} returned invalid stop-message ai mode`);
+}
+
 export function planStopMessagePersistedLookupWithNative(input: {
   record: Record<string, unknown>;
   runtimeMetadata?: Record<string, unknown>;
@@ -418,6 +750,330 @@ export function validateClientExecCommandResultWithNative(rawOutput: string): Re
     throw new Error(`validateClientExecCommandResultJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson) as Record<string, unknown>;
+}
+
+export function resolveRuntimeStopMessageStateFromAdapterContextWithNative(
+  input: RuntimeStopMessageStateFromAdapterContextInput,
+): RuntimeStopMessageStateSnapshot | null {
+  const capability = 'resolveRuntimeStopMessageStateFromAdapterContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveRuntimeStopMessageStateFromAdapterContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveRuntimeStopMessageStateFromAdapterContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as RuntimeStopMessageStateSnapshot | null;
+}
+
+export function resolveBdWorkingDirectoryForRecordWithNative(
+  input: ServertoolRecordRuntimeMetadataInput,
+): string | undefined {
+  const capability = 'resolveBdWorkingDirectoryForRecordJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveBdWorkingDirectoryForRecordJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveBdWorkingDirectoryForRecordJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as string | null;
+  return typeof parsed === 'string' && parsed.length ? parsed : undefined;
+}
+
+export function resolveStopMessageFollowupProviderKeyWithNative(
+  input: ServertoolRecordRuntimeMetadataInput,
+): string {
+  const capability = 'resolveStopMessageFollowupProviderKeyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveStopMessageFollowupProviderKeyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveStopMessageFollowupProviderKeyJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as string;
+  return typeof parsed === 'string' ? parsed : '';
+}
+
+export function getCapturedRequestWithNative(adapterContext: unknown): Record<string, unknown> | null {
+  const capability = 'getCapturedRequestJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('getCapturedRequestJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(adapterContext));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`getCapturedRequestJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
+}
+
+export function resolveClientConnectionStateWithNative(value: unknown): { disconnected?: boolean } | null {
+  const capability = 'resolveClientConnectionStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveClientConnectionStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveClientConnectionStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as { disconnected?: boolean }
+    : null;
+}
+
+export function hasCompactionFlagWithNative(runtimeMetadata: unknown): boolean {
+  const capability = 'hasCompactionFlagJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('hasCompactionFlagJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(runtimeMetadata));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`hasCompactionFlagJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`hasCompactionFlagJson native returned invalid bool: ${resultJson}`);
+}
+
+export function resolveEntryEndpointWithNative(record: Record<string, unknown>): string {
+  const capability = 'resolveEntryEndpointJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveEntryEndpointJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(record));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveEntryEndpointJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' && parsed.trim().length ? parsed : '/v1/chat/completions';
+}
+
+export function resolveStopMessageFollowupToolContentMaxCharsWithNative(input: {
+  envValue?: unknown;
+  providerKey?: string;
+  model?: string;
+}): number | undefined {
+  const capability = 'resolveStopMessageFollowupToolContentMaxCharsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveStopMessageFollowupToolContentMaxCharsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveStopMessageFollowupToolContentMaxCharsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function planPersistStopMessageStateWithNative(
+  input: PersistStopMessageStatePlanInput,
+): PersistStopMessageStatePlanOutput {
+  const capability = 'planPersistStopMessageStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPersistStopMessageStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPersistStopMessageStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPersistStopMessageStateJson native returned invalid payload');
+  }
+  const action = (parsed as Record<string, unknown>).action;
+  if (action !== 'save' && action !== 'clear') {
+    throw new Error('planPersistStopMessageStateJson native returned invalid action');
+  }
+  return { action };
+}
+
+export function resolveDefaultStopMessageSnapshotWithNative(
+  input: StopMessageDefaultSnapshotInput,
+): RuntimeStopMessageStateSnapshot | null {
+  const capability = 'resolveDefaultStopMessageSnapshotJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveDefaultStopMessageSnapshotJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveDefaultStopMessageSnapshotJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
+}
+
+export function resolveImplicitGeminiStopMessageSnapshotWithNative(
+  input: StopMessageImplicitGeminiSnapshotInput,
+): RuntimeStopMessageStateSnapshot | null {
+  const capability = 'resolveImplicitGeminiStopMessageSnapshotJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveImplicitGeminiStopMessageSnapshotJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveImplicitGeminiStopMessageSnapshotJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
+}
+
+export function readServertoolLoopStateWithNative(runtimeMetadata: unknown): ServertoolLoopStateSnapshot | null {
+  const capability = 'readServertoolLoopStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('readServertoolLoopStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`readServertoolLoopStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolLoopStatePayload(resultJson, capability);
+}
+
+export function planServertoolLoopStateWithNative(
+  input: ServertoolLoopStatePlanInput,
+): ServertoolLoopStateSnapshot | null {
+  const capability = 'planServertoolLoopStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolLoopStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolLoopStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolLoopStatePayload(resultJson, capability);
+}
+
+function parseServertoolLoopStatePayload(resultJson: string, capability: string): ServertoolLoopStateSnapshot | null {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.payloadHash !== 'string' || !record.payloadHash.trim()) {
+    throw new Error(`${capability} native returned invalid payloadHash`);
+  }
+  return {
+    ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
+    payloadHash: record.payloadHash.trim(),
+    ...(Number.isInteger(record.repeatCount) ? { repeatCount: record.repeatCount as number } : {}),
+    ...(Number.isInteger(record.startedAtMs) ? { startedAtMs: record.startedAtMs as number } : {}),
+    ...(typeof record.stopPairHash === 'string' && record.stopPairHash.trim() ? { stopPairHash: record.stopPairHash.trim() } : {}),
+    ...(Number.isInteger(record.stopPairRepeatCount) ? { stopPairRepeatCount: record.stopPairRepeatCount as number } : {}),
+    ...(typeof record.stopPairWarned === 'boolean' ? { stopPairWarned: record.stopPairWarned } : {})
+  };
+}
+
+export function parseServertoolTimeoutMsWithNative(input: ServertoolTimeoutPolicyInput): number {
+  const capability = 'parseServertoolTimeoutMsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('parseServertoolTimeoutMsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`parseServertoolTimeoutMsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'number' || !Number.isInteger(parsed)) {
+    throw new Error('parseServertoolTimeoutMsJson native returned invalid timeout');
+  }
+  if (parsed < 0) {
+    throw new Error('parseServertoolTimeoutMsJson native returned invalid timeout');
+  }
+  return parsed;
+}
+
+export function readClientInjectOnlyWithNative(metadata: Record<string, unknown>): boolean {
+  const capability = 'readClientInjectOnlyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('readClientInjectOnlyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(metadata));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`readClientInjectOnlyJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`readClientInjectOnlyJson native returned invalid bool: ${resultJson}`);
+}
+
+export function normalizeClientInjectTextWithNative(value: unknown): string {
+  const capability = 'normalizeClientInjectTextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('normalizeClientInjectTextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ value }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`normalizeClientInjectTextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string' || !parsed.trim()) {
+    throw new Error('normalizeClientInjectTextJson native returned invalid text');
+  }
+  return parsed;
+}
+
+export function compactFollowupErrorReasonWithNative(value: unknown): string | undefined {
+  const capability = 'compactFollowupErrorReasonJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('compactFollowupErrorReasonJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`compactFollowupErrorReasonJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  if (typeof parsed !== 'string') {
+    throw new Error('compactFollowupErrorReasonJson native returned invalid reason');
+  }
+  return parsed;
+}
+
+export function resolveAdapterContextProviderKeyWithNative(adapterContext: unknown): string {
+  const capability = 'resolveAdapterContextProviderKeyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveAdapterContextProviderKeyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ adapterContext }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveAdapterContextProviderKeyJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' ? parsed : '';
 }
 
 export function hasStopMessageAutoCliResultInRequestWithNative(input: {
@@ -662,4 +1318,40 @@ export function extractTextFromChatLikeWithNative(payload: unknown): string {
     throw new Error(`extractServertoolTextFromChatLikeJson native returned invalid payload: ${typeof parsed}`);
   }
   return parsed;
+}
+
+export function stripStopSchemaControlTextWithNative(text: string): string {
+  const capability = 'stripStopSchemaControlTextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('stripStopSchemaControlTextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(text));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`stripStopSchemaControlTextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string') {
+    throw new Error(`stripStopSchemaControlTextJson native returned invalid payload: ${typeof parsed}`);
+  }
+  return parsed;
+}
+
+export function stripStopSchemaControlPayloadWithNative<TPayload extends Record<string, unknown>>(
+  payload: TPayload,
+): TPayload {
+  const capability = 'stripStopSchemaControlPayloadJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('stripStopSchemaControlPayloadJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(payload));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`stripStopSchemaControlPayloadJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`stripStopSchemaControlPayloadJson native returned invalid payload: ${typeof parsed}`);
+  }
+  return parsed as TPayload;
 }

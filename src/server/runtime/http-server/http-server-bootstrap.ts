@@ -349,17 +349,6 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   if (!patched.autoRetry && profile.metadata?.autoRetry) {
     patched.autoRetry = profile.metadata.autoRetry;
   }
-  if (profile.metadata?.windsurf) {
-    const nextExtensions: Record<string, unknown> =
-      patched.extensions && typeof patched.extensions === 'object' && !Array.isArray(patched.extensions)
-        ? { ...patched.extensions }
-        : {};
-    if (!nextExtensions.windsurf || typeof nextExtensions.windsurf !== 'object' || Array.isArray(nextExtensions.windsurf)) {
-      nextExtensions.windsurf = profile.metadata.windsurf;
-    }
-    patched.extensions = nextExtensions;
-  }
-
   return canonicalizeRuntimeProvider(patched);
 }
 

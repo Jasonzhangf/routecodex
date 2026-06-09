@@ -359,7 +359,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
 
     const handle = createRuntimeHandle(async () => {
-      throw Object.assign(new Error('windsurf raw stream ended with no content'), {
+      throw Object.assign(new Error('provider raw stream ended with no content'), {
         code: 'MALFORMED_REQUEST',
         upstreamCode: 'MALFORMED_REQUEST',
         status: 400,

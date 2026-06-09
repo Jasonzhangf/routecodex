@@ -371,7 +371,7 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
     expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
-  test("sticky 里有 active goal 时仍视为 goal active，不自动续", async () => {
+  test("sticky 里有 active goal 但当前请求非显式 /goal 时仍按默认 stopless 自动续", async () => {
     const sessionId = "sticky-active-goal-skip";
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState("active"));
 
@@ -380,14 +380,15 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       requestId: "req-non-goal-sticky-active-skip",
     });
 
-    expect(result.executed).toBe(false);
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe("stop_message_flow");
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({
       status: "active",
     });
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
-  test("/goal active 即使来自 persisted routing state 也不自动续", async () => {
+  test("persisted routing state 的 active goal 不能替代当前请求显式 /goal active", async () => {
     const sessionId = "goal-active-persisted-skip";
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState("active"));
 
@@ -396,11 +397,12 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       requestId: "req-goal-active-persisted-skip",
     });
 
-    expect(result.executed).toBe(false);
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe("stop_message_flow");
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({
       status: "active",
     });
-    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
+    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
   });
 
   test("/goal completed 只自动续一次", async () => {

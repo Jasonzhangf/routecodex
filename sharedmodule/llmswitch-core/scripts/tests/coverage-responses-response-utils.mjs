@@ -4,9 +4,7 @@ import assert from 'node:assert/strict';
 
 async function main() {
   const {
-    buildChatResponseFromResponses,
-    collectToolCallsFromResponses,
-    resolveFinishReason
+    buildChatResponseFromResponses
   } = await import('../../dist/conversion/shared/responses-response-utils.js');
 
   {
@@ -33,16 +31,10 @@ async function main() {
       ]
     };
 
-    const toolCalls = collectToolCallsFromResponses(response);
-    assert.equal(toolCalls.length, 1);
-    assert.equal(toolCalls[0].function?.name, 'exec_command');
-
-    const finishReason = resolveFinishReason(response, toolCalls);
-    assert.equal(finishReason, 'tool_calls');
-
     const chat = buildChatResponseFromResponses(response);
     assert.equal(chat.object, 'chat.completion');
     assert.equal(chat.id, 'resp_cov_1');
+    assert.equal(chat.choices[0].finish_reason, 'tool_calls');
     assert.equal(chat.choices[0].message.content, 'hello');
     assert.equal(chat.choices[0].message.reasoning_content, 'plan');
     assert.equal(chat.choices[0].message.tool_calls[0].function.name, 'exec_command');
@@ -55,7 +47,7 @@ async function main() {
 
   {
     const passthrough = { choices: [{ message: { role: 'assistant', content: 'ok' } }] };
-    assert.equal(buildChatResponseFromResponses(passthrough), passthrough);
+    assert.deepEqual(buildChatResponseFromResponses(passthrough), passthrough);
   }
 
   console.log('✅ coverage-responses-response-utils passed');

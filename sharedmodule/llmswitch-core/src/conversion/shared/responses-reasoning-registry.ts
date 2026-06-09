@@ -1,18 +1,6 @@
 // Registry thin wrappers — delegates to Rust NAPI.
 // All state is managed in Rust; TS only validates inputs and serializes JSON.
 
-export interface ResponsesOutputTextMeta {
-  hasField: boolean;
-  value?: string;
-  raw?: string;
-}
-
-export interface ResponsesReasoningPayload {
-  summary?: Array<{ type: 'summary_text'; text: string }>;
-  content?: Array<{ type: 'reasoning_text' | 'text'; text: string }>;
-  encrypted_content?: string | null;
-}
-
 import {
   extractNativeErrorMessage,
   failNative,
@@ -56,44 +44,6 @@ function parseRegistryPayload<T>(capability: string, raw: unknown): T | undefine
   } catch (error) {
     return failNative<T>(capability, `invalid native json: ${extractNativeErrorMessage(error)}`);
   }
-}
-
-export function registerResponsesReasoning(
-  id: unknown,
-  reasoning: ResponsesReasoningPayload | undefined,
-): void {
-  if (typeof id !== 'string') return;
-  if (!reasoning) return;
-  const capability = 'registerResponsesReasoningJson';
-  callNativeRequired(capability, id, stringifyRegistryPayload(capability, reasoning));
-}
-
-export function consumeResponsesReasoning(
-  id: unknown,
-): ResponsesReasoningPayload | undefined {
-  if (typeof id !== 'string') return undefined;
-  const capability = 'consumeResponsesReasoningJson';
-  const result = callNativeRequired(capability, id);
-  return parseRegistryPayload<ResponsesReasoningPayload>(capability, result);
-}
-
-export function registerResponsesOutputTextMeta(
-  id: unknown,
-  meta: ResponsesOutputTextMeta | undefined,
-): void {
-  if (typeof id !== 'string') return;
-  if (!meta) return;
-  const capability = 'registerResponsesOutputTextMetaJson';
-  callNativeRequired(capability, id, stringifyRegistryPayload(capability, meta));
-}
-
-export function consumeResponsesOutputTextMeta(
-  id: unknown,
-): ResponsesOutputTextMeta | undefined {
-  if (typeof id !== 'string') return undefined;
-  const capability = 'consumeResponsesOutputTextMetaJson';
-  const result = callNativeRequired(capability, id);
-  return parseRegistryPayload<ResponsesOutputTextMeta>(capability, result);
 }
 
 export function registerResponsesPayloadSnapshot(

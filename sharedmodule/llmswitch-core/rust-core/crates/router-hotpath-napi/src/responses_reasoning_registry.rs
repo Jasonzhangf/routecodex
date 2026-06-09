@@ -192,7 +192,6 @@ fn clone_value(v: &Value) -> Value {
 // NAPI exported functions
 // ============================================================
 
-#[napi]
 pub fn register_responses_reasoning_json(
     id: String,
     reasoning_json: Option<String>,
@@ -271,7 +270,6 @@ pub fn register_responses_reasoning_json(
     Ok(())
 }
 
-#[napi]
 pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>> {
     let mut reg = registry()
         .lock()
@@ -308,7 +306,6 @@ pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>
     }
 }
 
-#[napi]
 pub fn register_responses_output_text_meta_json(id: String, meta_json: String) -> NapiResult<()> {
     let meta: ResponsesOutputTextMeta =
         serde_json::from_str(&meta_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -323,7 +320,6 @@ pub fn register_responses_output_text_meta_json(id: String, meta_json: String) -
     Ok(())
 }
 
-#[napi]
 pub fn consume_responses_output_text_meta_json(id: String) -> NapiResult<Option<String>> {
     let mut reg = registry()
         .lock()
@@ -615,6 +611,25 @@ mod tests {
     }
 
     #[test]
+    fn test_register_and_consume_output_text_meta() {
+        let meta = ResponsesOutputTextMeta {
+            has_field: true,
+            value: Some("ok".to_string()),
+            raw: None,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        register_responses_output_text_meta_json("meta1".to_string(), json).unwrap();
+        let result = consume_responses_output_text_meta_json("meta1".to_string()).unwrap();
+        assert!(result.is_some());
+        let parsed: ResponsesOutputTextMeta = serde_json::from_str(&result.unwrap()).unwrap();
+        assert!(parsed.has_field);
+        assert_eq!(parsed.value.as_deref(), Some("ok"));
+        assert!(consume_responses_output_text_meta_json("meta1".to_string())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn test_register_and_consume_by_aliases() {
         let snapshot = serde_json::json!({"key": "value"});
         register_responses_payload_snapshot_json(
@@ -661,7 +676,9 @@ mod tests {
         reg.prune(now);
 
         assert_eq!(reg.entries.len(), DEFAULT_MAX_ENTRIES);
-        assert!(!reg.entries.contains_key(&format!("entry-{DEFAULT_MAX_ENTRIES}")));
+        assert!(!reg
+            .entries
+            .contains_key(&format!("entry-{DEFAULT_MAX_ENTRIES}")));
         assert!(reg.entries.contains_key("entry-0"));
     }
 }

@@ -284,11 +284,6 @@ function computeTransientKeepPoolCooldownMs(series: ErrorSeries, consecutive: nu
   return COOLDOWN_SCHEDULE_TRANSIENT_KEEP_POOL_MS[idx] ?? null;
 }
 
-function isQuotaNeutralProviderError(event: ErrorEventForQuota): boolean {
-  const code = String(event.code || '').trim().toUpperCase();
-  return code === 'WINDSURF_SERVICE_UNREACHABLE';
-}
-
 export function applyErrorEvent(
   state: QuotaState,
   event: ErrorEventForQuota,
@@ -297,10 +292,6 @@ export function applyErrorEvent(
   // Manual/operator blacklist is rigid: automated error events must not override it.
   if (state.blacklistUntil !== null && nowMs < state.blacklistUntil) {
     return state;
-  }
-
-  if (isQuotaNeutralProviderError(event)) {
-    return tickQuotaStateTime(state, nowMs);
   }
 
   const series = normalizeErrorSeries(event);

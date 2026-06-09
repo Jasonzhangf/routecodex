@@ -89,4 +89,123 @@ describe('virtual-router router-direct protocol filter', () => {
       expect(result.target?.outboundProfile).toBe('openai-responses');
     }
   });
+
+  it('does not report provider-unavailable when default route only has cross-protocol targets', async () => {
+    const input: any = {
+      virtualrouter: {
+        providers: {
+          minimax: {
+            id: 'minimax',
+            type: 'openai',
+            enabled: true,
+            endpoint: 'https://minimax.invalid',
+            auth: { type: 'apikey', apiKey: 'MINIMAX_KEY' },
+            models: {
+              'MiniMax-M3': { capabilities: ['text'] }
+            }
+          }
+        },
+        routing: {
+          'gateway_priority_5555:default': [{
+            id: 'gateway-priority-5555-default',
+            priority: 100,
+            mode: 'priority',
+            targets: ['minimax.MiniMax-M3'],
+            routeParams: { routePolicyGroup: 'gateway_priority_5555' }
+          }]
+        }
+      }
+    };
+    const { config } = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
+
+    const result = await engine.route(
+      {
+        model: 'gpt-5.5',
+        stream: true,
+        input: 'default floor protocol mismatch should relay'
+      } as any,
+      {
+        requestId: 'req_router_direct_default_floor_protocol_mismatch',
+        entryEndpoint: '/v1/responses',
+        routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+        routerDirectInboundProtocol: 'openai-responses',
+        providerProtocol: 'openai-responses'
+      } as any
+    );
+
+    expect(result.decision.routeName).toBe('default');
+    expect(result.target?.providerKey).toBe('minimax.key1.MiniMax-M3');
+    expect(result.target?.outboundProfile).toBe('openai-chat');
+  });
+
+  it('does not report provider-unavailable when default route only has a cross-protocol forwarder target', async () => {
+    const input: any = {
+      virtualrouter: {
+        providers: {
+          minimax: {
+            id: 'minimax',
+            type: 'openai',
+            enabled: true,
+            endpoint: 'https://minimax.invalid',
+            auth: { type: 'apikey', apiKey: 'MINIMAX_KEY' },
+            models: {
+              'MiniMax-M3': { capabilities: ['text'] }
+            }
+          }
+        },
+        routing: {
+          'gateway_priority_5555:default': [
+            {
+              id: 'gateway-priority-5555-default',
+              priority: 100,
+              mode: 'priority',
+              targets: ['fwd.minimax.MiniMax-M3'],
+              routeParams: { routePolicyGroup: 'gateway_priority_5555' }
+            }
+          ]
+        },
+        forwarders: {
+          'fwd.minimax.MiniMax-M3': {
+            forwarderId: 'fwd.minimax.MiniMax-M3',
+            protocol: 'openai',
+            modelId: 'MiniMax-M3',
+            resolutionMode: 'model-first',
+            strategy: 'priority',
+            stickyKey: 'none',
+            targets: [
+              {
+                providerKey: 'minimax.key1.MiniMax-M3',
+                priority: 1,
+                disabled: false
+              }
+            ]
+          }
+        }
+      }
+    };
+    const { config } = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
+
+    const result = await engine.route(
+      {
+        model: 'gpt-5.5',
+        stream: true,
+        input: 'default forwarder floor protocol mismatch should relay'
+      } as any,
+      {
+        requestId: 'req_router_direct_default_forwarder_protocol_mismatch',
+        entryEndpoint: '/v1/responses',
+        routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+        routerDirectInboundProtocol: 'openai-responses',
+        providerProtocol: 'openai-responses'
+      } as any
+    );
+
+    expect(result.decision.routeName).toBe('default');
+    expect(result.target?.providerKey).toBe('minimax.key1.MiniMax-M3');
+    expect(result.target?.outboundProfile).toBe('openai-chat');
+  });
 });

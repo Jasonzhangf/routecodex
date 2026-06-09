@@ -258,5 +258,5 @@ docs/goals/apply-patch-config-gated-servertool-plan.md
    - 防错：失败测试断言 `APPLY_PATCH_FAILED` 与 reason。
 4. **越界写文件**：servertool 本地执行可能写出 workspace。
    - 防错：workspace-relative path guard；越界 fail-fast。
-5. **错误修改层**：provider 或 Windsurf 文件被误改。
-   - 防错：实现和提交前检查 diff；本功能禁止触碰 provider/Windsurf。
+5. **错误修改层**：provider runtime 文件被误改。
+   - 防错：实现和提交前检查 diff；本功能禁止触碰 provider runtime。

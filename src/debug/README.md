@@ -12,8 +12,7 @@ src/debug/
 ├── session-manager.ts       # debug session lifecycle
 ├── harness-registry.ts      # harness registration
 ├── harnesses/
-│   ├── provider-harness.ts  # provider-layer dry-run
-│   └── windsurf-static-request-harness.ts # static windsurf outbound lens
+│   └── provider-harness.ts  # provider-layer dry-run
 ├── dry-runner.ts            # dry-run controller
 └── replay-runner.ts         # snapshot replay
 ```

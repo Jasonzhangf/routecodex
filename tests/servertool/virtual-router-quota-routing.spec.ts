@@ -224,7 +224,7 @@ describe('virtual-router quotaView routing', () => {
       cooldownUntil: null,
       blacklistUntil: null,
       lastErrorSeries: 'E5XX',
-      lastErrorCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      lastErrorCode: 'HTTP_502',
       consecutiveErrorCount: 3
     }));
     engine.initialize({

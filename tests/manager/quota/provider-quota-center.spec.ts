@@ -103,29 +103,6 @@ describe('provider-quota-center error handling', () => {
     expect(state.lastErrorSeries).toBe('ENET');
   });
 
-  it('does not cooldown provider for Windsurf service unreachable', () => {
-    const baseNow = 4_600_000;
-    let state = createInitialQuotaState('windsurf.ws-pro-5.gpt-5.4-none', { authType: 'oauth' }, baseNow);
-
-    state = applyErrorEvent(
-      state,
-      {
-        providerKey: 'windsurf.ws-pro-5.gpt-5.4-none',
-        code: 'WINDSURF_SERVICE_UNREACHABLE',
-        httpStatus: 502,
-        message: '[windsurf] service unreachable'
-      },
-      baseNow
-    );
-
-    expect(state.inPool).toBe(true);
-    expect(state.reason).toBe('ok');
-    expect(state.cooldownUntil).toBeNull();
-    expect(state.blacklistUntil).toBeNull();
-    expect(state.consecutiveErrorCount).toBe(0);
-    expect(state.lastErrorCode).toBeNull();
-  });
-
   it('keeps HTTP 402 quota exhaustion in pool as keep-pool cooldown', () => {
     const baseNow = 4_700_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);

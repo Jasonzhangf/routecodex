@@ -11,10 +11,10 @@ function buildConfig(): any {
           priority: 100,
           mode: 'priority',
           targets: [
-            'windsurf.ws-pro-1.gpt-5.5-medium',
-            'windsurf.ws-pro-3.gpt-5.5-medium',
-            'windsurf.ws-pro-1.gpt-5.4-high',
-            'windsurf.ws-pro-3.gpt-5.4-high',
+            'openai.key1.gpt-5.5-medium',
+            'openai.key3.gpt-5.5-medium',
+            'openai.key1.gpt-5.4-high',
+            'openai.key3.gpt-5.4-high',
           ]
         }
       ],
@@ -24,19 +24,19 @@ function buildConfig(): any {
           priority: 10,
           mode: 'priority',
           targets: [
-            'windsurf.ws-pro-1.gpt-5.5-medium',
-            'windsurf.ws-pro-3.gpt-5.5-medium',
-            'windsurf.ws-pro-1.gpt-5.4-high',
-            'windsurf.ws-pro-3.gpt-5.4-high',
+            'openai.key1.gpt-5.5-medium',
+            'openai.key3.gpt-5.5-medium',
+            'openai.key1.gpt-5.4-high',
+            'openai.key3.gpt-5.4-high',
           ]
         }
       ]
     },
     providers: {
-      'windsurf.ws-pro-1.gpt-5.5-medium': buildProvider('windsurf.ws-pro-1.gpt-5.5-medium', 'windsurf.ws-pro-1', 'gpt-5.5-medium'),
-      'windsurf.ws-pro-3.gpt-5.5-medium': buildProvider('windsurf.ws-pro-3.gpt-5.5-medium', 'windsurf.ws-pro-3', 'gpt-5.5-medium'),
-      'windsurf.ws-pro-1.gpt-5.4-high': buildProvider('windsurf.ws-pro-1.gpt-5.4-high', 'windsurf.ws-pro-1', 'gpt-5.4-high'),
-      'windsurf.ws-pro-3.gpt-5.4-high': buildProvider('windsurf.ws-pro-3.gpt-5.4-high', 'windsurf.ws-pro-3', 'gpt-5.4-high'),
+      'openai.key1.gpt-5.5-medium': buildProvider('openai.key1.gpt-5.5-medium', 'openai.key1', 'gpt-5.5-medium'),
+      'openai.key3.gpt-5.5-medium': buildProvider('openai.key3.gpt-5.5-medium', 'openai.key3', 'gpt-5.5-medium'),
+      'openai.key1.gpt-5.4-high': buildProvider('openai.key1.gpt-5.4-high', 'openai.key1', 'gpt-5.4-high'),
+      'openai.key3.gpt-5.4-high': buildProvider('openai.key3.gpt-5.4-high', 'openai.key3', 'gpt-5.4-high'),
     },
     classifier: {},
     loadBalancing: { strategy: 'round-robin' },
@@ -89,18 +89,18 @@ describe('virtual-router priority preserves configured target order', () => {
     engine.initialize(buildConfig());
 
     const first = engine.route(buildRequest(), buildMetadata('req-priority-1'));
-    expect(first.target.providerKey).toBe('windsurf.ws-pro-1.gpt-5.5-medium');
+    expect(first.target.providerKey).toBe('openai.key1.gpt-5.5-medium');
 
     const second = engine.route(buildRequest(), {
       ...buildMetadata('req-priority-2'),
-      excludedProviderKeys: ['windsurf.ws-pro-1.gpt-5.5-medium']
+      excludedProviderKeys: ['openai.key1.gpt-5.5-medium']
     } as any);
-    expect(second.target.providerKey).toBe('windsurf.ws-pro-3.gpt-5.5-medium');
+    expect(second.target.providerKey).toBe('openai.key3.gpt-5.5-medium');
 
     const third = engine.route(buildRequest(), {
       ...buildMetadata('req-priority-3'),
-      excludedProviderKeys: ['windsurf.ws-pro-1.gpt-5.5-medium', 'windsurf.ws-pro-3.gpt-5.5-medium']
+      excludedProviderKeys: ['openai.key1.gpt-5.5-medium', 'openai.key3.gpt-5.5-medium']
     } as any);
-    expect(third.target.providerKey).toBe('windsurf.ws-pro-1.gpt-5.4-high');
+    expect(third.target.providerKey).toBe('openai.key1.gpt-5.4-high');
   });
 });

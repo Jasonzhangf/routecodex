@@ -74,8 +74,13 @@ export function buildServerToolAdapterContext(args: {
     ...metadataBag
   };
   const originRequest = args.entryOriginRequest;
+  const originRecord = asFlatRecord(originRequest);
   if (!asFlatRecord(baseContext.capturedEntryRequest) && asFlatRecord(originRequest)) {
     baseContext.capturedEntryRequest = originRequest as Record<string, unknown>;
+  }
+  const existingCapturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
+  if (originRecord && (!existingCapturedChatRequest || hasRccFenceInRequestPayload(originRecord))) {
+    baseContext.capturedChatRequest = originRecord;
   }
 
   backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(baseContext, originRequest);

@@ -21,11 +21,6 @@ import {
   readDeepSeekProviderRuntimeOptions
 } from '../contracts/deepseek-provider-contract.js';
 import {
-  isWindsurfRuntimeIdentity,
-  normalizeWindsurfProviderRuntimeOptions,
-  WINDSURF_COMPATIBILITY_PROFILE,
-} from '../contracts/windsurf-provider-contract.js';
-import {
   getAuthSignature,
   instantiateProvider,
   mapProviderModule,
@@ -239,14 +234,8 @@ export class ProviderFactory {
       runtime.providerKey,
       providerType
     );
-    const isWindsurfRuntime = isWindsurfRuntimeIdentity({
-      providerFamily,
-      providerId: runtime.providerId,
-      providerKey: runtime.providerKey,
-      compatibilityProfile: runtime.compatibilityProfile
-    });
     const baseUrl = (runtime.baseUrl || runtime.endpoint || '').trim();
-    if (!baseUrl && !isWindsurfRuntime) {
+    if (!baseUrl) {
       throw new Error(`[ProviderFactory] runtime ${runtime.runtimeKey} missing baseUrl`);
     }
     const authConfig = mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey, runtime);
@@ -283,30 +272,6 @@ export class ProviderFactory {
       })
     ) {
       extensions.deepseek = deepseekOptions;
-    }
-    const runtimeExtensions = (runtime as unknown as { extensions?: Record<string, unknown> }).extensions;
-    const nestedWindsurfOptions =
-      runtimeExtensions
-      && typeof runtimeExtensions === 'object'
-      && !Array.isArray(runtimeExtensions)
-      && runtimeExtensions.windsurf
-      && typeof runtimeExtensions.windsurf === 'object'
-      && !Array.isArray(runtimeExtensions.windsurf)
-        ? (runtimeExtensions.windsurf as Record<string, unknown>)
-        : runtimeExtensions;
-    const windsurfOptions = normalizeWindsurfProviderRuntimeOptions(
-      nestedWindsurfOptions as Record<string, unknown> | undefined
-    );
-    if (
-      windsurfOptions &&
-      isWindsurfRuntimeIdentity({
-        providerFamily,
-        providerId: runtime.providerId,
-        providerKey: runtime.providerKey,
-        compatibilityProfile: runtime.compatibilityProfile
-      })
-    ) {
-      extensions.windsurf = windsurfOptions;
     }
     extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
     const implicitModuleOverride = this.resolveImplicitProviderModule(runtime, authConfig);
@@ -368,15 +333,6 @@ export class ProviderFactory {
       })
     ) {
       return 'deepseek-http-provider';
-    }
-
-    if (isWindsurfRuntimeIdentity({
-      providerFamily: runtime.providerFamily,
-      providerId: runtime.providerId,
-      providerKey: runtime.providerKey,
-      compatibilityProfile: runtime.compatibilityProfile
-    })) {
-      return 'windsurf-chat-provider';
     }
 
     return undefined;

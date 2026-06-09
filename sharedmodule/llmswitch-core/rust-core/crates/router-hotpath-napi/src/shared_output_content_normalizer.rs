@@ -367,48 +367,6 @@ pub(crate) struct OutputContentExtractionResult {
 }
 
 #[napi_derive::napi]
-pub fn extract_output_segments_json(
-    source_json: String,
-    items_key: Option<String>,
-) -> NapiResult<String> {
-    let source: Value =
-        serde_json::from_str(&source_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = extract_output_segments(
-        &source,
-        items_key.unwrap_or_else(|| "output".to_string()).as_str(),
-    );
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
-pub fn normalize_output_content_part_json(
-    part_json: String,
-    reasoning_collector_json: String,
-) -> NapiResult<String> {
-    let part: Value =
-        serde_json::from_str(&part_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let collector_seed: Value = serde_json::from_str(&reasoning_collector_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut reasoning_collector: Vec<String> = collector_seed
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(|v| v.to_string())
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-    let normalized = normalize_content_part(&part, &mut reasoning_collector)
-        .map(Value::Object)
-        .unwrap_or(Value::Null);
-    let output = json!({
-      "normalized": normalized,
-      "reasoningCollector": reasoning_collector
-    });
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
 pub fn normalize_message_content_parts_json(
     parts_json: String,
     reasoning_collector_json: String,

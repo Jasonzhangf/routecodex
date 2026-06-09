@@ -59,7 +59,7 @@ Use heading and keyword scans to create a compact inventory:
 
 ```bash
 rg -n '^#{1,4} ' note.md
-rg -n 'Hub Pipeline|Virtual Router|servertool|stopless|direct|Responses|ErrorPolicy|metadata|apply_patch|Windsurf|MiniMax|config.toml|generated|source-map|fallback|hardcode' note.md
+rg -n 'Hub Pipeline|Virtual Router|servertool|stopless|direct|Responses|ErrorPolicy|metadata|apply_patch|MiniMax|config.toml|generated|source-map|fallback|hardcode' note.md
 ```
 
 Group entries by durable themes, for example:
@@ -70,7 +70,7 @@ Group entries by durable themes, for example:
 - Direct passthrough and Responses continuation
 - ErrorPolicyCenter / provider failure classification
 - Metadata isolation and pipeline topology
-- Provider-specific contracts: Windsurf, MiniMax, DeepSeek, Qwen
+- Provider-specific contracts: MiniMax, DeepSeek, Qwen, and any current provider runtime contracts
 - apply_patch and servertool projection behavior
 - Generated artifacts, source-map residue, repo root governance
 - Build/install/runtime verification baselines

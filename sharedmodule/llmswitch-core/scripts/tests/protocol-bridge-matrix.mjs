@@ -31,7 +31,7 @@ function resolveDistModule(...segments) {
 
 const SAMPLE_BASE =
   process.env.CODEX_SAMPLES_DIR ||
-  path.join(os.homedir(), '.routecodex', 'codex-samples');
+  path.join(os.homedir(), '.rcc', 'codex-samples');
 
 function readJsonFile(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -214,14 +214,9 @@ const {
   buildResponsesRequestFromChat,
   buildResponsesPayloadFromChat,
   buildChatResponseFromResponses,
-  captureResponsesContext
-} = responsesBridgeMod;
-const responsesRequestAdapterMod = await import(
-  pathToFileURL(resolveDistModule('conversion', 'shared', 'responses-request-adapter.js')).href
-);
-const {
+  captureResponsesContext,
   buildChatRequestFromResponses
-} = responsesRequestAdapterMod;
+} = responsesBridgeMod;
 
 const responsesSseIndexMod = await import(pathToFileURL(resolveDistModule('sse', 'index.js')).href);
 const { responsesConverters } = responsesSseIndexMod;

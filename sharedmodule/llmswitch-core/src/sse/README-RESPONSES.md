@@ -142,30 +142,6 @@ const reconstructed = await sseToJson.convertSseToJson(sseStream, {
 });
 ```
 
-### 回环测试
-```typescript
-// 执行完整的回环测试
-const { responses } = createBidirectionalConverters();
-const roundtripResult = await responses.roundTrip(originalResponse, {
-  requestId: 'roundtrip-test'
-});
-```
-
-### 协议互转
-```typescript
-const { bidirectionalConverters } = createBidirectionalConverters();
-
-// Chat → Responses
-const responsesResponse = await bidirectionalConverters.chatToResponses(
-  chatResponse, options
-);
-
-// Responses → Chat
-const chatResponse = await bidirectionalConverters.responsesToChat(
-  responsesResponse, options
-);
-```
-
 ## 高级功能
 
 ### 智能内容分块
@@ -191,10 +167,7 @@ const chatResponse = await bidirectionalConverters.responsesToChat(
 ## 测试和验证
 
 ### 单元测试
-```bash
-# 运行Responses协议转换器测试
-npm test -- responses-converter.test.ts
-```
+Responses SSE 回归入口以仓库根目录 `tests/` 和 `docs/architecture/verification-map.yml` 为准；`src/sse/test/*` 已迁出并禁止恢复为 active 源内测试入口。
 
 ### 回环测试
 ```bash

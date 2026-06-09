@@ -93,7 +93,6 @@ import {
   isRequiredToolCallTurn,
   isToolResultFollowupTurn
 } from './executor/request-executor-request-semantics.js';
-import { isWindsurfManagedProviderIdentity } from '../../../providers/core/contracts/windsurf-provider-contract.js';
 import {
   extractRequestExecutorProviderErrorStage,
   isHostRequestExecutorErrorStage,
@@ -843,17 +842,11 @@ export class HubRequestExecutor implements RequestExecutor {
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
             : undefined;
-        const providerOwnsWindsurfManagedTraffic = isWindsurfManagedProviderIdentity({
-          providerKey: typeof target.providerKey === 'string' ? target.providerKey : undefined,
-          runtimeKey: typeof runtimeKey === 'string' ? runtimeKey : undefined,
+        const providerTransportBackoffKey = buildProviderTransportBackoffKey({
+          providerKey: target.providerKey,
+          runtimeKey
         });
-        const providerTransportBackoffKey = providerOwnsWindsurfManagedTraffic
-          ? undefined
-          : buildProviderTransportBackoffKey({
-            providerKey: target.providerKey,
-            runtimeKey
-          });
-        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt) || providerOwnsWindsurfManagedTraffic;
+        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
         let retryAfterProviderFailure = false;
         let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
@@ -885,7 +878,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
-              reason: providerOwnsWindsurfManagedTraffic ? 'windsurf_managed_provider_owned' : 'servertool_followup',
+              reason: 'servertool_followup',
               attempt
             });
           } else {

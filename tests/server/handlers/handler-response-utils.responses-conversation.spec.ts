@@ -156,7 +156,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
       {
         status: 200,
         body: {
-          id: 'resp_windsurf_native_tool_1',
+          id: 'resp_provider_native_tool_1',
           object: 'response',
           status: 'requires_action',
           output: [
@@ -186,12 +186,12 @@ describe('sendPipelineResponse responses conversation recording', () => {
           finishReason: 'tool_calls',
           routeName: 'thinking/gateway-priority-5520-thinking',
           timingRequestIds: [
-            'openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260523T053402638-222073-757',
+            'openai-responses-openai.key1-gpt-5.4-medium-20260523T053402638-222073-757',
             'openai-responses-router-gpt-5.4-medium-20260523T053402638-222073-757'
           ]
         }
       } as any,
-      'openai-responses-windsurf.ws-pro-4-gpt-5.4-medium-20260523T053402638-222073-757',
+      'openai-responses-openai.key1-gpt-5.4-medium-20260523T053402638-222073-757',
       {
         entryEndpoint: '/v1/responses',
         responsesRequestContext: {
@@ -203,7 +203,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
 
     expect(res.statusCode).toBe(200);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
-      'resp_windsurf_native_tool_1'
+      'resp_provider_native_tool_1'
     ]);
   });
 
@@ -217,7 +217,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
       {
         status: 200,
         body: {
-          id: 'resp_windsurf_mixed_second',
+          id: 'resp_provider_mixed_second',
           object: 'response',
           status: 'requires_action',
           output: [
@@ -246,7 +246,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
         usageLogInfo: {
           finishReason: 'tool_calls',
           routeName: 'thinking',
-          timingRequestIds: ['openai-responses-windsurf.submit-2']
+          timingRequestIds: ['openai-responses-openai.submit-2']
         }
       } as any,
       'openai-responses-router-submit-2',
@@ -254,7 +254,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     );
 
     expect(res.statusCode).toBe(200);
-    expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toContain('resp_windsurf_mixed_second');
+    expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toContain('resp_provider_mixed_second');
   });
 
   it('RED: records streamed /v1/responses tool_calls so continuation restores tools after tool execution', async () => {
@@ -268,7 +268,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
       {
         status: 200,
         body: {
-          id: 'resp_windsurf_streamed_tool_100318513',
+          id: 'resp_provider_streamed_tool_100318513',
           object: 'response',
           status: 'requires_action',
           output: [
@@ -276,7 +276,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
               type: 'function_call',
               name: 'exec_command',
               arguments: '{"cmd":"pwd"}',
-              call_id: 'call_windsurf_streamed_tool'
+              call_id: 'call_provider_streamed_tool'
             }
           ],
           required_action: {
@@ -284,11 +284,11 @@ describe('sendPipelineResponse responses conversation recording', () => {
             submit_tool_outputs: {
               tool_calls: [
                 {
-                  id: 'call_windsurf_streamed_tool',
+                  id: 'call_provider_streamed_tool',
                   type: 'function',
                   name: 'exec_command',
                   arguments: '{"cmd":"pwd"}',
-                  tool_call_id: 'call_windsurf_streamed_tool'
+                  tool_call_id: 'call_provider_streamed_tool'
                 }
               ]
             }
@@ -298,7 +298,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
           finishReason: 'tool_calls',
           routeName: 'default/gateway-priority-5520-default',
           timingRequestIds: [
-            'openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T100318513-222172-856',
+            'openai-responses-openai.key1-gpt-5.4-none-20260523T100318513-222172-856',
             'openai-responses-router-gpt-5.3-codex-20260523T100318513-222172-856'
           ]
         }
@@ -318,7 +318,7 @@ describe('sendPipelineResponse responses conversation recording', () => {
     expect(res.statusCode).toBe(200);
     expect(convertResponseToJsonToSseMock).toHaveBeenCalledTimes(1);
     expect(recordResponsesResponseForRequestMock.mock.calls.map(([arg]) => arg.requestId)).toEqual([
-      'resp_windsurf_streamed_tool_100318513'
+      'resp_provider_streamed_tool_100318513'
     ]);
   });
 

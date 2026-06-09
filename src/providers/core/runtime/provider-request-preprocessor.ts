@@ -32,6 +32,22 @@ export class ProviderRequestPreprocessor {
       request && typeof request === 'object' && (request as MetadataContainer).metadata && typeof (request as MetadataContainer).metadata === 'object'
         ? ((request as MetadataContainer).metadata as Record<string, unknown>)
         : undefined;
+    if (runtimeMetadata && requestMetadata) {
+      if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
+        runtimeMetadata.metadata = {};
+      }
+      const runtimeCarrier = runtimeMetadata.metadata as Record<string, unknown>;
+      Object.assign(runtimeCarrier, requestMetadata);
+      for (const [key, value] of Object.entries(requestMetadata)) {
+        if (key === 'clientHeaders' || key === 'entryEndpoint' || key === 'stream') {
+          continue;
+        }
+        if ((runtimeMetadata as Record<string, unknown>)[key] === undefined) {
+          (runtimeMetadata as Record<string, unknown>)[key] = value;
+        }
+      }
+    }
+
     const headersFromRequest = ProviderPayloadUtils.normalizeClientHeaders(requestMetadata?.clientHeaders);
     const headersFromRuntime = ProviderPayloadUtils.normalizeClientHeaders(
       runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
@@ -83,19 +99,7 @@ export class ProviderRequestPreprocessor {
       attachProviderRuntimeMetadata(processedRequest as Record<string, unknown>, runtimeMetadata);
     }
 
-    const processedMetadata = ((processedRequest as MetadataContainer).metadata ?? {}) as Record<string, unknown>;
-    const {
-      entryEndpoint: _dropEntryEndpoint,
-      stream: _dropStream,
-      clientHeaders: _dropClientHeaders,
-      __origModel: _dropOrigModel,
-      ...restMetadata
-    } = processedMetadata;
-    if (Object.keys(restMetadata).length > 0) {
-      (processedRequest as MetadataContainer).metadata = restMetadata;
-    } else {
-      delete (processedRequest as MetadataContainer).metadata;
-    }
+    delete (processedRequest as MetadataContainer).metadata;
 
     return processedRequest;
   }

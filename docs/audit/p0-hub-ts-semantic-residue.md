@@ -65,7 +65,7 @@
 - 回归：
 - `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts tests/sharedmodule/hub-pipeline-router-metadata.spec.ts`
  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-execute-chat-process-entry.spec.ts`
-- `npm run jest:run -- --runTestsByPath tests/sharedmodule/anthropic-semantics-stage2.spec.ts tests/sharedmodule/provider-compat-anthropic.spec.ts`
+- `npm run jest:run -- --runTestsByPath tests/sharedmodule/provider-compat-anthropic.spec.ts tests/sharedmodule/anthropic-tool-schema-stability.spec.ts`
 
 ## 当前残留分类（A/D 允许保留）
 

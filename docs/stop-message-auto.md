@@ -34,6 +34,7 @@
   - `stopMessageMaxRepeats`
   - `stopMessageUsed`
 - CLI input 中 `repeatCount` / `maxRepeats` 必须始终存在，缺 runtime state 时使用 `repeatCount=0`、`maxRepeats=3`。
+- 当前 Rust 真源中，provided schema 与 missing schema 都按连续 3 次 stop 收敛；旧的 missing-schema 10 次文档已过期。
 - 非连续 stop、工具调用或正常进展必须 reset 连续 stop 计数。
 
 ## 4. 当前明确移除的旧复杂语义

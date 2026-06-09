@@ -36,7 +36,7 @@
 边界证据：
 - `src/server/runtime/http-server/router-direct-pipeline.ts` 是 server/router 层 same-protocol direct bypass；它不是 Hub Pipeline passthrough。
 - `src/providers/core/runtime/responses-provider.ts` 的 SSE passthrough 是 provider runtime 传输级直传；不是 Hub Pipeline `processMode='passthrough'`。
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts` 的 `passthrough_remote_direct` 是 responses continuation 解析模式；不属于 Hub Pipeline processMode passthrough。
+- 已删除的 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts` 曾含 `passthrough_remote_direct` responses continuation 解析模式；该模式不属于 Hub Pipeline processMode passthrough。当前 continuation 真源在 Rust `hub_pipeline_blocks/responses_resume.rs` / `shared_responses_conversation_utils.rs`。
 
 ## 3. 问题判断
 

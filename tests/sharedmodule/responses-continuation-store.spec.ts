@@ -900,7 +900,7 @@ describe('responses conversation store plain continuation restore', () => {
     clearResponsesConversationByRequestId('req-resp-store-store-false-blocked');
     clearResponsesConversationByRequestId('resp-store-false-blocked');
   });
-  it('keeps native Cascade run_command function_call arguments during submit_tool_outputs resume', () => {
+  it('keeps native run_command function_call arguments during submit_tool_outputs resume', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-native-run-command'),
       sessionId: 'sess-native-run-command',
@@ -959,6 +959,162 @@ describe('responses conversation store plain continuation restore', () => {
         type: 'function_call_output',
         call_id: 'native:run_command:3',
         output: '/Users/fanzhang/Documents/github/routecodex\n'
+      })
+    ]);
+  });
+
+  it('RED: third submit_tool_outputs resume must preserve cumulative exec_command history instead of collapsing to first user-only input', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-third-round'),
+      sessionId: 'sess-third-round',
+      payload: {
+        model: 'gpt-5.5',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '这是第三轮 stopless 恢复测试' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-third-round'),
+      response: {
+        id: 'resp-third-round-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_third_round_1',
+            call_id: 'call_third_round_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":1}\\""}',
+            status: 'in_progress'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_third_round_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":1}\\""}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed1 = resumeResponsesConversation(
+      'resp-third-round-1',
+      {
+        tool_outputs: [{ tool_call_id: 'call_third_round_1', output: '{"repeatCount":1}' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-third-round-submit-1') }
+    );
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-third-round-submit-1'),
+      sessionId: 'sess-third-round',
+      payload: {
+        model: 'gpt-5.5',
+        store: true
+      },
+      context: {
+        input: resumed1.payload.input
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-third-round-submit-1'),
+      response: {
+        id: 'resp-third-round-2',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_third_round_2',
+            call_id: 'call_third_round_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":2}\\""}',
+            status: 'in_progress'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_third_round_2',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":2}\\""}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed2 = resumeResponsesConversation(
+      'resp-third-round-2',
+      {
+        tool_outputs: [{ tool_call_id: 'call_third_round_2', output: '{"repeatCount":2}' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-third-round-submit-2') }
+    );
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-third-round-submit-2'),
+      sessionId: 'sess-third-round',
+      payload: {
+        model: 'gpt-5.5',
+        store: true
+      },
+      context: {
+        input: resumed2.payload.input
+      }
+    });
+
+    expect(Array.isArray(resumed1.payload.input)).toBe(true);
+    expect(Array.isArray(resumed2.payload.input)).toBe(true);
+    expect(resumed2.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '这是第三轮 stopless 恢复测试' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_third_round_1',
+        name: 'exec_command'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_third_round_1',
+        output: '{"repeatCount":1}'
+      }),
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_third_round_2',
+        name: 'exec_command'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_third_round_2',
+        output: '{"repeatCount":2}'
       })
     ]);
   });

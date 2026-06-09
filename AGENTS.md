@@ -11,8 +11,8 @@
 8. **llmswitch-core 禁止新增 TS 功能代码**：如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
 9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 Hub Pipeline / chat process / req_chatprocess / resp_chatprocess / servertool followup orchestration 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust，TS 收缩为薄壳转发。
 10. **只写必要代码，且必须最小合规**：新增/修改代码前，先证明它是完成当前需求所必需的；禁止加入用户未要求、问题未证明需要、或不影响验收的代码。实现必须保持最小合规面，能删则删，能不加就不加。
-11. **Windsurf 工具禁止伪装 native**：Windsurf 中只有已证明完全等价的工具才能 native-map；`apply_patch` 不得映射到 `write_to_file/propose_code`，必须走 RCC 文本收割或显式 servertool。
-12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或 Windsurf/Cascade 特例。provider 差异只能在对应 Provider runtime 内解决。
+11. **已移除 provider 禁止复活**：已物理删除的 provider 不得恢复其 runtime、contract、probe、harness、compat profile、fixture、script、test、doc 或 config 入口，除非 Jason 明确授权新 provider 设计。
+12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或已移除 provider 特例。provider 差异只能在对应 Provider runtime 内解决。
 13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
 14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_chatprocess -> req_outbound -> resp_inbound -> resp_chatprocess -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_chatprocess` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
 15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
@@ -137,15 +137,12 @@ client-visible error
 4. servertool / stopMessage / stopless followup：`docs/agent-routing/30-servertool-lifecycle-routing.md`
 5. 任务跟踪与记忆：`docs/agent-routing/40-task-memory-routing.md`
 6. 权威细节文档：
-   - Windsurf 当前事实入口：`.agents/skills/rcc-dev-skills/SKILL.md` 的 Windsurf 章节 + `docs/providers/windsurf-chat-provider-design.md`
    - `docs/ARCHITECTURE.md`
    - `docs/error-handling-v2.md`
    - `docs/routing-instructions.md`
    - `docs/stop-message-auto.md`
    - `docs/design/servertool-stopmessage-lifecycle.md`
    - `docs/design/servertool-followup-rebuild-from-origin.md`
-   - `docs/design/windsurf-cascade-tool-protocol.md`
-   - `docs/providers/windsurf-chat-provider-design.md`
    - `docs/design/pipeline-type-topology-and-module-boundaries.md`
 
 ## 标准执行顺序
@@ -169,7 +166,7 @@ client-visible error
 
 - 本规则的 **执行规范、门禁、白名单** 由 `docs/goals/hardcode-fallback-arch-audit-plan.md` 细化；SSOT 迁移 (constants / 错误码 / provider key 抽象) 必须按 plan §7 阶段顺序推进。
 - 物理删除铁律 (项目级): 迁出后旧 Set / 旧 `if` 块 / 旧常量字符串必须删除；保留必须经 `silent-failure-audit.mjs` + `hardcode-audit.mjs` 报警并写理由；不得用"不接入 / 不调用 / 注释掉 / 闲置"代替删除。
-- Provider 特例唯一允许位置: Provider runtime。Hub Pipeline / Virtual Router / RequestExecutor 禁 `windsurf.managed.` / `windsurf.` / `deepseek` / `qwen` 字符串前缀特判；改用 `isWindsurfRuntimeIdentity` / `isWindsurfManagedProviderIdentity` / `providerFamily` 抽象 (在 `src/providers/core/contracts/windsurf-provider-contract.ts`)。
-- Rust runtime: 不得用 windsurf.managed. 前缀特判 persisted 503 family cleanup；改用 `clear_persisted_503_family_for_provider` (in `health.rs`)。
-- 红测先行: 每个 Phase 必须有红测先红后绿；TS 端参考 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts`；Rust 端参考 `record_success_clears_persisted_503_family_for_non_windsurf_provider` 双向 fixture。
+- Provider 特例唯一允许位置: Provider runtime。Hub Pipeline / Virtual Router / RequestExecutor 禁 provider key 字符串前缀特判；改用 `providerFamily` / runtime identity 抽象。
+- Rust runtime: 不得用 provider key 前缀特判 persisted 503 family cleanup；必须使用通用 provider-family cleanup 语义。
+- 红测先行: 每个 Phase 必须有红测先红后绿；TS 端参考 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts`；Rust 端用 provider-family cleanup 双向 fixture 锁住不串台。
 - 完成标准 5 验证: `pnpm run verify:hardcode` 必须 PASS; `silent-failure-audit.mjs` 命中数 < 488 (基线) 且 < 后续 Phase 4 后的新基线。

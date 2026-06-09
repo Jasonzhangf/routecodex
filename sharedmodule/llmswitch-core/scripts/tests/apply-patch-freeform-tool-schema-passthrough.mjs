@@ -63,11 +63,11 @@ function hasLegacyFilePathSchema(parameters) {
 
 async function main() {
   assert.equal(FEATURE_ID_APPLY_PATCH_FREEFORM_CONTRACT, 'feature_id: tool.apply_patch_freeform_contract');
-  const { bridgeToolToChatDefinition } = await loadToolMapping();
+  const { mapBridgeToolsToChat } = await loadToolMapping();
 
   const rawTool = makeClientApplyPatchTool();
 
-  const mapped = bridgeToolToChatDefinition(rawTool);
+  const mapped = mapBridgeToolsToChat([rawTool])?.[0];
   assert.ok(mapped, 'expected tool mapping to produce a definition');
   assert.ok(
     !hasStructuredChangesSchema(mapped.function?.parameters),

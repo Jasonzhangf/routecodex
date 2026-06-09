@@ -19,6 +19,10 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
 - stopless CLI projection reasoning（2026-06-07）：reasoning 真源顺序必须是 `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default`；continuationPrompt/stop schema guidance 只放 CLI `--input-json`，不得替换可见 reasoning。client-visible Responses replay history 只能投影 reasoning `summary`，不得生成非空 `reasoning.content` 数组；看到 upstream `input[n].content array too long` 时修 servertool projection owner，不修 direct/relay。测试 repeatCount/prompt 层级前必须清理对应 session/tmux state，避免旧 `stopMessageUsed` 残留伪造后续轮次。
 - response stream stopless 测试隔离（2026-06-08）：`/v1/responses` stream=true 的 stopless CLI projection 同时依赖 Rust `servertoolRuntimeAction` 与 `streamPipe` effect；单测必须使用唯一 requestId/sessionId，`clientInjectDispatch` mock 必须返回 `{ ok: true }`。固定 session 或 `{ body: ... }` mock 会污染 stopMessage loop / injection contract，伪造成 SSE 仍输出原始 stop 文本。
 - stop-message routing state key（2026-06-08）：`resolveStateKey` 的顺序 `continuation request_chain -> stop-message session scope -> requestId -> default` 属于 `servertool-core::persisted_lookup::resolve_servertool_state_key`；TS `runtime-utils.ts` 只能 merge metadata 后调用 `resolveServertoolStateKeyWithNative`，禁止恢复 `continuationScope/stickyScope/requestId/default` TS 分支。
+- stop-message runtime state/stage/flowId/CLI-result/metadata/context/content-limit/persist/default/implicit snapshot resolver（2026-06-09）：runtime `stopMessageState/serverToolLoopState` snapshot、`stopMessageStageMode` normalize、默认 `继续执行` / `servertool.stop_message`、followup `serverToolLoopState.flowId`、客户端 `exec_command` CLI-result request-record 扫描与 `client_exec_result` snapshot 构造、BD working directory、followup provider key、captured request、client connection state、compaction flag、entry endpoint、followup tool content max chars、persist state clear/save、default stop-message snapshot、implicit Gemini `/v1/responses` empty assistant snapshot 语义属于 `servertool-core::persisted_lookup::{resolve_runtime_stop_message_state,resolve_runtime_stop_message_state_from_adapter_context,read_runtime_stop_message_stage_mode,read_servertool_followup_flow_id,resolve_bd_working_directory_for_record,resolve_stop_message_followup_provider_key,get_captured_request,resolve_client_connection_state,has_compaction_flag,resolve_entry_endpoint,resolve_stop_message_followup_tool_content_max_chars,plan_persist_stop_message_state,resolve_default_stop_message_snapshot,resolve_implicit_gemini_stop_message_snapshot}`；TS `runtime-utils.ts` 只能调用 native wrapper，禁止恢复 TS `serverToolLoopState/maxRepeats/flowId/stopMessageText/stopMessageUsed`、POSIX `--input-json` 解析、command map、request-record restoration、`client_exec_result` 构造分支、metadata walker/providerKey/workdir/capturedRequest/compaction/entryEndpoint 解析分支、`Number/Math.floor/Math.max/kimi-k2.5` 内容上限策略、`persistStopMessageState` 空状态判定、`isStopEligibleForServerTool`、`extractResponsesOutputText`、`hasToolLikeOutput`、`isEmptyAssistantReply`、`gemini-chat` / `/v1/responses` TS 判定。BD working directory 保持 key-priority：全部 `workdir` 候选先于 `cwd` / `workingDirectory`；content-limit invalid env 不得 fall through 到 model default。
+- servertool loop-state（2026-06-09）：`readServerToolLoopState` / `buildServerToolLoopState` 的 runtime state normalize、payload-vs-flow-only tracking、`__servertool_auto__`、repeat/start time、stop-pair repeat/warned policy 属于 `servertool-core::loop_state_contract::{read_servertool_loop_state,plan_servertool_loop_state}`；TS `loop-state-block.ts` 只能做 stable JSON/SHA1 hashing + native call，禁止恢复 `sameFlow/samePayload/prevCount/previousPair*`、`Number.isFinite` / `Math.floor` / `Math.max` 和 `stop_message_flow` 本地分支。
+- servertool stop-gateway（2026-06-09）：`inspectStopGatewaySignal` / `isStopEligibleForServerTool` / `readStopGatewayContext` 的响应 stop inspect、eligibility、embedded tool marker、reasoning-only empty、Responses tool-like output、metadata context normalize 属于 `servertool-core::stop_gateway_context::{inspect,is_stop_eligible,normalize_stop_gateway_context}`；TS `stop-gateway-context.ts` 只能做 native call + runtime metadata IO，禁止恢复 fallback inspect、本地 marker/tool-like/reasoning-only 扫描、local normalize 或吞 metadata write failure。
+- servertool stop-message compare-context（2026-06-09）：`attachStopMessageCompareContext` / `readStopMessageCompareContext` / `formatStopMessageCompareContext` 的 compare context normalize、mode/decision 归一、数字 floor/clamp、remaining 计算、progress summary 格式属于 `servertool-core::stop_message_compare_context::{normalize_stop_message_compare_context,format_stop_message_compare_context}`；TS `stop-message-compare-context.ts` 只能做 native call + runtime metadata IO，禁止恢复 local normalize/format、Boolean/numeric policy 或吞 metadata write failure。
 - legacy review servertool 删除（2026-06-08）：`review` servertool followup / `review_flow` / `tests/servertool/review-followup.spec.ts` 已删除并由 `verify-servertool-rust-only` 的 `legacy-review-tool-deleted` gate 锁住。遇到旧文档或旧测试期待 review 注入时，先改为“不注入/不恢复”，不要重建 `servertool.review`。
 - empty-reply continue 禁止复活（2026-06-08）：`empty_reply_continue` / empty-reply auto-followup 是错误绕过，已物理删除并由 `verify-servertool-rust-only` 锁住。空 assistant/空 response 属于不规范请求/响应契约问题；只能修请求/provider contract 或 fail-fast，禁止通过 servertool auto-continue、native export、handler、skeleton hook、测试脚本恢复。
 - stopless goal 状态判定（2026-06-06）：captured request 中出现 `<goal_context>` / `Continue working toward the active thread goal` 只能用于重复 stop loop 检测，不能覆盖真实 `stoplessGoalState.status`；`completed/paused/stopped` 必须保持非 active，否则会误跳过 stopless CLI projection。
@@ -81,7 +85,7 @@ ServerReqInbound01 -> HubReqInbound02 -> HubReqChatProcess03 -> VrRoute04
 
 遇到 provider 502/503/524/429、死打同一 provider、cooldown 不生效、direct path 无 `[provider-switch]` 时，先按 `AGENTS.md` 的“标准错误链契约图”定位，禁止在现场调用点补第二套策略。
 
-错误本身与错误风暴必须拆开处理：错误本身按唯一协议/路由/Provider/error-chain owner 修复或 fail-fast 暴露；错误风暴只治理重复触发、重复投递、重复日志、client reconnect 放大与 session backoff，不得把原始错误改写成 empty reply、成功响应、relay fallback 或 payload sanitizer。先判定第一个错误在哪个契约节点发生，再判定风暴是否由客户端重连、请求内 retry、provider-switch、日志双上报或 session storm backoff 缺口放大。
+错误本身与错误风暴必须拆开处理：错误本身按唯一协议/路由/Provider/error-chain owner 修复或 fail-fast 暴露；错误风暴只治理重复触发、重复投递、重复日志、client reconnect 放大与 session backoff，不得把原始错误改写成 empty reply、成功响应、relay fallback 或 payload sanitizer。先判定第一个错误在哪个契约节点发生，再判定风暴是否由客户端重连、请求内 retry、provider-switch、日志双上报或 session storm backoff 缺口放大。session storm backoff 是节流阀：所有 surfaced error 都可进入，但等待上限硬锁 3 秒，环境变量只能调低不能调高。
 
 ```text
 ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
@@ -136,7 +140,8 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 1. RouteCodex 运行时 provider/router 配置真源优先看 `~/.rcc/`，不是仓库内 `config/`、不是 `~/.codex/config.toml`。
 2. 排查“某 provider 是否已配置/当前 targets 是什么/某端口命中什么路由”时，先读：
    - `~/.rcc/config.toml`
-   - `~/.rcc/config.<provider>.toml`（如 `config.windsurf.toml`）
+   - `~/.rcc/config.<provider>.toml`（如 `config.openai.toml`）
+   - request-level 日志里的 `[port:<port> group:<routingPolicyGroup>]`、`sid=...`、`gateway-priority-<port>`、`route_failed`。
 3. 只有在需要核对运行时合并结果时，才把 `~/config/merged-config.<port>.json` 当作派生快照；它不是首要真源。
 4. 若本次任务暴露出 agent 先查错配置源，必须先纠正到 `~/.rcc`，再继续分析 provider/token/router 问题。
 5. ProviderForwarder 配置排障：forwarder target 必须同时满足 TS provider 加载和 Rust target 解析；`providerId` 用于 `buildVirtualRouterInputV2` 收集 provider configs，`providerKey` 用于 Rust `ForwarderTarget` 真实目标校验。`routecodex config validate` 可能漏过 forwarder schema，启动错误必须用 materialized/bootstrap 或真实 `routecodex restart --config ~/.rcc/config.toml --port <port>` 验证。
@@ -145,6 +150,9 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 8. ProviderForwarder 启动 cooldown reprobe（2026-06-08）：重启后所有 cooldown provider 必须有一次被动命中机会；fwd 内部 availability scan 只能 `peek` startup reprobe 状态，等 `forwarder_registry.select` 真正选中 real target 后再 `consume`，禁止在扫描候选时提前消耗未选中的 target。
 9. Hub/VR/ProviderForwarder function-map gate（2026-06-08）：修改 Hub Pipeline / Virtual Router / forwarder owner 时，必须同步 `docs/architecture/function-map.yml`、`docs/architecture/verification-map.yml` 和源码 `feature_id:` anchor；`npm run build` / `npm run build:min` 必须先跑 `verify:function-map-compile-gate`，禁止把 map gate 从 build 链路拔掉。
 10. Virtual Router direct provider.model 媒体能力规则（2026-06-08）：显式 `provider.model` 是用户指定 direct target；若请求带图片/远程视频而该 provider/model 缺少 `vision`/`multimodal`，必须 fail-fast 返回 `CONFIG_ERROR`，禁止改路由到 vision/multimodal/forwarder target；`verify:vr-no-fallback-semantics` 锁住旧 fallback 字段和 direct media reroute 语义。
+11. Hub Pipeline 架构审计补充（2026-06-08）：`updateRuntimeDeps` / healthStore / routingStateStore 属于运行时路由语义，native update 失败必须 fail-fast，禁止 `non-blocking` 吞错继续使用旧状态；观测 snapshot recorder 才能 best-effort。`verify:function-map-compile-gate` 若报 canonical builder missing，先查 stale map/source anchor drift，修 map 或源码唯一真源后再谈 build。
+12. 5555/5520 误判规则（2026-06-09）：看到 `No available providers after applying routing instructions` 时，先看同一 request 的 VR hit / port 前缀。若证据是 `gateway-priority-5520-*` 或 `[port:5520 group:gateway_priority_5520]`，不得称为“5555 无路由可选”；先查客户端 provider/base_url/Host/socket.localPort 为什么走 5520。只有出现 `gateway-priority-5555-*` 或 `[port:5555 group:gateway_priority_5555]`，才进入 5555 provider availability / health / quota 排查。
+13. router-direct 协议兼容规则（2026-06-09）：`routerDirectInboundProtocol` / same-protocol 只能作为选择偏好，不能作为 provider availability 过滤器。普通 route 和 forwarder real-target 扫描都必须在无同协议候选时保留原候选，不能把非空 `default` 池压成 `PROVIDER_NOT_AVAILABLE`。forwarder 配置解析/物化错误 fail-fast；真实 target 的 health/quota/瞬态错误只影响本轮有序选择，池内最后 provider 不得被错误路径移除到空池。
 
 ## Provider 自动重试 (Auto-Retry) 配置（2026-05-27）
 
@@ -169,8 +177,6 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 ~/.rcc/provider/
 ├── mini27/
 │   └── config.v2.toml          # MiniMax 配置（含 autoRetry 示例）
-├── windsurf/
-│   └── config.v2.toml
 ├── deepseek/
 │   └── config.v2.toml
 └── ...
@@ -293,13 +299,8 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ## 2026-05-29 架构硬规则（Hub/VR 与 Provider 边界）
 
-- Hub Pipeline / Virtual Router 永远不写 provider 特例：不得在 hub/VR 中加入 Windsurf、Cascade、某账号、某模型、某 provider shape 的分支、补偿、fallback 或上下文修补。
-- Windsurf 的云端 Cascade 自带上下文记忆；Windsurf Provider 发送层应按 WindsurfAPI/Cascade 形状只发送当前 delta，并在 provider runtime 内处理 native/MCP 映射，不能要求 Hub Pipeline 为 Windsurf 改 continuation 语义。
-- Windsurf resume/已有 cascade 时，`additionalSteps` 只能包含当轮新完成的 native/MCP tool result；历史 tool result 不得 replay。MCP result 对应 Cascade `CortexTrajectoryStep` field 47 `mcp_tool`，native result 走对应 native step field。
-- Windsurf native tool config 必须保留 protobuf zero-length message 字段（如 `run_command` field 8 空子消息）；生成 CascadeToolConfig 时禁止用“空 buffer 跳过字段”的 helper，否则二跳 additional_steps 可能触发 gRPC status 2。
-- Windsurf poll 看到 tool_calls 不能立即返回给 Hub；必须像 WindsurfAPI 一样继续 `GetCascadeTrajectory` 轮询到 Cascade IDLE 后再返回，否则下一跳会撞上 `executor is not idle: CASCADE_RUN_STATUS_RUNNING` 并变成 503/upstreamCode=2。
-- Windsurf 单本地 Cascade executor 同时只能处理一个发送链路；同 provider/账号请求必须在 provider 内串行化，禁止并发 close/reuse 同一 local gRPC session，否则 warmup/SendUserCascadeMessage 会互相污染并表现为卡住或 status 2。
-- Windsurf warmup 必须 bounded：每个 stage 都有 provider 内 timeout；`AddTrackedWorkspace` / `UpdateWorkspaceTrust` / `Heartbeat` 非 transport 错误只记录并继续；transport/timeout 必须 reset local gRPC session + 清 warmup promise，禁止永久占住真实请求。
+- Hub Pipeline / Virtual Router 永远不写 provider 特例：不得在 hub/VR 中加入某账号、某模型、某 provider shape 的分支、补偿、fallback 或上下文修补。
+- 2026-06-08 已删除 provider 处理规则：禁止恢复已物理删除 provider 的 runtime、contract、probe、harness、compat profile、测试 fixture、文档计划或配置入口。用户要求清理已删除 provider 时，只删仓库代码/文档/测试，不停止任何 worker/进程。
 
 ## 2026-05-28 回归测试新增硬规则（Jason）
 
@@ -310,6 +311,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 5. 标准顺序固定为：HTTP 黑盒红测（先红）→ 必要白盒红测（可选）→ 修唯一真源 → HTTP 黑盒变绿 → 构建/安装/运行态 smoke。
 6. 汇报必须单列证据：`HTTP 黑盒红测` / `白盒红测(如有)` / `唯一修复点` / `HTTP 黑盒绿测` / `运行态证据`。
 7. 若黑盒红测没有经过真实请求入口和真实响应断言，不得宣称“已完成修复”。
+8. 验证标准以真实运行时为准：单测/代码回归只算门禁，不算完成；必须完成至少一次线上或本机真实入口 smoke / live runtime probe，且证据要能指向实际端口、真实请求、真实响应。没有 live 证据，不能宣称验证完成。
 
 0. TS→Rust JSON 序列化铁律：Rust enum 若要从 TS 接收小写值（如 `"idle"`、`"on"`、`"trigger"`），必须加 `#[serde(rename_all = "camelCase")]`，否则 serde 默认等 PascalCase（`"Idle"`、`"On"`、`"Trigger"`），反序列化直接炸。
    - 2026-05-27 踩坑：`stop-message-core` 的 `StageMode`、`SnapshotSource`、`GoalStatus`、`SkipReason`、`Action` 五个枚举都缺这个 derive 属性。后果：`decideStopMessageActionWithNative` 每一次都悄无声息地 fallback skip（`native_returned_non_string: object`），stopless 完全不工作。
@@ -355,118 +357,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 2026-06-04 更新：stopless/servertool gateway 只能检查 `HubRespChatProcess03Governed` chat 标准态；禁止用 provider raw `stop_reason` 或 client outbound/SSE payload 判定。Rust effect 必须携带 chat-process payload，TS shell 缺 payload 必须 fail-fast。
 
 
-## Windsurf 对齐固定参考（2026-05-21，强制）
+## Removed Provider Rule（2026-06-08）
 
-1. **不要再全盘搜索参考仓。** Windsurf 相关任务固定先看以下路径：
-   - 主参考仓入口：`/Volumes/extension/code/WindsurfAPI`
-   - 鉴权 / PostAuth 真源：`/Volumes/extension/code/WindsurfAPI/src/dashboard/windsurf-login.js`
-   - RouteCodex 当前实现：`src/providers/core/runtime/windsurf-chat-provider.ts`
-
-2. **鉴权已确认真源（且只允许 cascade 主线）**
-   - 所有 Windsurf 认证最终都收敛为：`devin-session-token$...`
-   - provider 最终使用的凭证就是这个 session token
-   - 若 provider 配置里直接给了 devin session token：**优先直接用 token，不走账密登录**
-   - 若只有账号密码：直接走 `/_devin-auth/password/login` 拿 `auth1_token`，再调用 `WindsurfPostAuth` 换 `session_token`
-   - 登录成功后，**必须持久化 session token**；下次优先读持久化 token，失败再按规则刷新
-   - Windsurf 本地实现只允许：`chat -> windsurf-chat-provider -> cascade`；禁止再引回任何第二实现文件、脚本、文档或测试锚点
-   - **发送主链已黑盒证伪旧 JSON 路径**：`GetChatCompletions` 不是当前 WindsurfAPI / app 真发送主线；后续调试/实现/测试必须只围绕 `StartCascade -> SendUserCascadeMessage -> GetCascadeTrajectorySteps/poll`。若文档、测试或代码仍把 `GetChatCompletions` 当主线，必须先纠正并物理删除该错误叙事/实现。
-   - 调试与实现中，默认先检查 `~/.rcc/codex-samples/**` 的 same-shape 样本，再看代码；不要跳过样本直接脑补
-   - 当前仓内只允许单一路径实现；后续禁止把任何已删除旧链路写回 Windsurf 文档、测试和实现
-
-3. **WindsurfPostAuth 对齐规则**
-   - **不能**把 `WindsurfPostAuth` 当普通 JSON 接口调用
-   - 参考真源要求：
-     - body：`application/proto`
-     - body 为空（`Buffer.alloc(0)`）
-     - header 必须带：`X-Devin-Auth1-Token: <auth1_token>`
-   - 响应按 `WindsurfAPI/src/dashboard/windsurf-login.js::parsePostAuthResponseData()` 的观察真源解析：
-     - `sessionToken`
-     - `accountId`
-     - `primaryOrgId`
-
-4. **排查优先级**
-   - 先判定问题是否仍在“鉴权链”：
-     - `password/login` 是否拿到 `auth1_token`
-     - `WindsurfPostAuth` 是否按 proto + header 正确发送
-     - 是否成功落到 `devin-session-token$...`
-   - 若以上已通，再看工具调用 / 历史 / continuity；不要把工具问题误判成认证问题
-   - **调试顺序强制追加**：
-     1. 先看 `~/.rcc/codex-samples/**` 里与当前 requestId / 时间段 / 端口命中的 sample / snapshot / same-shape 输入；
-     2. 先比对 sample 中的 `messages / tools / tool results / stream / model / request body delta` 是否合理；
-     3. 再去看实现代码；**禁止跳过 codex samples 直接凭日志表象改代码**。
-
-5. **调试优先看固定参考目标（新增，强制）**
-   - Windsurf 任务不要先全仓乱搜；固定先看：
-     - `/Volumes/extension/code/WindsurfAPI`
-     - `src/dashboard/windsurf-login.js`
-     - `src/conversation-pool.js`
-     - `src/cascade-native-bridge.js`
-     - `src/windsurf.js`
-     - `src/handlers/responses.js`
-   - 先从这些目标提取锚点函数/shape，再回到 RouteCodex 对应实现。
-   - **禁止先脱离参考仓自造边界解释。**
-
-6. **Windsurf 调试先看固定参考与 codex samples（强制）**
-   - 先看 `~/.rcc/codex-samples/**` 的同 requestId / 同时间段样本，先核对 request body、messages、tools、tool results、stream、model delta。
-   - 再看固定参考：`/Volumes/extension/code/WindsurfAPI`，禁止先全仓乱搜或凭日志表象脑补。
-   - 对 Windsurf，只允许围绕 `chat -> provider -> cascade` 真源排查；不得回到任何旧 transport 叙事。
-- 调试 Windsurf 前，固定先看两个目标：`~/.rcc/codex-samples/**` 与 `/Volumes/extension/code/WindsurfAPI`；先对样本和参考锚点，再动代码。
-
-6. **Cascade 语义测试真源（新增，强制）**
-   - Windsurf 的 assistant/tool_result/history/continuity 测试，**必须先对齐参考仓锚点，再写测试**；禁止先凭主观推边界再补 case。
-   - 固定语义锚点文件：
-     - `/Volumes/extension/code/WindsurfAPI/src/handlers/responses.js`
-       - `responsesToChat()`
-       - `chatToResponse()`
-       - 这是 Responses ↔ Chat 结构语义锚点
-     - `/Volumes/extension/code/WindsurfAPI/src/windsurf.js`
-       - `parseTrajectorySteps()`
-       - 这是 Cascade trajectory step → assistant/tool/tool-result 观察面的锚点
-     - `/Volumes/extension/code/WindsurfAPI/src/cascade-native-bridge.js`
-       - `buildAdditionalStepsFromHistory()`
-       - 这是 assistant tool_calls + tool results 历史如何注入 cascade additional_steps 的锚点
-     - `/Volumes/extension/code/WindsurfAPI/src/conversation-pool.js`
-       - `projectAssistantToolCalls()`
-       - `projectMessage()`
-       - 这是 continuity / digest / assistant text + tool_calls 投影锚点
-
-7. **Windsurf 测试编写规则（新增，强制）**
-   - 每补一条 `tests/providers/core/runtime/windsurf-chat-provider.spec.ts`：
-     1. 先指出参考锚点文件 + 函数名；
-     2. 说明该测试是在锁哪个 reference 语义；
-     3. 如果 reference 里没有直接证据，只能先记入 `note.md` 为“待证伪/待证实假设”，**不能直接当真源测试**。
-   - 允许写“RouteCodex 本地 fail-fast 真源”测试，但前提是：
-     - 该 case 必须能从参考仓已有 shape/投影/trajectory family 合理推出；
-     - 且在 `note.md` 明确标注“derived from reference anchor”，不能伪装成 reference 直接明文行为。
-
-8. **Windsurf provider / cascade 实现禁止假设（新增，强制）**
-   - Windsurf provider 的 cascade 实现，**不得脑补 endpoint / body / response / 轮询协议 / tool shape / history shape**。
-   - 固定参考真源只有：`/Volumes/extension/code/WindsurfAPI`。
-   - **实现、测试、调试都必须先对齐参考仓，再动本仓代码；不允许伪造，不允许假设，不允许自己编协议。**
-   - 对齐目标是 **WindsurfAPI 的 cascade 观察真相**：鉴权链、tool call、tool result、history continuity、trajectory steps、additional_steps 注入方式。
-   - 任何“我觉得应该是这样”的判断都不算证据；必须能指回 `WindsurfAPI` 的具体文件、函数、shape 或实机请求样本。
-   - 如果参考仓没有直接证据：
-     1. 先记入 `note.md` 为待证实假设；
-     2. 不能写成正式测试真源；
-     3. 不能写进 provider 主线实现。
-   - 排查与实现顺序强制为：
-     1. 先看 `WindsurfAPI` 对应锚点文件与函数；
-     2. 再看 `~/.rcc/codex-samples/**` 的 same-shape 样本；
-     3. 再写/改 RouteCodex 测试；
-     4. 最后才改实现。
-   - **禁止伪造 happy-path 测试**：如果 reference 没证明某条 send-path / poll-path / tool-path / history-path 存在，就不能写成“已验证主线”测试。
-
-9. **Windsurf 工具真相（2026-05-23，强制）**
-   - 已确认 native-equivalent：`exec_command` / `shell_command` 只能映射到 Cascade `run_command` 的 one-shot blocking shell 子集。
-   - `apply_patch` 不是已确认 native-equivalent。Windsurf.app 仅确认 `write_to_file` / `propose_code` 是 trajectory/proto step，不能确认它们是可控 executor，也不能表达 Codex `apply_patch` 的 multi-file patch 与失败/aborted 语义。
-   - 禁止把不完全兼容工具伪装成 native tool。此类工具只能二选一：显式配置打开 RouteCodex servertool 由 RCC 执行，或走 RCC 文本引导/收割。
-   - Windsurf provider 当前 `apply_patch` 必须走 RCC 文本收割；不得再恢复 `apply_patch -> write_to_file/propose_code` native 伪装。
-   - **禁止把未验证 cloud endpoint 当真源**：没有 reference 或实机证据的路径，不得作为实现前提，不得作为测试锚点。
-   - 若 reference 未覆盖，而本地又必须处理，只能：
-     - 明确标成 `derived from reference anchor` 或 `local fail-fast invariant`
-     - 写入 `note.md`
-     - 不能冒充成 WindsurfAPI 已证实行为。
-   - **UA / app version 也不得脑补**：先对齐本机 `Windsurf.app` 真值；当前已验证版本为 `2.3.9`，所以 provider 内所有 auth/login/probe/send header builder 必须统一为 `User-Agent: windsurf/2.3.9`，禁止混入 `Mozilla/...` 浏览器指纹。
+- Removed providers must stay removed from RouteCodex. Do not use old removed-provider docs, probes, tests, fixtures, config templates, local workers, or external reference repos as implementation guidance.
+- If a task mentions a removed provider now, first confirm whether it is asking for repository cleanup. Cleanup means physical deletion or neutralization of tracked code/docs/tests only; it does not mean stopping local workers or processes.
+- Any future reintroduction would require explicit user authorization, a new provider design document, and new blackbox gates. Do not resurrect deleted paths opportunistically.
 > 适用于 Hub Pipeline / Virtual Router / servertool / provider runtime / Rust 化收口。  
 > 必须按顺序推进；没有上一步证据，不允许跳下一步。
 
@@ -525,7 +420,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
    - 受管 `restart --port 5555`（必要时 5520 / 10000）
 2. 禁止把“源码测试通过”当成“运行态已修复”。
 3. **用户已明确：以后重启服务器统一使用 `routecodex restart --port <port>`；禁止用 `routecodex stop --port <port> && routecodex start --port <port>` 或单独 `routecodex start --port <port>` 伪装重启。**
-4. Responses + Windsurf 工具续接回归必须覆盖“streamed tool_calls 记录 provider context + 后续 `function_call_output` + restored tools 同时存在”，避免只测 previous_response_id 或只测 tools 的半链路绿。
+4. Responses 工具续接回归必须覆盖“streamed tool_calls 记录 provider context + 后续 `function_call_output` + restored tools 同时存在”，避免只测 previous_response_id 或只测 tools 的半链路绿。
 
 ### R5. 验证（必须包含原错误形状）
 1. 必须复测原错误请求或 same-shape 样本。
@@ -584,17 +479,19 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
    - 对 `/v1/responses`：即使客户端请求 `stream=false`，内部 upstream/provider 仍可使用 SSE；这属于实现细节，不是故障。
    - 真正要验证的是**客户端出站契约**：
      - `stream=false` → 客户端最终必须拿到 JSON，而不是可见 SSE。
-     - `stream=true` → 客户端最终必须稳定收到完整 SSE，直到 `response.done`（**不是** `response.completed`）。
+     - `stream=true` → 客户端最终必须稳定收到完整 SSE：`response.completed`、`response.done`、`data: [DONE]` 都必须按序出现；Codex 客户端会把缺 `response.completed` 判成断流。
 
 2. **看到客户端 SSE 反馈，不得误判为断流根因**
    - Codex/TUI/调试客户端在流式阶段显示 SSE 反馈是正常现象。
-   - 只有在缺失 `response.done`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
-   - Responses `requires_action` 工具调用态必须只有 `response.required_action` + `response.done`，禁止同时发 `response.completed`；否则 Codex UI 可能把工具调用回合判成完成而不执行/提交 tool output。
+   - 只有在缺失 `response.completed` / `response.done` / `[DONE]`、过早 close、或 JSON/SSE 收口契约错误时，才算真 bug。
+   - Responses `requires_action` 工具调用态必须发 `response.required_action`，随后仍要发 `response.completed`、`response.done`、`[DONE]`；禁止把服务端 `completed(status=200)` 日志当作客户端已收到 terminal frames 的证据。
 
 3. **5555/5520 断流排查优先级**
    - 先查公共层的 response contract / handler dispatch / SSE->JSON 或 JSON->SSE 收口。
    - 禁止先把 provider 内部使用 SSE 定性为错误，更禁止为此把 provider 强行改成懂 SSE 的耦合实现。
-   - decoder terminal event 只认 `response.done` / `response.error` / `response.cancelled`；`response.completed` 不是 terminal。
+   - 5555 fin/断流必须按 requestId + `gateway-priority-5555` / `port":5555` 过滤；当前多端口进程可能把 5555 请求写进 `server-5520.log`，但 5520 的 `client_close` / timeout 不能当 5555 证据。简单 curl/health/小 stream 探针只证明 listener 和基础 terminal 可用，不能证明用户真实请求完成。
+   - incomplete SSE 日志判定必须在 terminal repair / `upstream_stream_incomplete` 分类之后；缺 `response.completed` / `response.done` / `[DONE]` 的流不得先打 `completed(status=200)` 成功日志。
+   - decoder 内部终止可只认 `response.done` / `response.error` / `response.cancelled`；但 client-visible writer 必须在 close 前输出 `response.completed`。
    - `buildResponseDoneEvent` 必须发完整 `{ response: {...} }` 对象，禁止发 `data: [DONE]`（Chat API 格式）。
    - client disconnect detection：Symbol-keyed AbortSignal 不可序列化，只能轮询 `clientConnectionState.disconnected` 布尔值。
 
@@ -1481,39 +1378,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - provider 错误重复上报真源（2026-05-18）：主链 provider 失败可能同时来自 `base-provider.ts -> emitProviderError(stage=provider.http)` 与 `request-executor-provider-failure.ts -> emitProviderErrorAndWait(stage=provider.send)`；若黑盒显示 502 两次就提前 cooldown，先审 `src/providers/core/utils/provider-error-reporter.ts` 的单次错误去重 marker，禁止去 router selection/quota view 补第三语义面。
 - 高频周期日志禁令（2026-05-20）：**未经 Jason 明确要求，禁止任何 500ms/逐轮/按 poll tick 输出的运行态日志进入主链**，尤其是 provider poll / heartbeat / idle counter / step scan 这类周期调试信息。此类日志不允许“节流后保留”，默认必须物理删除；只有状态跃迁、最终退出、明确错误三类日志可保留。若需要排查，优先 requestId 定点样本或临时本地调试，不得把高频日志带入常规运行态。
 
-## Windsurf cascade provider lessons
-
-- Windsurf cascade blackbox must be verified through the local LS gRPC cascade chain, not cloud `GetChatCompletions` or Connect/JSON detours: warmup -> `StartCascade` -> `SendUserCascadeMessage` -> trajectory poll.
-- Protobuf empty embedded messages must be omitted to match WindsurfAPI `writeMessageField`; encoding `tag + len=0` can make LS reject requests as invalid wire-format data.
-- When multiple `routecodex-windsurf-*` LS instances exist, pin the selected runtime per request scope. Do not store pinned LS runtime in provider instance fields because concurrent `/v1/responses` calls can overwrite it and cause `trajectory not found`.
-- After modifying Windsurf provider, agent must run its own source smoke and installed `/v1/responses` smoke before asking Jason to test.
-
-- Windsurf pending stream canceled 排查（2026-05-22）：若 `/v1/responses` 报 `The pending stream has been canceled`，先用 WindsurfAPI `grpc.js + buildInitializePanelStateRequest` 直打当前 `lsPort` 验证；若同样失败或端口无监听，根因是 LS 连接/启动形态，不是 Hub/retry/并发。RouteCodex Windsurf provider 必须按 WindsurfAPI `ensureLs()` 启动受管 LS（`--server_port --csrf_token --codeium_dir --database_dir --detect_proxy=false`），不要连 Windsurf app 的 `--random_port` 子进程或 stale `~/.rcc` 端口。
-- Windsurf 工具协议改造顺序（2026-05-22）：必须先更新 `docs/design/windsurf-cascade-tool-protocol.md` 固化协议事实，再补黑盒锚点测试，最后改 `windsurf-chat-provider.ts`；禁止先写实现再反补文档/测试。
-- Windsurf 工具调用目标（2026-05-22）：最终路径必须是 Cascade structured protocol：`planner_mode=DEFAULT(1)` + `CascadeToolConfig.tool_allowlist(field32)` + trajectory fields 45/47/49/50 + `additional_steps(field9)`；文本 `function_call` / `<tool_call>` prompt 注入与 harvest 只能作为待删除旧实现，不能作为完成标准。
-- Windsurf 文档事实清理（2026-05-22）：当前事实只写 `docs/providers/windsurf-chat-provider-design.md` 与 `docs/design/windsurf-cascade-tool-protocol.md`；audit/goal/note 只能写历史取证且必须标注 superseded。发现 `GetChatCompletions`、cloud JSON baseurl、`tools_preamble`、文本 harvest、`~/.routecodex` 被当成当前事实时，必须立即改成 local managed LS gRPC + Cascade 与 `~/.rcc`。
-- Windsurf 旧语义处置（2026-05-22）：skipped 测试、未调用 helper、注释中的旧文本工具协议都不能长期保留；确认由 structured protocol 覆盖后必须物理删除。
-- Windsurf hybrid tool 边界（2026-05-23）：不要做能力路由 gating；App `SendUserCascadeMessageRequest` 只有 fields 1-9、无 tool definitions 输入槽位，所以 Codex/MCP/custom 任意工具不得进入 Cascade native structured protocol。Jason 已授权 unsupported tools 使用显式 RCC text-tool protocol：当前只有已证明等价的 one-shot shell 工具（`exec_command`/`shell_command`）走 Cascade native `run_command`；`apply_patch`、MCP/custom 工具走 `<|RCC|tool_calls>` / `<|RCC|tool_result>` 或未来显式 servertool。这不是 native 失败后的 fallback，RCC guidance 只能列 unsupported tool names，harvest 必须 native/RCC 分离并对 conflict/malformed/undeclared fail-fast。
-- Windsurf fence 命名（2026-05-23）：Windsurf unsupported-tool fence 只能写 `RCC`，不得借用其他 provider 的历史协议名；若参考 DeepSeek/Qwen 文本 harvest 经验，只能迁移“容器边界/harvest 思路”，不能迁移协议名。
-
-- Windsurf multi-account / quota / stopMessage 事实（2026-05-23）：配置账号必须是“多 key -> 多 runtime”生效，形如 `windsurf.ws-pro-N.<model>`；runtime auth 若缺 `accountAlias`，必须从 `windsurf.ws-pro-N` 派生，避免 token/session 落到 default。Windsurf 每个 runtime 启动时默认做一次 `checkHealth()` auth/model-config probe；失败即该 runtime init 失败并按 provider-init error/quota 路径移出池，不允许继续伪装可用。weekly quota 是 alias-family 级别：命中一个 model 要回收同 alias 下所有 Windsurf target，默认冷却到本地 00:00 自动恢复；显式 upstream cooldown 才能覆盖。5520 这种纯 HTTP 测试端口若 `[[httpserver.ports]].stopMessage.enabled=false`，stopMessage 必须被端口元数据关闭，不能触发 tmux followup。
-
-## Windsurf truncation / legacy marker rule（2026-05-23）
-- If Windsurf output appears truncated, first inspect `~/.rcc/codex-samples/**/provider-response-contract.json` for visible legacy `<tool_call>` / `<function_call>` fragments.
-- Legacy tool markers in Cascade assistant text are not a fallback protocol; they are malformed/truncated output and must fail-fast as `WINDSURF_TOOL_PROTOCOL_CONFLICT`. Only RCC text protocol is valid for unsupported text tools.
-- Windsurf 启动探测铁律补充（2026-05-23）：`checkHealth()` 返回 `false` 等同 startup probe 失败，必须抛 `WINDSURF_STARTUP_PROBE_FAILED` 并阻止 runtime handle 注册；不能把 false 当“非阻塞健康差”。weekly quota 到本地 00:00 后，quota maintenance/reload 必须清掉 expired weekly blacklist，随后由启动 probe 重新确认账号可用再入池。
-- Windsurf Cascade history 对齐（2026-05-23）：对照 WindsurfAPI native bridge，`role=tool` 与 assistant tool-call-only 历史不得进入 visible Cascade prompt；native 工具结果只走 `additional_steps`。若 prompt 里出现空 `<assistant>\n\n</assistant>`，优先查 `buildCascadePromptText()` 是否没有跳过 blank rendered history turns。
-- Responses 续轮工具保持（2026-05-23）：若 Windsurf/Responses 第 1 轮有工具、第 2 轮变 `finish_reason=stop`，先看路由原因是否从 `tools:tool-request-detected` 退化成仅 `search:last-tool-search`；真源可能是 scoped continuation retention 清掉 `entry.tools`。释放大 payload 可以，但不得清掉工具定义。
-- Windsurf 5520 多账号配置铁律（2026-05-23）：多账号同时工作不是 `mode="priority"`，priority 会固定首个可用 target；5520 这种多账号池必须使用 `mode="round-robin"` 或明确 weighted，同时保持 provider `maxInFlight=1` 实现“单账号不并发、多账号并行”。账号配置必须去重 alias，重复 alias 会造成认证/状态语义混淆。
-
 - Responses SSE tool_calls 调试锚点（2026-05-23）：如果 `/v1/responses stream=true` 日志显示 `finish_reason=tool_calls` 但 mem-observer 仍 `responseIndex=0 scopeIndex=0 pendingNoResponseId>0`，先查 `src/server/handlers/handler-response-utils.ts::streamResponsesJsonAsSse()` 是否像 JSON path 一样调用 conversation store 记录。样本必须进 `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` 红测，断言 response id + router id + provider timing id 均入库。
-- apply_patch servertool 骨架事实（2026-05-23）：`[servertool.apply_patch].mode=servertool` 时，`apply_patch` 只在 Hub/servertool 层本地执行，并通过标准 servertool followup 骨架（captured origin + injection ops）把 `APPLY_PATCH_APPLIED/FAILED` 回给模型；不得走 tmux/client injection，不得在 provider/Windsurf 层处理。默认 `client` 模式必须保持 client 原生 tool_call 透传，runtime dispatch gate 不得消费。
+- apply_patch servertool 骨架事实（2026-05-23）：`[servertool.apply_patch].mode=servertool` 时，`apply_patch` 只在 Hub/servertool 层本地执行，并通过标准 servertool followup 骨架（captured origin + injection ops）把 `APPLY_PATCH_APPLIED/FAILED` 回给模型；不得走 tmux/client injection，不得在 provider 层处理。默认 `client` 模式必须保持 client 原生 tool_call 透传，runtime dispatch gate 不得消费。
 - stop_message_flow 路径修正（2026-06-03）：stopless/stopMessage 普通续杯不走 tmux/client injection；Rust `servertool_skeleton_config.rs` 中 `stop_message_flow` 的 active fact 是 servertool `reenter` + `stickyProvider` + `seedLoopPayload` + `retryEmptyFollowupOnce`，无 `clientInjectOnly/clientInjectSource`。测试或实现若看到 `servertool.stop_message -> client_inject_only` 或 followup metadata stopMessage false，这是旧事实污染。
 - servertool followup origin 修正（2026-06-04）：followup capture 必须在请求 entry 保存 `entryOriginRequest/capturedEntryRequest`，哪个入口协议就 clone 哪个请求 shape；`/v1/responses` 只能在 `input` 上加 delta，不能从 chat `messages`、raw metadata、responses context 或当前污染 payload 重建。旧 `backfillServertoolAdapterContextTools*` 属于错误实现，发现即删除而不是闲置。
 - Responses retention cleanup（2026-05-23）：`retainedInputItems` 与 `pendingNoResponseId` 同步增长时，唯一先查 `handler-response-utils.ts` 在拿到 client `resp_*` 后是否清掉 superseded router/provider requestId；释放 payload 只能保留工具定义与 pending tool-call ids 摘要，禁止保留完整 input prefix 伪装指标下降。
-- Windsurf RCC text-tool typed args（2026-05-23）：若 unsupported tool 经 RCC fence 后工具层报 `plan expected sequence` / 参数类型错，先查 `windsurf-chat-provider.ts` harvester 是否按 JSON schema 还原 array/object/boolean/number；禁止把所有 `<|RCC|parameter>` 都当 string。guidance 必须列出所有 required 参数，不能只示例第一个。
-- Windsurf managed-account 请求内账号固定（2026-05-28）：健康/extra quota 探测结果只在启动/首次缓存填充时进入 `windsurfHealthCache`；单次请求内 transient retry 必须复用第一次 `resolveCascadeApiKey()` 的账号，不得重新 health probe 或静默切账号。quota exhausted 只标记 alias 并显式抛给外层 provider/VR 策略处理。
-- Windsurf latest-delta 铁律（2026-05-30）：Windsurf 云端 Cascade 自带上下文，`SendUserCascadeMessage.text` 永远只发最新用户 delta；历史 system/developer/assistant/tool-result 不得重放进 text。当前轮 native/MCP tool result 只走 `additional_steps` 当前窗口；`WINDSURF_CASCADE_STALLED` 是本轮 Cascade 闭环失败，provider 内 non-retryable，禁止 provider-switch 重发造成风暴。
 - apply_patch samples 排查（2026-05-23）：若 codex-samples 里反复 `APPLY_PATCH_ERROR`，先看 provider-request history 是否有 synthetic `__APPLY_PATCH_ERROR__` tool_call；真源可能是 response governance 生成旧 `{input,patch}` guard + request inbound 未剪历史。当前 schema `{filePath,patch}` 必须原样保留，不能被归一成旧 `{input,patch}`。
 
 ## Provider 错误统一码表与归一化指引（2026-05-27）
@@ -1600,29 +1469,10 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 多端口 routingPolicyGroup 隔离必须是独立 HubPipeline/VR config，不是只用 `allowedProviders` 或隐藏日志；`[VR-KEYS]` 不应在 5555 实例里看到 5520/10000 keys。
 - Pool id 是展示/日志名，隔离真源只能是 `routeParams.routePolicyGroup`；weighted pool 的 display id 必须从实际 strategy 生成，不能沿用 `gateway-priority-*`。
 
-### 2026-05-29 Windsurf Cascade shape 精华
-- 对齐 `/Volumes/extension/code/WindsurfAPI` 时以实际编码字节为准，不以注释为准：`writeBoolField(false)` 会返回空 Buffer，因此 `memory_config enabled=false` 在真实 `SendUserCascadeMessage` 中被省略；RCC 不得额外发送 cascade_config field 5 `{1:0}`。
-- Windsurf transient retry 不得清空同一请求首次选中的 `sessionId/cascadeId`；只有 panel missing / expired cascade / untrusted workspace 这类显式 rewarm 才允许重开 cascade。
-
-### 2026-05-29 Windsurf model-aware health 精华
-- Windsurf 账号健康不能只看 quota/extra：`ws-pro-3` 这类 Free 账号可表现为 daily/weekly 100%，但不支持 `gpt-5.5-low`，基础请求会失败；健康排序必须先判定当前 `modelUid` 是否在账号 allowed models 内，再按 rate-limit/exhausted/extra/quota 排序。
-- 最小黑盒顺序：先用 `/Volumes/extension/code/WindsurfAPI` 基础 cascade 请求找到“当前模型可成功账号”，再让 RCC 选择同一类账号；禁止把 quota 最高但模型不支持的账号当最健康。
-- Windsurf MCP 工具形状要同时覆盖 top-level `tool.mcp_compat` 与 OpenAI function 形态 `function.mcp_compat`；线上样本必须看到 `mcpCompatCount>0`，native 工具则看 `nativeMode=true/nativeAllowlist`。
-- Windsurf provider 对 Hub 的边界协议是标准 chat tools：入口 `tools` 不在 Hub 改写；只允许 Windsurf provider 内部拆成 native Cascade 与 MCP field-10；返回 Hub 前必须把 native 工具名/参数重新映射回原始标准 chat tool call。
-- Windsurf provider 内部拆分字段不得以 enumerable request body 字段暴露给 Hub Pipeline：`windsurf_custom_tools` / `windsurf_declared_native_tools` / `windsurf_native_allowlist` / `windsurf_native_mode` / `windsurf_tool_choice` 必须是 provider 私有/hidden 状态；黑盒断言 `Object.keys/JSON.stringify(body)` 不出现 `mcp_compat`、`node_repl` 或 Windsurf 内部字段。
-- Windsurf provider 会经过 `processIncoming -> preprocessRequest -> sendRequest -> preprocessRequest` 双预处理；内部 hidden 工具字段必须跨第二次 preprocess 保留，禁止用 `{...request}` 这类 enumerable-only 克隆丢掉 native/MCP 分区。
-- Windsurf 工具验证不能只看 provider-request 形状；必须强制真实 tool_call 并检查最终 `/v1/responses` 输出仍是请求的标准工具名（如 `shell_command`），防止 Rust response governance 再次 canonicalize 成 `exec_command`。
 - `stop_followup` 是正常 continuation relay 请求，不是一次性内部噪声；nested responses followup capture 到 `requestId:stop_followup` 后，成功响应必须 rebind 到最终 `resp_*`，让外层 `recordResponse()` 通过 responseId 找回 context 并延续 `previous_response_id`/submit 上下文。
-- Windsurf managed transient 502 / service unreachable / rate-limit 不等于账号坏：同一 request/session 已选中最健康账号后，provider retry 必须继续使用同一 alias；只有 quota/auth/account-unavailable 这类明确账号级事实才允许释放/冷却并切号。若日志出现 `ws-pro-3 -> ws-pro-4 -> ws-pro-2` 连环切号，先查 provider 是否又在 transient catch 中删 session binding 或写 transient cooldown。
-- Windsurf 5520 单 provider 被 `provider-health.json` 的 `__http_503_daily_cooldown__` 卡成 `PROVIDER_NOT_AVAILABLE` 时，真源在 Rust VR health filter：singleton route 必须允许 persisted 503 做一次真实请求 passive reprobe；多 provider pool 仍按健康过滤/fallback，不能把旧 daily cooldown 扩散成全局不可路由。
-- Windsurf managed 的账号/session/concurrency 真源在 provider 内部；executor 层不得再叠加 `windsurf.managed.*` 全局 traffic lease、transport backoff 或 Cascade provider-wide serial queue，否则同一请求 retry 会被自己的 lease/backoff 自锁。验证必须看 `~/.rcc/state/provider-traffic/state/windsurf.managed.json` 无 active lease，并连发两次 5520 请求。
-
 ### 2026-05-29 调试精华（Rust tool-result normalize CPU 热点）
 - 触发信号：Node 进程 CPU 高频但 sample 栈落在 `router_hotpath_napi::shared_tooling::normalize_tool_result_text` / `strip_terminal_right_gutter_noise` / `regex::Regex::new`。
 - 处理规则：优先检查 Rust hot path 是否在逐行/逐 tool-result 循环内重复 `Regex::new`；固定正则必须用 `OnceLock<Regex>` 静态缓存，并用结构红测禁止 hot-path 函数体内直接编译 regex。
-- Windsurf “第二跳慢但第一跳快”若伴随 `/health` 超时和 Node CPU 飙高，先用 `sample <pid>` 查 native hotpath；2026-05-29 真源是 Rust `hub_reasoning_tool_normalizer` 每次响应治理重复 `Regex::new`，必须静态缓存 regex，不要再从 provider/上游等待方向误判。
-- Windsurf managed alias 不能盲信 `~/.rcc/auth/windsurf-<alias>.json`：配置里有 `account` 时，健康探测返回的 `userStatus.email` 必须匹配该账号；不匹配则用 entry password 重登覆盖 token，没密码则该 entry exhausted，禁止把旧 token 的 quota/extra 当成目标账号事实。
-- Windsurf 请求“进不去 provider”但 `/health` ready 时，先查 `routes.ts::holdUntilReady()`/`runtimeReadyPromise`：Windsurf startup health probe 必须后台异步执行，不能阻塞 runtimeReady；否则日志不会出现 `▶ [/v1/responses] started`。
 
 ### 2026-05-29 调试精华（install/global artifact 隔离）
 - 触发信号：启动报 `dist/error-handling/route-error-hub.js` 缺失，或 `routecodex start` 从 repo `dist/` 回落启动；优先查 `install-global.sh` 是否在仓库内清理/重建 `dist`，以及全局包是否是指向临时 build 目录的 symlink。
@@ -1641,11 +1491,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Regression for VR route changes must include HTTP blackbox evidence from `/v1/responses` or an equivalent handler harness, asserting real route/provider/log/body, not only unit tests.
 - Memory observer is a leak-detection signal and must remain visible by default; only explicit `ROUTECODEX_MEM_OBSERVER_DISABLE=1`/`RCC_MEM_OBSERVER_DISABLE=1` may hide `[mem-observer]` lines. Do not gate it behind opt-in logs because pendingNoResponseId/retainedInputItems regressions must be observable in runtime.
 
-### 2026-05-29 Windsurf Cascade live 对齐补充
-- Cascade shape 对齐要覆盖 warmup lifecycle，不只比 `SendUserCascadeMessage`：`GetUserStatus -> UpdatePanelStateWithUserStatus -> InitializeCascadePanelState -> AddTrackedWorkspace -> UpdateWorkspaceTrust -> Heartbeat -> StartCascade -> SendUserCascadeMessage`。
-- 默认 workspace 不得放在 `~/.rcc` 等隐藏目录；LS 会对 AddTrackedWorkspace 返回 `is hidden: ignore uri`。默认使用非隐藏临时 workspace，并用红测锁住路径形状。
-- 若 RCC 与 `/Volumes/extension/code/WindsurfAPI` 使用同一 LS、同一 apiKey、同一 modelUid 都在 trajectory 返回 `an internal error occurred (trace ID: ...)`，不要继续改 RCC 请求 shape；这时真源已转为 Windsurf 上游/账号/model 可用性，需要换模型或账号做黑盒矩阵。
-
 ## 2026-05-29 Provider failover / port isolation blackbox rule
 - Recoverable provider failure routing must be proven with HTTP blackbox: first request hits primary three times, emits `[provider-switch] ... exclude_and_reroute`, then returns backup 200; next request skips cooled primary; restart passive reprobe gets exactly one primary chance before cooling again.
 - Multi-port VR tests must isolate `routingPolicyGroup` at the route-pool boundary and at traffic/error-state observations. A 5555 failure/cooldown must not let 5555 see 6666 candidates, and must not block 6666 from selecting its own group.
@@ -1656,21 +1501,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - Direct/remote Responses continuation is the only case that may restore the exact provider key, and that belongs to continuation resume metadata, not servertool followup flow policy.
 - Blackbox proof: `scripts/tests/stopless-followup-blackbox.mjs` uses two round-robin providers and must observe `crs1 -> crs2` for initial request then stopless followup.
 
-### 2026-05-29 Windsurf Kimi K2.6 UID 对齐
-- Windsurf provider 内测 Kimi K2.6 时，必须先直连 Windsurf `GetUserStatus`/LS 拿真实 Cascade `modelUid`；当前 ws-pro-3 证实 UID 是 `kimi-k2-6`，不是外部 provider 常见的 `kimi-k2.6`。
-- 5520 Windsurf 配置应使用已在 Windsurf provider 注册的 target（如 `windsurf.kimi-k2-6`）；若 VR 报 unknown model，先补 provider model registry + runtime modelTag 映射，再重启验证。
-
 ## 2026-05-29 Alias sticky queue removal rule
 - `aliasSelection` / alias sticky queues are removed from Virtual Router. Do not add `sticky-queue`, `pinAliasQueue`, or alias-selection provider pinning back; weighted/priority plus health cooldown is the only alias/provider scheduling path.
 - Use `scripts/tests/no-provider-sticky-physical-regression.mjs` with the HTTP blackbox matrix whenever touching VR routing/followup code, so provider sticky semantics cannot re-enter through Rust/TS wrappers.
-
-### 2026-05-29 Windsurf managed account isolation
-- Windsurf account aliases (`ws-pro-*`) 是 provider 内部实现细节，外部 Virtual Router/Hub/stats 当前请求链路只能看到 `windsurf.managed.<model>`；新增账号选择逻辑时必须补 bootstrap 回归防止账号 alias 外漏。
-- Windsurf session sticky 禁止跨 session “账号占用避让”自锁：同 session pinned 可用则用 pinned，否则按健康排序选最优账号；不要因为另一个 session 活跃而切走最健康账号。
-
-## 2026-05-29 Windsurf 单账号直发止血规则
-- 当用户要求先恢复 Windsurf 通信时，优先切到唯一账号直发：配置只保留 `ws-pro-3 / frost89409@gmail.com`，显式 `tokenFile = "~/.rcc/auth/windsurf-ws-pro-3.json"`，禁止健康排序、旧 token 自动扫描、账号冷却和内部切号影响发送。
-- 验证必须包含：定向回归 `windsurf-account-health-routing.spec.ts` + `windsurf-request-shape-sample.spec.ts`，全局安装/5520 restart，真实 `/v1/responses` 单跳 200，以及同 session 两跳上下文 token 回读；日志必须有 `single-account selected alias=ws-pro-3`，不能有 `ranked`/`cooldown`/切到 `ws-pro-*` 外部 provider。
 
 ## 2026-05-29 调试精华（端口/路由池隔离）
 - Router 端口是天然隔离边界：`matchedPort + routingPolicyGroup` 必须进入 Hub metadata、VR pool filter、Responses continuation store；禁止任何 group pipeline 缺失时 fallback 到 global pipeline。
@@ -1697,10 +1530,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - 2026-05-30 chat direct model rule 已废弃（2026-06-07 纠正）：router-direct 不得用 selected `providerPayload` / runtime model 覆盖当前请求 body；这会把 direct 变成 provider outbound builder。若 provider 不接受客户端 model，必须在路由/入口契约上解决，不允许 direct 层重建请求。
 
-### 2026-05-30 Windsurf Cascade poll / retry 精华
-- Windsurf provider 内的 Cascade 状态机错误必须显式终止：`WINDSURF_CASCADE_BUSY` / `WINDSURF_CASCADE_NO_PROGRESS` 是本地 Cascade executor 状态，不是上游 503；retry policy 必须视为 unrecoverable，禁止 provider-switch 再次 Send 导致 `executor is not idle` 风暴。
-- 审计卡死时同时看 provider poll 状态和请求层 retry 分类：若 provider 已抛 `retryable:false` 但仍出现重复 provider send，根因在 failure-policy / request-executor exclusion 执行链，不在 Windsurf payload shape。
-
 - 2026-05-30 chat stream_options 400 精华：若上游报 `stream_options should be set along with stream = true`，必须查最终 `provider-request.json`，不要只看 direct payload mock。OpenAI-chat 通用真源在 `provider-request-shaping-utils`：从 request/data/metadata/runtime metadata 读取 stream intent，并在最终 provider HTTP body 保留 `stream:true`；禁止 DeepSeek/provider 硬编码。
 
 ## 2026-05-30 snapshot 路径长度精华
@@ -1717,15 +1546,6 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### 2026-05-30 VR recoverable busy 精华
 - 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 阻塞指数退避重试 3 次后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。
 - 2026-05-30 router-mode relay 注意：5555 MiniMax 是 relay/HubPipeline/VR；`router-direct.hub_pipeline_failed` 只是 same-protocol direct 预选日志。预选遇到 route-pool recoverable 错误必须让请求回 RequestExecutor 唯一错误链处理，禁止吞成普通 direct skip 或改成 direct fallback。
-
-
-### 2026-05-30 Windsurf cascade busy polling fix (verified)
-- WINDSURF_CASCADE_BUSY 不再直接 429：provider runtime 轮询 GetCascadeTrajectory 直到 status=1 (IDLE)，最多 2 分钟
-- totalWaitMs=120000, pollIntervalMs=1000（cascade-continuation-block.ts）
-- 有 pollIdle 回调 → 轮询等待 idle → 重试 send；无 pollIdle → 降级 blind sleep（向后兼容）
-- 日志信号：cascade.busy.wait_idle（轮询中）、cascade.busy.final_timeout（2min 超时后）
-- 回归测试：28/28 passed（含 5 个 RED→GREEN 轮询行为测试）
-- 构建验证：v0.90.2569, build:min + install:global + restart 成功
 
 ## 2026-05-31 调试精华（Rust response effect plan 执行）
 - Rust HubPipeline `servertoolRuntimeAction` 不是终点；TS provider-response 壳必须把 effect 接回 `runRespProcessStage3ServerToolOrchestration`，否则有 executor callbacks 也会报 `requires runtime executor`。
@@ -1935,11 +1755,11 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 多端口配置下显式 `rcc start --port <port>` 只能检查/启动目标端口，禁止因同组其他端口 healthy 提前退出；用 “requested port only” 红测锁住。
 
 ### 2026-06-05 硬编码 + Fallback 架构收口精华
-- SSOT 唯一真源: `src/constants/index.ts` (API base / timeout / model / SSE caps) + `src/providers/core/runtime/provider-error-catalog.ts` (错误码) + `isWindsurfRuntimeIdentity` / `isWindsurfManagedProviderIdentity` (provider key 抽象, in `src/providers/core/contracts/windsurf-provider-contract.ts`)。
-- Provider 特例物理位置: 只允许在 Provider runtime; Hub Pipeline / Virtual Router / RequestExecutor 任何 `windsurf.managed.` / `windsurf.` / `deepseek` / `qwen` 字符串前缀特判均违规; 改用 `providerFamily` 抽象 + helper。
-- Rust `health.rs` 通用化: `clear_windsurf_managed_persisted_503_family` 已重命名为 `clear_persisted_503_family_for_provider`, 按 canonical provider key 匹配, 不特判 `windsurf.managed.` 前缀; 调用方 `record_success` 隐式传播。
+- SSOT 唯一真源: `src/constants/index.ts` (API base / timeout / model / SSE caps) + `src/providers/core/runtime/provider-error-catalog.ts` (错误码) + provider family/runtime identity 抽象。
+- Provider 特例物理位置: 只允许在 Provider runtime; Hub Pipeline / Virtual Router / RequestExecutor 任何 provider key 字符串前缀特判均违规; 改用 `providerFamily` / runtime identity 抽象 + helper。
+- Rust `health.rs` 通用化: persisted 503 family cleanup 必须按 canonical provider key / reason 匹配，禁止 provider 前缀硬编码；调用方 `record_success` 隐式传播。
 - 物理删除铁律: 迁出后旧 Set / 旧 `if` 块 / 旧常量字符串必须删除; 保留必须经 `silent-failure-audit.mjs` + `hardcode-audit.mjs` 报警并写理由; 不得"不接入 / 不调用 / 注释掉"代替删除。
-- 红测先行契约: TS 端 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts` 锁住 3 个 server-runtime 文件零 `windsurf.managed.` / `windsurf.` 字面; Rust 端 `record_success_clears_persisted_503_family_for_non_windsurf_provider` 锁住 `health.rs` 双向行为 (deepseek.chat 清理 / qwen.turbo 不串台); 后续若新文件引入 provider key 字符串硬编码, 红测应 fail。
+- 红测先行契约: TS 端 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts` 锁住 server-runtime 文件零 provider key 前缀特判；Rust 端 health 双向 fixture 锁住同 family 清理 / 不串台；后续若新文件引入 provider key 字符串硬编码, 红测应 fail。
 - 后续接手 Phase 4 必读: 静默 catch 清理前先跑 `node scripts/ci/silent-failure-audit.mjs` 拿基线 (488 / 5); 改后命中数 < 基线即合规; 新增 catch 必须满足 HAS_HANDLED_RE (warn/error/logger/report/emit/record)。
 - 后续接手 Phase 5 必读: 新建 `scripts/ci/hardcode-audit.mjs` 扫 `src/` + `sharedmodule/llmswitch-core/src/` 找新增 provider key 字符串硬编码; package.json 加 `verify:hardcode` 串接 silent-failure-audit + hardcode-audit + hub-deterministic-audit + llmswitch-rustification-audit + check-file-line-limit。
 - cargo test 副作用污染模式: 跑 `cargo test` 后会触碰 6-12 个 timestamp/auto-gen 文件, commit 前必须 `git status --porcelain` + 逐个 `git restore -- <path>` 排除; 唯一真实改动在 `health.rs`, 但 cargo 会再次标 M, 需 `git restore -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs` 恢复 commit state。

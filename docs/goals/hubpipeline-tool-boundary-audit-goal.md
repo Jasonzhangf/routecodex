@@ -44,7 +44,7 @@
 - TS 中遍历/过滤/重写 `messages`、`input`、`tool_calls`、`function_call_output`、`required_action`、servertool 或 apply_patch 语义。
 - request outbound 把工具语义转成普通 `message.content` / `input_text`。
 - response outbound 试图修复 request inbound/outbound 已经污染的历史。
-- Hub Pipeline 或 Virtual Router 出现 provider-specific 分支、MiniMax/Windsurf/Cascade/MCP 特例。
+- Hub Pipeline 或 Virtual Router 出现 provider-specific 分支、MiniMax/MCP/任意 provider runtime 特例。
 - 任一阶段用 fallback、best-effort、try/catch ignore、non-blocking swallow 隐藏工具错误。
 - direct path 进入 Hub Pipeline conversion 或把 direct 错误 reroute 到 executor。
 

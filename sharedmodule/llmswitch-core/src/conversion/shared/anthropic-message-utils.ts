@@ -4,7 +4,6 @@ import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { normalizeChatMessageContent } from './chat-output-normalizer.js';
 import { jsonClone, type JsonValue, type JsonObject } from '../hub/types/json.js';
 import { mapAnthropicToolsToChat } from './anthropic-message-utils-tool-schema.js';
-import { coerceAnthropicAliasRecord } from './anthropic-message-utils-openai-response.js';
 import {
   flattenAnthropicText,
   isObject,
@@ -14,9 +13,7 @@ import {
   requireTrimmedString,
   safeJson
 } from './anthropic-message-utils-core.js';
-export { denormalizeAnthropicToolName, normalizeAnthropicToolName } from './anthropic-message-utils-core.js';
-export { mapAnthropicToolsToChat, mapChatToolsToAnthropicTools } from './anthropic-message-utils-tool-schema.js';
-export type { BuildAnthropicFromOpenAIOptions } from './anthropic-message-utils-openai-response.js';
+export { mapChatToolsToAnthropicTools } from './anthropic-message-utils-tool-schema.js';
 export { buildAnthropicFromOpenAIChat } from './anthropic-message-utils-openai-response.js';
 export { buildAnthropicRequestFromOpenAIChat } from './anthropic-message-utils-openai-request.js';
 
@@ -68,6 +65,19 @@ function invertAnthropicAliasMap(source: Record<string, string> | undefined): Re
     }
   }
   return Object.keys(inverted).length ? inverted : undefined;
+}
+
+function coerceAnthropicAliasRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === 'string') {
+      out[key] = raw;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function hasVisibleText(value: string | undefined): boolean {

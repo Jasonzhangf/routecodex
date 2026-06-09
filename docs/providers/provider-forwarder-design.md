@@ -55,8 +55,7 @@
 ### 1.3 现有等价物
 
 - **chatgpt family** 现状：用 N 个独立 provider entry 模拟，**没有 family 概念**。
-- **多 apiKey** 现状：`ApiKeyAuth.entries` 数组 + Windsurf 账号池（`windsurf-account-pool`），**但都是单 provider 内部**，没有跨 provider 调度。
-- **Windsurf multi-account** 现状：`windsurf-account-store.ts` / `windsurf-account-pool.ts` 已经实现了"同 provider 多账号"的 sticky + cooldown + 选择，但**没有暴露给 openai/responses/anthropic**。
+- **多 apiKey** 现状：`ApiKeyAuth.entries` 数组属于单 provider 内部认证配置，不提供跨 provider 调度。
 - **provider-direct / router-direct** 现状：direct passthrough 模式只有"单 provider + hooks"，没有聚合。
 
 ---
@@ -115,7 +114,7 @@ export interface ProviderForwarderProfile {
   /** 加权策略使用的 weights 兜底（target 未覆盖时） */
   weights?: Record<string, number>;
   targets: ProviderForwarderTarget[];
-  /** 可选：sticky session 维度（与 Windsurf pool 同语义） */
+  /** 可选：sticky session 维度 */
   stickyKey?: 'session' | 'request' | 'none';
 }
 ```
@@ -223,7 +222,7 @@ pub(crate) struct ForwarderRegistry {
 - **sticky session**（Rust 侧，host 只传 sessionId）：
   - `forwarder.rs` 持有 sticky map：`HashMap<(session_id, forwarder_id), real_provider_key>`
   - `stickyKey = 'session'` 时用 sessionId 哈希固定 target；session 内不再切换
-  - **与 `WindsurfAccountPool` 无关**（windsurf 有自己的 cooldown + availability 感知，forwarder 不复用、不替代）
+  - **只属于 forwarder 自身**，不复用任何 provider runtime 内部账号池或状态机
 
 | 层 | 新增 | 修改 |
 | --- | --- | --- |
@@ -305,8 +304,7 @@ Host 收到:
 1. **provider 命名空间冲突**：forwarder id 用 `fwd.` 前缀，与 ProviderProfile id 隔离；但需要 bootstrap 阶段校验前缀唯一
 2. **跨 forwarder 共享 runtimeKey**：不允许。两个 forwarder 不能 resolve 同一 (provider_key, model)，bootstrap 阶段 fail-fast
 3. **加权策略 + health 的优先级**：weighted 模式下 health 未达标的 target 是直接跳过还是降权？提案：**直接跳过**（与 `RouteLoadBalancer` 现有行为一致），不引入新语义
-4. **Windsurf 兼容**：windsurf multi-account 是否要并入 forwarder？**不并入**（windsurf 已是 sticky + cooldown 成熟实现，强行合并会破坏其 sticky 语义），仅在文档中标注 forwarder **不接管** windsurf account pool
-5. **配置漂移**：forwarder 引用了不存在的 providerId，bootstrap 阶段 fail-fast（不静默跳过）
+4. **配置漂移**：forwarder 引用了不存在的 providerId，bootstrap 阶段 fail-fast（不静默跳过）
 
 ---
 
@@ -316,7 +314,6 @@ Host 收到:
 - [ ] model-first / provider-first 二选一机制是否覆盖需求？
 - [ ] weighted / round-robin / priority 三策略够用？还是需要 least-loaded / health-weighted 一起落地？
 - [ ] 是否同意"forwarder 全 disabled → fail-fast"，不引入 fallback？
-- [ ] 是否同意 forwarder **不接管** windsurf account pool（仅用于 openai/responses/anthropic/gemini 通用路径）？
 - [ ] 是否同意把 forwarder 语义真源放在 `router-hotpath-napi/src/virtual_router_engine/forwarder.rs`（Rust）？
 
 审批后我会按 §3.6 文件改动总览执行，按 §5 验证标准回归。

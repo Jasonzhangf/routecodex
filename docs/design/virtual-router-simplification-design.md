@@ -424,7 +424,7 @@ match capability {
 
 | 位置 | 内容 | 建议 |
 |------|------|------|
-| `provider_bootstrap.rs` | Header 注入、Windsurf 特判、provider type 检测 | **保留**。这是 config bootstrap 阶段，不在请求热路径。但应移出 `virtual_router_engine/` 到独立的 `bootstrap/` 模块 |
+| `provider_bootstrap.rs` | Header 注入、provider type 检测 | **保留**。这是 config bootstrap 阶段，不在请求热路径。但应移出 `virtual_router_engine/` 到独立的 `bootstrap/` 模块 |
 | `hub_pipeline_blocks/protocol.rs` | 协议别名映射、endpoint 推断 | **保留**。这是 pipeline 的协议层职责 |
 | `hub_pipeline_blocks/process_mode.rs` | "sticky"/"force" 指令透传 | **保留**。这是指令透传机制，与 provider 无关 |
 | `text_harvest_detection.rs` | DeepSeek/Qwen text tool family | **保留**。这是 tool governance 层职责 |

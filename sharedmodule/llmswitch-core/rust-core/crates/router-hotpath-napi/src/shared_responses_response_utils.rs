@@ -4,15 +4,15 @@ use serde_json::{Map, Value};
 
 // feature_id: hub.response_responses_chat_projection
 
+use crate::hub_bridge_actions::pipeline::run_bridge_action_pipeline;
+use crate::hub_bridge_actions::{
+    BridgeActionDescriptor, BridgeActionPipelineInput, BridgeActionState,
+};
+use crate::hub_bridge_policies::resolve_bridge_policy_actions_for_tokens;
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot,
     project_message_reasoning_text, sanitize_reasoning_tagged_text,
 };
-use crate::hub_bridge_actions::{
-    BridgeActionDescriptor, BridgeActionPipelineInput, BridgeActionState,
-};
-use crate::hub_bridge_actions::pipeline::run_bridge_action_pipeline;
-use crate::hub_bridge_policies::resolve_bridge_policy_actions_for_tokens;
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::responses_reasoning_registry::{
     register_responses_passthrough_json, register_responses_payload_snapshot_json,
@@ -632,7 +632,9 @@ fn register_responses_payload_snapshot_for_chat(
     chat: &mut Value,
     response: &Value,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let id = chat.as_object().and_then(|row| read_trimmed_string(row.get("id")));
+    let id = chat
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("id")));
     let request_id = chat
         .as_object()
         .and_then(|row| read_trimmed_string(row.get("request_id")))
@@ -677,7 +679,9 @@ pub(crate) fn build_chat_response_from_responses_full(
         let result = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
         return Ok(BuildChatResponseFromResponsesFullOutput {
             result,
-            id: payload.as_object().and_then(|row| read_trimmed_string(row.get("id"))),
+            id: payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("id"))),
             request_id: payload
                 .as_object()
                 .and_then(|row| read_trimmed_string(row.get("request_id"))),
@@ -735,7 +739,8 @@ pub fn build_chat_response_from_responses_json(payload_json: String) -> NapiResu
 pub fn build_chat_response_from_responses_full_json(input_json: String) -> NapiResult<String> {
     let input: BuildChatResponseFromResponsesFullInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = build_chat_response_from_responses_full(input).map_err(napi::Error::from_reason)?;
+    let output =
+        build_chat_response_from_responses_full(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -988,6 +993,10 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         response_payload.insert("reasoning".to_string(), Value::Object(reasoning.clone()));
     }
     let response_value = Value::Object(response_payload.clone());
+    let completed_payload = serde_json::json!({
+        "type":"response.completed",
+        "response": Value::Object(response_payload.clone())
+    });
     let done_payload = serde_json::json!({"type":"response.done","response":response_value});
     let mut frames: Vec<String> = Vec::new();
     if let Some(required_action) = required_action {
@@ -1002,19 +1011,6 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
                 required_payload
             ));
         }
-        if !seen_done {
-            frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
-        }
-        if !seen_done_chunk {
-            frames.push("data: [DONE]\n\n".to_string());
-        }
-        return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
-    }
-    if status == "completed" || !probe.is_empty() {
-        let completed_payload = serde_json::json!({
-            "type":"response.completed",
-            "response": Value::Object(response_payload)
-        });
         if !seen_completed {
             frames.push(format!(
                 "event: response.completed\ndata: {}\n\n",
@@ -1024,8 +1020,17 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         if !seen_done {
             frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         }
-        if !seen_done_chunk {
-            frames.push("data: [DONE]\n\n".to_string());
+        return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
+    }
+    if status == "completed" || !probe.is_empty() {
+        if !seen_completed {
+            frames.push(format!(
+                "event: response.completed\ndata: {}\n\n",
+                completed_payload
+            ));
+        }
+        if !seen_done {
+            frames.push(format!("event: response.done\ndata: {}\n\n", done_payload));
         }
     }
     serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -1036,7 +1041,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_frames_for_required_action_must_not_emit_completed() {
+    fn terminal_frames_for_required_action_emit_completed_before_done() {
         let probe = serde_json::json!({
             "id": "resp_required_terminal",
             "status": "requires_action",
@@ -1060,11 +1065,15 @@ mod tests {
         let frames: Vec<String> = serde_json::from_str(&frames_json).unwrap();
         let wire = frames.join("");
         assert!(wire.contains("event: response.required_action"));
-        assert!(!wire.contains("event: response.completed"));
+        assert!(wire.contains("event: response.completed"));
         assert!(wire.contains("event: response.done"));
         assert!(wire.contains("data: [DONE]"));
         assert!(
             wire.find("event: response.required_action").unwrap()
+                < wire.find("event: response.completed").unwrap()
+        );
+        assert!(
+            wire.find("event: response.completed").unwrap()
                 < wire.find("event: response.done").unwrap()
         );
     }
@@ -1261,11 +1270,12 @@ mod tests {
             chat["choices"][0]["message"]["reasoning_content"],
             "native bridge summary"
         );
-        let retained = crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(
-            "req_full".to_string(),
-        )
-        .expect("registry lookup")
-        .expect("registered snapshot");
+        let retained =
+            crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(
+                "req_full".to_string(),
+            )
+            .expect("registry lookup")
+            .expect("registered snapshot");
         let retained_json: Value = serde_json::from_str(&retained).expect("snapshot json");
         assert_eq!(retained_json["id"], "resp_full");
     }

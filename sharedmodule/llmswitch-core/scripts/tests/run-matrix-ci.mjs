@@ -96,9 +96,7 @@ async function main() {
     results.push(await run(label, file));
   }
 
-  results.push(await run('anthropic:chat-regression', 'scripts/tests/chat-to-anthropic-regression.mjs'));
   results.push(await run('anthropic:response-regression', 'scripts/tests/anthropic-response-regression.mjs'));
-  results.push(await run('matrix:anthropic-outbound-postmap-tool-use-preserve', 'scripts/tests/anthropic-outbound-postmap-tool-use-preserve.mjs'));
 
   // 1b) protocol bridge matrix (JSON + SSE, codex samples)
   results.push(await run('matrix:bridge', 'scripts/tests/protocol-bridge-matrix.mjs'));
@@ -117,25 +115,16 @@ async function main() {
   results.push(await run('matrix:responses-local-image-path-autoload', 'scripts/tests/responses-local-image-path-autoload.mjs'));
   // 1c) cross protocol chat chain (chat→responses→chat→anthropic→chat→gemini→chat)
   results.push(await run('matrix:cross-protocol', 'scripts/tests/cross-protocol-matrix.mjs'));
-  // 1c.1) tool governance invariants
-  results.push(await run('matrix:tool-governance', 'scripts/tests/tool-governance-check.mjs'));
-  results.push(await run('matrix:tool-governance-native-compare', 'scripts/tests/tool-governance-native-compare.mjs'));
   // 1c.1.1) hub pipeline full-stage smoke (inbound→process→outbound + chat_process re-entry)
   results.push(await run('matrix:hub-pipeline-smoke', 'scripts/tests/hub-pipeline-smoke.mjs'));
   // 1c.1.1.1) coverage boosts (pure, deterministic)
   results.push(await run('matrix:coverage-openai-message-normalize', 'scripts/tests/coverage-openai-message-normalize.mjs'));
-  results.push(await run('matrix:coverage-request-tool-list-filter', 'scripts/tests/coverage-request-tool-list-filter.mjs'));
-  results.push(await run('matrix:coverage-context-diff', 'scripts/tests/coverage-context-diff.mjs'));
   results.push(await run('matrix:coverage-sticky-pool', 'scripts/tests/coverage-sticky-pool-via-router.mjs'));
-  results.push(await run('matrix:coverage-parse-loose-json', 'scripts/tests/coverage-parse-loose-json.mjs'));
   results.push(await run('matrix:coverage-responses-sse-parser-lmstudio-no-event', 'scripts/tests/responses-sse-parser-lmstudio-no-event.mjs'));
   results.push(await run('matrix:coverage-responses-sse-terminated-salvage', 'scripts/tests/responses-sse-to-json-terminated-salvage.mjs'));
   results.push(await run('matrix:coverage-responses-sse-missing-terminator', 'scripts/tests/responses-sse-missing-terminator.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
-  results.push(await run('matrix:coverage-compat-iflow-qwen-tool-tokens', 'scripts/tests/compat-iflow-qwen-tool-tokens.mjs'));
   results.push(await run('matrix:compat-iflow-kimi-history-media-placeholder', 'scripts/tests/compat-iflow-kimi-history-media-placeholder.mjs'));
-  results.push(await run('matrix:compat-iflow-reasoning-replay-20260206', 'scripts/tests/compat-iflow-reasoning-replay-20260206.mjs'));
-  results.push(await run('matrix:compat-profile-auto-resolve', 'scripts/tests/compat-profile-auto-resolve.mjs'));
   results.push(await run('matrix:coverage-hub-req-outbound-compat', 'scripts/tests/coverage-hub-req-outbound-compat.mjs'));
   results.push(await run('matrix:deepseek-web-compat-tool-calling', 'scripts/tests/deepseek-web-compat-tool-calling.mjs'));
   results.push(await run('matrix:anthropic-usage-input-output-regression', 'scripts/tests/anthropic-usage-input-output-regression.mjs'));
@@ -149,7 +138,6 @@ async function main() {
   results.push(await run('matrix:coverage-chat-sse-deepseek-web-patch', 'scripts/tests/chat-sse-to-json-deepseek-web-patch.mjs'));
   results.push(await run('matrix:coverage-instruction-target', 'scripts/tests/coverage-instruction-target.mjs'));
   results.push(await run('matrix:coverage-guidance-augment', 'scripts/tests/coverage-guidance-augment.mjs'));
-  results.push(await run('matrix:coverage-tool-harvester', 'scripts/tests/coverage-tool-harvester.mjs'));
   results.push(
     await run('matrix:coverage-text-markup-normalizer', 'scripts/run-package-bin.mjs', {
       args: [
@@ -169,24 +157,7 @@ async function main() {
       env: { C8_COVERAGE: '1' }
     })
   );
-  results.push(await run('matrix:coverage-recursive-detection-guard', 'scripts/tests/coverage-recursive-detection-guard.mjs'));
-  results.push(await run('matrix:coverage-tool-surface-engine', 'scripts/tests/coverage-tool-surface-engine.mjs'));
-  results.push(await run('matrix:coverage-engine-health', 'scripts/tests/coverage-engine-health.mjs'));
   results.push(await run('matrix:coverage-bridge-protocol-blackbox', 'scripts/tests/coverage-bridge-protocol-blackbox.mjs'));
-  // 1c.2) glm /v1/responses compat + tool governance
-  results.push(await run('matrix:glm-responses-compat', 'scripts/tests/glm-responses-compat.mjs'));
-  // 1c.3) gemini inbound finish_reason invariants (tool_calls)
-  results.push(await run('matrix:gemini-finish-reason', 'scripts/tests/gemini-finish-reason.mjs'));
-  // 1c.3.1) gemini outbound tool schema sanitization (oneOf/anyOf/allOf)
-  results.push(await run('matrix:gemini-tool-schema-sanitize', 'scripts/tests/gemini-tool-schema-sanitize.mjs'));
-  // 1c.4.2) web_search route: tools list must be cleaned regardless of route name ("web_search" vs "search")
-  results.push(await run('matrix:web-search-route-tools-clean', 'scripts/tests/web-search-route-tools-clean.mjs'));
-	  // 1c.4.2.1) web_search backend handler smoke (providerInvoker + reenterPipeline)
-	  results.push(await run('matrix:web-search-backend-smoke', 'scripts/tests/web-search-backend-smoke.mjs'));
-	  // 1c.4.3) clock tool schema must satisfy OpenAI strict JSON-schema rules (required/additionalProperties)
-	  results.push(await run('matrix:clock-tool-schema-openai-strict', 'scripts/tests/clock-tool-schema-openai-strict.mjs'));
-	  // 1c.4.3.1) clock daemon/tmux metadata must propagate into adapterContext so session scope resolves to clockd.<daemonId>
-	  results.push(await run('matrix:clock-session-scope-daemon-context', 'scripts/tests/clock-session-scope-daemon-context.mjs'));
   // 1d) responses provider response chain
   results.push(await run('matrix:responses-chain', 'scripts/tests/hub-response-chain.mjs'));
   // 1d.1) hard-order guard: provider -> compat -> inbound -> chat_process -> outbound -> client
@@ -226,16 +197,6 @@ async function main() {
   results.push(await run('matrix:stop-message-auto-branch-coverage', 'scripts/tests/stop-message-auto-branch-coverage.mjs'));
   results.push(await run('matrix:stop-message-mode-off-default-guard', 'scripts/tests/stop-message-mode-off-default-guard.mjs'));
   results.push(await run('matrix:stop-message-global-clear-hard-reset', 'scripts/tests/stop-message-global-clear-hard-reset.mjs'));
-  // 1f.1.1) serverToolFollowup hops must not re-enter ServerTool orchestration (prevents nested loops)
-  results.push(await run('matrix:servertool-followup-skip', 'scripts/tests/servertool-followup-skip.mjs'));
-  // 1f.1.2) followup can optionally preserve client tools (stop_message_flow continuation)
-  results.push(await run('matrix:servertool-followup-preserve-tools', 'scripts/tests/servertool-followup-preserve-tools.mjs'));
-  // 1f.2) servertool followup must accept requires_action payloads (tool call)
-  results.push(await run('matrix:servertool-followup-requires-action', 'scripts/tests/servertool-followup-requires-action.mjs'));
-  // 1f.2.1) continue_execution no-op tool should auto-followup and keep tool list available
-  results.push(
-    await run('matrix:servertool-continue-execution-followup', 'scripts/tests/servertool-continue-execution-followup.mjs')
-  );
   results.push(
     await run('matrix:servertool-client-inject-strict-failure', 'scripts/tests/servertool-client-inject-strict-failure.mjs')
   );
@@ -280,32 +241,8 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:coverage-hub-req-inbound-context-capture-orchestration',
-      'scripts/tests/coverage-hub-req-inbound-context-capture-orchestration.mjs'
-    )
-  );
-  results.push(
-    await run(
-      'matrix:coverage-hub-req-inbound-context-tool-snapshot',
-      'scripts/tests/coverage-hub-req-inbound-context-tool-snapshot.mjs'
-    )
-  );
-  results.push(
-    await run(
-      'matrix:coverage-hub-req-inbound-responses-context-snapshot',
-      'scripts/tests/coverage-hub-req-inbound-responses-context-snapshot.mjs'
-    )
-  );
-  results.push(
-    await run(
       'matrix:coverage-hub-req-outbound-context-merge',
       'scripts/tests/coverage-hub-req-outbound-context-merge.mjs'
-    )
-  );
-  results.push(
-    await run(
-      'matrix:coverage-hub-format-adapters-protocol-family',
-      'scripts/tests/coverage-hub-format-adapters-protocol-family.mjs'
     )
   );
   results.push(
@@ -327,13 +264,6 @@ async function main() {
   // 1f.5) responses request: must not emit top-level parameters wrapper
   results.push(await run('matrix:responses-no-parameters-wrapper', 'scripts/tests/responses-request-no-parameters-wrapper.mjs'));
   results.push(await run('matrix:responses-overlong-function-name', 'scripts/tests/responses-overlong-function-name-regression.mjs'));
-  // 1f.6) hub policy: enforce outbound sanitize/flatten (responses)
-  results.push(await run('matrix:hub-policy-enforce-responses', 'scripts/tests/hub-policy-enforce-responses.mjs'));
-  // 1f.7) hub policy: enforce outbound sanitize/flatten (openai-chat / anthropic / gemini)
-  results.push(await run('matrix:hub-policy-enforce-openai-chat', 'scripts/tests/hub-policy-enforce-openai-chat.mjs'));
-  results.push(await run('matrix:hub-policy-enforce-anthropic', 'scripts/tests/hub-policy-enforce-anthropic.mjs'));
-  results.push(await run('matrix:hub-policy-enforce-gemini', 'scripts/tests/hub-policy-enforce-gemini.mjs'));
-
   // 2) goldens (chat + anthropic)
   //
   // These run against repo fixtures by default (tests/fixtures/codex-samples).

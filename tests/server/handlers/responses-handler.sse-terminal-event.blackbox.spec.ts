@@ -191,8 +191,10 @@ describe('responses-handler SSE terminal contract', () => {
 
       expect(response.status).toBe(200);
       expect(text).toContain('event: response.required_action');
-      expect(text).not.toContain('event: response.completed');
+      expect(text).toContain('event: response.completed');
       expect(text).toContain('event: response.done');
+      expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
+      expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');
     });

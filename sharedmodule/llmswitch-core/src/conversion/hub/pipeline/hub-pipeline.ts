@@ -6,7 +6,6 @@ import {
 } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
 import type { SseProtocol } from "../../../sse/index.js";
 import { defaultSseCodecRegistry } from "../../../sse/index.js";
-import { setHubPolicyRuntimePolicy } from "../policy/policy-engine.js";
 import { executeChatProcessEntryPipeline } from "./hub-pipeline-execute-chat-process-entry.js";
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";
 import { clearHubStageTiming } from "./hub-stage-timing.js";
@@ -66,11 +65,7 @@ function updateRouterRuntimeDeps(args: {
   if (!deps || typeof deps !== "object") return;
   if ("healthStore" in deps) config.healthStore = deps.healthStore ?? undefined;
   if ("routingStateStore" in deps) config.routingStateStore = (deps.routingStateStore ?? undefined) as any;
-  try {
-    routerEngine.updateDeps({ healthStore: config.healthStore ?? null, routingStateStore: (config.routingStateStore ?? null) as any });
-  } catch (updateDepsError) {
-    logHubPipelineNonBlockingError("updateRuntimeDeps.routerEngine.updateDeps", updateDepsError);
-  }
+  routerEngine.updateDeps({ healthStore: config.healthStore ?? null, routingStateStore: (config.routingStateStore ?? null) as any });
 }
 
 function createHubPipelineRouterEngine(config: HubPipelineConfig): VirtualRouterRuntime {
@@ -79,7 +74,6 @@ function createHubPipelineRouterEngine(config: HubPipelineConfig): VirtualRouter
     routingStateStore: config.routingStateStore as any,
   });
   routerEngine.initialize(config.virtualRouter);
-  setHubPolicyRuntimePolicy(config.policy);
   return routerEngine;
 }
 

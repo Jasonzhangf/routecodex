@@ -11,13 +11,10 @@ async function loadBridge() {
   const responsesBridge = await import(
     pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')).href
   );
-  const requestAdapter = await import(
-    pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'shared', 'responses-request-adapter.js')).href
-  );
   return {
     buildResponsesRequestFromChat: responsesBridge.buildResponsesRequestFromChat,
-    captureResponsesContext: requestAdapter.captureResponsesContext,
-    buildChatRequestFromResponses: requestAdapter.buildChatRequestFromResponses
+    captureResponsesContext: responsesBridge.captureResponsesContext,
+    buildChatRequestFromResponses: responsesBridge.buildChatRequestFromResponses
   };
 }
 

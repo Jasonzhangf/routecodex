@@ -31,8 +31,7 @@ export interface OpenAIStandardConfig extends ModuleConfig {
     | 'gemini-http-provider'
     | 'deepseek-http-provider'
     | 'mimoweb-provider'
-    | 'mock-provider'
-    | 'windsurf-chat-provider';
+    | 'mock-provider';
   config: {
     // 服务类型标识 (必需)
     providerType: ProviderType;

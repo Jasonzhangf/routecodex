@@ -53,7 +53,7 @@
 ### F. CI 门禁收口
 - 已新增到 `scripts/tests/ci-jest.mjs`：
   - `responses-cross-protocol-audit-matrix.spec.ts`
-  - `real-sample-hub-io-compare.spec.ts`
+  - 旧 `real-sample-hub-io-compare.spec.ts` 已删除；不得作为当前 gate 引用。
   - `provider-response-converter.unified-semantics.spec.ts`
   - `provider-response-converter.servertool-regression.spec.ts`
   - `provider-direct-pipeline.spec.ts`
@@ -70,7 +70,7 @@
 - `82 tests passed`
 
 ## 剩余风险
-1. `tests/sharedmodule/real-sample-hub-io-compare.spec.ts` 依赖本机 codex-samples，CI 环境可能无样本导致 skip（不影响核心 matrix 单元门禁，但影响“真实样本回放覆盖率”）。
+1. 旧 `tests/sharedmodule/real-sample-hub-io-compare.spec.ts` 已删除；真实样本回放不能继续挂旧 gate，必须迁入现存 matrix/fixture gate 后再声明覆盖。
 2. SSE completed 与 JSON final 的逐字段等价矩阵，当前更多依赖现有 converter/servertool suites；后续可追加到 `responses-cross-protocol-audit-matrix.spec.ts` 的统一断言函数中。
 
 ## 唯一性论证

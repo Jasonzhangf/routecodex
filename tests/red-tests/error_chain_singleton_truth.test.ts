@@ -202,7 +202,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
     expect(decision).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,240}hasAlternativeCandidate/);
     expect(executionPlan).not.toMatch(/recoverableProviderReroute|terminalRecoverableReroute/);
-    expect(executionPlan).not.toMatch(/providerKey\.startsWith\(['"]windsurf\./);
+    expect(executionPlan).not.toMatch(/providerKey\.startsWith\(['"][a-z0-9_-]+\./i);
   });
 
   it('executor retry path does not locally reroute unrecoverable failures away from direct failure', () => {
@@ -214,6 +214,6 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
   it('executor retry path does not locally classify quota or periodic recovery candidates', () => {
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
     expect(executionPlan).not.toMatch(/isTerminalQuotaRerouteCandidate/);
-    expect(executionPlan).not.toMatch(/WINDSURF_WEEKLY_QUOTA_EXHAUSTED|WINDSURF_ACCOUNT_POOL_COOLDOWN|quotaScope|quotaReason|daily_limit/);
+    expect(executionPlan).not.toMatch(/quotaScope|quotaReason|daily_limit/);
   });
 });

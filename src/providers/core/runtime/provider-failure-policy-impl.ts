@@ -32,10 +32,6 @@ import {
   PROVIDER_NETWORK_CODES,
   PROVIDER_UNRECOVERABLE_CODES
 } from './provider-error-catalog.js';
-import {
-  WINDSURF_BLOCKING_RECOVERABLE_CODES,
-  WINDSURF_UNRECOVERABLE_CODES
-} from '../contracts/windsurf-provider-contract.js';
 import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-contract.js';
 
 
@@ -43,23 +39,12 @@ import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-con
 // Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
 const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
   ...PROVIDER_UNRECOVERABLE_CODES,
-  ...WINDSURF_UNRECOVERABLE_CODES,
   ...DEEPSEEK_UNRECOVERABLE_CODES
 ]);
 const NETWORK_ERROR_CODE_SET: ReadonlySet<string> = PROVIDER_NETWORK_CODES;
 const BLOCKING_RECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
-  ...PROVIDER_BLOCKING_RECOVERABLE_CODES,
-  ...WINDSURF_BLOCKING_RECOVERABLE_CODES
+  ...PROVIDER_BLOCKING_RECOVERABLE_CODES
 ]);
-
-function isWindsurfCanceledMessageLike(value: unknown): boolean {
-  if (typeof value !== 'string') {
-    return false;
-  }
-  const reason = value.trim().toLowerCase();
-  return reason.includes('pending stream has been canceled')
-    || reason.includes('err_http2_stream_cancel');
-}
 
 function isHostFailureStage(stage?: string): boolean {
   return stage === 'host.response_contract';
@@ -348,8 +333,6 @@ export function resolveProviderFailureClassification(args: {
     errorCode === 'ERR_HTTP2_STREAM_CANCEL'
     || upstreamCode === 'ERR_HTTP2_STREAM_CANCEL'
     || nestedCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || isWindsurfCanceledMessageLike(reason)
-    || isWindsurfCanceledMessageLike(nestedMessage)
   ) {
     return 'recoverable';
   }
@@ -383,7 +366,6 @@ export function resolveProviderFailureClassification(args: {
     reason.includes('[mimoweb] upstream assistant response was empty')
     || reason.includes('[mimoweb] upstream emitted tool markers but no tool calls could be harvested')
     || reason.includes('[mimoweb] upstream repeated prior tool call after tool_result')
-    || reason.includes('[windsurf] upstream repeated prior tool call after tool_result')
     || reason.includes('[mimoweb] serialized query exceeds empty-safe limit')
   ) {
     return 'special_400';
@@ -914,11 +896,10 @@ export function resolveProviderFailureExclusionDecision(args: {
 }): ProviderFailureExclusionDecision {
   const normalizedErrorCode = normalizeProviderFailureCodeKey(args.errorCode);
   const normalizedUpstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
-  const isWindsurfStreamCanceled =
+  const isStreamCanceled =
     normalizedErrorCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || normalizedUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || isWindsurfCanceledMessageLike((args as { reason?: unknown }).reason);
-  if (isWindsurfStreamCanceled && args.hasAlternativeCandidate) {
+    || normalizedUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL';
+  if (isStreamCanceled && args.hasAlternativeCandidate) {
     return {
       excludeCurrentProvider: true,
       retryAction: 'reroute_explicit_alternative'
@@ -1080,15 +1061,6 @@ export function isProviderFailureHealthNeutral(args: {
     return true;
   }
   if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
-    return true;
-  }
-  if (errorCode === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
-    return true;
-  }
-  if (errorCode === 'WINDSURF_CASCADE_BUSY' || upstreamCode === 'WINDSURF_CASCADE_BUSY') {
-    return true;
-  }
-  if (errorCode === 'WINDSURF_CASCADE_NO_PROGRESS' || upstreamCode === 'WINDSURF_CASCADE_NO_PROGRESS') {
     return true;
   }
   if (args.classification === 'recoverable') {

@@ -101,7 +101,7 @@ describe("sendPipelineResponse responses store integration", () => {
     "openai-responses-router-gpt-5.3-codex-native-sse-no-final-delimiter",
     "openai-responses-router-gpt-5.3-codex-native-sse-tail-store",
     "openai-responses-sdfv.key1-gpt-5.4-live-shape-direct-sse",
-    "openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867",
+    "openai-responses-openai.key1-gpt-5.4-none-20260523T102906604-222183-867",
     "openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867",
     "resp_native_sse_premature_persist_1",
     "resp_native_sse_metadata_only_store_1",
@@ -110,11 +110,11 @@ describe("sendPipelineResponse responses store integration", () => {
     "resp_native_sse_tail_store_1",
     "resp_04c9be1feb153bec016a1539bb89a08196b1c2349ac465d6a3",
     "resp_1779503404150",
-    "resp_windsurf_json_resume_1",
+    "resp_provider_json_resume_1",
     "openai-responses-router-gpt-5.3-codex-orphan-cleanup",
-    "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup",
-    "resp_windsurf_orphan_cleanup_1",
-    "req-windsurf-history-tool-next",
+    "openai-responses-openai.key1-gpt-5.4-none-orphan-cleanup",
+    "resp_provider_orphan_cleanup_1",
+    "req-provider-history-tool-next",
   ];
 
   afterEach(async () => {
@@ -133,13 +133,13 @@ describe("sendPipelineResponse responses store integration", () => {
     }
   });
 
-  it("RED: streamed Windsurf tool_calls records provider context so history plus tools restore together", async () => {
+  it("RED: streamed provider tool_calls records provider context so history plus tools restore together", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const providerRequestId =
-      "openai-responses-windsurf.ws-pro-5-gpt-5.4-none-20260523T102906604-222183-867";
+      "openai-responses-openai.key1-gpt-5.4-none-20260523T102906604-222183-867";
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-20260523T102906604-222183-867";
     const responseId = "resp_1779503404150";
@@ -186,7 +186,7 @@ describe("sendPipelineResponse responses store integration", () => {
               type: "function_call",
               name: "exec_command",
               arguments: '{"cmd":"pwd"}',
-              call_id: "call_windsurf_history_tool",
+              call_id: "call_provider_history_tool",
             },
           ],
         },
@@ -236,7 +236,7 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
     const restored = store.resumeLatestResponsesContinuationByScope({
-      requestId: "req-windsurf-history-tool-next",
+      requestId: "req-provider-history-tool-next",
       sessionId: "rcc-routecodex-2",
       payload: {
         model: "gpt-5.3-codex",
@@ -249,7 +249,7 @@ describe("sendPipelineResponse responses store integration", () => {
           },
           {
             type: "function_call_output",
-            call_id: "call_windsurf_history_tool",
+            call_id: "call_provider_history_tool",
             output: "/Users/fanzhang/Documents/github/routecodex",
           },
           {
@@ -269,7 +269,7 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(restored?.payload.input).toEqual([
       {
         type: "function_call_output",
-        call_id: "call_windsurf_history_tool",
+        call_id: "call_provider_history_tool",
         output: "/Users/fanzhang/Documents/github/routecodex",
       },
       {
@@ -1413,7 +1413,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-resume";
-    const responseId = "resp_windsurf_json_resume_1";
+    const responseId = "resp_provider_json_resume_1";
 
     try {
       const res = new MockResponse();
@@ -1429,7 +1429,7 @@ describe("sendPipelineResponse responses store integration", () => {
               {
                 type: "function_call",
                 name: "shell_command",
-                arguments: '{"command":"printf native-windsurf-ok"}',
+                arguments: '{"command":"printf native-provider-ok"}',
                 call_id: "native:run_command:3",
               },
             ],
@@ -1496,7 +1496,7 @@ describe("sendPipelineResponse responses store integration", () => {
         tool_outputs: [
           {
             tool_call_id: "native:run_command:3",
-            output: "native-windsurf-ok",
+            output: "native-provider-ok",
           },
         ],
       });
@@ -1507,7 +1507,7 @@ describe("sendPipelineResponse responses store integration", () => {
           expect.objectContaining({
             type: "function_call_output",
             call_id: "native:run_command:3",
-            output: "native-windsurf-ok",
+            output: "native-provider-ok",
           }),
         ]),
       );
@@ -1524,8 +1524,8 @@ describe("sendPipelineResponse responses store integration", () => {
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-string-input-submit";
-    const responseId = "resp_windsurf_string_input_submit_1";
-    const callId = "call_windsurf_string_input_submit_1";
+    const responseId = "resp_provider_string_input_submit_1";
+    const callId = "call_provider_string_input_submit_1";
 
     try {
       const res = new MockResponse();
@@ -1542,7 +1542,7 @@ describe("sendPipelineResponse responses store integration", () => {
                 type: "function_call",
                 name: "apply_patch",
                 arguments:
-                  '{"filePath":"tmp/windsurf-live-smoke.txt","patch":"+ alpha"}',
+                  '{"filePath":"tmp/provider-live-smoke.txt","patch":"+ alpha"}',
                 call_id: callId,
               },
             ],
@@ -1565,7 +1565,7 @@ describe("sendPipelineResponse responses store integration", () => {
               model: "gpt-5.3-codex",
               store: true,
               input:
-                "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
+                "Use apply_patch to create tmp/provider-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
               tools: [{ type: "function", function: { name: "apply_patch" } }],
             },
             context: {
@@ -1576,7 +1576,7 @@ describe("sendPipelineResponse responses store integration", () => {
                   content: [
                     {
                       type: "input_text",
-                      text: "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
+                      text: "Use apply_patch to create tmp/provider-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
                     },
                   ],
                 },
@@ -1596,7 +1596,7 @@ describe("sendPipelineResponse responses store integration", () => {
         tool_outputs: [
           {
             tool_call_id: callId,
-            output: "created tmp/windsurf-live-smoke.txt with alpha",
+            output: "created tmp/provider-live-smoke.txt with alpha",
           },
         ],
       });
@@ -1618,7 +1618,7 @@ describe("sendPipelineResponse responses store integration", () => {
         {
           role: "user",
           content:
-            "Use apply_patch to create tmp/windsurf-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
+            "Use apply_patch to create tmp/provider-live-smoke.txt with content alpha on one line. Do not answer directly; call the tool.",
         },
         expect.objectContaining({
           role: "assistant",
@@ -1629,7 +1629,7 @@ describe("sendPipelineResponse responses store integration", () => {
         expect.objectContaining({
           role: "tool",
           tool_call_id: callId,
-          content: "created tmp/windsurf-live-smoke.txt with alpha",
+          content: "created tmp/provider-live-smoke.txt with alpha",
         }),
       ]);
     } finally {
@@ -1647,8 +1647,8 @@ describe("sendPipelineResponse responses store integration", () => {
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-orphan-cleanup";
     const providerRequestId =
-      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-orphan-cleanup";
-    const responseId = "resp_windsurf_orphan_cleanup_1";
+      "openai-responses-openai.key1-gpt-5.4-none-orphan-cleanup";
+    const responseId = "resp_provider_orphan_cleanup_1";
 
     store.captureResponsesRequestContext({
       requestId: routerRequestId,
@@ -1789,9 +1789,9 @@ describe("sendPipelineResponse responses store integration", () => {
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-20260523T212223310-222654-435";
     const providerRequestId =
-      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212223310-222654-435";
+      "openai-responses-openai.key1-gpt-5.4-none-20260523T212223310-222654-435";
     const stopRequestId =
-      "openai-responses-windsurf.ws-pro-4-gpt-5.4-none-20260523T212244407-223292-1073";
+      "openai-responses-openai.key1-gpt-5.4-none-20260523T212244407-223292-1073";
     const responseId = "resp_5520_tools_followup_1";
     const stopResponseId = "resp_5520_tools_followup_stop";
     const sessionId = "rcc-routecodex";

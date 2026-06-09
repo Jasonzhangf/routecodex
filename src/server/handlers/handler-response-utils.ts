@@ -152,12 +152,14 @@ type SseTerminalWatch = {
   sawTerminalChunk: boolean;
   sawResponsesCompletedChunk?: boolean;
   sawResponsesDoneEvent?: boolean;
-  sawDoneChunk?: boolean;
   requiresResponsesTerminalEvent?: boolean;
   terminalSource?: string;
   pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled' | 'response.failed';
 };
 
+type StreamCompletionLogState = {
+  logged: boolean;
+};
 
 type StreamContractProbeEnvelope = {
   probe?: Record<string, unknown>;
@@ -555,6 +557,21 @@ function logStreamRequestComplete(
   console.warn(colorizeRequestLog(line, requestLabel, context));
 }
 
+function logStreamRequestCompleteOnce(
+  state: StreamCompletionLogState,
+  endpoint: string | undefined,
+  requestLabel: string,
+  status: number,
+  finishReason?: string,
+  context?: { sessionId?: unknown; conversationId?: unknown }
+): void {
+  if (state.logged) {
+    return;
+  }
+  state.logged = true;
+  logStreamRequestComplete(endpoint, requestLabel, status, finishReason, context);
+}
+
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
@@ -872,13 +889,10 @@ function updateSseTerminalTrackerFromChunk(
     return;
   }
 
-  if (text.includes('data: [DONE]')) {
-    terminalWatch.sawDoneChunk = true;
-    if (!terminalWatch.requiresResponsesTerminalEvent) {
-      finishTracker.seenTerminalEvent = true;
-      terminalWatch.sawTerminalChunk = true;
-      terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
-    }
+  if (text.includes('data: [DONE]') && !terminalWatch.requiresResponsesTerminalEvent) {
+    finishTracker.seenTerminalEvent = true;
+    terminalWatch.sawTerminalChunk = true;
+    terminalWatch.terminalSource = terminalWatch.terminalSource ?? '[DONE]';
   }
 
   const blocks = text.split(/\n\n+/);
@@ -1764,7 +1778,7 @@ export async function sendPipelineResponse(
     };
 
     let ended = false;
-    let completedLogged = false;
+    const completionLogState: StreamCompletionLogState = { logged: false };
     let cleanupLogged = false;
     let streamEnded = false;
     let preservedConversationOnClientClose = false;
@@ -2089,7 +2103,6 @@ export async function sendPipelineResponse(
                 terminalWatch.sawTerminalChunk = true;
                 terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame) => frame.includes('event: response.completed'));
                 terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
-                terminalWatch.sawDoneChunk = terminalWatch.sawDoneChunk || framesToWrite.some((frame) => frame.includes('data: [DONE]'));
                 contractProbe.emitted = true;
                 } catch (repairWriteError) {
                   logResponseNonBlockingError(`response.sse.terminal.auto_close.write_terminal:${requestLabel}`, repairWriteError);
@@ -2197,11 +2210,7 @@ export async function sendPipelineResponse(
       } catch (error) {
         logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
       }
-      if (!completedLogged) {
-        completedLogged = true;
-        logStreamRequestComplete(entryEndpoint, requestLabel, status, resolvedStreamFinishReason, requestLogContext);
-      }
-      const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk || !terminalWatch.sawResponsesDoneEvent || !terminalWatch.sawDoneChunk
+      const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk || !terminalWatch.sawResponsesDoneEvent
         ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel)
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
@@ -2223,19 +2232,10 @@ export async function sendPipelineResponse(
             terminalWatch.sawTerminalChunk = true;
             terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame) => frame.includes('event: response.completed'));
             terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
-            terminalWatch.sawDoneChunk = terminalWatch.sawDoneChunk || framesToWrite.some((frame) => frame.includes('data: [DONE]'));
             contractProbe.emitted = true;
           }
         } catch (repairWriteError) {
           logResponseNonBlockingError(`response.sse.stream.end.write_terminal_probe:${requestLabel}`, repairWriteError);
-        }
-      }
-      if (finishTracker.seenTerminalEvent && !terminalWatch.sawDoneChunk && !res.writableEnded && !res.destroyed) {
-        try {
-          writeClientSseFrame('data: [DONE]\n\n', 'response.sse.stream.end.write_done_after_terminal');
-          terminalWatch.sawDoneChunk = true;
-        } catch (doneWriteError) {
-          logResponseNonBlockingError(`response.sse.stream.end.write_done_after_terminal:${requestLabel}`, doneWriteError);
         }
       }
       void persistNativeSseConversationState()
@@ -2271,6 +2271,15 @@ export async function sendPipelineResponse(
                 logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
               }
             }
+          } else {
+            logStreamRequestCompleteOnce(
+              completionLogState,
+              entryEndpoint,
+              requestLabel,
+              status,
+              resolvedStreamFinishReason,
+              requestLogContext
+            );
           }
           if (!res.writableEnded && !res.destroyed) {
             try {

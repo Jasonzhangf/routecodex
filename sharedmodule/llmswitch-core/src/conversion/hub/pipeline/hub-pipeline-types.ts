@@ -9,10 +9,13 @@ import type {
   TargetMetadata,
   VirtualRouterHealthStore,
 } from "../../../native/router-hotpath/virtual-router-contracts.js";
-import {
-  type HubPolicyConfig,
-  type HubPolicyMode,
-} from "../policy/policy-engine.js";
+
+export type HubPolicyMode = "off" | "observe" | "enforce";
+
+export interface HubPolicyConfig {
+  mode?: HubPolicyMode;
+  sampleRate?: number;
+}
 
 export type HubShadowCompareRequestConfig = {
   baselineMode: HubPolicyMode;

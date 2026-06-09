@@ -181,6 +181,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
     integration:
@@ -195,6 +196,7 @@ verification:
     notes:
       - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
       - Zero-consumer TS wrappers for tool-call collection and finish-reason resolution must stay removed from the shared response utility file.
+      - Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must stay removed from TS/native bridge/Rust NAPI public surfaces.
 
   - feature_id: hub.response_post_servertool_client_projection
     change_risk: high
@@ -258,7 +260,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_guard.rs
     contract:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
-      - sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs
+      - sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs
     integration:
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
     smoke:

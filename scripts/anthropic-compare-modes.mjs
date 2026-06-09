@@ -145,7 +145,6 @@ async function main() {
   const reqDiffs = diffViews('REQUEST COMPARISON', viewReqA, viewReqB);
 
   // 响应：A 直通 vs B 编解码
-  // 使用与 anthropic-snapshot-closed-loop 相同路径：
   // AnthResp -> AnthReq-like -> ChatReq -> fake ChatResp -> AnthResp'
   const anthReqLike = {
     model: anthResp.model,

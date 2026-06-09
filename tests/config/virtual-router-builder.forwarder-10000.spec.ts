@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { extractProviderKeysForRoutingGroup } from '../../src/server/runtime/http-server/http-server-bootstrap.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 /**
@@ -52,7 +53,6 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     expect(gpt55.targets.map((t) => [t.providerId, t.providerKey, t.modelId, t.priority])).toEqual([
       ['1token', '1token.key1.gpt-5.5', undefined, undefined],
       ['sdfv', 'sdfv.key1.gpt-5.5', undefined, undefined],
-      ['llmgate', 'llmgate.key1.free-gpt-5.5', 'free-gpt-5.5', undefined],
     ]);
 
     const m27 = fwds['fwd.minimax.MiniMax-M2.7'] as {
@@ -109,6 +109,36 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
         'mimo.mimo-v2.5',
       ]);
     }
+  });
+
+  skipUnless('5555 weighted tool/search routes keep direct MiniMax/Mimo targets', async () => {
+    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+    for (const routeName of ['tools', 'search', 'web_search', 'multimodal']) {
+      expect(routeTargets(input.routing, routeName)).toEqual([
+        'minimax.MiniMax-M3',
+        'opencode-zen-free.minimax-m3-free',
+        'mini27.MiniMax-M2.7',
+        'minimonth.MiniMax-M2.7',
+        'mimo.mimo-v2.5',
+      ]);
+    }
+  });
+
+  skipUnless('5555 allowedProviders expands forwarders to real provider ids', () => {
+    const allowed = extractProviderKeysForRoutingGroup(liveConfig as Record<string, unknown>, 'gateway_priority_5555');
+
+    expect(allowed).toEqual(expect.arrayContaining([
+      '1token',
+      'sdfv',
+      'minimax',
+      'opencode-zen-free',
+      'mini27',
+      'minimonth',
+      'mimo',
+    ]));
+    expect(allowed).not.toContain('fwd');
   });
 
   skipUnless('10000 routing contains MiniMax forwarder targets only', async () => {

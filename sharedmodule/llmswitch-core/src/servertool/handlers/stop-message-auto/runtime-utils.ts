@@ -1,18 +1,29 @@
 import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import {
+  getCapturedRequestWithNative,
+  hasCompactionFlagWithNative,
+  planPersistStopMessageStateWithNative,
   planStopMessagePersistedLookupWithNative,
+  readRuntimeStopMessageStageModeWithNative,
+  readServertoolFollowupFlowIdWithNative,
+  resolveBdWorkingDirectoryForRecordWithNative,
+  resolveClientConnectionStateWithNative,
+  resolveDefaultStopMessageSnapshotWithNative,
+  resolveEntryEndpointWithNative,
+  resolveImplicitGeminiStopMessageSnapshotWithNative,
+  resolveRuntimeStopMessageStateFromAdapterContextWithNative,
+  resolveRuntimeStopMessageStateWithNative,
+  resolveServertoolStateKeyWithNative,
+  resolveStopMessageFollowupToolContentMaxCharsWithNative,
+  resolveStopMessageFollowupProviderKeyWithNative,
   resolveStopMessageSessionScopeWithNative,
-  resolveServertoolStickyKeyWithNative,
-  validateClientExecCommandResultWithNative
+  resolveServertoolStickyKeyWithNative
 } from '../../../native/router-hotpath/native-servertool-core-semantics.js';
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   saveRoutingInstructionStateSync
 } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
-import { isStopEligibleForServerTool } from '../../stop-gateway-context.js';
-import { extractResponsesOutputText, hasToolLikeOutput } from './ai-followup.js';
-import { resolveStopMessageSnapshot } from './routing-state.js';
 
 export function resolveStickyKey(
   record: {
@@ -43,21 +54,7 @@ export function resolveStateKey(
   },
   runtimeMetadata?: unknown
 ): string {
-  const metadata = buildServertoolRoutingMetadata(record, runtimeMetadata);
-  const continuation = asRecord(metadata.continuation);
-  const continuationScope = toNonEmptyText(continuation?.continuationScope) || toNonEmptyText(continuation?.stickyScope);
-  if (continuationScope === 'request_chain') {
-    const resumeFrom = asRecord(continuation?.resumeFrom);
-    const chainId = toNonEmptyText(continuation?.chainId) || toNonEmptyText(resumeFrom?.requestId);
-    if (chainId) {
-      return chainId;
-    }
-  }
-  const stopScope = resolveStopMessageSessionScope(metadata, runtimeMetadata);
-  if (stopScope) {
-    return stopScope;
-  }
-  return toNonEmptyText(metadata.requestId) || 'default';
+  return resolveServertoolStateKeyWithNative(buildServertoolRoutingMetadata(record, runtimeMetadata));
 }
 
 export function planStopMessagePersistedLookup(
@@ -90,34 +87,10 @@ export function planStopMessagePersistedLookup(
 }
 
 export function persistStopMessageState(stickyKey: string | undefined, state: RoutingInstructionState): void {
-  if (!stickyKey) {
-    return;
-  }
-  const hasNonStopMessageState =
-    Boolean(state.stoplessGoalState) ||
-    Boolean(state.forcedTarget) ||
-    Boolean(state.preferTarget) ||
-    state.allowedProviders.size > 0 ||
-    state.disabledProviders.size > 0 ||
-    state.disabledKeys.size > 0 ||
-    state.disabledModels.size > 0 ||
-    Boolean(state.preCommandScriptPath && state.preCommandScriptPath.trim()) ||
-    (typeof state.preCommandUpdatedAt === 'number' && Number.isFinite(state.preCommandUpdatedAt));
-  const hasLifecycleStamp =
-    (typeof state.stopMessageLastUsedAt === 'number' && Number.isFinite(state.stopMessageLastUsedAt));
-  const empty =
-    (!state.stopMessageText || !state.stopMessageText.trim()) &&
-    (typeof state.stopMessageMaxRepeats !== 'number' || !Number.isFinite(state.stopMessageMaxRepeats)) &&
-    (typeof state.stopMessageUsed !== 'number' || !Number.isFinite(state.stopMessageUsed)) &&
-    (typeof state.stopMessageStageMode !== 'string' || !state.stopMessageStageMode.trim()) &&
-    (typeof state.stopMessageAiMode !== 'string' || !state.stopMessageAiMode.trim()) &&
-    !hasLifecycleStamp &&
-    !hasNonStopMessageState;
-  if (empty) {
-    saveRoutingInstructionStateSync(stickyKey, null);
-    return;
-  }
-  saveRoutingInstructionStateSync(stickyKey, state);
+  const plan = planPersistStopMessageStateWithNative({
+    state: buildPersistableRoutingInstructionState(state)
+  });
+  saveRoutingInstructionStateSync(stickyKey, plan.action === 'clear' ? null : state);
 }
 
 export function resolveStopMessageSessionScope(
@@ -141,232 +114,7 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
   stageMode?: 'on' | 'off' | 'auto';
   aiMode?: 'on' | 'off';
 } | null {
-  const runtime = asRecord(runtimeMetadata);
-  const state = runtime ? asRecord(runtime.stopMessageState) : null;
-  const direct = resolveStopMessageSnapshot(state);
-  if (direct) {
-    return direct;
-  }
-  const loopState = runtime ? asRecord(runtime.serverToolLoopState) : null;
-  if (!loopState || toNonEmptyText(loopState.flowId) !== 'stop_message_flow') {
-    return null;
-  }
-  const maxRepeats = readPositiveInteger(loopState.maxRepeats);
-  if (maxRepeats === undefined) {
-    return null;
-  }
-  const used = readPositiveInteger(state?.stopMessageUsed) ?? 0;
-  const text = toNonEmptyText(state?.stopMessageText) || '继续执行';
-  return {
-    text,
-    maxRepeats,
-    used,
-    source: 'servertool.stop_message',
-    stageMode: 'on'
-  };
-}
-
-function collectRequestLikeRecords(adapterContext: unknown): Record<string, unknown>[] {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return [];
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const values = [
-    asRecord(record.__raw_request_body),
-    asRecord(record.capturedEntryRequest),
-    asRecord(record.capturedChatRequest)
-  ];
-  return values.filter((value): value is Record<string, unknown> => Boolean(value));
-}
-
-function decodePosixSingleQuotedArgument(raw: string): string {
-  return raw.replace(/'\\''/g, "'");
-}
-
-function parseStopMessageCliInputFromCommand(command: string): {
-  continuationPrompt?: string;
-  repeatCount?: number;
-  maxRepeats?: number;
-  stdoutPreview?: string;
-} | null {
-  const text = typeof command === 'string' ? command.trim() : '';
-  if (!text.includes('routecodex servertool run stop_message_auto')) {
-    return null;
-  }
-  const match = text.match(/--input-json '([\s\S]+)'$/);
-  if (!match?.[1]) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(decodePosixSingleQuotedArgument(match[1])) as Record<string, unknown>;
-    return {
-      continuationPrompt: toNonEmptyText(parsed.continuationPrompt),
-      repeatCount: readPositiveInteger(parsed.repeatCount),
-      maxRepeats: readPositiveInteger(parsed.maxRepeats),
-      stdoutPreview: toNonEmptyText(parsed.stdoutPreview)
-    };
-  } catch {
-    return null;
-  }
-}
-
-function readStopMessageCliCommandMap(record: Record<string, unknown>): Map<string, {
-  continuationPrompt?: string;
-  repeatCount?: number;
-  maxRepeats?: number;
-  stdoutPreview?: string;
-}> {
-  const map = new Map<string, {
-    continuationPrompt?: string;
-    repeatCount?: number;
-    maxRepeats?: number;
-    stdoutPreview?: string;
-  }>();
-  const input = Array.isArray(record.input) ? record.input : [];
-  for (const item of input) {
-    const row = asRecord(item);
-    if (!row) {
-      continue;
-    }
-    const type = toNonEmptyText(row.type)?.toLowerCase();
-    if (type !== 'function_call') {
-      continue;
-    }
-    const name = toNonEmptyText(row.name) ?? toNonEmptyText(asRecord(row.function)?.name);
-    if (name !== 'exec_command') {
-      continue;
-    }
-    const callId = toNonEmptyText(row.call_id) ?? toNonEmptyText(row.tool_call_id) ?? toNonEmptyText(row.id);
-    if (!callId) {
-      continue;
-    }
-    const argumentsRaw = toNonEmptyText(row.arguments) ?? toNonEmptyText(asRecord(row.function)?.arguments);
-    if (!argumentsRaw) {
-      continue;
-    }
-    try {
-      const parsedArgs = JSON.parse(argumentsRaw) as Record<string, unknown>;
-      const command = toNonEmptyText(parsedArgs.cmd);
-      if (!command) {
-        continue;
-      }
-      const restored = parseStopMessageCliInputFromCommand(command);
-      if (restored) {
-        map.set(callId, restored);
-      }
-    } catch {
-      continue;
-    }
-  }
-  return map;
-}
-
-function findLastStopMessageCliCommandSeed(record: Record<string, unknown>): {
-  continuationPrompt?: string;
-  repeatCount?: number;
-  maxRepeats?: number;
-  stdoutPreview?: string;
-} | undefined {
-  const input = Array.isArray(record.input) ? record.input : [];
-  for (let index = input.length - 1; index >= 0; index -= 1) {
-    const row = asRecord(input[index]);
-    if (!row) {
-      continue;
-    }
-    const type = toNonEmptyText(row.type)?.toLowerCase();
-    if (type !== 'function_call') {
-      continue;
-    }
-    const name = toNonEmptyText(row.name) ?? toNonEmptyText(asRecord(row.function)?.name);
-    if (name !== 'exec_command') {
-      continue;
-    }
-    const argumentsRaw = toNonEmptyText(row.arguments) ?? toNonEmptyText(asRecord(row.function)?.arguments);
-    if (!argumentsRaw) {
-      continue;
-    }
-    try {
-      const parsedArgs = JSON.parse(argumentsRaw) as Record<string, unknown>;
-      const command = toNonEmptyText(parsedArgs.cmd);
-      if (!command) {
-        continue;
-      }
-      const restored = parseStopMessageCliInputFromCommand(command);
-      if (restored) {
-        return restored;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
-}
-
-function resolveRuntimeStopMessageStateFromRequestRecord(record: Record<string, unknown>): {
-  text: string;
-  maxRepeats: number;
-  used: number;
-  source?: string;
-  stageMode?: 'on';
-} | null {
-  const commandMap = readStopMessageCliCommandMap(record);
-  const lastCommandSeed = findLastStopMessageCliCommandSeed(record) ?? [...commandMap.values()].at(-1);
-  const input = Array.isArray(record.input) ? record.input : [];
-  const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : [];
-  const outputs = [...input, ...toolOutputs];
-  for (let index = outputs.length - 1; index >= 0; index -= 1) {
-    const row = asRecord(outputs[index]);
-    if (!row) {
-      continue;
-    }
-    const type = toNonEmptyText(row.type)?.toLowerCase();
-    if (type && type !== 'function_call_output' && type !== 'tool_result' && type !== 'tool_message') {
-      continue;
-    }
-    const rawOutput = toNonEmptyText(row.output) ?? toNonEmptyText(row.content) ?? toNonEmptyText(row.text);
-    if (!rawOutput) {
-      continue;
-    }
-    let parsed: Record<string, unknown> | null = null;
-    try {
-      parsed = validateClientExecCommandResultWithNative(rawOutput);
-    } catch {
-      parsed = null;
-    }
-    const callId = toNonEmptyText(row.call_id) ?? toNonEmptyText(row.tool_call_id) ?? toNonEmptyText(row.id);
-    const commandSeed = (callId ? commandMap.get(callId) : undefined) ?? lastCommandSeed;
-    const toolName = toNonEmptyText(parsed?.toolName) || toNonEmptyText(parsed?.tool) || toNonEmptyText(parsed?.kind);
-    const flowId = toNonEmptyText(parsed?.flowId) || 'stop_message_flow';
-    const commandLooksLikeStopless = Boolean(commandSeed);
-    const parsedLooksLikeStopless =
-      (toolName === 'stop_message_auto' || toolName === 'stop_message_flow')
-      && flowId === 'stop_message_flow';
-    if (!parsedLooksLikeStopless && !commandLooksLikeStopless) {
-      continue;
-    }
-    const continuationPrompt = toNonEmptyText(parsed?.continuationPrompt) || commandSeed?.continuationPrompt;
-    const text =
-      continuationPrompt
-      || toNonEmptyText(parsed?.summary)
-      || commandSeed?.stdoutPreview
-      || '继续执行';
-    const maxRepeats =
-      readPositiveInteger(parsed?.maxRepeats)
-      ?? commandSeed?.maxRepeats
-      ?? 1;
-    const used =
-      readPositiveInteger(parsed?.repeatCount)
-      ?? commandSeed?.repeatCount
-      ?? 0;
-    return {
-      text,
-      maxRepeats,
-      used,
-      source: 'client_exec_result',
-      stageMode: 'on'
-    };
-  }
-  return null;
+  return resolveRuntimeStopMessageStateWithNative(runtimeMetadata);
 }
 
 export function resolveRuntimeStopMessageStateFromAdapterContext(adapterContext: unknown): {
@@ -383,31 +131,14 @@ export function resolveRuntimeStopMessageStateFromAdapterContext(adapterContext:
     return null;
   }
   const runtime = readRuntimeMetadata(adapterContext as Record<string, unknown>);
-  const direct = resolveRuntimeStopMessageState(runtime);
-  if (direct) {
-    return direct;
-  }
-  for (const record of collectRequestLikeRecords(adapterContext)) {
-    const restored = resolveRuntimeStopMessageStateFromRequestRecord(record);
-    if (restored) {
-      return restored;
-    }
-  }
-  return null;
+  return resolveRuntimeStopMessageStateFromAdapterContextWithNative({
+    adapterContext,
+    runtimeMetadata: runtime
+  });
 }
 
 export function readRuntimeStopMessageStageMode(runtimeMetadata: unknown): 'on' | 'off' | 'auto' | undefined {
-  const runtime = asRecord(runtimeMetadata);
-  const state = runtime ? asRecord(runtime.stopMessageState) : null;
-  const value = state?.stopMessageStageMode;
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'auto') {
-    return normalized;
-  }
-  return undefined;
+  return readRuntimeStopMessageStageModeWithNative(runtimeMetadata);
 }
 
 function buildServertoolRoutingMetadata(
@@ -426,6 +157,22 @@ function buildServertoolRoutingMetadata(
   };
 }
 
+function buildPersistableRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {
+  return {
+    ...state,
+    allowedProviders: Array.from(state.allowedProviders ?? []),
+    disabledProviders: Array.from(state.disabledProviders ?? []),
+    disabledKeys: Array.from(state.disabledKeys ?? new Map()).map(([provider, keys]) => ({
+      provider,
+      keys: Array.from(keys)
+    })),
+    disabledModels: Array.from(state.disabledModels ?? new Map()).map(([provider, models]) => ({
+      provider,
+      models: Array.from(models)
+    }))
+  };
+}
+
 export function resolveBdWorkingDirectoryForRecord(
   record: {
     metadata?: unknown;
@@ -433,26 +180,14 @@ export function resolveBdWorkingDirectoryForRecord(
   },
   runtimeMetadata: unknown
 ): string | undefined {
-  const fromWorkdir = readSessionScopeValue(record, runtimeMetadata, 'workdir');
-  if (fromWorkdir) {
-    return fromWorkdir;
-  }
-  const fromCwd = readSessionScopeValue(record, runtimeMetadata, 'cwd');
-  if (fromCwd) {
-    return fromCwd;
-  }
-  const fromWorkingDirectory = readSessionScopeValue(record, runtimeMetadata, 'workingDirectory');
-  if (fromWorkingDirectory) {
-    return fromWorkingDirectory;
-  }
-  return undefined;
+  return resolveBdWorkingDirectoryForRecordWithNative({
+    record,
+    runtimeMetadata
+  });
 }
 
 export function readServerToolFollowupFlowId(runtimeMetadata: unknown): string {
-  const runtime = asRecord(runtimeMetadata);
-  const loopState = runtime ? asRecord(runtime.serverToolLoopState) : null;
-  const flowId = loopState ? toNonEmptyText(loopState.flowId) : '';
-  return flowId;
+  return readServertoolFollowupFlowIdWithNative(runtimeMetadata);
 }
 
 export function resolveStopMessageFollowupProviderKey(args: {
@@ -463,65 +198,33 @@ export function resolveStopMessageFollowupProviderKey(args: {
   };
   runtimeMetadata?: unknown;
 }): string {
-  const direct =
-    toNonEmptyText(args.record.providerKey) ||
-    toNonEmptyText(args.record.providerId) ||
-    readProviderKeyFromMetadata(args.record.metadata) ||
-    readProviderKeyFromMetadata(args.runtimeMetadata);
-  return direct;
+  return resolveStopMessageFollowupProviderKeyWithNative({
+    record: args.record,
+    runtimeMetadata: args.runtimeMetadata
+  });
 }
 
 export function resolveStopMessageFollowupToolContentMaxChars(params: {
   providerKey?: string;
   model?: string;
 }): number | undefined {
-  const raw = String(process.env.ROUTECODEX_STOPMESSAGE_FOLLOWUP_TOOL_CONTENT_MAX_CHARS || '').trim();
-  if (raw) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.max(64, Math.floor(parsed));
-    }
-    return undefined;
-  }
-
-  const model = typeof params.model === 'string' ? params.model.trim().toLowerCase() : '';
-  if (model === 'kimi-k2.5' || model.startsWith('kimi-k2.5-')) {
-    return 1200;
-  }
-
-  return undefined;
+  return resolveStopMessageFollowupToolContentMaxCharsWithNative({
+    envValue: process.env.ROUTECODEX_STOPMESSAGE_FOLLOWUP_TOOL_CONTENT_MAX_CHARS,
+    providerKey: params.providerKey,
+    model: params.model
+  });
 }
 
 export function getCapturedRequest(adapterContext: unknown): JsonObject | null {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return null;
-  }
-  const contextRecord = adapterContext as Record<string, unknown>;
-
-  const direct = contextRecord.capturedEntryRequest ?? contextRecord.capturedChatRequest;
-  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
-    return direct as JsonObject;
-  }
-
-  return null;
+  return getCapturedRequestWithNative(adapterContext) as JsonObject | null;
 }
 
 export function resolveClientConnectionState(value: unknown): { disconnected?: boolean } | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  return value as { disconnected?: boolean } | null;
+  return resolveClientConnectionStateWithNative(value);
 }
 
 export function hasCompactionFlag(rt: unknown): boolean {
-  const flag = rt && typeof rt === 'object' && !Array.isArray(rt) ? (rt as any).compactionRequest : undefined;
-  if (flag === true) {
-    return true;
-  }
-  if (typeof flag === 'string' && flag.trim().toLowerCase() === 'true') {
-    return true;
-  }
-  return false;
+  return hasCompactionFlagWithNative(rt);
 }
 
 export function resolveImplicitGeminiStopMessageSnapshot(
@@ -543,49 +246,12 @@ export function resolveImplicitGeminiStopMessageSnapshot(
   updatedAt?: number;
   lastUsedAt?: number;
 } | null {
-  try {
-    const protoFromCtx = ctx.providerProtocol;
-    const protoFromRecord =
-      typeof record.providerProtocol === 'string' && record.providerProtocol.trim()
-        ? String(record.providerProtocol).trim()
-        : undefined;
-    const providerProtocol = (protoFromCtx || protoFromRecord || '').toString().toLowerCase();
-    if (providerProtocol !== 'gemini-chat') {
-      return null;
-    }
-
-    const entryFromRecord =
-      typeof record.entryEndpoint === 'string' && record.entryEndpoint.trim()
-        ? String(record.entryEndpoint).trim()
-        : undefined;
-    const metaEntry =
-      record.metadata &&
-      typeof record.metadata === 'object' &&
-      (record.metadata as Record<string, unknown>).entryEndpoint;
-    const entryFromMeta =
-      typeof metaEntry === 'string' && metaEntry.trim() ? metaEntry.trim() : undefined;
-    const entryEndpoint = (entryFromRecord || entryFromMeta || '').toLowerCase();
-    if (!entryEndpoint.includes('/v1/responses')) {
-      return null;
-    }
-
-    if (!isStopEligibleForServerTool(ctx.base, ctx.adapterContext)) {
-      return null;
-    }
-
-    if (!isEmptyAssistantReply(ctx.base)) {
-      return null;
-    }
-
-    return {
-      text: '继续执行',
-      maxRepeats: 1,
-      used: 0,
-      source: 'auto'
-    };
-  } catch {
-    return null;
-  }
+  return resolveImplicitGeminiStopMessageSnapshotWithNative({
+    base: ctx.base,
+    adapterContext: ctx.adapterContext,
+    providerProtocol: ctx.providerProtocol,
+    record: record as Record<string, unknown>
+  });
 }
 
 export function resolveDefaultStopMessageSnapshot(
@@ -605,203 +271,15 @@ export function resolveDefaultStopMessageSnapshot(
   updatedAt?: number;
   lastUsedAt?: number;
 } | null {
-  try {
-    if (!isStopEligibleForServerTool(ctx.base, ctx.adapterContext)) {
-      return null;
-    }
-
-    const text = typeof options?.text === 'string' && options.text.trim().length
-      ? options.text.trim()
-      : '继续执行';
-    const maxRepeats =
-      typeof options?.maxRepeats === 'number' && Number.isFinite(options.maxRepeats) && options.maxRepeats > 0
-        ? Math.floor(options.maxRepeats)
-        : 1;
-
-    return {
-      text,
-      maxRepeats,
-      used: 0,
-      source: 'default'
-    };
-  } catch {
-    return null;
-  }
+  return resolveDefaultStopMessageSnapshotWithNative({
+    base: ctx.base,
+    adapterContext: ctx.adapterContext,
+    options
+  });
 }
 
 export function resolveEntryEndpoint(record: Record<string, unknown>): string {
-  const raw = typeof record.entryEndpoint === 'string' && record.entryEndpoint.trim()
-    ? record.entryEndpoint.trim()
-    : undefined;
-  if (raw) {
-    return raw;
-  }
-  const metaEntry = record.metadata && typeof record.metadata === 'object' && (record.metadata as Record<string, unknown>).entryEndpoint;
-  if (typeof metaEntry === 'string' && metaEntry.trim()) {
-    return metaEntry.trim();
-  }
-  return '/v1/chat/completions';
-}
-
-
-function isEmptyAssistantReply(base: unknown): boolean {
-  if (!base || typeof base !== 'object' || Array.isArray(base)) {
-    return false;
-  }
-  const payload = base as { [key: string]: unknown };
-  const choicesRaw = payload.choices;
-  if (Array.isArray(choicesRaw) && choicesRaw.length) {
-    const first = choicesRaw[0];
-    if (!first || typeof first !== 'object' || Array.isArray(first)) {
-      return false;
-    }
-    const finishReasonRaw = (first as { finish_reason?: unknown }).finish_reason;
-    const finishReason =
-      typeof finishReasonRaw === 'string' && finishReasonRaw.trim()
-        ? finishReasonRaw.trim().toLowerCase()
-        : '';
-    if (finishReason !== 'stop') {
-      return false;
-    }
-    const message =
-      (first as { message?: unknown }).message &&
-      typeof (first as { message?: unknown }).message === 'object' &&
-      !Array.isArray((first as { message?: unknown }).message)
-        ? ((first as { message: unknown }).message as { [key: string]: unknown })
-        : null;
-    if (!message) {
-      return false;
-    }
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    if (toolCalls.length > 0) {
-      return false;
-    }
-    const contentRaw = message.content;
-    const text = typeof contentRaw === 'string' ? contentRaw.trim() : '';
-    return text.length === 0;
-  }
-
-  const statusRaw = typeof payload.status === 'string' ? payload.status.trim().toLowerCase() : '';
-  if (statusRaw && statusRaw !== 'completed') {
-    return false;
-  }
-  if (payload.required_action && typeof payload.required_action === 'object') {
-    return false;
-  }
-  const outputText = extractResponsesOutputText(payload);
-  if (outputText.length > 0) {
-    return false;
-  }
-  const outputRaw = Array.isArray(payload.output) ? (payload.output as unknown[]) : [];
-  if (outputRaw.some((item) => hasToolLikeOutput(item))) {
-    return false;
-  }
-  return true;
-}
-
-function readSessionScopeValue(
-  record: {
-    sessionId?: unknown;
-    conversationId?: unknown;
-    metadata?: unknown;
-    [key: string]: unknown;
-  },
-  runtimeMetadata: unknown,
-  key: string
-): string {
-  const direct = toNonEmptyText(record[key]);
-  if (direct) {
-    return direct;
-  }
-
-  const metadata = asRecord(record.metadata);
-  const fromMetadata = metadata ? toNonEmptyText(metadata[key]) : '';
-  if (fromMetadata) {
-    return fromMetadata;
-  }
-
-  const fromRecordCapture = readHubCaptureContextValue(record, key);
-  if (fromRecordCapture) {
-    return fromRecordCapture;
-  }
-
-  const fromMetadataContext = metadata ? toNonEmptyText(asRecord(metadata.context)?.[key]) : '';
-  if (fromMetadataContext) {
-    return fromMetadataContext;
-  }
-
-  const fromMetadataCapture = metadata ? readHubCaptureContextValue(metadata, key) : '';
-  if (fromMetadataCapture) {
-    return fromMetadataCapture;
-  }
-
-  const runtime = asRecord(runtimeMetadata);
-  const fromRuntime = runtime ? toNonEmptyText(runtime[key]) : '';
-  if (fromRuntime) {
-    return fromRuntime;
-  }
-
-  const fromRuntimeCapture = runtime ? readHubCaptureContextValue(runtime, key) : '';
-  if (fromRuntimeCapture) {
-    return fromRuntimeCapture;
-  }
-
-  return '';
-}
-
-function readHubCaptureContextValue(
-  source: Record<string, unknown> | null,
-  key: string
-): string {
-  if (!source) {
-    return '';
-  }
-
-  const hubCapture = asRecord(source.__hub_capture);
-  const capturedContext = asRecord(source.capturedContext);
-  const capturedHubCapture = asRecord(capturedContext?.__hub_capture);
-  const candidateRecords: Array<Record<string, unknown> | null> = [
-    source,
-    asRecord(source.context),
-    hubCapture,
-    asRecord(hubCapture?.context),
-    capturedContext,
-    asRecord(capturedContext?.context),
-    capturedHubCapture,
-    asRecord(capturedHubCapture?.context)
-  ];
-
-  for (const candidate of candidateRecords) {
-    if (!candidate) {
-      continue;
-    }
-    const value = toNonEmptyText(candidate[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return '';
-}
-
-function readProviderKeyFromMetadata(value: unknown): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return '';
-  }
-  const metadata = value as Record<string, unknown>;
-  const direct =
-    toNonEmptyText(metadata.providerKey) ||
-    toNonEmptyText(metadata.providerId) ||
-    toNonEmptyText(metadata.targetProviderKey);
-  if (direct) {
-    return direct;
-  }
-  const target = metadata.target;
-  if (target && typeof target === 'object' && !Array.isArray(target)) {
-    const targetRecord = target as Record<string, unknown>;
-    return toNonEmptyText(targetRecord.providerKey) || toNonEmptyText(targetRecord.providerId);
-  }
-  return '';
+  return resolveEntryEndpointWithNative(record);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -809,17 +287,4 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function toNonEmptyText(value: unknown): string {
-  return typeof value === 'string' && value.trim().length ? value.trim() : '';
-}
-
-function readPositiveInteger(value: unknown): number | undefined {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-  const floored = Math.floor(parsed);
-  return floored >= 0 ? floored : undefined;
 }

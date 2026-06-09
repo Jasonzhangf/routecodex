@@ -4,13 +4,12 @@
  */
 
 import type { ResponsesSseEvent } from '../../types/responses-types.js';
-import type { EventSerializer } from './base-serializer.js';
 
 /**
  * Responses协议SSE事件序列化器
  * 负责将内部事件对象转换为符合LMStudio/官方SDK习惯的SSE格式
  */
-export class ResponsesEventSerializer implements EventSerializer<ResponsesSseEvent> {
+export class ResponsesEventSerializer {
   /**
    * 将Responses事件序列化为SSE wire格式
    */

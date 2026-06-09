@@ -10,7 +10,10 @@ describe('handler-utils server.req_adapter metadata contract', () => {
       {
         clientRequestId: 'client-1',
         userAgent: 'ua',
-        clientOriginator: 'originator'
+        clientOriginator: 'originator',
+        sessionId: 'sess-1',
+        conversationId: 'conv-1',
+        client_tmux_session_id: 'tmux-1'
       },
       {
         requestId: 'req-1',
@@ -21,6 +24,9 @@ describe('handler-utils server.req_adapter metadata contract', () => {
       clientRequestId: 'client-1',
       userAgent: 'ua',
       clientOriginator: 'originator',
+      sessionId: 'sess-1',
+      conversationId: 'conv-1',
+      client_tmux_session_id: 'tmux-1',
       requestId: 'req-1',
       providerProtocol: 'openai-chat'
     });
@@ -42,6 +48,8 @@ describe('handler-utils server.req_adapter metadata contract', () => {
 
   it('contract helper lists expose allowed and denied field sets for tests/help sync', () => {
     expect(__pipelineMetadataAllowedClientFields().has('clientRequestId')).toBe(true);
+    expect(__pipelineMetadataAllowedClientFields().has('sessionId')).toBe(true);
+    expect(__pipelineMetadataAllowedClientFields().has('conversationId')).toBe(true);
     expect(__pipelineMetadataDeniedClientFields().has('routeHint')).toBe(true);
   });
 });

@@ -57,7 +57,7 @@ interface RouteOptions {
   getHealthSnapshot?: () => unknown | null;
   getRoutingState?: (sessionId: string) => unknown | null;
   getManagerDaemon?: () => unknown | null;
-  getHubPipeline?: () => unknown | null;
+  getHubPipeline?: (routingPolicyGroup?: string) => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
   getServerHost?: () => string;
@@ -80,6 +80,34 @@ interface RouteOptions {
     config?: Record<string, unknown>,
   ) => Promise<{ ok: boolean; error?: string }>;
   getAvailableProviders?: () => Array<{ key: string; family?: string; protocol?: string }>;
+}
+
+function resolvePortScopedHubPipeline(req: Request, options: RouteOptions): unknown | null {
+  const getHubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline : undefined;
+  if (!getHubPipeline) {
+    return null;
+  }
+  const localPort = typeof req.socket?.localPort === 'number' ? req.socket.localPort : undefined;
+  const getPortConfigs = typeof options.getPortConfigs === 'function' ? options.getPortConfigs : undefined;
+  if (!getPortConfigs || typeof localPort !== 'number') {
+    return getHubPipeline();
+  }
+  const portConfigs = getPortConfigs();
+  const matchedPort = Array.isArray(portConfigs)
+    ? portConfigs.find((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return false;
+      }
+      const record = entry as Record<string, unknown>;
+      return typeof record.port === 'number' && record.port === localPort;
+    })
+    : undefined;
+  const routingPolicyGroup =
+    matchedPort
+    && typeof (matchedPort as Record<string, unknown>).routingPolicyGroup === 'string'
+      ? String((matchedPort as Record<string, unknown>).routingPolicyGroup).trim()
+      : '';
+  return routingPolicyGroup ? getHubPipeline(routingPolicyGroup) : getHubPipeline();
 }
 
 /**
@@ -339,7 +367,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       return;
     }
     try {
-      const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
+      const hubPipeline = resolvePortScopedHubPipeline(req, options);
       const virtualRouter = readVirtualRouterRuntimeStatus(hubPipeline);
       res.status(200).json({
         ok: true,

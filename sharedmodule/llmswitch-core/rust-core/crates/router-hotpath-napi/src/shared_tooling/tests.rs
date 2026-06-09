@@ -1,12 +1,10 @@
 use super::{
-    chunk_string_by_bytes, chunk_string_json, collapse_extra_newlines_and_trim,
-    decode_basic_xml_entities, extract_rcc_tool_call_fence_segments,
-    extract_structured_apply_patch_payloads_with, find_last_user_message_index,
-    flatten_by_comma_json, is_chunked_exec_transcript_header_line, is_image_path,
+    chunk_string_by_bytes, collapse_extra_newlines_and_trim, decode_basic_xml_entities,
+    extract_rcc_tool_call_fence_segments, extract_structured_apply_patch_payloads_with,
+    find_last_user_message_index, is_chunked_exec_transcript_header_line, is_image_path,
     is_structured_apply_patch_payload, normalize_ran_tree_or_chunked_tool_text,
     normalize_standard_chunked_tool_text, normalize_tool_result_text, normalize_tool_result_value,
-    pack_shell_args_json, repair_find_meta_json, split_command_string_json,
-    strip_terminal_right_gutter_noise, unwrap_chunked_exec_transcript_shape,
+    repair_find_meta_json, strip_terminal_right_gutter_noise, unwrap_chunked_exec_transcript_shape,
     unwrap_ran_transcript_shape, unwrap_xml_cdata_sections, value_to_string,
 };
 use serde_json::json;
@@ -49,40 +47,6 @@ fn shared_tooling_repair_find_meta_json_repairs_quoted_find_parens_and_exec() {
     let repaired = parsed.as_str().unwrap_or("");
     assert!(repaired.contains("find . -type f \\("));
     assert!(repaired.contains("\\) -exec sed -n \"1,3p\" {} \\;"));
-}
-
-#[test]
-fn shared_tooling_split_command_string_json() {
-    let input = json!("echo hello world").to_string();
-    let raw = split_command_string_json(input).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(parsed.as_array().unwrap().len(), 3);
-}
-
-#[test]
-fn shared_tooling_pack_shell_args_json() {
-    let input = json!({"command": "cd /tmp && ls"}).to_string();
-    let raw = pack_shell_args_json(input).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(parsed["workdir"], "/tmp");
-    assert!(parsed["command"].is_array());
-}
-
-#[test]
-fn shared_tooling_flatten_by_comma_json() {
-    let input = json!(["a, b", "c"]).to_string();
-    let raw = flatten_by_comma_json(input).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(parsed.as_array().unwrap().len(), 3);
-}
-
-#[test]
-fn shared_tooling_chunk_string_json() {
-    let input =
-        json!({"s": "abcdefghij", "minParts": 2, "maxParts": 4, "targetChunk": 4}).to_string();
-    let raw = chunk_string_json(input).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert!(parsed.as_array().unwrap().len() >= 2);
 }
 
 #[test]

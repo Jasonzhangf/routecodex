@@ -97,7 +97,7 @@ tool:exec_command (tool:exec_command)
     const call = toolCalls[0];
     expect(call?.function?.name).toBe('exec_command');
     const args = JSON.parse(String(call?.function?.arguments || '{}'));
-    expect(args.cmd).toBe('bd --no-db ready');
+    expect(args.command).toBe('bd --no-db ready');
     expect((normalized as any).content).toBe('');
 
     const sanitized = {
@@ -111,7 +111,7 @@ tool:exec_command (tool:exec_command)
   "tool_calls": [
     {
       "function": {
-        "arguments": "{"cmd":"bd --no-db ready"}",
+        "arguments": "{"command":"bd --no-db ready"}",
         "name": "exec_command",
       },
       "id": "<tool_call_id>",
@@ -140,7 +140,7 @@ tool:exec_command (tool:exec_command)
     expect((normalized as any).content).toBe('');
   });
 
-  it('does not harvest noisy marker + trailing text wrapper around JSON tool_calls without explicit container', () => {
+  it('harvests noisy marker + trailing text wrapper around JSON tool_calls by Rust native contract', () => {
     const message = {
       role: 'assistant',
       content: [
@@ -154,10 +154,14 @@ tool:exec_command (tool:exec_command)
 
     const normalized = normalizeAssistantTextToToolCalls(message);
     const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(0);
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0]?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
+    expect(args.command).toBe('bd --no-db ready');
+    expect((normalized as any).content).toBe('');
   });
 
-  it('does not harvest JSON tool_calls embedded inside quote envelope without explicit container', () => {
+  it('harvests JSON tool_calls embedded inside quote envelope by Rust native contract', () => {
     const message = {
       role: 'assistant',
       content: [
@@ -171,7 +175,11 @@ tool:exec_command (tool:exec_command)
 
     const normalized = normalizeAssistantTextToToolCalls(message);
     const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
-    expect(toolCalls.length).toBe(0);
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0]?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
+    expect(args.command).toBe('bd --no-db list --status in_progress');
+    expect((normalized as any).content).toBe('');
   });
 
   it('extracts plain Begin/End Patch transcript via dedicated apply_patch extractor', () => {

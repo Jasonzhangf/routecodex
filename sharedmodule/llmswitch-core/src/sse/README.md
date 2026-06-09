@@ -7,7 +7,7 @@
 - **单一骨架**：所有协议都沿用 `JSON → Sequencer → Shared Writer → SSE` 与 `SSE → Shared Parser → Builder → JSON` 的流水线。
 - **协议特定逻辑隔离**：仅在 `anthropic-*`、`gemini-*` 等文件内处理特殊字段；共享目录保持中性命名。
 - **可配置推理/工具治理**：reasoning channel、tool call chunk、metadata 过滤等均由 shared actions / dispatcher 控制。
-- **统一推理归档**：所有协议的 inbound format adapter 会调用 `conversion/shared/reasoning-normalizer.ts`，在进入骨架前将 `<think>`/`<reflection>` 等推理片段剥离并写入 canonical `reasoning` 字段，后续 SSE/JSON builder 仅依赖骨架数据结构。
+- **统一推理归档**：推理片段剥离与 canonical `reasoning` 字段归档由 Rust `hub_bridge_actions/reasoning.rs` / native required exports 承载；SSE 骨架只消费已规范化后的数据结构。
 - **完整双向验证**：`scripts/tests/loop-rt-*.mjs`、`run-matrix-ci` 都会运行每个协议的 roundtrip。
 
 ## 2. 目录/文件速查
@@ -17,8 +17,8 @@
 | `types/` | 协议与共享类型。`core-interfaces.ts` 定义 `BaseSseEvent`、`StreamProtocol`。`chat-/responses-/anthropic-/gemini-types.ts` 描述各协议 payload/上下文/事件，`index.ts` 汇总导出。 |
 | `json-to-sse/` | JSON→SSE 主入口。`chat-json-to-sse-converter.ts`、`responses-json-to-sse-converter.ts`、`anthropic-json-to-sse-converter.ts`、`gemini-json-to-sse-converter.ts` 负责各协议。`sequencers/` 下的 `chat-sequencer.ts`、`responses-sequencer.ts`、`anthropic-sequencer.ts`、`gemini-sequencer.ts` 统一生成 canonical 事件序列。 |
 | `sse-to-json/` | SSE→JSON 主入口。`chat-sse-to-json-converter.ts`、`responses-sse-to-json-converter.ts`、`anthropic-sse-to-json-converter.ts`、`gemini-sse-to-json-converter.ts` 同步共享 parser。`parsers/sse-parser.ts` 识别所有事件类型，`builders/` 目录下的 builder 还原 JSON 形状。 |
-| `shared/` | `writer.ts` 统一写入器（处理 backpressure/heartbeat），`serializers/` 输出 Chat/Responses/Anthropic/Gemini wire frame，`reasoning-dispatcher.ts` 控制推理 channel/text，`snapshot-utils.ts`、`streaming-text-extractor.ts` 等辅助模块。 |
-| `conversion/shared/reasoning-normalizer.ts` | Chat/Responses/Gemini 三条协议的 `<think>`→`reasoning` 入站处理。前半段在格式化请求/响应时调用，确保骨架看到的内容已拆分。 |
+| `shared/` | `writer.ts` 统一写入器（处理 backpressure/heartbeat），`serializers/` 输出 Chat/Responses/Anthropic/Gemini wire frame，`reasoning-dispatcher.ts` 控制推理 channel/text，`snapshot-utils.ts` 等辅助模块。 |
+| Rust reasoning native owner | Chat/Responses/Gemini/Anthropic 的 `<think>`→`reasoning` 入站处理由 `hub_bridge_actions/reasoning.rs` 与 native required exports 承载，TS SSE 层不得恢复 marker predicate / cleanup 语义。 |
 | `registry/sse-codec-registry.ts` | 提供 `openai-chat` / `openai-responses` / `anthropic-messages` / `gemini-chat` 的 JSON↔SSE 编解码器，供 `provider-response` 层加载。 |
 | `scripts/tests/loop-rt-*.mjs` | 各协议的最小 roundtrip（含 Gemini），由 `run-matrix-ci` 调用。 |
 

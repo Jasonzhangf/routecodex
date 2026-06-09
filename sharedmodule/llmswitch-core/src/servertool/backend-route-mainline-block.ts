@@ -43,10 +43,7 @@ import {
   applyFollowupDeltaPlan,
   loadFollowupOriginSeed
 } from './backend-route-origin-delta.js';
-import {
-  appendStopMessageLoopWarning,
-  buildStopMessageLoopPayload
-} from './stop-message-loop-payload-block.js';
+import { buildStopMessageLoopPayload } from './stop-message-loop-payload-block.js';
 import {
   buildFollowupRequestIdWithNative,
   injectLoopWarningWithNative,

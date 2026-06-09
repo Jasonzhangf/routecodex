@@ -953,7 +953,7 @@ mod tests {
                 }),
                 stream_body_text: None,
             })
-        .unwrap();
+            .unwrap();
         assert_eq!(output["mode"], "sse");
         assert_eq!(
             output["bodyText"],
@@ -971,7 +971,7 @@ mod tests {
                 }),
                 stream_body_text: Some(" data: {\"ok\":true}\n\n ".to_string()),
             })
-        .unwrap();
+            .unwrap();
         assert_eq!(output["mode"], "sse");
         assert_eq!(output["bodyText"], " data: {\"ok\":true}\n\n ");
         assert_eq!(output["trace"], "kept");

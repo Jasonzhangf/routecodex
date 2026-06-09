@@ -268,11 +268,10 @@ mod tests {
         let id = output.id.expect("anthropic response id");
         assert!(!id.trim().is_empty());
 
-        let reasoning = crate::responses_reasoning_registry::consume_responses_reasoning_json(
-            id.clone(),
-        )
-        .unwrap()
-        .expect("reasoning carrier");
+        let reasoning =
+            crate::responses_reasoning_registry::consume_responses_reasoning_json(id.clone())
+                .unwrap()
+                .expect("reasoning carrier");
         assert_eq!(
             serde_json::from_str::<Value>(&reasoning).unwrap()["encrypted_content"],
             json!("enc-carrier")
@@ -289,9 +288,11 @@ mod tests {
         );
 
         let snapshot =
-            crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(id.clone())
-                .unwrap()
-                .expect("payload snapshot");
+            crate::responses_reasoning_registry::consume_responses_payload_snapshot_json(
+                id.clone(),
+            )
+            .unwrap()
+            .expect("payload snapshot");
         assert_eq!(
             serde_json::from_str::<Value>(&snapshot).unwrap()["id"],
             json!("resp-carrier")

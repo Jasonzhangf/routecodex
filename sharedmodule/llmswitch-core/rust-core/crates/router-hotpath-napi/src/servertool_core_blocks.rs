@@ -12,9 +12,14 @@ use servertool_core::backend_route_contract::{
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
+use servertool_core::loop_state_contract;
+use servertool_core::orchestration_policy_contract;
+use servertool_core::persisted_lookup;
 use servertool_core::stop_gateway_context;
+use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
+use servertool_core::stop_visible_text;
 use servertool_core::text_extraction;
 
 /// Inspect a response payload and return the stop gateway context as JSON.
@@ -31,6 +36,30 @@ pub fn is_stop_eligible(payload_json: &str) -> Result<String, String> {
         serde_json::from_str(payload_json).map_err(|e| format!("deserialize payload: {e}"))?;
     let eligible = stop_gateway_context::is_stop_eligible(&payload);
     Ok(if eligible { "true" } else { "false" }.to_string())
+}
+
+pub fn normalize_stop_gateway_context_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop gateway context input: {e}"))?;
+    let context = stop_gateway_context::normalize_stop_gateway_context(&input);
+    serde_json::to_string(&context).map_err(|e| format!("serialize stop gateway context: {e}"))
+}
+
+pub fn normalize_stop_message_compare_context_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop-message compare context input: {e}"))?;
+    let context = stop_message_compare_context::normalize_stop_message_compare_context(&input);
+    serde_json::to_string(&context)
+        .map_err(|e| format!("serialize stop-message compare context: {e}"))
+}
+
+pub fn format_stop_message_compare_context_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop-message compare format input: {e}"))?;
+    serde_json::to_string(
+        &stop_message_compare_context::format_stop_message_compare_context(Some(&input)),
+    )
+    .map_err(|e| format!("serialize stop-message compare format: {e}"))
 }
 
 /// Evaluate stop-message loop guard.
@@ -78,6 +107,202 @@ pub fn plan_budget_state_update_json(input_json: &str) -> Result<String, String>
         .map_err(|e| format!("deserialize BudgetStateUpdateInput: {e}"))?;
     let plan = stop_message_counter::plan_budget_state_update(input);
     serde_json::to_string(&plan).map_err(|e| format!("serialize budget state update plan: {e}"))
+}
+
+pub fn resolve_servertool_state_key_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool state key input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::resolve_servertool_state_key(&input))
+        .map_err(|e| format!("serialize servertool state key: {e}"))
+}
+
+pub fn resolve_runtime_stop_message_state_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize runtime stop-message state input: {e}"))?;
+    let snapshot = persisted_lookup::resolve_runtime_stop_message_state(&input);
+    serde_json::to_string(&snapshot)
+        .map_err(|e| format!("serialize runtime stop-message state: {e}"))
+}
+
+pub fn resolve_runtime_stop_message_state_from_adapter_context_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize runtime stop-message adapter context input: {e}"))?;
+    let snapshot =
+        persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(&input);
+    serde_json::to_string(&snapshot)
+        .map_err(|e| format!("serialize runtime stop-message adapter context state: {e}"))
+}
+
+pub fn read_runtime_stop_message_stage_mode_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize runtime stop-message stage mode input: {e}"))?;
+    let stage_mode = persisted_lookup::read_runtime_stop_message_stage_mode(&input);
+    serde_json::to_string(&stage_mode)
+        .map_err(|e| format!("serialize runtime stop-message stage mode: {e}"))
+}
+
+pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool followup flow id input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::read_servertool_followup_flow_id(&input))
+        .map_err(|e| format!("serialize servertool followup flow id: {e}"))
+}
+
+pub fn resolve_bd_working_directory_for_record_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::ServertoolRecordRuntimeMetadataInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize bd working directory input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::resolve_bd_working_directory_for_record(
+        &input,
+    ))
+    .map_err(|e| format!("serialize bd working directory: {e}"))
+}
+
+pub fn resolve_stop_message_followup_provider_key_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::ServertoolRecordRuntimeMetadataInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message followup provider key input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::resolve_stop_message_followup_provider_key(&input))
+        .map_err(|e| format!("serialize stop-message followup provider key: {e}"))
+}
+
+pub fn get_captured_request_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize captured request input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::get_captured_request(&input))
+        .map_err(|e| format!("serialize captured request: {e}"))
+}
+
+pub fn resolve_client_connection_state_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize client connection state input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::resolve_client_connection_state(&input))
+        .map_err(|e| format!("serialize client connection state: {e}"))
+}
+
+pub fn has_compaction_flag_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize compaction flag input: {e}"))?;
+    Ok(if persisted_lookup::has_compaction_flag(&input) {
+        "true"
+    } else {
+        "false"
+    }
+    .to_string())
+}
+
+pub fn resolve_entry_endpoint_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize entry endpoint input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::resolve_entry_endpoint(&input))
+        .map_err(|e| format!("serialize entry endpoint: {e}"))
+}
+
+pub fn resolve_stop_message_followup_tool_content_max_chars_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageFollowupToolContentMaxCharsInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize stop-message followup tool content max chars input: {e}")
+        })?;
+    serde_json::to_string(
+        &persisted_lookup::resolve_stop_message_followup_tool_content_max_chars(&input),
+    )
+    .map_err(|e| format!("serialize stop-message followup tool content max chars: {e}"))
+}
+
+pub fn plan_persist_stop_message_state_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::PersistStopMessageStatePlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize persist stop-message state input: {e}"))?;
+    let plan = persisted_lookup::plan_persist_stop_message_state(&input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize persist stop-message state plan: {e}"))
+}
+
+pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageDefaultSnapshotInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize default stop-message snapshot input: {e}"))?;
+    let snapshot = persisted_lookup::resolve_default_stop_message_snapshot(&input);
+    serde_json::to_string(&snapshot)
+        .map_err(|e| format!("serialize default stop-message snapshot: {e}"))
+}
+
+pub fn resolve_implicit_gemini_stop_message_snapshot_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageImplicitGeminiSnapshotInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize implicit Gemini stop-message snapshot input: {e}"))?;
+    let snapshot = persisted_lookup::resolve_implicit_gemini_stop_message_snapshot(&input);
+    serde_json::to_string(&snapshot)
+        .map_err(|e| format!("serialize implicit Gemini stop-message snapshot: {e}"))
+}
+
+pub fn read_servertool_loop_state_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool loop state input: {e}"))?;
+    let snapshot = loop_state_contract::read_servertool_loop_state(&input);
+    serde_json::to_string(&snapshot).map_err(|e| format!("serialize servertool loop state: {e}"))
+}
+
+pub fn plan_servertool_loop_state_json(input_json: &str) -> Result<String, String> {
+    let input: loop_state_contract::ServertoolLoopStatePlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool loop state plan input: {e}"))?;
+    let snapshot = loop_state_contract::plan_servertool_loop_state(input);
+    serde_json::to_string(&snapshot)
+        .map_err(|e| format!("serialize servertool loop state plan: {e}"))
+}
+
+pub fn parse_servertool_timeout_ms_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolTimeoutPolicyInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool timeout input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::parse_servertool_timeout_ms(
+        &input,
+    )?)
+    .map_err(|e| format!("serialize servertool timeout: {e}"))
+}
+
+pub fn read_client_inject_only_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize client inject metadata input: {e}"))?;
+    Ok(
+        if orchestration_policy_contract::read_client_inject_only(&input) {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    )
+}
+
+pub fn normalize_client_inject_text_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolClientInjectTextInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize client inject text input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::normalize_client_inject_text(&input)?)
+        .map_err(|e| format!("serialize client inject text: {e}"))
+}
+
+pub fn compact_followup_error_reason_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup error reason input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::compact_followup_error_reason(&input))
+        .map_err(|e| format!("serialize followup error reason: {e}"))
+}
+
+pub fn resolve_adapter_context_provider_key_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolProviderKeyInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize adapter provider key input: {e}"))?;
+    serde_json::to_string(
+        &orchestration_policy_contract::resolve_adapter_context_provider_key(&input),
+    )
+    .map_err(|e| format!("serialize adapter provider key: {e}"))
 }
 
 pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<String, String> {
@@ -202,6 +427,20 @@ pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, Stri
     serde_json::to_string(&text).map_err(|e| format!("serialize extracted text: {e}"))
 }
 
+pub fn strip_stop_schema_control_text_json(input_json: &str) -> Result<String, String> {
+    let text: String = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop schema text input: {e}"))?;
+    let stripped = stop_visible_text::strip_stop_schema_control_text(&text);
+    serde_json::to_string(&stripped).map_err(|e| format!("serialize stripped text: {e}"))
+}
+
+pub fn strip_stop_schema_control_payload_json(input_json: &str) -> Result<String, String> {
+    let mut payload: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop schema payload input: {e}"))?;
+    stop_visible_text::strip_stop_schema_control_payload(&mut payload);
+    serde_json::to_string(&payload).map_err(|e| format!("serialize stripped payload: {e}"))
+}
+
 /// Resolve default max repeats.
 pub fn resolve_default_max_repeats(
     configured: Option<u32>,
@@ -214,6 +453,67 @@ pub fn resolve_default_max_repeats(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn normalizes_stop_gateway_context_via_servertool_core_bridge() {
+        let raw = normalize_stop_gateway_context_json(
+            &json!({
+                "observed": true,
+                "eligible": false,
+                "source": " CHAT ",
+                "reason": " finish_reason_stop ",
+                "choiceIndex": 2.8,
+                "hasToolCalls": true
+            })
+            .to_string(),
+        )
+        .expect("stop gateway context bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["observed"], true);
+        assert_eq!(parsed["eligible"], false);
+        assert_eq!(parsed["source"], "chat");
+        assert_eq!(parsed["reason"], "finish_reason_stop");
+        assert_eq!(parsed["choice_index"], 2);
+        assert_eq!(parsed["has_tool_calls"], true);
+    }
+
+    #[test]
+    fn normalizes_stop_message_compare_context_via_servertool_core_bridge() {
+        let raw = normalize_stop_message_compare_context_json(
+            &json!({
+                "armed": true,
+                "mode": " AUTO ",
+                "allowModeOnly": false,
+                "textLength": 12.8,
+                "maxRepeats": 3.2,
+                "used": 1.9,
+                "active": true,
+                "stopEligible": true,
+                "hasCapturedRequest": true,
+                "compactionRequest": false,
+                "hasSeed": true,
+                "decision": " TRIGGER ",
+                "reason": " native_decision ",
+                "observationStableCount": 2.7
+            })
+            .to_string(),
+        )
+        .expect("stop-message compare context bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["mode"], "auto");
+        assert_eq!(parsed["decision"], "trigger");
+        assert_eq!(parsed["textLength"], 12);
+        assert_eq!(parsed["maxRepeats"], 3);
+        assert_eq!(parsed["used"], 1);
+        assert_eq!(parsed["remaining"], 2);
+        assert_eq!(parsed["observationStableCount"], 2);
+
+        let summary = format_stop_message_compare_context_json(&raw).expect("summary");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&summary).expect("json"),
+            json!("decision=trigger reason=native_decision armed=true mode=auto allowModeOnly=false max=3 used=1 left=2 active=true stopEligible=true captured=true compaction=false seed=true obs=none stable=2 toolSig=none")
+        );
+    }
 
     #[test]
     fn plans_backend_route_policy_via_servertool_core_bridge() {
@@ -231,6 +531,50 @@ mod tests {
         assert_eq!(parsed["routeHint"], "servertool_backend_route:web_search");
         assert_eq!(parsed["executionMode"], "reenter");
         assert_eq!(parsed["shapeGuard"]["failOnMissingPayload"], true);
+    }
+
+    #[test]
+    fn plans_orchestration_policy_via_servertool_core_bridge() {
+        let timeout = parse_servertool_timeout_ms_json(&json!({ "raw": "1200.8" }).to_string())
+            .expect("timeout");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&timeout).expect("json"),
+            json!(1200)
+        );
+        let client_inject =
+            read_client_inject_only_json(&json!({ "clientInjectOnly": " true " }).to_string())
+                .expect("client inject");
+        assert_eq!(client_inject, "true");
+        let text = normalize_client_inject_text_json(
+            &json!({ "value": " hello\n[Time/Date]: now\n<**hidden**>\nworld " }).to_string(),
+        )
+        .expect("client inject text");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&text).expect("json"),
+            json!("hello\n\nworld")
+        );
+        let reason =
+            compact_followup_error_reason_json(&json!("HTTP 503: unavailable").to_string())
+                .expect("reason");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&reason).expect("json"),
+            json!("HTTP_503")
+        );
+        let provider_key = resolve_adapter_context_provider_key_json(
+            &json!({
+                "adapterContext": {
+                    "providerKey": "alias",
+                    "targetProviderKey": "direct",
+                    "target": { "providerKey": "exact" }
+                }
+            })
+            .to_string(),
+        )
+        .expect("provider key");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&provider_key).expect("json"),
+            json!("exact")
+        );
     }
 
     #[test]
@@ -387,6 +731,34 @@ mod tests {
     }
 
     #[test]
+    fn strips_stop_schema_control_text_via_servertool_core_bridge() {
+        let raw = strip_stop_schema_control_text_json(
+            &json!("visible\n<stop_schema>{\"stopreason\":\"blocked\"}</stop_schema>\n停止原因：blocked")
+                .to_string(),
+        )
+        .expect("strip text");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("visible"));
+    }
+
+    #[test]
+    fn strips_stop_schema_control_payload_via_servertool_core_bridge() {
+        let raw = strip_stop_schema_control_payload_json(
+            &json!({
+                "choices": [{
+                    "message": {
+                        "content": "answer {\"stopreason\":\"blocked\",\"next_step\":\"inspect\"}"
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .expect("strip payload");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["choices"][0]["message"]["content"], "answer");
+    }
+
+    #[test]
     fn detects_stop_message_auto_cli_result_via_servertool_core_bridge() {
         let raw = has_stop_message_auto_cli_result_in_request_json(
             &json!({
@@ -432,5 +804,367 @@ mod tests {
         assert_eq!(parsed["shouldPersist"], true);
         assert_eq!(parsed["used"], 2);
         assert_eq!(parsed["nextState"]["stopMessageUsed"], 2);
+    }
+
+    #[test]
+    fn resolves_default_stop_message_snapshot_via_servertool_core_bridge() {
+        let raw = resolve_default_stop_message_snapshot_json(
+            &json!({
+                "base": {
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": { "role": "assistant", "content": "done" }
+                    }]
+                },
+                "adapterContext": null,
+                "options": {
+                    "text": " keep going ",
+                    "maxRepeats": 2.9
+                }
+            })
+            .to_string(),
+        )
+        .expect("default snapshot bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["text"], "keep going");
+        assert_eq!(parsed["maxRepeats"], 2);
+        assert_eq!(parsed["used"], 0);
+        assert_eq!(parsed["source"], "default");
+    }
+
+    #[test]
+    fn resolves_implicit_gemini_stop_message_snapshot_via_servertool_core_bridge() {
+        let raw = resolve_implicit_gemini_stop_message_snapshot_json(
+            &json!({
+                "base": {
+                    "status": "completed",
+                    "output": []
+                },
+                "adapterContext": {
+                    "__rt": {
+                        "stopGatewayContext": {
+                            "observed": true,
+                            "eligible": true,
+                            "source": "responses",
+                            "reason": "status_completed"
+                        }
+                    }
+                },
+                "providerProtocol": "gemini-chat",
+                "record": {
+                    "entryEndpoint": "/v1/responses"
+                }
+            })
+            .to_string(),
+        )
+        .expect("implicit gemini snapshot bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["text"], "继续执行");
+        assert_eq!(parsed["maxRepeats"], 1);
+        assert_eq!(parsed["source"], "auto");
+    }
+
+    #[test]
+    fn reads_servertool_loop_state_via_servertool_core_bridge() {
+        let raw = read_servertool_loop_state_json(
+            &json!({
+                "serverToolLoopState": {
+                    "flowId": " stop_message_flow ",
+                    "payloadHash": " __servertool_auto__ ",
+                    "repeatCount": 2.9,
+                    "startedAtMs": 100,
+                    "stopPairHash": " pair-a ",
+                    "stopPairRepeatCount": 4.1,
+                    "stopPairWarned": true
+                }
+            })
+            .to_string(),
+        )
+        .expect("loop state bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["flowId"], "stop_message_flow");
+        assert_eq!(parsed["payloadHash"], "__servertool_auto__");
+        assert_eq!(parsed["repeatCount"], 2);
+        assert_eq!(parsed["stopPairRepeatCount"], 4);
+        assert_eq!(parsed["stopPairWarned"], true);
+    }
+
+    #[test]
+    fn plans_servertool_loop_state_via_servertool_core_bridge() {
+        let raw = plan_servertool_loop_state_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "decision": { "flowOnlyLoopLimit": false },
+                "previousLoopState": {
+                    "flowId": "stop_message_flow",
+                    "payloadHash": "__servertool_auto__",
+                    "repeatCount": 2,
+                    "startedAtMs": 100,
+                    "stopPairHash": "pair-a",
+                    "stopPairRepeatCount": 4,
+                    "stopPairWarned": true
+                },
+                "payloadHash": "ignored",
+                "stopPairHash": "pair-a",
+                "nowMs": 200
+            })
+            .to_string(),
+        )
+        .expect("loop state plan bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["flowId"], "stop_message_flow");
+        assert_eq!(parsed["payloadHash"], "__servertool_auto__");
+        assert_eq!(parsed["repeatCount"], 3);
+        assert_eq!(parsed["startedAtMs"], 100);
+        assert_eq!(parsed["stopPairRepeatCount"], 5);
+        assert_eq!(parsed["stopPairWarned"], true);
+    }
+
+    #[test]
+    fn resolves_servertool_state_key_via_servertool_core_bridge() {
+        let raw = resolve_servertool_state_key_json(
+            &json!({
+                "continuation": {
+                    "stickyScope": "request_chain",
+                    "resumeFrom": { "requestId": "req-parent" }
+                },
+                "clientTmuxSessionId": "tmux-a",
+                "requestId": "req-child"
+            })
+            .to_string(),
+        )
+        .expect("state key");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("req-parent"));
+    }
+
+    #[test]
+    fn resolves_runtime_stop_message_state_via_servertool_core_bridge() {
+        let raw = resolve_runtime_stop_message_state_json(
+            &json!({
+                "serverToolLoopState": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 99,
+                    "maxRepeats": 3
+                }
+            })
+            .to_string(),
+        )
+        .expect("runtime stop state");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["text"], "继续执行");
+        assert_eq!(parsed["maxRepeats"], 3);
+        assert_eq!(parsed["used"], 0);
+        assert_eq!(parsed["source"], "servertool.stop_message");
+        assert_eq!(parsed["stageMode"], "on");
+        assert!(parsed.get("repeatCount").is_none());
+    }
+
+    #[test]
+    fn resolves_runtime_stop_message_state_from_adapter_context_via_servertool_core_bridge() {
+        let command = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from command\",\"repeatCount\":1,\"maxRepeats\":3}'";
+        let raw = resolve_runtime_stop_message_state_from_adapter_context_json(
+            &json!({
+                "adapterContext": {
+                    "__raw_request_body": {
+                        "input": [{
+                            "type": "function_call",
+                            "call_id": "call_servertool_cli",
+                            "name": "exec_command",
+                            "arguments": json!({ "cmd": command }).to_string()
+                        }],
+                        "tool_outputs": [{
+                            "type": "function_call_output",
+                            "call_id": "call_servertool_cli",
+                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from output\",\"repeatCount\":2,\"maxRepeats\":4}"
+                        }]
+                    }
+                },
+                "runtimeMetadata": null
+            })
+            .to_string(),
+        )
+        .expect("runtime stop state from adapter context");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["text"], "continue from output");
+        assert_eq!(parsed["maxRepeats"], 4);
+        assert_eq!(parsed["used"], 2);
+        assert_eq!(parsed["source"], "client_exec_result");
+        assert_eq!(parsed["stageMode"], "on");
+    }
+
+    #[test]
+    fn reads_runtime_stop_stage_mode_via_servertool_core_bridge() {
+        let raw = read_runtime_stop_message_stage_mode_json(
+            &json!({
+                "stopMessageState": {
+                    "stopMessageStageMode": " AUTO "
+                }
+            })
+            .to_string(),
+        )
+        .expect("stage mode");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("auto"));
+    }
+
+    #[test]
+    fn reads_servertool_followup_flow_id_via_servertool_core_bridge() {
+        let raw = read_servertool_followup_flow_id_json(
+            &json!({
+                "serverToolLoopState": {
+                    "flowId": " stop_message_flow "
+                }
+            })
+            .to_string(),
+        )
+        .expect("followup flow id");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("stop_message_flow"));
+    }
+
+    #[test]
+    fn resolves_bd_working_directory_via_servertool_core_bridge() {
+        let raw = resolve_bd_working_directory_for_record_json(
+            &json!({
+                "record": {
+                    "metadata": {
+                        "capturedContext": {
+                            "__hub_capture": {
+                                "context": { "workdir": " /repo/captured " }
+                            }
+                        }
+                    }
+                },
+                "runtimeMetadata": { "workdir": "/repo/runtime" }
+            })
+            .to_string(),
+        )
+        .expect("bd working directory");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("/repo/captured"));
+    }
+
+    #[test]
+    fn resolves_stop_message_followup_provider_key_via_servertool_core_bridge() {
+        let raw = resolve_stop_message_followup_provider_key_json(
+            &json!({
+                "record": {
+                    "metadata": {
+                        "target": { "providerId": " target.provider " }
+                    }
+                },
+                "runtimeMetadata": { "providerKey": "runtime.provider" }
+            })
+            .to_string(),
+        )
+        .expect("provider key");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed, json!("target.provider"));
+    }
+
+    #[test]
+    fn resolves_runtime_context_helpers_via_servertool_core_bridge() {
+        let captured = get_captured_request_json(
+            &json!({
+                "capturedEntryRequest": { "input": "entry" },
+                "capturedChatRequest": { "messages": [] }
+            })
+            .to_string(),
+        )
+        .expect("captured request");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&captured).expect("json"),
+            json!({ "input": "entry" })
+        );
+
+        let connection =
+            resolve_client_connection_state_json(&json!({ "disconnected": true }).to_string())
+                .expect("connection");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&connection).expect("json"),
+            json!({ "disconnected": true })
+        );
+
+        assert_eq!(
+            has_compaction_flag_json(&json!({ "compactionRequest": " true " }).to_string())
+                .expect("compaction flag"),
+            "true"
+        );
+
+        let endpoint = resolve_entry_endpoint_json(
+            &json!({ "metadata": { "entryEndpoint": " /v1/responses " } }).to_string(),
+        )
+        .expect("entry endpoint");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&endpoint).expect("json"),
+            json!("/v1/responses")
+        );
+    }
+
+    #[test]
+    fn resolves_followup_tool_content_max_chars_via_servertool_core_bridge() {
+        let raw = resolve_stop_message_followup_tool_content_max_chars_json(
+            &json!({
+                "envValue": " 2000.9 ",
+                "model": "kimi-k2.5"
+            })
+            .to_string(),
+        )
+        .expect("tool content max chars");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&raw).expect("json"),
+            json!(2000)
+        );
+
+        let fallback = resolve_stop_message_followup_tool_content_max_chars_json(
+            &json!({
+                "model": " KIMI-K2.5-preview "
+            })
+            .to_string(),
+        )
+        .expect("tool content max chars fallback");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&fallback).expect("json"),
+            json!(1200)
+        );
+    }
+
+    #[test]
+    fn plans_persist_stop_message_state_via_servertool_core_bridge() {
+        let raw = plan_persist_stop_message_state_json(
+            &json!({
+                "state": {
+                    "allowedProviders": [],
+                    "disabledProviders": [],
+                    "disabledKeys": [],
+                    "disabledModels": [],
+                    "stopMessageText": " "
+                }
+            })
+            .to_string(),
+        )
+        .expect("persist plan");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&raw).expect("json"),
+            json!({ "action": "clear" })
+        );
+
+        let save = plan_persist_stop_message_state_json(
+            &json!({
+                "state": {
+                    "allowedProviders": [],
+                    "disabledProviders": [],
+                    "disabledKeys": [{ "provider": "p", "keys": [] }],
+                    "disabledModels": []
+                }
+            })
+            .to_string(),
+        )
+        .expect("persist save plan");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&save).expect("json"),
+            json!({ "action": "save" })
+        );
     }
 }

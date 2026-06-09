@@ -41,7 +41,7 @@ native-compat-action-semantics.ts  ✅ 无 fixApplyPatchToolCallsWithNative expo
 | build:min | ✅ v0.90.1628 | tsc + cargo check + build:min |
 | unified-hub-shadow | ✅ diff=0 | `npm run test:unified-hub-shadow` |
 | stopless-goal-state tests | ✅ 2/2 passed | `jest:run tests/sharedmodule/stopless-goal-state.spec.ts` |
-| goal regression tests | ✅ 4/5 passed | `jest:run tests/sharedmodule/goal-request-user-input-sample-regression.spec.ts` |
+| protocol compatibility regression tests | ✅ current gate | `npm run test:protocol-compat-regression` |
 | Phase 1 Slice 0: Rust pipeline shadow | ✅ 3/3 passed | `tests/sharedmodule/hub-rust-pipeline-shadow.spec.ts` |
 
 ---
@@ -584,7 +584,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 
 ### 语义状态
 - **Rust 唯一真源**：`shouldNormalizeReasoningPayloadWithNative`（TS thin wrapper）
-- **TS 残留**：`valueMayContainReasoningMarkup`（reasoning-normalizer.ts）、responses 子 predicate 函数（被 `normalizeReqInboundReasoningPayload` fast-path 使用）
+- **已清理残留**：`valueMayContainReasoningMarkup` 所在的 `conversion/shared/reasoning-normalizer.ts` 已作为 zero-consumer wrapper 物理删除；reasoning normalize 语义由 Rust `hub_bridge_actions/reasoning.rs` 与 native required exports 承载。
 - **待迁移**：`normalizeReqInboundReasoningPayload` 的 responses fast-path（`normalizeLatestResponsesReasoningTarget` ~100 行）
 
 ### 标注
@@ -645,6 +645,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 - `shouldNormalizeReqInboundReasoningPayload` body（~30 行）
 - `ResponsesReasoningTarget` interface
 - 未使用 imports（`normalizeReqInboundReasoningPayloadWithNative`、`valueMayContainReasoningMarkup`）
+- 后续 Phase 0 清理已物理删除旧 `conversion/shared/reasoning-normalizer.ts` wrapper；禁止恢复 TS marker predicate / transport-noise cleanup。
 - 约 **~190 行 TS 物理删除**
 
 ### 验证

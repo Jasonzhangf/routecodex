@@ -61,6 +61,15 @@ function resolveSessionKey(context?: {
   return normalizeToken(context?.sessionId) || normalizeToken(context?.conversationId);
 }
 
+function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
+  const bracketSession = text.match(/\[virtual-router-hit\](?:\x1b\[[0-9;]*m)?\s+\[([^\]\x1b]+)\]/)?.[1];
+  if (bracketSession) {
+    return normalizeToken(bracketSession);
+  }
+  const sid = text.match(/\bsid=([^ \x1b]+)/)?.[1];
+  return normalizeToken(sid);
+}
+
 function pruneExpiredContext(nowMs: number): void {
   for (const [key, record] of REQUEST_LOG_CONTEXT.entries()) {
     if (record.expiresAtMs <= nowMs) {
@@ -142,15 +151,19 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
     return text;
   }
   const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
-  if (!requestId) {
-    return text;
-  }
-  const color = resolveRequestLogColorToken(requestId);
+  const sessionKey = resolveVirtualRouterHitSessionKey(text);
+  const color = sessionKey ? resolveSessionAnsiColor(sessionKey) : resolveRequestLogColorToken(requestId);
   if (!color || color === ANSI_FALLBACK_LOG_COLOR) {
     return text;
   }
   let line = text.replace(/\x1b\[[0-9;]*m\[virtual-router-hit\]\x1b\[0m/, `${color}[virtual-router-hit]${ANSI_RESET}`);
+  if (line === text) {
+    line = line.replace('[virtual-router-hit]', `${color}[virtual-router-hit]${ANSI_RESET}`);
+  }
   line = line.replace(/(\breq=[^ \x1b]+(?: sid=[^ \x1b]+)? )\x1b\[[0-9;]*m/, `$1${color}`);
+  line = line.replace(/(\[virtual-router-hit\]\x1b\[0m\s+\[[^\]\x1b]+\]\s*)\x1b\[[0-9;]*m/, `$1${color}`);
+  line = line.replace(/(\breq=[^ \x1b]+ sid=[^ \x1b]+ )([^ \x1b])/, `$1${color}$2`);
+  line = line.replace(/(\[virtual-router-hit\]\x1b\[0m\s+\[[^\]\x1b]+\]\s*)([^ \x1b])/, `$1${color}$2`);
   return line;
 }
 

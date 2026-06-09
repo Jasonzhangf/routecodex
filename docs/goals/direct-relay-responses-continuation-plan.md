@@ -1,5 +1,13 @@
 # Direct / Relay Responses Continuation 修复计划
 
+> 2026-06-09 状态更新：本计划中的旧 TS route-aware continuation owner 已废弃并物理删除。当前 Responses continuation trigger / restore / materialize 真源在 Rust/native：
+> - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+> - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+>
+> 禁止恢复旧文件：
+> - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+> - `tests/sharedmodule/route-aware-responses-continuation.spec.ts`
+
 ## 1. 目标与验收标准
 
 ### 目标
@@ -65,7 +73,7 @@ CRS upstream 可能返回：
 
 ### 唯一正确修复点
 - Rust native bridge conversion 需要支持“受控 continuation 场景下允许 pending tool_call + 后续 user turn”的语义；
-- 该能力只能由 route-aware responses continuation 显式开启；
+- 该能力只能由 Rust Responses continuation owner 显式开启；
 - 普通 bridge conversion / 普通请求历史校验仍保持 fail-fast，不放宽全局契约。
 
 ### 计划改动文件
@@ -79,10 +87,13 @@ CRS upstream 可能返回：
    - 透传新标志到 native。
 5. `sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts`
    - 仅增加受控选项，不改变默认校验语义。
-6. `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
-   - 只在 route-aware materialize -> non-responses 路径开启该标志。
-7. 测试：
-   - `tests/sharedmodule/route-aware-responses-continuation.spec.ts`
+6. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+   - 只在受控 continuation materialize -> non-responses 路径开启该标志。
+7. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+   - 保持 store restore/materialize payload 的 Rust truth。
+8. 测试：
+   - Rust/native bridge action tests
+   - `tests/sharedmodule/responses-continuation-store.spec.ts`
    - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs`
 
@@ -106,7 +117,7 @@ CRS upstream 可能返回：
 1. Rust 定向：
 - `convert_bridge_input_allows_pending_tool_call_continuation_when_enabled`
 2. TS 定向：
-- `tests/sharedmodule/route-aware-responses-continuation.spec.ts`
+- `tests/sharedmodule/responses-continuation-store.spec.ts`
   - `RED: materialized plain followup without tool result must preserve released pending tool call and append next user turn for non-responses outbound`
 3. E2E：
 - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
@@ -137,7 +148,7 @@ CRS upstream 可能返回：
 3. 在 native bridge conversion 增加 continuation 受控能力。
 4. 透传到 TS binding 与 route-aware 调用点。
 5. 跑 Rust 定向绿测。
-6. 跑 TS route-aware 定向绿测。
+6. 跑 TS continuation store / native bridge action 定向绿测。
 7. 跑 handler E2E 绿测。
 8. native build。
 9. build / install / restart 5555。

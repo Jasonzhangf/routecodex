@@ -8,40 +8,10 @@ import {
   normalizeApplyPatchArgumentsWithNative,
   validateApplyPatchArgumentsWithNative
 } from '../../dist/native/router-hotpath/native-chat-process-governance-semantics.js';
-import { maybeAugmentApplyPatchErrorContent } from '../../dist/conversion/hub/operation-table/semantic-mappers/chat-mapper.js';
-import { runServerSideToolEngine } from '../../dist/servertool/server-side-tools.js';
 
 function parseNormalizedArgs(result) {
   assert.equal(typeof result?.normalizedArguments, 'string', 'normalizedArguments must be string');
   return JSON.parse(result.normalizedArguments);
-}
-
-function makeApplyPatchToolCallResponse(args) {
-  return {
-    id: 'chatcmpl-tool-applypatch-matrix',
-    object: 'chat.completion',
-    model: 'gpt-test',
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: null,
-          tool_calls: [
-            {
-              id: 'call_apply_patch_matrix',
-              type: 'function',
-              function: {
-                name: 'apply_patch',
-                arguments: args
-              }
-            }
-          ]
-        },
-        finish_reason: 'tool_calls'
-      }
-    ]
-  };
 }
 
 async function main() {
@@ -144,75 +114,6 @@ PATCH"`;
         'native verdict must plus-prefix add-file content'
       );
       assert.equal(parsed.input, undefined);
-    }
-
-    // 6) file changed -> context mismatch
-    {
-      const content =
-        "apply_patch verification failed: Failed to find context '-50,6 +50,8 @@' in src/server/index.ts";
-      const augmented = maybeAugmentApplyPatchErrorContent(content, 'apply_patch');
-      assert.ok(augmented.includes('[APPLY_PATCH_CONTEXT_MISMATCH]'), 'context mismatch hint must be stable');
-      assert.ok(augmented.includes('更小且唯一的上下文'), 'context mismatch hint must force smaller real context');
-    }
-
-    // 7) repeated failure -> enforced read-before-repatch
-    {
-      const adapterContext = {
-        requestId: 'req-apply-patch-native-matrix',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        routeId: 'coding',
-        capturedChatRequest: {
-          model: 'gpt-test',
-          messages: [
-            { role: 'user', content: 'edit AGENTS.md' },
-            {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_apply_patch_prev',
-                  type: 'function',
-                  function: {
-                    name: 'apply_patch',
-                    arguments: JSON.stringify({
-                      patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-old\n+new\n*** End Patch'
-                    })
-                  }
-                }
-              ]
-            },
-            {
-              role: 'tool',
-              tool_call_id: 'call_apply_patch_prev',
-              name: 'apply_patch',
-              content: "apply_patch verification failed: Failed to find context '-1,1 +1,1 @@' in AGENTS.md"
-            }
-          ],
-          tools: [
-            {
-              type: 'function',
-              function: { name: 'apply_patch', description: 'patch', parameters: { type: 'object' } }
-            }
-          ]
-        }
-      };
-      const result = await runServerSideToolEngine({
-        chatResponse: makeApplyPatchToolCallResponse(
-          JSON.stringify({
-            patch: '*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-older\n+newer\n*** End Patch'
-          })
-        ),
-        adapterContext,
-        entryEndpoint: '/v1/chat/completions',
-        requestId: 'req-apply-patch-native-matrix',
-        providerProtocol: 'openai-chat',
-        reenterPipeline: async () => ({ body: {} })
-      });
-      const output = JSON.parse(String(result.finalChatResponse?.tool_outputs?.[0]?.content || '{}'));
-      assert.equal(output.code, 'APPLY_PATCH_REQUIRES_READ_BEFORE_RETRY');
-      const ops = result.execution?.followup?.injection?.ops || [];
-      assert.ok(ops.some((row) => row?.op === 'preserve_tools'), 'followup must preserve tools');
     }
 
     console.log('✅ apply_patch native regression matrix passed');

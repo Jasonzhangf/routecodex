@@ -108,129 +108,6 @@ describe('provider-profile-loader', () => {
       expect(profile.auth.tokenFile).toBe('~/.routecodex/auth/deepseek-account-1.json');
     }
   });
-
-
-
-
-  it('RED: parses windsurf devin-token auth with tokenFile persistence fields', () => {
-    const config: Record<string, unknown> = {
-      providers: {
-        windsurf: {
-          type: 'openai',
-          providerModule: 'windsurf-chat-provider',
-          auth: {
-            type: 'windsurf-devin-token',
-            apiKey: 'devin-session-token$profile-token',
-            tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json'
-          }
-        }
-      }
-    };
-
-    const result = buildProviderProfiles(config);
-    const profile = result.byId.windsurf;
-    expect(profile.auth.kind).toBe('apikey');
-    if (profile.auth.kind === 'apikey') {
-      expect(profile.auth.rawType).toBe('windsurf-devin-token');
-      expect(profile.auth.apiKey).toBe('devin-session-token$profile-token');
-      expect(profile.auth.tokenFile).toBe('~/.rcc/auth/windsurf-devin-token-1.json');
-      expect(profile.auth.mobile).toBeUndefined();
-      expect(profile.auth.password).toBeUndefined();
-    }
-  });
-  it('parses windsurf account auth with account/password fields', () => {
-    const config: Record<string, unknown> = {
-      providers: {
-        windsurf: {
-          type: 'openai',
-          providerModule: 'windsurf-chat-provider',
-          auth: {
-            type: 'windsurf-account',
-            account: '2094423@qq.com',
-            password: 'welcome4zcam#'
-          }
-        }
-      }
-    };
-
-    const result = buildProviderProfiles(config);
-    const profile = result.byId.windsurf;
-    expect(profile.auth.kind).toBe('apikey');
-    if (profile.auth.kind === 'apikey') {
-      expect(profile.auth.rawType).toBe('windsurf-account');
-      expect(profile.auth.mobile).toBe('2094423@qq.com');
-      expect(profile.auth.password).toBe('welcome4zcam#');
-    }
-  });
-
-  it('RED: preserves providerModule instead of collapsing it to protocol type for windsurf', () => {
-    const config: Record<string, unknown> = {
-      providers: {
-        windsurf: {
-          type: 'openai',
-          providerModule: 'windsurf-chat-provider',
-          compatibilityProfile: 'chat:windsurf',
-          auth: {
-            type: 'windsurf-account',
-            account: '2094423@qq.com',
-            password: 'welcome4zcam#'
-          }
-        }
-      }
-    };
-
-    const result = buildProviderProfiles(config);
-    expect(result.byId.windsurf.moduleType).toBe('windsurf-chat-provider');
-    expect(result.byId.windsurf.protocol).toBe('openai');
-  });
-
-  it('parses windsurf runtime metadata needed by cascade local-runtime chain', () => {
-    const config: Record<string, unknown> = {
-      providers: {
-        windsurf: {
-          type: 'openai',
-          providerModule: 'windsurf-chat-provider',
-          compatibilityProfile: 'chat:windsurf',
-          auth: {
-            type: 'windsurf-devin-token',
-            apiKey: 'devin-session-token$profile-token',
-            tokenFile: '~/.rcc/auth/windsurf-devin-token-1.json'
-          },
-          windsurf: {
-            enableThinking: true,
-            defaultReasoningEffort: 'high',
-            sanitizePaths: true,
-            preserveUpstreamIdentity: true,
-            toolEmulationStrict: true,
-            pollIntervalMs: 500,
-            pollMaxWaitMs: 120000,
-            lsPort: 42101,
-            csrfToken: 'windsurf-api-csrf-fixed-token',
-            sessionId: 'session-from-profile',
-            workspacePath: '/tmp/windsurf-workspace',
-            workspaceUri: 'file:///tmp/windsurf-workspace'
-          }
-        }
-      }
-    };
-
-    const result = buildProviderProfiles(config);
-    expect(result.byId.windsurf.metadata?.windsurf).toEqual({
-      enableThinking: true,
-      defaultReasoningEffort: 'high',
-      sanitizePaths: true,
-      preserveUpstreamIdentity: true,
-      toolEmulationStrict: true,
-      pollIntervalMs: 500,
-      pollMaxWaitMs: 120000,
-      lsPort: 42101,
-      csrfToken: 'windsurf-api-csrf-fixed-token',
-      sessionId: 'session-from-profile',
-      workspacePath: '/tmp/windsurf-workspace',
-      workspaceUri: 'file:///tmp/windsurf-workspace'
-    });
-  });
-
   it('defaults deepseek-web profile to contextFileEnabled when omitted', () => {
     const config: Record<string, unknown> = {
       providers: {
@@ -303,8 +180,8 @@ describe('provider-profile-loader', () => {
   it('extracts concurrency and rpm metadata from provider config', () => {
     const config: Record<string, unknown> = {
       providers: {
-        qwen: {
-          type: 'qwen',
+        openai: {
+          type: 'openai',
           concurrency: {
             maxInFlight: 1,
             acquireTimeoutMs: 45000,
@@ -319,12 +196,12 @@ describe('provider-profile-loader', () => {
     };
 
     const result = buildProviderProfiles(config);
-    expect(result.byId.qwen.metadata?.concurrency).toEqual({
+    expect(result.byId.openai.metadata?.concurrency).toEqual({
       maxInFlight: 1,
       acquireTimeoutMs: 45000,
       staleLeaseMs: 240000
     });
-    expect(result.byId.qwen.metadata?.rpm).toEqual({
+    expect(result.byId.openai.metadata?.rpm).toEqual({
       requestsPerMinute: 80,
       acquireTimeoutMs: 35000
     });

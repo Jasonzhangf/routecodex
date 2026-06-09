@@ -35,17 +35,11 @@ async function loadFixtures() {
 
 async function runRoundtripTests() {
   const bridge = await import(pathToFileURL(distBridge).href);
-  const { buildResponsesRequestFromChat } = bridge;
-
-  const requestAdapter = await import(
-    pathToFileURL(
-      path.join(projectRoot, 'dist', 'conversion', 'shared', 'responses-request-adapter.js')
-    ).href
-  );
   const {
+    buildResponsesRequestFromChat,
     captureResponsesContext,
     buildChatRequestFromResponses
-  } = requestAdapter;
+  } = bridge;
 
   const fixtures = await loadFixtures();
   let passed = 0;

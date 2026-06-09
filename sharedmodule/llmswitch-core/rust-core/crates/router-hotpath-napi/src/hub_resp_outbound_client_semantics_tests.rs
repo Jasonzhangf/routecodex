@@ -503,16 +503,12 @@ fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflo
     );
     assert_eq!(with_tool_calls["shouldFailEmptyOutput"], Value::Bool(true));
 
-    let max_tokens_empty =
-        resolve_anthropic_chat_completion_outcome(Some("max_tokens"), 0, false);
+    let max_tokens_empty = resolve_anthropic_chat_completion_outcome(Some("max_tokens"), 0, false);
     assert_eq!(
         max_tokens_empty["finishReason"],
         Value::String("length".to_string())
     );
-    assert_eq!(
-        max_tokens_empty["shouldFailEmptyOutput"],
-        Value::Bool(true)
-    );
+    assert_eq!(max_tokens_empty["shouldFailEmptyOutput"], Value::Bool(true));
 
     let without_tool_calls =
         resolve_anthropic_chat_completion_outcome(Some("model_context_window_exceeded"), 0, true);
@@ -1784,7 +1780,10 @@ fn resolve_provider_response_context_helpers_omits_request_id_when_context_has_n
     let context = serde_json::json!({
         "modelId": "glm-4.7"
     });
-    assert_eq!(resolve_client_facing_request_id_from_context(&context), None);
+    assert_eq!(
+        resolve_client_facing_request_id_from_context(&context),
+        None
+    );
     assert_eq!(
         resolve_display_model_from_context(&context),
         Some("glm-4.7".to_string())

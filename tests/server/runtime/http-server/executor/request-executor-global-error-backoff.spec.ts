@@ -9,10 +9,10 @@ import {
 } from '../../../../../src/server/runtime/http-server/executor/request-executor-global-error-backoff';
 
 describe('request-executor-global-error-backoff', () => {
-  const scopeA = '5520|windsurf.managed.gpt-5.3-codex-low|windsurf_upstream_transient';
-  const scopeB = '5555|windsurf.managed.gpt-5.3-codex-low|windsurf_upstream_transient';
-  const scopeC = '5520|openai.gpt-5.3-codex-low|windsurf_upstream_transient';
-  const scopeD = '5520|windsurf.managed.gpt-5.3-codex-low|status_429';
+  const scopeA = '5520|openai.key1.gpt-5.3-codex-low|upstream_transient';
+  const scopeB = '5555|openai.key1.gpt-5.3-codex-low|upstream_transient';
+  const scopeC = '5520|glm.key1.gpt-5.3-codex-low|upstream_transient';
+  const scopeD = '5520|openai.key1.gpt-5.3-codex-low|status_429';
 
   beforeEach(() => {
     resetGlobalErrorBackoffStateForTests();
@@ -54,7 +54,7 @@ describe('request-executor-global-error-backoff', () => {
   test('resets consecutive scoped errors after provider-scope success', () => {
     expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
     expect(recordScopedErrorBackoff(scopeD)).toBe(1000);
-    resetScopedErrorBackoffByProvider('5520|windsurf.managed.gpt-5.3-codex-low|');
+    resetScopedErrorBackoffByProvider('5520|openai.key1.gpt-5.3-codex-low|');
 
     expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
     expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);

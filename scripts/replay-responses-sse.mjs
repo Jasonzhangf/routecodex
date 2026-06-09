@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Offline replay for Responses SSE: take a snapshot JSON (finalize-pre/post or raw Chat JSON),
-// run through core finalize → bridge → SSE synth, and print a concise summary.
+// Offline replay for Responses SSE: take a snapshot JSON (raw Chat JSON or snapshot wrapper),
+// run through the current Responses bridge + SSE codec, and print a concise summary.
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -43,7 +43,7 @@ async function main() {
 
   // 仅允许本地 sharedmodule 构建
   const repoRoot = path.resolve(__dirname, '..');
-  const localBase = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion');
+  const localBase = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist');
   try {
     await fs.access(localBase);
   } catch {
@@ -53,9 +53,8 @@ async function main() {
 
   const importCore = async (relPath) => import(pathToFileURL(path.join(localBase, relPath)).href);
 
-  const finalizeMod = await importCore(path.join('shared', 'openai-finalizer.js'));
-  const bridgeMod = await importCore(path.join('responses', 'responses-openai-bridge.js'));
-  const sseMod = await importCore(path.join('streaming', 'json-to-responses-sse.js'));
+  const bridgeMod = await importCore(path.join('conversion', 'responses', 'responses-openai-bridge.js'));
+  const sseMod = await importCore(path.join('sse', 'index.js'));
 
   const requestId = (() => {
     const bn = path.basename(abs).replace(/\.json$/i, '');
@@ -65,10 +64,8 @@ async function main() {
 
   // Unwrap snapshot → Chat JSON
   const chatLike = pickChatPayload(raw);
-  // Finalize Chat JSON (idempotent)
-  const finalized = await finalizeMod.finalizeOpenAIChatResponse(chatLike, { requestId, endpoint: '/v1/responses' });
   // Map to Responses JSON (non-stream)
-  const mapped = bridgeMod.buildResponsesPayloadFromChat(finalized, undefined);
+  const mapped = bridgeMod.buildResponsesPayloadFromChat(chatLike, undefined);
 
   // Summarize mapping
   const outputText = (mapped && typeof mapped === 'object') ? (mapped.output_text || '') : '';
@@ -76,8 +73,11 @@ async function main() {
     ? (Array.isArray(mapped.required_action.submit_tool_outputs?.tool_calls) ? mapped.required_action.submit_tool_outputs.tool_calls.length : 0)
     : 0;
 
-  // Generate synthetic Responses SSE from Chat JSON
-  const readable = sseMod.createResponsesSSEStreamFromChatJson(finalized, { requestId });
+  // Generate Responses SSE from current Responses JSON codec
+  const readable = await sseMod.responsesConverters.jsonToSse.convertResponseToJsonToSse(mapped, {
+    requestId,
+    model: mapped?.model || chatLike?.model
+  });
   const stats = { textDelta: 0, ra: 0, completed: 0, done: 0, doneToken: 0 };
   let chunks = 0;
   await new Promise((resolve) => {

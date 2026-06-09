@@ -149,5 +149,4 @@ export type ReportRequestExecutorProviderErrorArgs = {
   metadata?: Record<string, unknown>;
   routePool?: string[];
   excludedProviderKeys?: Set<string>;
-  affectsHealthOverride?: boolean;
 };

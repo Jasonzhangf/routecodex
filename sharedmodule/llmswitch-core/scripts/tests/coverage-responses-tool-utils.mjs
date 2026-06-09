@@ -4,44 +4,27 @@ import assert from 'node:assert/strict';
 
 async function main() {
   const {
-    normalizeResponsesToolCallIds,
-    resolveToolCallIdStyle,
+    createToolCallIdTransformer,
+    enforceToolCallIdStyle,
     stripInternalToolingMetadata,
     sanitizeResponsesFunctionName
   } = await import('../../dist/conversion/shared/responses-tool-utils.js');
 
   {
-    const payload = {
-      output: [
-        { type: 'function_call', id: 'toolu_1', call_id: 'toolu_1' },
-        { type: 'function_call_output', id: 'result_1', tool_call_id: 'toolu_1' },
-        {
-          type: 'message',
-          tool_calls: [
-            { id: 'toolu_nested', tool_call_id: 'toolu_nested' }
-          ]
-        }
-      ],
-      required_action: {
-        submit_tool_outputs: {
-          tool_calls: [{ id: 'toolu_1', tool_call_id: 'toolu_1' }]
-        }
-      }
-    };
+    const transformer = createToolCallIdTransformer('fc');
+    assert.ok(transformer);
+    const input = [
+      { type: 'function_call', id: 'toolu_1', call_id: 'toolu_1' },
+      { type: 'function_call_output', id: 'result_1', tool_call_id: 'toolu_1' }
+    ];
+    enforceToolCallIdStyle(input, transformer);
 
-    normalizeResponsesToolCallIds(payload);
-
-    assert.match(payload.output[0].call_id, /^fc_/);
-    assert.match(payload.output[0].id, /^fc_/);
-    assert.match(payload.output[1].call_id, /^fc_/);
-    assert.match(payload.output[1].id, /^fc_/);
-    assert.match(payload.output[2].tool_calls[0].id, /^fc_/);
-    assert.match(payload.required_action.submit_tool_outputs.tool_calls[0].tool_call_id, /^fc_/);
-  }
-
-  {
-    assert.equal(resolveToolCallIdStyle(undefined), 'fc');
-    assert.equal(resolveToolCallIdStyle({ toolCallIdStyle: 'preserve' }), 'preserve');
+    assert.match(input[0].call_id, /^call_/);
+    assert.match(input[0].id, /^fc_/);
+    assert.match(input[1].call_id, /^call_/);
+    assert.match(input[1].tool_call_id, /^call_/);
+    assert.match(input[1].id, /^fc_/);
+    assert.equal(createToolCallIdTransformer('preserve'), null);
   }
 
   {

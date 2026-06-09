@@ -90,7 +90,7 @@
   - longcontext 在非 fatal 429 下保持同路由池（无 TS fallback）语义已由测试覆盖。
 
 #### Hub anthropic fallback 清理回归
-`npm run jest:run -- --runTestsByPath tests/sharedmodule/anthropic-semantics-stage2.spec.ts tests/sharedmodule/provider-compat-anthropic.spec.ts`
+`npm run jest:run -- --runTestsByPath tests/sharedmodule/provider-compat-anthropic.spec.ts tests/sharedmodule/anthropic-tool-schema-stability.spec.ts`
 
 - 结果：**2 suites passed, 5 tests passed, 0 failed** ✅
 

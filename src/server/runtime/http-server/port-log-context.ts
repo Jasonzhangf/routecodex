@@ -55,6 +55,30 @@ function stringifyArg(value: unknown): string {
   }
 }
 
+function resolvePortPrefix(context: PortRequestContext | undefined, port: number | undefined): string {
+  if (!context || !port) {
+    return '';
+  }
+  const group = typeof context.routingPolicyGroup === 'string' && context.routingPolicyGroup.trim()
+    ? ` group:${context.routingPolicyGroup.trim()}`
+    : '';
+  return `[port:${port}${group}]`;
+}
+
+function prefixArgsWithPort(args: unknown[], prefix: string): unknown[] {
+  if (!prefix) {
+    return args;
+  }
+  if (args.length === 0) {
+    return [prefix];
+  }
+  const first = args[0];
+  if (typeof first === 'string') {
+    return [`${prefix} ${first}`, ...args.slice(1)];
+  }
+  return [prefix, ...args];
+}
+
 export function installPortLogConsoleRouter(): void {
   if (installed) {
     return;
@@ -65,15 +89,18 @@ export function installPortLogConsoleRouter(): void {
   const originalWarn = console.warn.bind(console);
   const originalError = console.error.bind(console);
   const wrap = (original: (...args: unknown[]) => void) => (...args: unknown[]) => {
+    const context = storage.getStore();
+    const port = resolvePort(context);
+    const prefix = resolvePortPrefix(context, port);
     const routedArgs =
       args.length === 1 && typeof args[0] === 'string'
         ? [colorizeVirtualRouterHitLogLine(args[0])]
         : args;
-    const port = resolvePort(storage.getStore());
+    const prefixedArgs = prefixArgsWithPort(routedArgs, prefix);
     if (port) {
-      writePortLine(port, routedArgs.map(stringifyArg).join(' '));
+      writePortLine(port, prefixedArgs.map(stringifyArg).join(' '));
     }
-    original(...routedArgs);
+    original(...prefixedArgs);
   };
   console.log = wrap(originalLog) as typeof console.log;
   console.info = wrap(originalInfo) as typeof console.info;

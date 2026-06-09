@@ -6,7 +6,7 @@
 //!
 //! 设计约束（硬护栏）：
 //! 1. forwarder id 仅做命名空间（`fwd.` 前缀）；**禁止**按 `split(".")` 推算 model
-//! 2. 不接管 WindsurfAccountPool；sticky map 独立持有
+//! 2. sticky map 独立持有
 //! 3. 全 disabled → fail-fast（`ERR_FORWARDER_NO_AVAILABLE_TARGET`）
 //! 4. 不修改 build_target（forwarder 解析发生在 select 阶段）
 

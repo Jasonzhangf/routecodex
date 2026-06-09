@@ -57,7 +57,7 @@ docs/design/apply-patch-config-gated-servertool.md
 
 ### Out of Scope / 禁止项
 
-- 不碰 Windsurf provider。
+- 不碰 provider runtime。
 - 不在 provider 内实现 apply_patch 分支。
 - 不做失败后 fallback 或自动切模式。
 - 不保留 `mode` 与 `enabled` 双配置真源。
@@ -157,7 +157,7 @@ config -> runtimeMetadata -> Hub request governance + servertool dispatch + resp
 ### Phase 0：冻结事实与保护边界
 
 1. 读：`AGENTS.md`、`.agents/skills/rcc-dev-skills/SKILL.md`、本设计文档、本计划。
-2. `git status --short`，确认不改、不 restore、不提交 Windsurf provider 文件。
+2. `git status --short`，确认不改、不 restore、不提交 provider runtime 文件。
 3. 查现有 codex samples，记录 apply_patch 失败/污染现象作为红测依据。
 4. 在 `note.md` 记录开始状态与约束。
 
@@ -284,7 +284,7 @@ npm run install:global
 - docs/goals/apply-patch-config-gated-servertool-plan.md
 
 执行规范：
-- 只改 Hub Pipeline / servertool / config 链路；禁止触碰 Windsurf provider。
+- 只改 Hub Pipeline / servertool / config 链路；禁止触碰 provider runtime。
 - 不做 fallback：mode=client 与 mode=servertool 由配置固定决定，失败不得自动切换。
 - 默认必须是 client；非法配置 fail-fast。
 - 先红测/contract，再实现；修改后必须自己构建、安装、重启 10000 并做真实 smoke。

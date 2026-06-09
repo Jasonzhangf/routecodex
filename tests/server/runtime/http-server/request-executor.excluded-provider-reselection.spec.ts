@@ -37,38 +37,38 @@ describe('request-executor excluded provider reselection plan', () => {
 
   it('keeps excluded provider excluded when current routingDecision pool was narrowed but initial route pool still has alternatives', () => {
     const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
-      inputRequestId: 'req-ws-weekly-reroute',
-      providerRequestId: 'req-ws-weekly-reroute',
+      inputRequestId: 'req-provider-weekly-reroute',
+      providerRequestId: 'req-provider-weekly-reroute',
       attempt: 2,
       metadataForAttempt: {},
       pipelineResult: {
         routingDecision: {
           routeName: 'thinking',
-          pool: ['windsurf.ws-pro-1.gpt-5.4-medium'],
+          pool: ['openai.key1.gpt-5.4-medium'],
         },
         providerPayload: { body: { model: 'gpt-5.4-medium' } },
         target: {
-          providerKey: 'windsurf.ws-pro-1.gpt-5.4-medium',
-          runtimeKey: 'windsurf.ws-pro-1',
-          compatibilityProfile: 'chat:windsurf',
+          providerKey: 'openai.key1.gpt-5.4-medium',
+          runtimeKey: 'openai.key1',
+          compatibilityProfile: 'chat:openai',
         },
         metadata: {},
       } as any,
       clientHeadersForAttempt: undefined,
-      clientRequestId: 'req-ws-weekly-reroute',
+      clientRequestId: 'req-provider-weekly-reroute',
       clientAbortSignal: undefined,
       initialRoutePool: [
-        'windsurf.ws-pro-1.gpt-5.4-medium',
-        'windsurf.ws-pro-2.gpt-5.4-medium',
-        'windsurf.ws-pro-3.gpt-5.4-medium',
+        'openai.key1.gpt-5.4-medium',
+        'openai.key2.gpt-5.4-medium',
+        'openai.key3.gpt-5.4-medium',
       ],
-      excludedProviderKeys: new Set(['windsurf.ws-pro-1.gpt-5.4-medium']),
+      excludedProviderKeys: new Set(['openai.key1.gpt-5.4-medium']),
       lastError: Object.assign(
         new Error('Your weekly usage quota has been exhausted.'),
         {
           status: 429,
-          code: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
-          upstreamCode: 'WINDSURF_WEEKLY_QUOTA_EXHAUSTED',
+          code: 'HTTP_429',
+          upstreamCode: 'HTTP_429',
           retryable: false,
           quotaScope: 'weekly',
         }
@@ -84,9 +84,9 @@ describe('request-executor excluded provider reselection plan', () => {
     expect(resolved).toEqual({
       kind: 'retry_next_attempt',
       initialRoutePool: [
-        'windsurf.ws-pro-1.gpt-5.4-medium',
-        'windsurf.ws-pro-2.gpt-5.4-medium',
-        'windsurf.ws-pro-3.gpt-5.4-medium',
+        'openai.key1.gpt-5.4-medium',
+        'openai.key2.gpt-5.4-medium',
+        'openai.key3.gpt-5.4-medium',
       ]
     });
   });

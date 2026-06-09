@@ -20,7 +20,7 @@
 ## 范围与边界
 
 In Scope：
-- `route-aware-responses-continuation.ts` continuation 触发条件收紧
+- Rust Responses continuation trigger / restore owner 的触发条件收紧
 - hub outbound allowlist / provider payload policy 收口
 - provider 侧 `body.metadata` 消费迁移到 runtime symbol / context
 - followup / submit_tool_outputs / direct / relay 相关回归测试
@@ -49,11 +49,17 @@ Out of Scope：
 5. followup 只是正常请求重入；若触发 continuation，必须遵守 direct/relay ownership，不允许跨介质恢复
 6. 内部 meta / ownership / sticky 信息只允许在 hub 内部流转；provider 与 client 都不可见
 
-这条规则的唯一 continuation 真源仍然只允许收口在：
+这条规则的唯一 continuation 真源只允许收口在 Rust/native owner：
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+
+已删除的旧 TS owner 禁止恢复：
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+- `tests/sharedmodule/route-aware-responses-continuation.spec.ts`
 
 1. 单一真源：
-   - continuation 触发真源收口在 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+   - continuation 触发真源收口在 Rust `hub_pipeline_blocks/responses_resume.rs`
+   - continuation store restore/materialize 真源收口在 Rust `shared_responses_conversation_utils.rs`
    - provider outbound 白名单真源收口在 hub provider payload policy / native allowlist
 2. 内部控制面与外部协议面分离：
    - 内部 meta 走 runtime symbol / adapter context
@@ -67,9 +73,12 @@ Out of Scope：
 ## 现状审计结论
 
 ### A. continuation 误触发真源
-- 文件：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+- 文件：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
 - 当前问题：只要 `entryProtocol === 'openai-responses'` 且 scope 命中，就可能自动恢复 continuation。
 - 风险：普通 `/v1/responses` create（尤其 search）会被错误注入 `previous_response_id`，打成 continuation。
+- 边界：旧 `route-aware-responses-continuation.ts` TS owner 已删除，不能作为修复点恢复。
 
 ### B. metadata 出站收口过晚
 - 文件：
@@ -94,7 +103,8 @@ Out of Scope：
 
 ### 1. 收紧 continuation 触发条件
 目标文件：
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
 
 策略：
 - 只有存在明确 continuation 证据时才允许恢复 continuation：
@@ -107,8 +117,8 @@ Out of Scope：
 ### 2. provider outbound allowlist 前移
 目标文件：
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-policy-apply-blocks.ts`
-- `sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.ts`
-- 对应 native allowlist 真源
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs`
+- 对应 native allowlist / policy Rust 真源
 
 策略：
 - 在 providerPayload 形成后、发给 provider 前，统一剥离内部控制字段。
@@ -147,9 +157,10 @@ Out of Scope：
 ## 文件清单
 
 主修改候选：
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-provider-payload-policy-apply-blocks.ts`
-- `sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs`
 - native allowlist / policy 对应 Rust 真源文件
 - `src/providers/core/runtime/provider-request-preprocessor.ts`
 - `src/providers/core/runtime/responses-provider.ts`
@@ -211,7 +222,7 @@ Out of Scope：
 
 1. 落红测：continuation 误触发 + outbound meta 泄露 + provider hint 读取
 2. 审计并迁移 provider `body.metadata` 消费到 runtime symbol / context
-3. 收紧 `route-aware-responses-continuation.ts` 的 continuation 触发条件
+3. 收紧 Rust Responses continuation owner 的 continuation 触发条件
 4. 前移 hub outbound allowlist，禁止 internal meta 出站
 5. 清理 `provider-response-converter` 等路径的 payload.metadata 注入
 6. 跑定向测试
@@ -227,6 +238,6 @@ Out of Scope：
 4. submit_tool_outputs / followup / direct / relay 回归全绿
 5. build/install/restart/live 验证完成
 6. summary 中可明确说明：
-   - continuation 真源为什么唯一在 `route-aware-responses-continuation.ts`
+   - continuation 真源为什么唯一在 Rust `responses_resume.rs` / `shared_responses_conversation_utils.rs`
    - outbound meta 收口为什么唯一在 hub allowlist，而不是 provider client 末端删除
 7. 架构文档已明确写清 ownership 共识：`store=false` / `direct+store=true` / `relay+store=true`

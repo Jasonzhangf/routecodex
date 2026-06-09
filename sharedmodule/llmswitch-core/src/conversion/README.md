@@ -1,42 +1,34 @@
 # Conversion Module
 
-## Overview
-Conversion module implements the front-half and back-half pipeline for protocol transformation between different AI provider APIs. This is the core of llmswitch-core's conversion engine.
+## Current Boundary
 
-## Directory Structure
-```
+Hub Pipeline runtime semantics are Rust-owned. TypeScript under `src/conversion/` is limited to direct-owner bridge modules, generated/dist entry points, and narrow host glue around native Rust owners.
+
+The public `conversion/index.ts` barrel is intentionally minimal. It currently exports only repository-live barrel consumers:
+
+- `convertProviderResponse`
+- `runStandardChatRequestFilters`
+
+Other conversion modules must be imported from their direct owner path when they remain live. Do not restore legacy umbrella exports for protocol pipelines, codec registries, schema validators, Hub types, response bridge helpers, or shared tool/text helpers.
+
+## Directory Notes
+
+```text
 src/conversion/
-├── index.ts                  # Main entry point and exports
-├── codec-registry.ts         # Codec registry for all protocols
-├── schema-validator.ts       # JSON Schema validation
-├── types.ts                  # Conversion type definitions
-├── codecs/                   # Protocol codec implementations (chat, responses, anthropic)
-├── compat/                   # Provider compatibility profiles
-├── config/                   # Conversion configuration files
-├── hub/                      # Hub Pipeline implementation
-├── pipeline/                 # Pipeline nodes and stages
-├── responses/                # Responses protocol specific conversion
-└── shared/                   # Shared utilities (reasoning normalizer, etc.)
+├── index.ts                  # Minimal public barrel: only live barrel consumers.
+├── types.ts                  # Direct-owner conversion types still used by live codecs/filters.
+├── codecs/                   # Legacy/direct codec implementations; not public barrel surface.
+├── compat/                   # Provider compatibility profiles and direct-owner helpers.
+├── hub/                      # TS bridge/glue around Rust Hub Pipeline owners.
+├── pipeline/                 # Legacy V2 pipeline internals; direct-owner usage only.
+├── responses/                # Responses bridge internals; direct-owner usage only.
+└── shared/                   # Shared direct-owner wrappers around native/Rust semantics.
 ```
 
-## Key Components
+Deleted legacy public-surface modules must stay absent:
 
-### Front-Half Conversion
-Converts inbound requests from different protocols to canonical OpenAI Chat format:
-- `chat`: Minimal validation and normalization
-- `responses`: Maps instructions + input to messages, function_call → tool_calls
-- `anthropic`: Claude message mapping to OpenAI Chat
+- `codec-registry.ts`
+- `schema-validator.ts`
+- `args-mapping.ts`
 
-### Back-Half Pipeline (Tool Governance)
-The only place where tool handling occurs:
-- `request-tools-stage`: canonicalize tools, repair arguments, ID generation
-- `response-tools-stage`: tool result pairing, responses reverse bridge
-
-### Codec Registry
-Provides codec implementations for:
-- `openai-chat` - OpenAI Chat protocol
-- `openai-responses` - OpenAI Responses protocol  
-- `anthropic-messages` - Anthropic Messages protocol
-
-## Related Documentation
-- Root README.md - Package overview and architecture principles
+Residue gates in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` lock this boundary.

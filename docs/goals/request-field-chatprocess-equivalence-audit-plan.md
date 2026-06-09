@@ -108,11 +108,15 @@
 文件：
 - `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
 - `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts`
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts`
 
 问题：
 - 仍使用 `responsesContext`、`toolsRaw`、`restoredTools`、`buildResponsesPayloadFromChat(...)` 等旧上下文机制。
 - 部分用途属于响应投影还原，部分可能参与请求/响应桥接重建，边界不清。
+
+2026-06-09 closeout:
+- V2 conversion pipeline codecs have been physically deleted: `sharedmodule/llmswitch-core/src/conversion/pipeline/**` and matching dist outputs are not valid migration targets anymore.
+- Deleted files such as `responses-openai-pipeline.ts`, `anthropic-openai-pipeline.ts`, `openai-openai-pipeline.ts`, and `openai-chat-helpers.ts` are forbidden duplicate request-semantics entrances; do not restore them as compatibility shims.
+- The remaining active audit scope is the live Responses bridge files above plus Rust/HTTP owners listed later in this plan.
 
 处理方向：
 - 标注 `toolsRaw/clientToolsRaw` 仅允许 response projection read-only 使用。
@@ -273,21 +277,14 @@
 - 保留 provider runtime 对当前 provider wire body 的读取。
 - 审计并移除从 wrapper/raw `data.*` 补 prompt/tools 的行为；provider runtime 不应有第二输入源。
 
-### 11.3 Windsurf provider runtime 仍做协议转换
-
-文件：`src/providers/core/runtime/windsurf-chat-provider.ts`
-
-现状：
-- `preprocessRequest(...)` 将 `body.input` 转为 `body.messages`。
-- 读取/拆分 `body.tools`，写入 hidden Windsurf 字段并删除 `body.tools` / `body.tool_choice`。
-- 根据 `body.reasoning` / `body.reasoning_effort` 改写 model。
+### 11.3 Provider runtime TS semantic conversion
 
 判定：
-- 这是 provider runtime 内承担 request protocol semantic conversion / tool governance 的路径。
-- 按项目护栏，Hub Pipeline / Chat Process / req_outbound 语义必须 Rust-only；provider runtime 只能做 transport/auth/provider内部协议兼容，不能重建工具治理。
+- provider runtime 若承担 request protocol semantic conversion / tool governance，属于越界。
+- 按项目护栏，Hub Pipeline / Chat Process / req_outbound 语义必须 Rust-only；provider runtime 只能做 transport/auth/provider 内部协议兼容，不能重建工具治理。
 
 处理决策：
-- 列为 Rust 下沉候选：Windsurf-specific outbound projection 进入 Rust provider outbound/profile 语义块。
+- 这类 provider runtime semantic conversion 必须下沉到 Rust outbound/profile 语义块，或随对应 provider 实现物理删除。
 - TS provider runtime 收缩为 transport shell；不得从 Responses input 转 Chat messages。
 
 ### 11.4 OpenAI Responses SDK transport raw body 传递
@@ -343,7 +340,6 @@
 文件：
 - `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
 - `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts`
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts`
 
 现状：
 - 使用 `responsesContext`、`toolsRaw`、`restoredTools`、`buildResponsesPayloadFromChat(...)`。
@@ -408,7 +404,7 @@
 | V7 | `servertool_followup_delta.rs` | `replace_tools` / `force_tool_choice` ops | 直接改 tools/tool_choice | 删除或移入 chatprocess policy |
 | V8 | `responses-openai-bridge*.ts` | `responsesContext/toolsRaw/restoredTools` | TS legacy context 参与 payload build | Rust 下沉；response-only 隔离 |
 | V9 | `deepseek-web-request.ts` | `__hub_capture.context.toolsRaw` restore | raw context -> provider tools | 删除；Rust profile 生成 |
-| V10 | `windsurf-chat-provider.ts` | `preprocessRequest` | provider runtime 做 input/tools/tool_choice/model semantic conversion | Rust 下沉；TS transport shell |
+| V10 | provider runtime preprocess | request preprocess | provider runtime 做 input/tools/tool_choice/model semantic conversion | Rust 下沉或物理删除；TS transport shell |
 | V11 | `openai-sdk-transport.ts` | `mergePreservedOpenAiRequestFields` | rawBody 未知字段回填 | 删除；SDK options 由 Rust outbound 显式生成 |
 | V12 | `deepseek-http-provider-helpers.ts` | `data.tools/data.messages` fallback | wrapper/raw data 字段补偿 | 删除 wrapper 补偿；只读 provider body |
 | V13 | `direct-passthrough-payload.ts` | `metadata.__raw_request_body` | direct raw passthrough | direct-only 保留；禁止 relay/followup 使用 |
@@ -421,7 +417,7 @@
 3. 给 `ProviderReqOutbound06WirePayload` 加运行时 guard：禁止 internal carrier、`metadata`、`type:"namespace"`、`toolsRaw/clientToolsRaw`。
 4. 收敛 `servertool_followup_delta`：删除 tools/tool_choice ops；仅保留等价用户输入注入；history compact/trim 移入 chatprocess。
 5. 重命名/隔离 response projection tool alias carrier，禁止 ReqOutbound 读取。
-6. Rust 下沉 provider runtime semantic conversion：Windsurf、Vercel SDK OpenAI、DeepSeek web tools profile。
+6. Rust 下沉 provider runtime semantic conversion：Vercel SDK OpenAI、DeepSeek web tools profile，以及任何仍存活 provider runtime 中的协议语义转换。
 7. 更新 docs/skills/MEMORY，并通过 build/install/live sample 验证。
 
 ## 16. 追加审计：关键词反查后的风险分级
@@ -434,7 +430,6 @@
   - 风险：provider profile 读取 runtime metadata 中的 `reasoning_effort`，可能把 side-channel 控制语义投影成 provider body 字段。
   - 决策：纳入 Rust outbound/provider profile 参数映射审计；TS profile 不应拥有 live request semantic source。
 
-- `src/providers/core/runtime/windsurf-chat-provider.ts`
   - 风险：provider runtime 将 `input -> messages`、拆分 `tools`、隐藏 `tool_choice`，并把 reasoning effort 合并进 model。
   - 决策：列为 provider-specific outbound projection Rust 下沉；TS runtime 收缩为 transport。
 
@@ -507,7 +502,7 @@
 | V6/V7 | Rust `servertool_followup_delta.rs` tests | `replace_tools` / `force_tool_choice` 不再生成 live request fields；或该 DSL 删除后无导出 |
 | V8 | Responses bridge tests | `toolsRaw/restoredTools` 只能影响 client response projection，不能参与 request payload build |
 | V9 | `deepseek-web-request` compat tests | `__hub_capture.context.toolsRaw` 不会 restore 到 payload.tools |
-| V10 | Windsurf provider tests | provider runtime 不做 `input -> messages` / tools governance；新 Rust outbound profile 做等价投影 |
+| V10 | provider runtime semantic-conversion tests | provider runtime 不做 `input -> messages` / tools governance；新 Rust outbound profile 做等价投影 |
 | V11 | Vercel SDK transport tests | rawBody 未知字段不被 merge 回 SDK request |
 | V12 | DeepSeek helper tests | wrapper `data.tools/data.messages` 不作为 provider request 补偿输入 |
 | V13 | direct passthrough tests | direct-only 可用 raw body；relay/followup 不可使用 `__raw_request_body` 构造 provider body |
@@ -566,7 +561,7 @@
 4. `servertool_followup_delta.rs`：删除或重构 followup 专用 `replace_tools` / `force_tool_choice` / request-field DSL；followup 只能构造等价客户端输入，不拥有 provider request patch 能力。
 5. `deepseek-web-request.ts` / DeepSeek helpers：删除 `__hub_capture.context.toolsRaw -> payload.tools` 和 wrapper `data.tools/messages/prompt` 作为请求补偿来源。
 6. Vercel/OpenAI SDK transport：删除 `mergePreservedOpenAiRequestFields(rawBody, builtBody)` 这类 raw merge；SDK options 必须由标准语义显式生成。
-7. Windsurf / provider runtime TS semantic conversion：`input -> messages`、tool governance、tool_choice/model/reasoning 转换应下沉到 Rust outbound profile；provider runtime 不再拥有 Hub 语义转换职责。
+7. Provider runtime TS semantic conversion：`input -> messages`、tool governance、tool_choice/model/reasoning 转换应下沉到 Rust outbound profile；provider runtime 不再拥有 Hub 语义转换职责。
 8. response projection 中的 `toolsRaw/clientToolsRaw` 如仍需存在，必须改名/改型为 response-only alias carrier，且 red test 证明 ReqOutbound 无法读取。
 
 ### 20.5 红测优先级
@@ -822,9 +817,10 @@ docs/goals/request-field-chatprocess-equivalence-audit-plan.md（以 §23 审计
 
 以下路径需要进一步下沉、删除或隔离；不能把它们当作已验证真源：
 
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts`
-  - 仍在 TS 中执行 `captureResponsesContext`、`buildChatRequestFromResponses`、`collectResponsesRequestParameters`、`standardizedToChatEnvelopeWithNative`、`chatEnvelopeToStandardizedWithNative`、`runStandardChatRequestFilters` 的组合转换。
-  - 风险：TS codec 仍承担部分 Responses -> Chat -> Standardized 请求语义编排；应列入 Rust 下沉或薄壳化计划。
+- V2 conversion pipeline codecs have been physically deleted.
+  - Deleted surface: `sharedmodule/llmswitch-core/src/conversion/pipeline/**` and `sharedmodule/llmswitch-core/dist/conversion/pipeline/**`.
+  - Former files such as `responses-openai-pipeline.ts`, `anthropic-openai-pipeline.ts`, `openai-openai-pipeline.ts`, and `openai-chat-helpers.ts` are not pending migration; they are forbidden duplicate request-semantics entrances.
+  - Any future need for Responses/Chat/Anthropic field equivalence must be implemented in the Rust owning nodes, not by reviving V2 pipeline codecs or wrapper tests.
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs`
   - 仍存在 `metadata_tool_choice/context_tool_choice`、`metadata_parallel_tool_calls/context_parallel_tool_calls` 等优先级读取。
   - 风险：若这些字段被用于 live request 生成，就是 metadata/context 回填；若仅用于 legacy bridge，应迁移到 ChatProcess 标准语义或删除。
@@ -847,7 +843,7 @@ docs/goals/request-field-chatprocess-equivalence-audit-plan.md（以 §23 审计
 - 新增 TS red test（建议路径）：`tests/red-tests/request_field_semantics_must_not_use_raw_context_metadata.test.ts`。
   - 静态扫描禁止 `ReqOutbound/ProviderReqOutbound/provider transport/followup dispatch` 读取 `__raw_request_body/rawBody/requestMetadata/contextSnapshot/responsesContext/toolsRaw/clientToolsRaw` 来生成 request fields。
   - 允许列表必须只包含 direct-only passthrough、response-only diagnostics、snapshot-only sanitizer。
-- 更新 topology red test：把 `responses-openai-pipeline.ts` 中 TS 语义编排列为待迁移 legacy，防止新增第二套 converter。
+- 更新 topology red test：锁定 `sharedmodule/llmswitch-core/src/conversion/pipeline/**` 与 matching dist outputs 不得复活，防止新增第二套 converter。
 
 ### 25.5 当前执行判断
 
@@ -859,12 +855,10 @@ docs/goals/request-field-chatprocess-equivalence-audit-plan.md（以 §23 审计
 
 ### 26.1 人审范围
 
-- Anthropic 入站：`sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/anthropic-openai-pipeline.ts`
-  - 路径为 Anthropic raw -> native OpenAI Chat -> `parseReqInboundFormatEnvelopeWithNative` -> `mapOpenaiChatToChatWithNative` -> `chatEnvelopeToStandardizedWithNative` -> `convertStandardizedToOpenAIChat`。
-  - 未发现从 `metadata/context/toolsRaw/clientToolsRaw` 补 live request 字段的专用入口。
-- Chat 出站：`sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/shared/openai-chat-helpers.ts`
-  - 路径为 standardized -> `standardizedToChatEnvelopeWithNative` -> `mapOpenaiChatFromChatWithNative`。
-  - `context.metadata.reasoningMode` 仅用于 response codec reasoning mode，不作为 request field source。
+- Anthropic/Chat V2 pipeline codec scope has been closed by physical deletion, not migration.
+  - Deleted source root: `sharedmodule/llmswitch-core/src/conversion/pipeline/**`.
+  - Deleted dist root: `sharedmodule/llmswitch-core/dist/conversion/pipeline/**`.
+  - Former Anthropic/Chat V2 codec findings are historical; do not use them as current implementation truth.
 - Responses 双向桥：`sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts` 与 `.js`
   - 发现并修复多套字段入口：`ctx.parameters`、`ctx.metadata.parameters`、`ctx.metadata`、`ctx.toolsRaw`、`ctx.toolChoice/parallelToolCalls/responseFormat/serviceTier/truncation/include/store` 曾可影响 Responses request projection。
   - 修复后，Responses request projection 只从 Chat 源请求字段与 `chat.parameters` 生成；context/metadata 不再回填 live request 字段。

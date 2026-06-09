@@ -5,7 +5,6 @@ import { applyRetryExclusionForCurrentProvider } from './request-executor-retry-
 import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
-import { isWindsurfManagedProviderIdentity } from '../../../../providers/core/contracts/windsurf-provider-contract.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 
@@ -82,23 +81,14 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     target && typeof target.runtimeKey === 'string' && target.runtimeKey.trim()
       ? target.runtimeKey.trim()
       : undefined;
-  const providerOwnsWindsurfManagedTraffic = isWindsurfManagedProviderIdentity({
-    providerKey: typeof target?.providerKey === 'string' ? target.providerKey : undefined,
-    runtimeKey: targetRuntimeKey,
+  const providerTransportBackoffKey = buildProviderTransportBackoffKey({
+    providerKey: target?.providerKey,
+    runtimeKey: targetRuntimeKey
   });
-  const providerTransportBackoffKey = providerOwnsWindsurfManagedTraffic
-    ? undefined
-    : buildProviderTransportBackoffKey({
-      providerKey: target?.providerKey,
-      runtimeKey: targetRuntimeKey
-    });
   const pendingTransportBackoffMs =
     providerTransportBackoffKey
       ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
       : 0;
-  if (providerOwnsWindsurfManagedTraffic && target?.providerKey) {
-    args.excludedProviderKeys.delete(target.providerKey);
-  }
   const preserveSameProviderRetry =
     args.blockingRecoverableRouteHoldState?.preserveSameProviderRetry === true
     && (

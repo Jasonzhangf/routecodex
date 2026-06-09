@@ -77,31 +77,7 @@ interface SseToJsonEngine<TEvent, TOutput, TOptions> {
 }
 ```
 
-### 2. 事件序列化接口
-
-#### EventSerializer
-```typescript
-interface EventSerializer<TEvent> {
-  serializeToWire(event: TEvent): string;
-  deserializeFromWire(wireData: string): TEvent;
-  validateWireFormat(wireData: string): boolean;
-}
-```
-
-#### 协议特定序列化器
-```typescript
-// Chat协议序列化器
-interface ChatEventSerializer extends EventSerializer<ChatSseEvent> {
-  serializeChatEvent(event: ChatSseEvent): string;
-}
-
-// Responses协议序列化器
-interface ResponsesEventSerializer extends EventSerializer<ResponsesSseEvent> {
-  serializeResponsesEvent(event: ResponsesSseEvent): string;
-}
-```
-
-### 3. 协议适配器接口
+### 2. 协议适配器接口
 
 #### ProtocolAdapter
 ```typescript
@@ -126,15 +102,11 @@ interface ProtocolInfo {
 class ConversionRegistry {
   private jsonToSseEngines = new Map<string, JsonToSseEngine<any, any, any>>();
   private sseToJsonEngines = new Map<string, SseToJsonEngine<any, any, any>>();
-  private serializers = new Map<string, EventSerializer<any>>();
   private adapters = new Map<string, ProtocolAdapter<any, any>>();
 
   // 注册引擎
   registerJsonToSseEngine<T>(protocol: string, engine: JsonToSseEngine<T, any, any>): void;
   registerSseToJsonEngine<T>(protocol: string, engine: SseToJsonEngine<any, T, any>): void;
-
-  // 注册序列化器
-  registerSerializer<T>(protocol: string, serializer: EventSerializer<T>): void;
 
   // 注册适配器
   registerAdapter<TInput, TOutput>(protocol: string, adapter: ProtocolAdapter<TInput, TOutput>): void;

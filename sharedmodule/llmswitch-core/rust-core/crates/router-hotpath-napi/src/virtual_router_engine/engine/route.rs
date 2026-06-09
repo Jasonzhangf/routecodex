@@ -501,7 +501,8 @@ impl VirtualRouterEngineCore {
                             && router_direct_inbound_protocol
                                 .as_deref()
                                 .map(|protocol| {
-                                    self.provider_registry.provider_protocol_matches(&key, protocol)
+                                    self.provider_registry
+                                        .provider_protocol_matches(&key, protocol)
                                 })
                                 .unwrap_or(true)
                         {

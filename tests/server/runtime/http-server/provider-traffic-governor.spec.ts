@@ -126,19 +126,19 @@ describe('provider-traffic-governor', () => {
     expect(policy.rpm.acquireTimeoutMs).toBe(23000);
   });
 
-  it('RED: honors explicit Windsurf account runtime concurrency instead of forcing global single-flight', () => {
+  it('honors explicit runtime concurrency instead of forcing global single-flight', () => {
     const policy = resolveProviderTrafficPolicy(
       createRuntime({
-        providerId: 'windsurf',
-        providerFamily: 'windsurf',
-        runtimeKey: 'windsurf.ws-pro-4',
+        providerId: 'openai',
+        providerFamily: 'openai',
+        runtimeKey: 'openai.key4',
         concurrency: {
           maxInFlight: 3,
           acquireTimeoutMs: 12000,
           staleLeaseMs: 150000
         }
       }),
-      'windsurf.ws-pro-4.gpt-5.4-medium'
+      'openai.key4.gpt-5.4-medium'
     );
     expect(policy.concurrency.maxInFlight).toBe(3);
     expect(policy.concurrency.acquireTimeoutMs).toBe(12000);
@@ -146,8 +146,8 @@ describe('provider-traffic-governor', () => {
 
 
 
-  it('RED: Windsurf runtime must not be clamped to single concurrency by persisted adaptive state', async () => {
-    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-windsurf-adaptive-${process.pid}-${randomUUID()}`);
+  it('runtime must not be clamped to single concurrency by persisted adaptive state', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-adaptive-${process.pid}-${randomUUID()}`);
     const adaptivePath = path.join(rootDir, 'dynamic-concurrency-overrides.json');
     const prevAdaptivePath = process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
     process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH = adaptivePath;
@@ -156,7 +156,7 @@ describe('provider-traffic-governor', () => {
       version: 1,
       updatedAt: Date.now(),
       runtimes: {
-        'windsurf.ws-pro-4': {
+        'openai.key4': {
           baseCap: 3,
           minCap: 1,
           hardMaxCap: 6,
@@ -175,23 +175,23 @@ describe('provider-traffic-governor', () => {
     }));
     const governor = new ProviderTrafficGovernor(rootDir);
     const runtime = createRuntime({
-      runtimeKey: 'windsurf.ws-pro-4',
-      providerId: 'windsurf',
-      providerFamily: 'windsurf',
+      runtimeKey: 'openai.key4',
+      providerId: 'openai',
+      providerFamily: 'openai',
       concurrency: { maxInFlight: 3, acquireTimeoutMs: 150, staleLeaseMs: 60000 }
     });
     try {
       const first = await governor.acquire({
         runtimeKey: runtime.runtimeKey,
-        providerKey: 'windsurf.ws-pro-4.gpt-5.4-medium',
-        requestId: 'windsurf-first',
+        providerKey: 'openai.key4.gpt-5.4-medium',
+        requestId: 'provider-first',
         runtime
       });
       expect(first.policy.concurrency.maxInFlight).toBe(3);
       const second = await governor.acquire({
         runtimeKey: runtime.runtimeKey,
-        providerKey: 'windsurf.ws-pro-4.gpt-5.3-codex',
-        requestId: 'windsurf-second',
+        providerKey: 'openai.key4.gpt-5.3-codex',
+        requestId: 'provider-second',
         runtime
       });
       await governor.release(first.permit);

@@ -13,7 +13,6 @@ describe('provider metadata isolation redlines', () => {
       'src/providers/core/runtime/http-transport-provider.ts',
       'src/providers/core/runtime/responses-provider.ts',
       'src/providers/core/runtime/responses-provider-helpers.ts',
-      'src/providers/core/runtime/windsurf-chat-provider.ts',
       'src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts',
       'src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.ts',
       'src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts',

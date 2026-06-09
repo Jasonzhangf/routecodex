@@ -218,33 +218,6 @@ impl ProviderHealthManager {
             state.last_failure_at = None;
             state.reason = None;
         }
-        self.clear_windsurf_managed_persisted_503_family(provider_key);
-    }
-
-    pub(crate) fn clear_windsurf_managed_persisted_503_family(&mut self, provider_key: &str) {
-        let canonical = Self::canonicalize_provider_key(provider_key);
-        if !canonical.starts_with("windsurf.managed.") {
-            return;
-        }
-        for state in self.states.values_mut() {
-            if !state.provider_key.starts_with("windsurf.managed.") {
-                continue;
-            }
-            if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
-                continue;
-            }
-            state.state = "healthy".to_string();
-            state.failure_count = 0;
-            state.cooldown_expires_at = None;
-            state.last_failure_at = None;
-            state.reason = None;
-            state.consecutive_http_502_failures = 0;
-            state.consecutive_http_429_failures = 0;
-            state.http_429_cooldown_cycles = 0;
-            state.consecutive_recoverable_failures = 0;
-            state.recoverable_cooldown_cycles = 0;
-            state.persisted_503_reprobe_available = false;
-        }
     }
 
     pub(crate) fn trip_provider(

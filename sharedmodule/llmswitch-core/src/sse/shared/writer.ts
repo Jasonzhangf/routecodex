@@ -6,7 +6,9 @@
 import { Writable, PassThrough } from 'stream';
 import type { BaseSseEvent } from '../types/core-interfaces.js';
 import type { ChatSseEvent, ResponsesSseEvent, AnthropicSseEvent, GeminiSseEvent } from '../types/index.js';
-import { defaultResponsesEventSerializer, serializeAnthropicEventToSSE, serializeGeminiEventToSSE } from './serializers/index.js';
+import { serializeAnthropicEventToSSE } from './serializers/anthropic-event-serializer.js';
+import { serializeGeminiEventToSSE } from './serializers/gemini-event-serializer.js';
+import { defaultResponsesEventSerializer } from './serializers/responses-event-serializer.js';
 import { TimeUtils } from './utils.js';
 import { serializeChatEventToSSE } from './chat-serializer.js';
 

@@ -21,6 +21,74 @@ function collectMatches(source: string, checks: ResidueCheck[]): string[] {
   return findings;
 }
 
+function extractFunctionBlock(source: string, functionName: string): string {
+  const signature = `function ${functionName}`;
+  const start = source.indexOf(signature);
+  if (start < 0) {
+    return '';
+  }
+  let parenDepth = 0;
+  let paramsEnd = -1;
+  for (let index = start + signature.length; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '(') {
+      parenDepth += 1;
+      continue;
+    }
+    if (char === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  if (paramsEnd < 0) {
+    return '';
+  }
+  let typeBraceDepth = 0;
+  let braceStart = -1;
+  for (let index = paramsEnd + 1; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') {
+      let previous = '';
+      for (let scan = index - 1; scan >= paramsEnd; scan -= 1) {
+        if (!/\s/.test(source[scan] ?? '')) {
+          previous = source[scan] ?? '';
+          break;
+        }
+      }
+      if (typeBraceDepth === 0 && previous !== ':') {
+        braceStart = index;
+        break;
+      }
+      typeBraceDepth += 1;
+      continue;
+    }
+    if (char === '}' && typeBraceDepth > 0) {
+      typeBraceDepth -= 1;
+    }
+  }
+  if (braceStart < 0) {
+    return '';
+  }
+  let depth = 0;
+  for (let index = braceStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  return source.slice(start);
+}
+
 function walkFiles(dir: string, suffixes: string[], out: string[] = []): string[] {
   if (!fs.existsSync(dir)) {
     return out;
@@ -123,6 +191,79 @@ describe('hub pipeline stage residue audit', () => {
         const source = fs.readFileSync(fullPath, 'utf8');
         if (!source.includes('runHubPipelineStageWithNative')) continue;
         findings.push(path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('llmswitch matrix scripts must not import deleted TS stage dist wrappers', () => {
+    const scriptsRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/scripts/tests');
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(scriptsRoot, ['.mjs', '.js'])) {
+      const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      const matches = collectMatches(source, [
+        {
+          label: 'deleted dist hub stage wrapper import',
+          pattern: /dist\/conversion\/hub\/pipeline\/stages/,
+        },
+        {
+          label: 'deleted hub node-support dist owner import',
+          pattern: /dist\/conversion\/hub\/node-support\.js/,
+        },
+        {
+          label: 'legacy hub policy engine dist owner import',
+          pattern: /dist\/conversion\/hub\/policy\/policy-engine\.js/,
+        },
+        {
+          label: 'legacy hub chat-process dist owner import',
+          pattern: /dist\/conversion\/hub\/process\/chat-process\.js/,
+        },
+        {
+          label: 'legacy provider-response dist owner import',
+          pattern: /dist\/conversion\/hub\/response\/provider-response\.js/,
+        },
+        {
+          label: 'legacy gemini web-search compat dist owner import',
+          pattern: /dist\/conversion\/compat\/actions\/gemini-web-search\.js/,
+        },
+        {
+          label: 'legacy native adapter context dist owner import',
+          pattern: /dist\/conversion\/hub\/pipeline\/compat\/native-adapter-context\.js/,
+        },
+        {
+          label: 'legacy servertool followup request builder dist owner import',
+          pattern: /dist\/servertool\/handlers\/followup-request-builder\.js/,
+        },
+        {
+          label: 'legacy web-search handler direct dist owner import',
+          pattern: /dist\/servertool\/handlers\/web-search\.js/,
+        },
+        {
+          label: 'deleted virtual-router native bridge dist import',
+          pattern: /dist\/router\/virtual-router\/engine-selection\/native-hub-pipeline-req-outbound-semantics\.js/,
+        },
+        {
+          label: 'legacy conversion streaming json-to-chat-sse dist owner import',
+          pattern: /dist\/conversion\/streaming\/json-to-chat-sse\.js/,
+        },
+        {
+          label: 'legacy conversion streaming json-to-responses-sse dist owner import',
+          pattern: /dist\/conversion\/streaming\/json-to-responses-sse\.js/,
+        },
+        {
+          label: 'legacy shared responses request adapter dist import',
+          pattern: /dist\/conversion\/shared\/responses-request-adapter\.js/,
+        },
+        {
+          label: 'deleted args-mapping dist owner import',
+          pattern: /dist\/conversion\/args-mapping\.js/,
+        },
+      ]);
+      for (const match of matches) {
+        findings.push(`${relativePath}:${match}`);
       }
     }
 
@@ -736,6 +877,94 @@ describe('hub pipeline stage residue audit', () => {
           label: 'exports operation-table semantic mapper module',
           pattern: /operation-table\/semantic-mappers/,
         },
+        {
+          label: 'exports internal OpenAI chat request normalizer from conversion barrel',
+          pattern: /normalizeChatRequest/,
+        },
+        {
+          label: 'exports req inbound bridge tool native wrapper from conversion barrel',
+          pattern: /mapReqInboundBridgeToolsToChatWithNative/,
+        },
+        {
+          label: 'exports provider protocol native normalizer from conversion barrel',
+          pattern: /normalizeProviderProtocolTokenWithNative/,
+        },
+        {
+          label: 'exports anthropic alias native helper from conversion barrel',
+          pattern: /buildAnthropicToolAliasMapWithNative/,
+        },
+        {
+          label: 'exports Claude thinking compat native helper from conversion barrel',
+          pattern: /applyClaudeThinkingToolSchemaCompatWithNative/,
+        },
+        {
+          label: 'exports shared tooling helper module from conversion barrel',
+          pattern: /shared\/tooling/,
+        },
+        {
+          label: 'exports shared tool mapping helper module from conversion barrel',
+          pattern: /shared\/tool-mapping/,
+        },
+        {
+          label: 'exports guidance policy module from conversion barrel',
+          pattern: /\.\.\/guidance\/index/,
+        },
+        {
+          label: 'exports legacy conversion types from conversion barrel',
+          pattern: /types\.js/,
+        },
+        {
+          label: 'exports legacy schema validator from conversion barrel',
+          pattern: /schema-validator/,
+        },
+        {
+          label: 'exports legacy codec registry from conversion barrel',
+          pattern: /codec-registry/,
+        },
+        {
+          label: 'exports legacy protocol conversion pipeline from conversion barrel',
+          pattern: /ProtocolConversionPipeline/,
+        },
+        {
+          label: 'exports legacy protocol pipeline schema from conversion barrel',
+          pattern: /pipeline\/schema/,
+        },
+        {
+          label: 'exports legacy protocol pipeline hooks from conversion barrel',
+          pattern: /pipeline\/hooks/,
+        },
+        {
+          label: 'exports legacy protocol pipeline meta bag from conversion barrel',
+          pattern: /pipeline\/meta/,
+        },
+        {
+          label: 'exports hub standardized bridge module from conversion barrel',
+          pattern: /hub\/standardized-bridge/,
+        },
+        {
+          label: 'exports hub response runtime module from conversion barrel',
+          pattern: /hub\/response\/response-runtime/,
+        },
+        {
+          label: 'exports hub pipeline module from conversion barrel',
+          pattern: /hub\/pipeline\/hub-pipeline/,
+        },
+        {
+          label: 'exports stage recorder type from conversion barrel',
+          pattern: /StageRecorder/,
+        },
+        {
+          label: 'exports hub types barrel from conversion barrel',
+          pattern: /hub\/types\/index/,
+        },
+        {
+          label: 'exports text markup normalizer module from conversion barrel',
+          pattern: /shared\/text-markup-normalizer/,
+        },
+        {
+          label: 'exports responses openai bridge module from conversion barrel',
+          pattern: /responses\/responses-openai-bridge/,
+        },
       ]),
       ...collectMatches(formatAdapterIndexSource, [
         {
@@ -868,6 +1097,73 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('legacy pipeline stage catalog docs must be physically removed', () => {
+    const stageRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages',
+    );
+    const legacyDocs = [
+      'README.md',
+      'INTEGRATION_NOTES.md',
+      'STAGE_CATALOG.md',
+    ].filter((relativePath) => fs.existsSync(path.join(stageRoot, relativePath)));
+
+    expect(legacyDocs).toEqual([]);
+  });
+
+  it('pipeline stages directory must only keep live bridge utilities', () => {
+    const stageRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages',
+    );
+    const files = walkFiles(stageRoot, ['.ts', '.md'])
+      .map((fullPath) => path.relative(stageRoot, fullPath).split(path.sep).join('/'))
+      .sort();
+
+    expect(files).toEqual(['utils.ts']);
+  });
+
+  it('legacy hub feature runtime switch must be physically removed', () => {
+    const repoRoot = process.cwd();
+    const deletedFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/hub/hub-feature.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/hub-feature.js',
+      'sharedmodule/llmswitch-core/src/conversion/hub/hub-feature.d.ts',
+    ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const publicBarrel = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/index.ts'),
+      'utf8',
+    );
+
+    expect(deletedFiles).toEqual([]);
+    expect(publicBarrel).not.toContain('hub/hub-feature');
+  });
+
+  it('legacy Hub enable env flags must not return as runtime gates', () => {
+    const roots = [
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      path.join(process.cwd(), 'src'),
+    ];
+    const findings: string[] = [];
+    for (const root of roots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        const source = fs.readFileSync(fullPath, 'utf8');
+        const forbiddenPatterns: Array<[string, RegExp]> = [
+          ['ROUTECODEX_HUB_ENABLED', /ROUTECODEX_HUB_ENABLED/],
+          ['ROUTECODEX_ENABLE_HUB', /ROUTECODEX_ENABLE_HUB(?!_STAGE_RECORDER)/],
+          ['ROUTECODEX_HUB_PROTOCOLS', /ROUTECODEX_HUB_PROTOCOLS/],
+          ['isHubProtocolEnabled', /isHubProtocolEnabled/],
+        ];
+        for (const [label, pattern] of forbiddenPatterns) {
+          if (pattern.test(source)) findings.push(`${relativePath}:${label}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy TS operation-table semantic mapper implementations must be physically removed', () => {
     const semanticMapperRoot = path.join(
       process.cwd(),
@@ -901,6 +1197,34 @@ describe('hub pipeline stage residue audit', () => {
     };
 
     visit(testRoot);
+    expect(findings).toEqual([]);
+  });
+
+  it('scripts must not import removed operation-table mapper, concrete adapter, or tool-surface dist owners', () => {
+    const repoRoot = process.cwd();
+    const scriptRoots = [
+      path.join(repoRoot, 'scripts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/scripts'),
+    ];
+    const findings: string[] = [];
+    const forbiddenPatterns: Array<[string, RegExp]> = [
+      ['operation-table dist owner', /conversion\/hub\/operation-table\//],
+      ['legacy hub semantic mapper dist owner', /conversion\/hub\/semantic-mappers\//],
+      ['concrete format adapter dist owner', /conversion\/hub\/format-adapters\/(?:chat|responses|anthropic|gemini)-format-adapter/],
+      ['tool-surface engine dist owner', /conversion\/hub\/tool-surface\/tool-surface-engine/],
+      ['legacy semantic mapper class', /\b(?:Chat|Responses|Anthropic|Gemini)SemanticMapper\b/],
+    ];
+
+    for (const root of scriptRoots) {
+      for (const fullPath of walkFiles(root, ['.mjs', '.js', '.ts'])) {
+        const relativePath = path.relative(repoRoot, fullPath).split(path.sep).join('/');
+        const source = fs.readFileSync(fullPath, 'utf8');
+        for (const [label, pattern] of forbiddenPatterns) {
+          if (pattern.test(source)) findings.push(`${relativePath}:${label}`);
+        }
+      }
+    }
+
     expect(findings).toEqual([]);
   });
 
@@ -1227,18 +1551,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('responses openai pipeline must not capture tool results in TS', () => {
-    const filePath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts',
-    );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'implements response tool result capture in TS', pattern: /function\s+captureToolResults|const\s+captureToolResults|for\s*\([^)]*inputArr|itemType|toolCallId/ },
-      { label: 'classifies function_call_output in TS', pattern: /\bfunction_call_output\b|\btool_result\b|\btool_message\b|\btool_use_id\b/ },
-    ]);
+  it('legacy V2 conversion pipeline codecs must stay physically removed', () => {
+    const repoRoot = process.cwd();
+    const forbiddenPaths = [
+      'sharedmodule/llmswitch-core/src/conversion/pipeline',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline',
+      'scripts/tests/anthropic-roundtrip.mjs',
+      'scripts/tests/chat-pipeline-blackbox.mjs',
+      'scripts/tests/chat-pipeline-regression.mjs',
+      'config/chat-pipeline-blackbox.json',
+      'sharedmodule/llmswitch-core/scripts/tests/openai-v1-v2-compare.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/anthropic-v1-v2-compare.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-v1-v2-compare.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/openai-tool-choice-single-source.mjs',
+    ];
+    const existing = forbiddenPaths.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
-    expect(findings).toEqual([]);
+    expect(existing).toEqual([]);
   });
 
   it('finish reason utility must not classify tool semantics in TS', () => {
@@ -1543,7 +1872,40 @@ describe('hub pipeline stage residue audit', () => {
 
   it('legacy zero-consumer TS native wrapper residues must stay removed', () => {
     const repoRoot = process.cwd();
+    const retiredSourceDistBases = [
+      'sharedmodule/llmswitch-core/dist/conversion/adapter-context-fields',
+      'sharedmodule/llmswitch-core/dist/conversion/bridge-id-utils',
+      'sharedmodule/llmswitch-core/dist/conversion/bridge-metadata',
+      'sharedmodule/llmswitch-core/dist/conversion/compat/actions/index',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/hub-feature',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers',
+      'sharedmodule/llmswitch-core/dist/conversion/jsonish',
+      'sharedmodule/llmswitch-core/dist/conversion/metadata-passthrough',
+      'sharedmodule/llmswitch-core/dist/conversion/payload-budget',
+      'sharedmodule/llmswitch-core/dist/conversion/protocol-state',
+      'sharedmodule/llmswitch-core/dist/http/sse-response',
+      'sharedmodule/llmswitch-core/dist/servertool/cli-result-guard',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/compaction-detect',
+      'sharedmodule/llmswitch-core/dist/sse/shared/constants',
+      'sharedmodule/llmswitch-core/dist/sse/shared/serializers/base-serializer',
+      'sharedmodule/llmswitch-core/dist/sse/shared/serializers/chat-event-serializer',
+      'sharedmodule/llmswitch-core/dist/sse/shared/serializers/index',
+      'sharedmodule/llmswitch-core/dist/sse/shared/serializers/types',
+      'sharedmodule/llmswitch-core/dist/sse/types/conversion-context',
+      'sharedmodule/llmswitch-core/dist/sse/types/stream-state',
+      'sharedmodule/llmswitch-core/dist/sse/types/utility-types',
+      'sharedmodule/llmswitch-core/dist/tools/apply-patch/json/parse-loose',
+      'sharedmodule/llmswitch-core/dist/tools/apply-patch/patch-text/fuzzy-match',
+      'sharedmodule/llmswitch-core/dist/tools/apply-patch/regression-capturer',
+      'sharedmodule/llmswitch-core/dist/tools/apply-patch/validation/shared',
+      'sharedmodule/llmswitch-core/dist/tools/exec-command/regression-capturer',
+      'sharedmodule/llmswitch-core/dist/tools/regression-capture',
+      'sharedmodule/llmswitch-core/dist/tools/tool-description-utils',
+    ].flatMap((base) => [`${base}.js`, `${base}.d.ts`, `${base}.js.map`]);
     const forbiddenFiles = [
+      ...retiredSourceDistBases,
+      'sharedmodule/llmswitch-core/src/conversion/adapter-context-fields.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compat/actions/index.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-mutable-record-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/target-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-finalize.ts',
@@ -1556,17 +1918,216 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-observation.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime-anthropic-helpers.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime-anthropic-helpers.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/session-identifiers.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-utils.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-utils.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-mapping.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-normalizer.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-argument-repairer.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/tool-argument-repairer.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/tool-argument-repairer.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-mapping.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-mapping.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-normalizer.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-normalizer.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-harvester.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/tool-harvester.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/tool-harvester.d.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-tool-harvester.mjs',
+      'sharedmodule/llmswitch-core/src/conversion/shared/streaming-text-extractor.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/streaming-text-extractor.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/streaming-text-extractor.d.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-streaming-text-extractor.mjs',
+      'sharedmodule/llmswitch-core/src/conversion/shared/gemini-tool-utils.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/gemini-tool-utils.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/gemini-tool-utils.d.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/gemini-tool-schema-sanitize.mjs',
+      'tests/sharedmodule/gemini-tool-schema-cleaning.spec.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/compaction-detect.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/memory/extract-responses-input.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.js',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-measure-blocks.js.map',
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/route-aware-responses-continuation.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/route-aware-responses-continuation.d.ts',
+      'tests/sharedmodule/route-aware-responses-continuation.spec.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/ops/operations.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/errors.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/errors.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/errors.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/format-envelope.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/format-envelope.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/format-envelope.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/index.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/index.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/index.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/node.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/node.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/types/node.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-routing.ts',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-bootstrap-routing.js',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-bootstrap-routing.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-state-semantics.ts',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-stop-message-state-semantics.js',
+      'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-stop-message-state-semantics.d.ts',
+      'sharedmodule/llmswitch-core/config/rust-migration-modules.json',
+      'sharedmodule/llmswitch-core/docs/rust-migration-gates.md',
+      'sharedmodule/llmswitch-core/scripts/check-shadow-coverage-gate.mjs',
+      'sharedmodule/llmswitch-core/scripts/lib/rust-migration-manifest.mjs',
+      'sharedmodule/llmswitch-core/scripts/promote-shadow-module.mjs',
+      'sharedmodule/llmswitch-core/scripts/run-ci-coverage.mjs',
+      'sharedmodule/llmswitch-core/scripts/verify-shadow-gate-all.mjs',
+      'sharedmodule/llmswitch-core/src/sse/test/gemini-converter.test.ts',
+      'sharedmodule/llmswitch-core/src/sse/test/responses-converter-failfast.test.ts',
+      'sharedmodule/llmswitch-core/src/sse/test/anthropic-converter.test.ts',
+      'sharedmodule/llmswitch-core/src/sse/test/chat-converter.test.ts',
+      'sharedmodule/llmswitch-core/src/sse/test/responses-converter.test.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-tool-selection-from-chat.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-bridge-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-chat-request-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-request-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-snapshot-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/anthropic-sse-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/codex-samples-analyzer.ts',
+      'sharedmodule/llmswitch-core/src/test/responses-request-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts',
+      'sharedmodule/llmswitch-core/src/test/stats-center.spec.ts',
+      'sharedmodule/llmswitch-core/src/sse/types/conversion-context.ts',
+      'sharedmodule/llmswitch-core/src/sse/types/stream-state.ts',
+      'sharedmodule/llmswitch-core/src/sse/types/utility-types.ts',
+      'sharedmodule/llmswitch-core/src/sse/shared/serializers/base-serializer.ts',
+      'sharedmodule/llmswitch-core/src/sse/shared/serializers/chat-event-serializer.ts',
+      'sharedmodule/llmswitch-core/src/sse/shared/serializers/index.ts',
+      'sharedmodule/llmswitch-core/src/sse/shared/serializers/types.ts',
+      'sharedmodule/llmswitch-core/src/conversion/payload-budget.ts',
+      'sharedmodule/llmswitch-core/src/conversion/protocol-state.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-parser.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-tool-parser.js',
+      'sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-tool-parser.d.ts',
+      'sharedmodule/llmswitch-core/src/http/sse-response.ts',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/empty-reply-continue.js',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/empty-reply-continue.d.ts',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/memory/extract-responses-input.js',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/memory/extract-responses-input.d.ts',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/stop-message-auto/visible-text.js',
+      'sharedmodule/llmswitch-core/dist/servertool/handlers/stop-message-auto/visible-text.d.ts',
+      'sharedmodule/llmswitch-core/src/tools/regression-capture.ts',
+      'sharedmodule/llmswitch-core/src/tools/apply-patch/regression-capturer.ts',
+      'sharedmodule/llmswitch-core/src/tools/exec-command/regression-capturer.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-id-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-metadata.ts',
+      'sharedmodule/llmswitch-core/src/conversion/jsonish.ts',
+      'sharedmodule/llmswitch-core/src/conversion/metadata-passthrough.ts',
+      'sharedmodule/llmswitch-core/src/sse/shared/constants.ts',
+      'sharedmodule/llmswitch-core/src/tools/apply-patch/json/parse-loose.ts',
+      'sharedmodule/llmswitch-core/src/tools/apply-patch/patch-text/fuzzy-match.ts',
+      'sharedmodule/llmswitch-core/src/tools/apply-patch/validation/shared.ts',
+      'sharedmodule/llmswitch-core/src/tools/tool-description-utils.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-parse-loose-json.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-reasoning-tool-parser.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/glm-responses-compat.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-context-capture-orchestration.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-shell-like-function-call-normalize.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-context-tool-snapshot.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-responses-context-snapshot.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/compat-iflow-reasoning-replay-20260206.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/compat-profile-auto-resolve.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/hub-policy-enforce-responses.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/hub-policy-enforce-openai-chat.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/hub-policy-enforce-anthropic.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/hub-policy-enforce-gemini.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/servertool-followup-skip.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/servertool-continue-execution-followup.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/web-search-route-tools-clean.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/servertool-followup-preserve-tools.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/servertool-followup-requires-action.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/web-search-backend-smoke.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/servertool-followup-history-media-single-source.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-entry-client-inject.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/sse-converters-test.mjs',
+      'sharedmodule/llmswitch-core/scripts/exp3-responses-sse-to-chat-sse.mjs',
+      'sharedmodule/llmswitch-core/scripts/exp4-responses-sse-loop.mjs',
+      'sharedmodule/llmswitch-core/scripts/exp2-responses-to-chat.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-context-diff.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-recursive-detection-guard.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/p0-alignment-validation.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/sse-parsers-test.mjs',
+      'tests/servertool/recursive-detection-guard.spec.ts',
+      'sharedmodule/llmswitch-core/docs/responses-sse-experiments.md',
+      'sharedmodule/llmswitch-core/docs/SSE_PARSER_ANALYSIS_AND_INTEGRATION_PLAN.md',
+      'sharedmodule/llmswitch-core/docs/SYMMETRIC_ADAPTER_ARCHITECTURE.md',
+      'tests/sharedmodule/anthropic-client-remap-namespace-fallback.spec.ts',
     ];
     const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     expect(existing).toEqual([]);
+  });
+
+  it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const corePkg = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/package.json'), 'utf8'),
+    ) as { scripts?: Record<string, string> };
+    const forbiddenScriptPatterns = [
+      /verify:shadow-gate/,
+      /check-shadow-coverage-gate/,
+      /verify-shadow-gate-all/,
+      /promote-shadow-module/,
+      /rust-migration-modules\.json/,
+      /run-ci-coverage/,
+    ];
+    const findings: string[] = [];
+
+    for (const [pkgName, scripts] of [
+      ['package.json', rootPkg.scripts ?? {}],
+      ['sharedmodule/llmswitch-core/package.json', corePkg.scripts ?? {}],
+    ] as const) {
+      for (const [name, command] of Object.entries(scripts)) {
+        for (const pattern of forbiddenScriptPatterns) {
+          if (pattern.test(name) || pattern.test(command)) {
+            findings.push(`${pkgName}:${name}`);
+          }
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('active source and tests must not import removed session identifier wrapper', () => {
+    const repoRoot = process.cwd();
+    const sourceRoots = [
+      path.join(repoRoot, 'src'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src'),
+      path.join(repoRoot, 'tests'),
+    ];
+    const findings: string[] = [];
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(repoRoot, fullPath).split(path.sep).join('/');
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
+          continue;
+        }
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (source.includes('conversion/hub/pipeline/session-identifiers')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
   });
 
   it('provider runtime must not call TS tool-governor response harvest outside HubPipeline resp_process', () => {
@@ -1613,6 +2174,14 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/index.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/rules.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/types.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-tool-governance.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/tool-governance-check.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/tool-governance-native-compare.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/response-tool-text-canonicalize-invoke.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/response-tool-text-canonicalize-tool-namespace.mjs',
+      'docs/plans/p1-deterministic-fix-plan.md',
+      'docs/goals/p1-deterministic-fix-execution-plan.md',
+      'docs/plans/next-step-deterministic-fix-execution.md',
     ];
     const legacyTests = [
       'tests/sharedmodule/request-tool-governor-apply-patch-guidance.spec.ts',
@@ -1644,10 +2213,82 @@ describe('hub pipeline stage residue audit', () => {
     });
   });
 
+  it('llmswitch matrix runner must not reference missing test scripts', () => {
+    const repoRoot = process.cwd();
+    const matrixPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs',
+    );
+    const source = fs.readFileSync(matrixPath, 'utf8');
+    const referenced = new Set<string>();
+    const scriptPattern = /['"`](scripts\/tests\/[^'"`]+\.mjs)['"`]/g;
+    let match: RegExpExecArray | null;
+    while ((match = scriptPattern.exec(source)) !== null) {
+      referenced.add(match[1]);
+    }
+    const missing = Array.from(referenced)
+      .filter((relativePath) => !fs.existsSync(path.join(repoRoot, 'sharedmodule/llmswitch-core', relativePath)))
+      .sort();
+
+    expect(missing).toEqual([]);
+  });
+
+  it('package scripts must not reference missing test files', () => {
+    const repoRoot = process.cwd();
+    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const pathPattern = /(?:tests|src)\/[^ '"`]+\.(?:spec|test)\.(?:tsx|ts|jsx|js|mjs|cjs)/g;
+    const missing: string[] = [];
+
+    for (const [scriptName, command] of Object.entries(packageJson.scripts ?? {})) {
+      const paths = command.match(pathPattern) ?? [];
+      for (const relativePath of paths) {
+        if (!fs.existsSync(path.join(repoRoot, relativePath))) {
+          missing.push(`${scriptName}:${relativePath}`);
+        }
+      }
+    }
+
+    expect(missing.sort()).toEqual([]);
+  });
+
+  it('root scripts must not call retired responses SSE replay owners', () => {
+    const scriptsRoot = path.join(process.cwd(), 'scripts');
+    const findings: string[] = [];
+
+    for (const fullPath of walkFiles(scriptsRoot, ['.mjs', '.js'])) {
+      const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+      const source = fs.readFileSync(fullPath, 'utf8');
+      const matches = collectMatches(source, [
+        {
+          label: 'legacy dist v2 conversion streaming owner import',
+          pattern: /dist\/v2\/conversion|streaming['"`),\s]*json-to-responses-sse\.js/,
+        },
+        {
+          label: 'legacy createResponsesSSEStreamFromChatJson helper',
+          pattern: /createResponsesSSEStreamFromChatJson/,
+        },
+      ]);
+      for (const match of matches) {
+        findings.push(`${relativePath}:${match}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy TS filters must not expose tool semantics after Rust HubPipeline takeover', () => {
     const filtersRoot = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/filters');
-    const publicIndex = fs.readFileSync(path.join(filtersRoot, 'index.ts'), 'utf8');
     const forbiddenModules = [
+      'index',
+      'engine',
+      'types',
+      'builtin/add-fields-filter',
+      'builtin/blacklist-filter',
+      'builtin/whitelist-filter',
+      'utils/snapshot-writer',
+      'config/openai-openai.fieldmap',
       'request-tool-choice-policy',
       'request-tool-list-filter',
       'request-toolcalls-stringify',
@@ -1662,12 +2303,96 @@ describe('hub pipeline stage residue audit', () => {
       'response-tool-arguments-blacklist',
       'response-tool-arguments-whitelist',
     ];
-    const exported = forbiddenModules.filter((name) => publicIndex.includes(name));
     const existing = forbiddenModules
-      .map((name) => `special/${name}.ts`)
+      .flatMap((name) => [`${name}.ts`, `special/${name}.ts`, `${name}.json`])
       .filter((relativePath) => fs.existsSync(path.join(filtersRoot, relativePath)));
 
-    expect({ exported, existing }).toEqual({ exported: [], existing: [] });
+    expect(existing).toEqual([]);
+  });
+
+  it('legacy config facade and stale coverage scripts must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const forbiddenFiles = [
+      'sharedmodule/llmswitch-core/src/config-unified/enhanced-path-resolver.ts',
+      'sharedmodule/llmswitch-core/src/config-unified/unified-config.ts',
+      'sharedmodule/llmswitch-core/src/conversion/protocol-field-allowlists.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.ts',
+      'sharedmodule/llmswitch-core/src/conversion/config/config-manager.ts',
+      'sharedmodule/llmswitch-core/src/conversion/config/sample-config.json',
+      'sharedmodule/llmswitch-core/src/conversion/config/version-switch.json',
+      'sharedmodule/llmswitch-core/src/conversion/args-mapping.ts',
+      'sharedmodule/llmswitch-core/src/conversion/codec-registry.ts',
+      'sharedmodule/llmswitch-core/src/conversion/schema-validator.ts',
+      'sharedmodule/llmswitch-core/src/conversion/media.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/index.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/meta/meta-bag.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/schema/index.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/README.md',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/README.md',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/anthropic-openai-pipeline.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/openai-openai-pipeline.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/responses-openai-pipeline.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/codecs/v2/shared/openai-chat-helpers.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/hooks/adapter-context.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/hooks/protocol-hooks.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/schema/canonical-chat.ts',
+      'sharedmodule/llmswitch-core/src/conversion/pipeline/tests/README.md',
+      'tests/sharedmodule/responses-openai-pipeline-request-parameters.spec.ts',
+      'src/types/llmswitch-core-api-shim.d.ts',
+      'tests/sharedmodule/hub-policy-provider-outbound-reasoning-filter.spec.ts',
+      'tests/sharedmodule/hub-policy-observe-allowlist.spec.ts',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-request-tool-list-filter.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/gemini-finish-reason.mjs',
+      'sharedmodule/llmswitch-core/dist/config-unified/enhanced-path-resolver.js',
+      'sharedmodule/llmswitch-core/dist/config-unified/enhanced-path-resolver.d.ts',
+      'sharedmodule/llmswitch-core/dist/config-unified/unified-config.js',
+      'sharedmodule/llmswitch-core/dist/config-unified/unified-config.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/protocol-field-allowlists.js',
+      'sharedmodule/llmswitch-core/dist/conversion/protocol-field-allowlists.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/policy/policy-engine.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/policy/policy-engine.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/policy/protocol-spec.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/policy/protocol-spec.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/config/config-manager.js',
+      'sharedmodule/llmswitch-core/dist/conversion/config/config-manager.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/config/sample-config.json',
+      'sharedmodule/llmswitch-core/dist/conversion/codec-registry.js',
+      'sharedmodule/llmswitch-core/dist/conversion/codec-registry.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/schema-validator.js',
+      'sharedmodule/llmswitch-core/dist/conversion/schema-validator.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/config/version-switch.json',
+      'sharedmodule/llmswitch-core/dist/conversion/args-mapping.js',
+      'sharedmodule/llmswitch-core/dist/conversion/args-mapping.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/media.js',
+      'sharedmodule/llmswitch-core/dist/conversion/media.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/index.js',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/index.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/meta/meta-bag.js',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/meta/meta-bag.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/schema/index.js',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline/schema/index.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/index.js',
+      'sharedmodule/llmswitch-core/dist/filters/index.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/engine.js',
+      'sharedmodule/llmswitch-core/dist/filters/engine.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/types.js',
+      'sharedmodule/llmswitch-core/dist/filters/types.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/add-fields-filter.js',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/add-fields-filter.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/blacklist-filter.js',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/blacklist-filter.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/whitelist-filter.js',
+      'sharedmodule/llmswitch-core/dist/filters/builtin/whitelist-filter.d.ts',
+      'sharedmodule/llmswitch-core/dist/filters/config/openai-openai.fieldmap.json',
+      'sharedmodule/llmswitch-core/dist/filters/utils/snapshot-writer.js',
+      'sharedmodule/llmswitch-core/dist/filters/utils/snapshot-writer.d.ts',
+    ];
+    const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
   });
 
   it('shared openai message normalize must not inject MCP tools or swallow native failures in TS', () => {
@@ -1680,6 +2405,178 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'keeps non-blocking normalize logger', pattern: /logNormalizeNonBlocking|formatUnknownError/ },
       { label: 'swallows native normalize failure', pattern: /catch\s*\(error\)\s*\{[\s\S]*?chat_messages\.normalize_native/ },
     ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'exports marker match type', pattern: /export\s+interface\s+MarkerSyntaxMatch\b/ },
+      { label: 'exports marker strip result type', pattern: /export\s+interface\s+StripMarkerSyntaxResult\b/ },
+      { label: 'exports text marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromText\b/ },
+      { label: 'exports content marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromContent\b/ },
+      { label: 'exports message marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromMessages\b/ },
+      { label: 'exports request marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromRequest\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('chat SSE serializer must not expose retired stream wrapper helper', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports stream wrapper primitives for deleted helper', pattern: /import\s+\{[^}]*\b(?:PassThrough|Readable)\b[^}]*\}\s+from\s+['"]node:stream['"]/ },
+      { label: 'keeps deleted chat SSE text stream wrapper', pattern: /export\s+function\s+toSSETextStream\b/ },
+      { label: 'keeps deleted chat serializer non-blocking logger', pattern: /logChatSerializerNonBlocking\b/ },
+      { label: 'keeps deleted generic chat serializer error frame', pattern: /chat sse serialization failed/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('SSE shared utils must not expose retired zero-consumer public helpers', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/shared/utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'imports stream primitive only used by retired helper', pattern: /import\s+\{[^}]*\bReadable\b[^}]*\}\s+from\s+['"]stream['"]/ },
+      { label: 'exports retired object helper namespace', pattern: /export\s+class\s+ObjectUtils\b/ },
+      { label: 'exports retired array helper namespace', pattern: /export\s+class\s+ArrayUtils\b/ },
+      { label: 'exports retired stream helper namespace', pattern: /export\s+class\s+StreamUtils\b/ },
+      { label: 'exports retired regex helper constants', pattern: /export\s+const\s+REGEX_PATTERNS\b/ },
+      { label: 'exports retired performance helper namespace', pattern: /export\s+class\s+PerformanceUtils\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('SSE public barrel must not expose retired bidirectional facade', () => {
+    const repoRoot = process.cwd();
+    const files = [
+      'sharedmodule/llmswitch-core/src/sse/index.ts',
+      'sharedmodule/llmswitch-core/src/sse/README-RESPONSES.md',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of files) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const matches = collectMatches(source, [
+        { label: 'exports retired bidirectional factory', pattern: /\bcreateBidirectionalConverters\b/ },
+        { label: 'exports retired bidirectional singleton', pattern: /\bbidirectionalConverters\b/ },
+        { label: 'keeps retired auto-detect conversion facade', pattern: /\bautoConvert\b/ },
+      ]);
+      for (const match of matches) {
+        findings.push(`${relativePath}:${match}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('responses reasoning registry TS wrapper must not expose Rust-internal reasoning/meta APIs', () => {
+    const repoRoot = process.cwd();
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of files) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const matches = collectMatches(source, [
+        { label: 'exports TS responses reasoning payload type', pattern: /export\s+interface\s+ResponsesReasoningPayload\b/ },
+        { label: 'exports TS responses output text meta type', pattern: /export\s+interface\s+ResponsesOutputTextMeta\b/ },
+        { label: 'exports TS responses reasoning register wrapper', pattern: /export\s+function\s+registerResponsesReasoning\b/ },
+        { label: 'exports TS responses reasoning consume wrapper', pattern: /export\s+function\s+consumeResponsesReasoning\b/ },
+        { label: 'exports TS output text meta register wrapper', pattern: /export\s+function\s+registerResponsesOutputTextMeta\b/ },
+        { label: 'exports TS output text meta consume wrapper', pattern: /export\s+function\s+consumeResponsesOutputTextMeta\b/ },
+        { label: 'requires JS responses reasoning register capability', pattern: /registerResponsesReasoningJson\b/ },
+        { label: 'requires JS responses reasoning consume capability', pattern: /consumeResponsesReasoningJson\b/ },
+        { label: 'requires JS output text meta register capability', pattern: /registerResponsesOutputTextMetaJson\b/ },
+        { label: 'requires JS output text meta consume capability', pattern: /consumeResponsesOutputTextMetaJson\b/ },
+        { label: 're-exports Rust responses reasoning register NAPI', pattern: /\bregister_responses_reasoning_json\b/ },
+        { label: 're-exports Rust responses reasoning consume NAPI', pattern: /\bconsume_responses_reasoning_json\b/ },
+        { label: 're-exports Rust output text meta register NAPI', pattern: /\bregister_responses_output_text_meta_json\b/ },
+        { label: 're-exports Rust output text meta consume NAPI', pattern: /\bconsume_responses_output_text_meta_json\b/ },
+      ]);
+      for (const match of matches) {
+        findings.push(`${relativePath}:${match}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('conversion shared thin wrappers must not expose retired zero-consumer public helpers', () => {
+    const repoRoot = process.cwd();
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-shell-utils.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of files) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const matches = collectMatches(source, [
+        { label: 'exports unused output extraction result type', pattern: /export\s+interface\s+OutputContentExtractionResult\b/ },
+        { label: 'exports unused output extraction wrapper', pattern: /export\s+function\s+extractOutputSegments\b/ },
+        { label: 'exports unused content part wrapper', pattern: /export\s+function\s+normalizeContentPart\b/ },
+        { label: 'exports unused anthropic tool-use id sanitizer', pattern: /export\s+function\s+sanitizeToolUseId\b/ },
+        { label: 'exports unused anthropic system text helper', pattern: /export\s+function\s+requireSystemText\b/ },
+        { label: 'exports internal anthropic alias coercion helper', pattern: /export\s+function\s+coerceAnthropicAliasRecord\b/ },
+        { label: 'exports file-local anthropic OpenAI options type', pattern: /export\s+interface\s+BuildAnthropicFromOpenAIOptions\b|export\s+type\s+\{\s*BuildAnthropicFromOpenAIOptions\s*\}/ },
+        { label: 're-exports internal anthropic tool-name helpers from barrel', pattern: /export\s+\{[^}]*\b(?:denormalizeAnthropicToolName|normalizeAnthropicToolName)\b[^}]*\}\s+from\s+['"]\.\/anthropic-message-utils-core\.js['"]/ },
+        { label: 're-exports internal anthropic tools-to-chat helper from barrel', pattern: /export\s+\{[^}]*\bmapAnthropicToolsToChat\b[^}]*\}\s+from\s+['"]\.\/anthropic-message-utils-tool-schema\.js['"]/ },
+        { label: 'exports unused reasoning normalization result type', pattern: /export\s+interface\s+ReasoningNormalizationResult\b/ },
+        { label: 'exports unused chat response reasoning wrapper', pattern: /export\s+function\s+normalizeChatResponseReasoningTools\b/ },
+        { label: 'exports unused tool-call function type', pattern: /export\s+interface\s+ToolCallFunction\b/ },
+        { label: 'exports unused tool-call item type', pattern: /export\s+interface\s+ToolCallItem\b/ },
+        { label: 'exports file-local call id transformer type', pattern: /export\s+interface\s+CallIdTransformer\b/ },
+        { label: 'exports file-local bridge tool map options type', pattern: /export\s+interface\s+BridgeToolMapOptions\b/ },
+        { label: 'exports unused stringify args helper', pattern: /export\s+function\s+stringifyArgs\b/ },
+        { label: 'exports unused bridge tool to chat single wrapper', pattern: /export\s+function\s+bridgeToolToChatDefinition\b/ },
+        { label: 'exports unused bridge tool to chat native bridge', pattern: /bridgeToolToChatDefinitionWithNative\b/ },
+        { label: 'keeps unused bridge tool to chat native capability', pattern: /bridgeToolToChatDefinitionJson\b/ },
+        { label: 'keeps unused bridge tool to chat rust napi export', pattern: /\bbridge_tool_to_chat_definition_json\b/ },
+        { label: 'exports unused chat tool to bridge single wrapper', pattern: /export\s+function\s+chatToolToBridgeDefinition\b/ },
+        { label: 'exports unused chat tool to bridge native bridge', pattern: /chatToolToBridgeDefinitionWithNative\b/ },
+        { label: 'keeps unused chat tool to bridge native capability', pattern: /chatToolToBridgeDefinitionJson\b/ },
+        { label: 'exports unused split command wrapper', pattern: /export\s+function\s+splitCommandString\b/ },
+        { label: 'exports unused shell args packing wrapper', pattern: /export\s+function\s+packShellArgs\b/ },
+        { label: 'exports unused comma flattening wrapper', pattern: /export\s+function\s+flattenByComma\b/ },
+        { label: 'exports unused shell args type', pattern: /export\s+interface\s+ShellArgs\b/ },
+        { label: 'exports unused chunk string wrapper', pattern: /export\s+function\s+chunkString\b/ },
+        { label: 'exports unused chunk string native bridge', pattern: /chunkStringWithNative\b/ },
+        { label: 'keeps unused chunk string native capability', pattern: /chunkStringJson\b/ },
+        { label: 'exports unused split command native bridge', pattern: /splitCommandStringWithNative\b/ },
+        { label: 'keeps unused split command native capability', pattern: /splitCommandStringJson\b/ },
+        { label: 'exports unused shell args packing native bridge', pattern: /packShellArgsWithNative\b/ },
+        { label: 'keeps unused shell args packing native capability', pattern: /packShellArgsJson\b/ },
+        { label: 'exports unused comma flattening native bridge', pattern: /flattenByCommaWithNative\b/ },
+        { label: 'keeps unused comma flattening native capability', pattern: /flattenByCommaJson\b/ },
+        { label: 'keeps unused split command rust napi export', pattern: /\bsplit_command_string_json\b/ },
+        { label: 'keeps unused shell args packing rust napi export', pattern: /\bpack_shell_args_json\b/ },
+        { label: 'keeps unused comma flattening rust napi export', pattern: /\bflatten_by_comma_json\b/ },
+        { label: 'keeps unused chunk string rust napi export', pattern: /\bchunk_string_json\b/ },
+      ]);
+      for (const match of matches) {
+        findings.push(`${relativePath}:${match}`);
+      }
+    }
 
     expect(findings).toEqual([]);
   });
@@ -1717,6 +2614,47 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('conversion shared source-side emit artifacts must stay deleted after proof', () => {
+    const repoRoot = process.cwd();
+    const forbiddenArtifacts = [
+      'sharedmodule/llmswitch-core/src/conversion/bridge-actions.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-instructions.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/bridge-policies.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compaction-detect.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/mcp-injection.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.js',
+      'sharedmodule/llmswitch-core/src/conversion/runtime-metadata.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-contract.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-contract.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-control-text.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-control-text.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-tool-history.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-tool-history.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/types.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/types.js',
+      'sharedmodule/llmswitch-core/src/conversion/types/bridge-message-types.js',
+    ];
+    const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
   it('src-side JS source maps must not remain tracked generated artifacts', () => {
     const trackedSourceMaps = execFileSync(
       'git',
@@ -1727,6 +2665,15 @@ describe('hub pipeline stage residue audit', () => {
       .filter((relativePath) => relativePath && fs.existsSync(path.join(process.cwd(), relativePath)));
 
     expect(trackedSourceMaps).toEqual([]);
+  });
+
+  it('llmswitch-core src must not keep side-by-side TS emit artifacts', () => {
+    const generatedArtifacts = walkFiles(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      ['.js', '.d.ts', '.js.map'],
+    ).map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+
+    expect(generatedArtifacts.sort()).toEqual([]);
   });
 
   it('Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts', () => {
@@ -1761,6 +2708,8 @@ describe('hub pipeline stage residue audit', () => {
 
   it('active Rust closeout docs must not target retired stage wrapper APIs', () => {
     const activeDocs = [
+      'docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md',
+      'docs/audit/p0-hub-stage-residue-matrix.md',
       'docs/goals/hubpipeline-rust-closeout-goal-prompt.md',
       'docs/goals/hubpipeline-rust-closeout-master-plan.md',
     ];
@@ -1772,6 +2721,11 @@ describe('hub pipeline stage residue audit', () => {
         { label: 'runHubPipelineStageJson', pattern: /runHubPipelineStageJson/ },
         { label: 'run_hub_pipeline_stage_json', pattern: /run_hub_pipeline_stage_json/ },
         { label: 'runHubPipelineStageWithNative', pattern: /runHubPipelineStageWithNative/ },
+        { label: 'runRespProcessStage1ToolGovernance', pattern: /runRespProcessStage1ToolGovernance/ },
+        {
+          label: 'resp_process_stage1_tool_governance-ts-wrapper',
+          pattern: /src\/conversion\/hub\/pipeline\/stages\/resp_process\/resp_process_stage1_tool_governance\/index\.ts/,
+        },
       ]);
       findings.push(...matches.map((match) => `${relativePath}:${match}`));
     }
@@ -1876,6 +2830,7 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(source).toContain("hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'");
@@ -1888,27 +2843,50 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts',
     );
+    const nativeWrapperPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+    );
+    const rustLookupPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs',
+    );
     const handlerPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
     );
     const runtimeUtilsSource = fs.readFileSync(runtimeUtilsPath, 'utf8');
+    const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
+    const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
     const handlerSource = fs.readFileSync(handlerPath, 'utf8');
+    const runtimeStateBlock = extractFunctionBlock(runtimeUtilsSource, 'resolveRuntimeStopMessageState');
+    const runtimeStageBlock = extractFunctionBlock(runtimeUtilsSource, 'readRuntimeStopMessageStageMode');
+    const followupFlowBlock = extractFunctionBlock(runtimeUtilsSource, 'readServerToolFollowupFlowId');
 
-    expect(runtimeUtilsSource).toContain('runtime.serverToolLoopState');
-    expect(runtimeUtilsSource).toContain("toNonEmptyText(loopState.flowId) !== 'stop_message_flow'");
-    expect(runtimeUtilsSource).toContain('readPositiveInteger(loopState.maxRepeats)');
-    expect(runtimeUtilsSource).not.toContain('readPositiveInteger(loopState.repeatCount)');
-    expect(runtimeUtilsSource).toContain('readPositiveInteger(state?.stopMessageUsed)');
+    expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
+    expect(rustLookupSource).toContain('pub fn read_servertool_followup_flow_id');
+    expect(rustLookupSource).toContain('STOP_MESSAGE_FOLLOWUP_FLOW_ID');
+    expect(rustLookupSource).toContain('loop_state.get("maxRepeats")');
+    expect(rustLookupSource).not.toContain('loop_state.get("repeatCount")');
+    expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
+    expect(nativeWrapperSource).toContain('readServertoolFollowupFlowIdWithNative');
+    expect(runtimeStateBlock).toContain('resolveRuntimeStopMessageStateWithNative(runtimeMetadata)');
+    expect(runtimeStageBlock).toContain('readRuntimeStopMessageStageModeWithNative(runtimeMetadata)');
+    expect(followupFlowBlock).toContain('readServertoolFollowupFlowIdWithNative(runtimeMetadata)');
     expect(handlerSource).toContain('if (followupFlowId && followupFlowId !== FLOW_ID)');
     expect(handlerSource).toContain("reason: 'skip_servertool_followup_hop'");
     expect(handlerSource).not.toContain('stop_message_followup_policy');
     expect(handlerSource).not.toContain('preserve_eligibility');
 
-    const findings = collectMatches(`${runtimeUtilsSource}\n${handlerSource}`, [
-      { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
+    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${followupFlowBlock}`, [
       { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
+      { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
+      { label: 'runtime stop stage TS normalizes state', pattern: /stopMessageStageMode|toLowerCase\(\)/ },
+      { label: 'servertool followup flow id TS reads loop state', pattern: /serverToolLoopState|\.flowId|toNonEmptyText/ },
     ]);
-    expect(findings).toEqual([]);
+    const handlerFindings = collectMatches(handlerSource, [
+      { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
+    ]);
+    expect([...runtimeFindings, ...handlerFindings]).toEqual([]);
   });
 });

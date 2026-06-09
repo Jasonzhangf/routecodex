@@ -40,18 +40,18 @@ describe('request-executor-runtime-blocks', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       logProviderRetrySwitchCompact({
-        requestId: 'req-windsurf-upstream-code',
+        requestId: 'req-provider-upstream-code',
         attempt: 1,
         maxAttempts: 6,
         nextAttempt: 2,
-        providerKey: 'windsurf.ws-pro-3.gpt-5.4-none',
+        providerKey: 'openai.key3.gpt-5.4-none',
         reason: 'An internal error occurred (error ID: upstream-13)',
         switchAction: 'exclude_and_reroute',
         backoffScope: 'provider',
         decisionLabel: 'provider_backoff_then_reroute',
         stage: 'provider.send',
         statusCode: 502,
-        errorCode: 'WINDSURF_UPSTREAM_TRANSIENT',
+        errorCode: 'PROVIDER_UPSTREAM_TRANSIENT',
         upstreamCode: '13',
         upstreamStatus: 13,
         backoffMs: 2000,

@@ -95,4 +95,25 @@ describe('provider-request-preprocessor', () => {
     expect(attached?.metadata?.stream).toBe(true);
     expect((out as any).metadata?.stream).toBeUndefined();
   });
+
+  it('physically removes session and conversation control metadata from outbound body', async () => {
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
+    const runtimeMetadata = { metadata: {} } as any;
+    const req = {
+      model: 'gpt-5.5',
+      metadata: {
+        sessionId: 'sess-live',
+        conversationId: 'conv-live',
+        client_tmux_session_id: 'tmux-live'
+      }
+    } as any;
+
+    const out = ProviderRequestPreprocessor.preprocess(req, runtimeMetadata);
+    const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
+
+    expect(attached?.metadata?.sessionId).toBe('sess-live');
+    expect(attached?.metadata?.conversationId).toBe('conv-live');
+    expect(attached?.metadata?.client_tmux_session_id).toBe('tmux-live');
+    expect((out as any).metadata).toBeUndefined();
+  });
 });

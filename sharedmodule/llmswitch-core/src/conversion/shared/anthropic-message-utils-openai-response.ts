@@ -2,7 +2,7 @@ import { buildAnthropicFromOpenAIChatWithNative } from '../../native/router-hotp
 
 type Unknown = Record<string, unknown>;
 
-export interface BuildAnthropicFromOpenAIOptions {
+interface BuildAnthropicFromOpenAIOptions {
   toolNameMap?: Record<string, string>;
   requestId?: string;
 }
@@ -12,17 +12,4 @@ export function buildAnthropicFromOpenAIChat(oa: unknown, options?: BuildAnthrop
     (oa ?? {}) as Unknown,
     options as Unknown | undefined,
   ) as Unknown;
-}
-
-export function coerceAnthropicAliasRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const out: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof raw === 'string') {
-      out[key] = raw;
-    }
-  }
-  return Object.keys(out).length ? out : undefined;
 }

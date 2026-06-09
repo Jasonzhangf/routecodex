@@ -6,7 +6,7 @@ import type {
 } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
 import type { ServerToolFollowupPlan } from '../types.js';
-import { isCompactionRequest } from './compaction-detect.js';
+import { isCompactionRequest } from '../../conversion/compaction-detect.js';
 import {
   shouldBypassStopMessageForMediaContext,
   shouldRunVisionFlowForAdapterContext
@@ -148,6 +148,15 @@ function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObjec
   if (!text) return cloned;
   if (prefixChatChoiceContent(cloned, text)) return cloned;
   if (prefixResponsesOutputContent(cloned, text)) return cloned;
+  return cloned;
+}
+
+function replaceStopSummaryContent(payload: JsonObject, prefix: unknown): JsonObject {
+  const text = typeof prefix === 'string' ? prefix.trim() : '';
+  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
+  if (!text) return cloned;
+  if (replaceChatChoiceContent(cloned, text)) return cloned;
+  if (replaceResponsesOutputContent(cloned, text)) return cloned;
   return cloned;
 }
 
@@ -301,6 +310,21 @@ function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
   return changed;
 }
 
+function replaceChatChoiceContent(payload: JsonObject, prefix: string): boolean {
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  let changed = false;
+  for (const choice of choices) {
+    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
+    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
+      ? choiceRow.message as Record<string, unknown>
+      : null;
+    if (!message) continue;
+    message.content = prefix;
+    changed = true;
+  }
+  return changed;
+}
+
 function prefixResponsesOutputContent(payload: JsonObject, prefix: string): boolean {
   const output = Array.isArray(payload.output) ? payload.output : [];
   for (const item of output) {
@@ -308,9 +332,35 @@ function prefixResponsesOutputContent(payload: JsonObject, prefix: string): bool
     const content = Array.isArray(itemRow?.content) ? itemRow.content : null;
     if (!content) continue;
     content.unshift({ type: 'output_text', text: `${prefix}\n` });
+    if (typeof payload.output_text === 'string') {
+      payload.output_text = `${prefix}\n${payload.output_text}`;
+    }
     return true;
   }
   return false;
+}
+
+function replaceResponsesOutputContent(payload: JsonObject, prefix: string): boolean {
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  let changed = false;
+  for (const item of output) {
+    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
+    const content = Array.isArray(itemRow?.content) ? itemRow.content : null;
+    if (!itemRow) continue;
+    if (content) {
+      itemRow.content = [{ type: 'output_text', text: prefix }];
+      changed = true;
+      continue;
+    }
+    if (itemRow.type === 'message') {
+      itemRow.content = [{ type: 'output_text', text: prefix }];
+      changed = true;
+    }
+  }
+  if (typeof payload.output_text === 'string' || changed) {
+    payload.output_text = prefix;
+  }
+  return changed;
 }
 
 function clearPersistedStopMessageRuntimeState(keys: string[]): void {
@@ -781,7 +831,9 @@ const handler: ServerToolHandler = async (
     }
 
     if (schemaGate.action === 'allow_stop') {
-      const prefixed = applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
+      const prefixed = schemaGate.reason_code === 'stop_schema_needs_user_input'
+        ? replaceStopSummaryContent(ctx.base, schemaGate.summary_prefix)
+        : applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
       persistStoplessLearnedNoteOnAllowStop({
         adapterContext: ctx.adapterContext as unknown as Record<string, unknown>,
         requestId: ctx.requestId,

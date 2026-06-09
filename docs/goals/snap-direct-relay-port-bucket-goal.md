@@ -87,7 +87,6 @@
     forbidden_paths:
       - src/client
       - src/providers/profile
-      - src/providers/core/runtime/windsurf-chat-provider.ts
       - src/providers/core/runtime/responses-provider.ts
       - src/server/runtime/http-server/executor/provider-response-converter.ts
     required_tests:

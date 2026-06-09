@@ -1,10 +1,8 @@
 import {
   createToolCallIdTransformerWithNative,
-  normalizeResponsesToolCallIdsWithNative,
   normalizeFunctionCallIdWithNative,
   normalizeFunctionCallOutputIdWithNative,
   normalizeResponsesCallIdWithNative,
-  resolveToolCallIdStyleWithNative,
   stripInternalToolingMetadataWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import { sanitizeResponsesFunctionNameWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
@@ -13,7 +11,7 @@ export type ToolCallIdStyle = 'preserve' | 'fc';
 
 type BridgeInputItem = Record<string, unknown>;
 
-export interface CallIdTransformer {
+interface CallIdTransformer {
   normalizeCallId(raw: unknown): string;
   normalizeItemId(raw: unknown, callId: string): string;
   normalizeOutputId(callId: string, raw: unknown): string;
@@ -22,11 +20,9 @@ export interface CallIdTransformer {
 function assertResponsesToolUtilsNativeAvailable(): void {
   if (
     typeof createToolCallIdTransformerWithNative !== 'function' ||
-    typeof normalizeResponsesToolCallIdsWithNative !== 'function' ||
     typeof normalizeFunctionCallIdWithNative !== 'function' ||
     typeof normalizeFunctionCallOutputIdWithNative !== 'function' ||
     typeof normalizeResponsesCallIdWithNative !== 'function' ||
-    typeof resolveToolCallIdStyleWithNative !== 'function' ||
     typeof stripInternalToolingMetadataWithNative !== 'function' ||
     typeof sanitizeResponsesFunctionNameWithNative !== 'function'
   ) {
@@ -74,23 +70,6 @@ function transformCounter(state: Record<string, unknown>, prefix: string): strin
   const next = current + 1;
   state.__counter = next;
   return `${prefix}_${next}`;
-}
-
-export function normalizeResponsesToolCallIds(payload: Record<string, unknown> | null | undefined): void {
-  assertResponsesToolUtilsNativeAvailable();
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return;
-  }
-  const normalized = normalizeResponsesToolCallIdsWithNative(payload);
-  if (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) {
-    replaceMutableRecord(payload, normalized);
-  }
-}
-
-export function resolveToolCallIdStyle(metadata: Record<string, unknown> | undefined): ToolCallIdStyle {
-  assertResponsesToolUtilsNativeAvailable();
-  const style = resolveToolCallIdStyleWithNative(metadata ?? null);
-  return style === 'preserve' ? 'preserve' : 'fc';
 }
 
 export function stripInternalToolingMetadata(metadata: unknown): void {

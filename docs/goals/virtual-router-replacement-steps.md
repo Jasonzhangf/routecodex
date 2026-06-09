@@ -172,7 +172,7 @@
 - `cooldown_provider`（L164）
 - `cooldown_provider_until_midnight_persisted`（L186）
 - `record_success`（L207）
-- `clear_windsurf_managed_persisted_503_family`（L224）
+- persisted 503 family cleanup（L224）
 - `trip_provider`（L250）
 - `is_available`（L273）
 - `cooldown_remaining_ms`（L311）

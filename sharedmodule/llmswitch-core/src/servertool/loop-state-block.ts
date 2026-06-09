@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import {
+  planServertoolLoopStateWithNative,
+  readServertoolLoopStateWithNative,
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
 
@@ -20,42 +24,7 @@ export function readServerToolLoopState(adapterContext: AdapterContext): ServerT
     return null;
   }
   const rt = readRuntimeMetadata(adapterContext as unknown as Record<string, unknown>);
-  const raw = (rt as any)?.serverToolLoopState;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  const flowId = typeof record.flowId === 'string' ? record.flowId.trim() : undefined;
-  const payloadHash = typeof record.payloadHash === 'string' ? record.payloadHash.trim() : undefined;
-  const repeatCount =
-    typeof record.repeatCount === 'number' && Number.isFinite(record.repeatCount)
-      ? Math.max(0, Math.floor(record.repeatCount))
-      : undefined;
-  const startedAtMs =
-    typeof record.startedAtMs === 'number' && Number.isFinite(record.startedAtMs)
-      ? Math.max(0, Math.floor(record.startedAtMs))
-      : undefined;
-  const stopPairHash =
-    typeof record.stopPairHash === 'string' && record.stopPairHash.trim().length
-      ? record.stopPairHash.trim()
-      : undefined;
-  const stopPairRepeatCount =
-    typeof record.stopPairRepeatCount === 'number' && Number.isFinite(record.stopPairRepeatCount)
-      ? Math.max(0, Math.floor(record.stopPairRepeatCount))
-      : undefined;
-  const stopPairWarned = typeof record.stopPairWarned === 'boolean' ? record.stopPairWarned : undefined;
-  if (!payloadHash) {
-    return null;
-  }
-  return {
-    ...(flowId ? { flowId } : {}),
-    payloadHash,
-    ...(repeatCount !== undefined ? { repeatCount } : {}),
-    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
-    ...(stopPairHash ? { stopPairHash } : {}),
-    ...(stopPairRepeatCount !== undefined ? { stopPairRepeatCount } : {}),
-    ...(stopPairWarned !== undefined ? { stopPairWarned } : {})
-  };
+  return readServertoolLoopStateWithNative(rt);
 }
 
 function stableStringify(value: unknown): string {
@@ -141,53 +110,17 @@ export function buildServerToolLoopState(args: {
     return null;
   }
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  const useFlowOnlyAutoLimit = decision.flowOnlyLoopLimit;
-  const trackPayload =
-    typeof args.flowId === 'string' && args.flowId.trim() && args.flowId !== 'stop_message_flow' && !useFlowOnlyAutoLimit;
-  const payloadHash = trackPayload ? hashPayload(args.payload, args.logNonBlocking) : '__servertool_auto__';
-  if (!payloadHash) {
-    return null;
-  }
+  const payloadHash = hashPayload(args.payload, args.logNonBlocking);
+  const stopPairHash = hashStopMessageRequestResponsePair(args.payload, args.response, args.logNonBlocking);
   const previous = readServerToolLoopState(args.adapterContext);
-  const sameFlow = previous && previous.flowId === args.flowId;
-  const samePayload = !trackPayload || (previous && previous.payloadHash === payloadHash);
-  const prevCount =
-    previous && typeof previous.repeatCount === 'number' && Number.isFinite(previous.repeatCount)
-      ? Math.max(0, Math.floor(previous.repeatCount))
-      : 0;
-  const repeatCount = sameFlow && samePayload ? prevCount + 1 : 1;
-  const previousStartedAtMs =
-    sameFlow && previous && typeof previous.startedAtMs === 'number' && Number.isFinite(previous.startedAtMs)
-      ? Math.max(0, Math.floor(previous.startedAtMs))
-      : undefined;
-  const startedAtMs = previousStartedAtMs ?? Date.now();
-
-  const base: ServerToolLoopState = {
-    ...(args.flowId ? { flowId: args.flowId } : {}),
+  return planServertoolLoopStateWithNative({
+    ...(typeof args.flowId === 'string' ? { flowId: args.flowId } : {}),
+    decision: {
+      flowOnlyLoopLimit: decision.flowOnlyLoopLimit
+    },
+    previousLoopState: previous,
     payloadHash,
-    repeatCount,
-    startedAtMs
-  };
-
-  if (args.flowId === 'stop_message_flow') {
-    const pairHash = hashStopMessageRequestResponsePair(args.payload, args.response, args.logNonBlocking);
-    if (pairHash) {
-      const previousPairHash =
-        sameFlow && previous && typeof previous.stopPairHash === 'string' ? previous.stopPairHash : undefined;
-      const previousPairCount =
-        sameFlow && previous && typeof previous.stopPairRepeatCount === 'number' && Number.isFinite(previous.stopPairRepeatCount)
-          ? Math.max(0, Math.floor(previous.stopPairRepeatCount))
-          : 0;
-      const stopPairRepeatCount = previousPairHash === pairHash ? previousPairCount + 1 : 1;
-      const stopPairWarned =
-        previousPairHash === pairHash && previous && typeof previous.stopPairWarned === 'boolean'
-          ? previous.stopPairWarned
-          : false;
-      base.stopPairHash = pairHash;
-      base.stopPairRepeatCount = stopPairRepeatCount;
-      base.stopPairWarned = stopPairWarned;
-    }
-  }
-
-  return base;
+    stopPairHash,
+    nowMs: Date.now()
+  });
 }

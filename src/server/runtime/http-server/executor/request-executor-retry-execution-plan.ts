@@ -131,13 +131,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
       routePool: args.routePool,
       excludedProviderKeys: args.excludedProviderKeys
     });
-  const terminalQuotaReroute =
+  const terminalPeriodicPolicyDecision =
     shouldRerouteTerminalPeriodicRecovery({
       classification,
       shouldRetry: eligibilityPlan.shouldRetry,
       hasTerminalAlternativeCandidate
     });
-  const terminalUnrecoverableProviderReroute =
+  const terminalUnrecoverablePolicyDecision =
     shouldRerouteTerminalUnrecoverableProviderFailure({
       classification,
       shouldRetry: eligibilityPlan.shouldRetry,
@@ -146,7 +146,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       errorCode: args.retryError.errorCode,
       upstreamCode: args.retryError.upstreamCode
     });
-  if (!eligibilityPlan.shouldRetry && !terminalQuotaReroute && !terminalUnrecoverableProviderReroute) {
+  if (!eligibilityPlan.shouldRetry && !terminalPeriodicPolicyDecision && !terminalUnrecoverablePolicyDecision) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return {
       shouldRetry: false,
@@ -159,7 +159,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  if (terminalQuotaReroute || terminalUnrecoverableProviderReroute) {
+  if (terminalPeriodicPolicyDecision || terminalUnrecoverablePolicyDecision) {
     const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
           error: args.error,
           retryError: args.retryError,

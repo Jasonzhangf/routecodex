@@ -9,35 +9,23 @@
 
 响应侧工具治理的实际执行路径：
 
-- pipeline 阶段：`resp_process_stage1_tool_governance`
-  - 调用 `runChatResponseToolFilters()`：
-    - 内部使用 `ResponseToolTextCanonicalizeFilter` →
-      `normalizeAssistantTextToToolCalls()`（`conversion/shared/text-markup-normalizer.ts`）；
-    - 再调用 `canonicalizeChatResponseTools()` 统一 `tool_calls` 形状。
-  - 调用 `ToolGovernanceEngine.governResponse()`（`conversion/hub/tool-governance`）：
-    - 做工具名治理、约束补齐等。
-  - 最终由 `ResponseFinishInvariantsFilter` 确保：
-    - 若存在 `tool_calls`：
-      - `choices[n].finish_reason === 'tool_calls'`；
-      - 对应 `message.content === null`（或空文本），避免工具标记作为正文残留。
+- pipeline 阶段：`HubRespChatProcess03Governed` / Rust `resp_process_stage1_tool_governance`
+- 文本 → `tool_calls`、工具名治理、参数治理、`finish_reason` 归一均由 Rust owner 处理
+- TS 测试和宿主代码不得恢复 `runChatResponseToolFilters()`、`ToolGovernanceEngine` 或 `filters/special/*` 旧链路
+- 若存在 `tool_calls`，客户端投影必须保持工具调用结构，不得把工具标记作为正文残留
 
 所有文本→工具调用的解析（包括 `apply_patch`、`shell/<function=execute>`、
-`<tool_call>` XML 以及 `list_directory` 这类 XML 片段）都必须在这条链路上实现。
+`<tool_call>` XML 以及 `list_directory` 这类 XML 片段）都必须在 Rust 响应治理链路上实现。
 
 ## 二、回归测试架构（复用同一条链路）
 
-`tests/v2/src/tool-processing-test.ts` 做的事情是：
+`tests/v2/src/tool-processing-test.ts` 已作为旧 V2 工具处理入口删除；新的回归入口必须落在 Rust/native owner 对应的 root `tests/sharedmodule/*`、HTTP 黑盒测试，或 `sharedmodule/llmswitch-core/scripts/tests/*` 中。
 
-1. 从 `~/.rcc/codex-samples` 读取真实快照：
-   - 当前仅使用 `openai-chat/*_provider-response.json`。
-2. 对每个样本：
-   - 取出 `response.body.data`（Chat completion 形状）。
-   - 调用：
-     - `runChatResponseToolFilters(chatPayload, { entryEndpoint: '/v1/chat/completions', requestId, profile: 'openai-chat' })`；
-     - `new ToolGovernanceEngine().governResponse(filtered, 'openai-chat')`。
-   - 从 `governed.choices[0].message.tool_calls` 中读取工具调用，并用于：
-     - 统计（收割工具数量、处理时间等）；
-     - 断言工具名 / arguments 形状是否符合预期。
+样本回归应当：
+
+1. 从 `~/.rcc/codex-samples` 或仓内 fixture 读取真实快照。
+2. 调用当前 Rust/native owner 或 thin bridge，例如 `normalizeAssistantTextToToolCalls`、`buildResponsesPayloadFromChatWithNative`、`buildChatResponseFromResponsesWithNative`。
+3. 从 native 输出的 canonical `tool_calls` / Responses `function_call` 中读取工具调用，并断言工具名与 arguments 形状。
 
 重要的是：**测试不再实现任何自定义 `harvestTools()` / 正则解析器**，
 而是完全依赖 llmswitch-core 的生产实现。这样一旦我们在核心模块里扩展新规则，
@@ -49,18 +37,15 @@
 
 - 规范化入口仍然是响应侧工具治理：
   - 文本中的结构化 payload（unified diff / JSON changes 等）通过
-    `text-markup-normalizer + canonicalizeChatResponseTools` 变成标准 `tool_calls`。
+    Rust/native text markup normalizer 变成标准 `tool_calls`。
 - 逻辑正确性由 `validateToolCall('apply_patch', args)`（`tools/tool-registry.ts`）
   负责：
   - 单元层面已有测试：
     - `tests/sharedmodule/apply-patch-validator.spec.ts`
     - `tests/sharedmodule/apply-patch-full.spec.ts`
   - 矩阵层面建议：
-    - 在 `tool-processing-test` 中，对所有 `function.name === 'apply_patch'`
-      的 `tool_calls`：
-      - 把 `function.arguments` 交给 `validateToolCall('apply_patch', args)`；
-      - 断言 `ok === true`，并对 `normalizedArgs` 中生成的 `patch` 做基本形状检查
-        （例如是否包含 `*** Begin Patch` / `*** (Add|Update) File:`）。
+    - 在 active root/sharedmodule 回归中，对所有 `function.name === 'apply_patch'` 的 `tool_calls` 调用 `validateToolCall('apply_patch', args)`。
+    - 断言 `ok === true`，并对 `normalizedArgs` 中生成的 `patch` 做基本形状检查（例如是否包含 `*** Begin Patch` / `*** (Add|Update) File:`）。
 
 ## 四、如何为新问题补样本 / 补测试
 
@@ -71,8 +56,8 @@
      `*_provider-response.json` 与对应 `*_client-request.json`。
 2. **在 llmswitch-core 修复**
    - 只在以下模块扩展逻辑：
-     - `conversion/shared/text-markup-normalizer.ts`（文本 → tool_calls）；
-     - `conversion/shared/tool-canonicalizer.ts`（tool_calls 形状统一）；
+     - Rust/native text markup normalizer（文本 → tool_calls）；
+     - Rust/native tool canonicalizer（tool_calls 形状统一）；
      - 必要时更新 `tools/tool-registry.ts` 或相关 compat；
    - **不要**在 Host / Provider / 测试代码里写第二套解析逻辑。
 3. **更新单元测试**

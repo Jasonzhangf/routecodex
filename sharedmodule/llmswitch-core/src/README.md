@@ -14,20 +14,13 @@ This directory contains the source code for `rcc-llmswitch-core`, the Hub Pipeli
 ```
 src/
 ├── bridge/                    # Bridge between Host and Hub Pipeline
-├── config-unified/            # Unified configuration system
 ├── conversion/                # Protocol conversion layer (front-half + back-half)
 │   ├── codecs/               # Protocol codec implementations
 │   ├── compat/               # Provider compatibility profiles
-│   ├── config/               # Conversion configuration
 │   ├── hub/                  # Hub Pipeline implementation
 │   ├── pipeline/             # Pipeline nodes and stages
 │   ├── responses/            # Responses protocol specific conversion
 │   └── shared/               # Shared conversion utilities
-├── filters/                   # Request/response filtering
-│   ├── builtin/              # Built-in filter implementations
-│   ├── config/               # Filter configuration
-│   ├── special/              # Special purpose filters
-│   └── utils/                # Filter utilities
 ├── guidance/                  # Guidance and instruction handling
 ├── http/                      # HTTP utilities for conversion
 ├── router/                    # Routing logic

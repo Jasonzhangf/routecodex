@@ -5,7 +5,7 @@
  * 本文件仅提供一个轻量 helper：从 host runtime metadata 中提取 sessionId，
  * 用于把 sticky hint 透传到 Rust NAPI 入口。
  *
- * 禁止：持有 sticky state / cache / map（与 WindsurfAccountPool 无关）。
+ * 禁止：持有 sticky state / cache / map。
  */
 
 import type { ProviderRuntimeProfile } from '../api/provider-types.js';

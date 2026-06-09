@@ -37,6 +37,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
   const originalStageVerbose = process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
   const originalStageTiming = process.env.ROUTECODEX_STAGE_TIMING;
   const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
   beforeEach(() => {
     process.env.ROUTECODEX_HTTP_LOG_VERBOSE = '1';
@@ -44,6 +45,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     process.env.ROUTECODEX_STAGE_LOG_VERBOSE = '1';
     delete process.env.ROUTECODEX_STAGE_TIMING;
     logSpy.mockClear();
+    warnSpy.mockClear();
     jest.resetModules();
   });
 
@@ -69,6 +71,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       process.env.ROUTECODEX_STAGE_TIMING = originalStageTiming;
     }
     logSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('does not attach stream contract probe for empty response.created placeholder', async () => {
@@ -186,6 +189,63 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=tool_calls\x1b[0m'));
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed t+0ms'));
+  });
+
+  it('does not log successful request completion before incomplete stream is classified', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = Readable.from([
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_incomplete_log_guard","object":"response","status":"in_progress","output":[]}}\n\n',
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        }
+      } as any,
+      'req-stream-incomplete-log-guard',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: error');
+    expect(output).toContain('"code":"upstream_stream_incomplete"');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse.stream][req-stream-incomplete-log-guard] error'));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('request req-stream-incomplete-log-guard completed (status=200'));
   });
 
   it('logs client_close diagnostics when SSE closes before terminal event', async () => {
@@ -1292,7 +1352,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     }
   });
 
-  it('does not repair required_action streams with response.completed', async () => {
+  it('repairs required_action streams with response.completed before response.done', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1309,6 +1369,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
         if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
           next.__seen_response_required_action = true;
         }
+        if (text.includes('event: response.completed') || text.includes('"type":"response.completed"')) {
+          next.__seen_response_completed = true;
+        }
         if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
           next.__seen_response_done = true;
         }
@@ -1318,6 +1381,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
         return next;
       },
       buildResponsesTerminalSseFramesFromProbeNative: (probe: Record<string, unknown> | undefined) => [
+        ...(probe?.__seen_response_completed ? [] : [
+          'event: response.completed\n' +
+            'data: {"type":"response.completed","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n'
+        ]),
         ...(probe?.__seen_response_done ? [] : [
           'event: response.done\n' +
             'data: {"type":"response.done","response":{"id":"resp_tool","object":"response","status":"requires_action"}}\n\n'
@@ -1368,8 +1435,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output.match(/event: response.required_action/g)).toHaveLength(1);
-    expect(output).not.toContain('event: response.completed');
+    expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
+    expect(output.indexOf('event: response.required_action')).toBeLessThan(output.indexOf('event: response.completed'));
+    expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('event: response.done'));
     expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
   });
 });

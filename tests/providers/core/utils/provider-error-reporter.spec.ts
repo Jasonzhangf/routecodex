@@ -33,7 +33,7 @@ describe('provider-error-reporter', () => {
         retryable: false,
         cooldownOverrideMs: 4321,
         quotaScope: 'weekly',
-        quotaReason: 'windsurf_weekly_exhausted'
+        quotaReason: 'weekly_exhausted'
       }),
       stage: 'provider.send',
       runtime: {
@@ -59,7 +59,7 @@ describe('provider-error-reporter', () => {
       fatal: false,
       cooldownOverrideMs: 4321,
       quotaScope: 'weekly',
-      quotaReason: 'windsurf_weekly_exhausted',
+      quotaReason: 'weekly_exhausted',
       resetAt: '2026-05-28T00:00:00.000Z',
       errorClassification: 'recoverable',
       status: 502,

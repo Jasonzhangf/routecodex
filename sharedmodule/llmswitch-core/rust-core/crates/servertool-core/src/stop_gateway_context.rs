@@ -84,10 +84,41 @@ pub fn is_stop_eligible(payload: &serde_json::Value) -> bool {
     inspect(payload).eligible
 }
 
+pub fn normalize_stop_gateway_context(value: &serde_json::Value) -> Option<StopGatewayContext> {
+    let record = value.as_object()?;
+    let observed = record.get("observed").and_then(|value| value.as_bool())?;
+    let eligible = record.get("eligible").and_then(|value| value.as_bool())?;
+    let source = normalize_source(record.get("source"));
+    let reason = record
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let choice_index = normalize_optional_non_negative_i32(
+        record
+            .get("choiceIndex")
+            .or_else(|| record.get("choice_index")),
+    );
+    let has_tool_calls = record
+        .get("hasToolCalls")
+        .or_else(|| record.get("has_tool_calls"))
+        .and_then(|value| value.as_bool());
+    Some(StopGatewayContext {
+        observed,
+        eligible,
+        source,
+        reason,
+        choice_index,
+        has_tool_calls,
+    })
+}
+
 // ── Internal ────────────────────────────────────────────────────────────────
 
 enum PayloadClass {
-    Chat(Vec<ChatChoice>),
+    Chat(Vec<(usize, ChatChoice)>),
     Responses {
         status: Option<String>,
         output: Option<Vec<serde_json::Value>>,
@@ -101,9 +132,14 @@ fn classify_payload(payload: &serde_json::Value) -> Option<PayloadClass> {
     // Chat format: has "choices" array
     if let Some(choices_val) = obj.get("choices") {
         if let Some(choices) = choices_val.as_array() {
-            let parsed: Vec<ChatChoice> = choices
+            let parsed: Vec<(usize, ChatChoice)> = choices
                 .iter()
-                .filter_map(|c| serde_json::from_value(c.clone()).ok())
+                .enumerate()
+                .filter_map(|(idx, c)| {
+                    serde_json::from_value(c.clone())
+                        .ok()
+                        .map(|choice| (idx, choice))
+                })
                 .collect();
             if !parsed.is_empty() {
                 return Some(PayloadClass::Chat(parsed));
@@ -129,9 +165,9 @@ fn classify_payload(payload: &serde_json::Value) -> Option<PayloadClass> {
     })
 }
 
-fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
+fn inspect_chat(choices: Vec<(usize, ChatChoice)>) -> StopGatewayContext {
     // Find the LAST choice with a finish_reason
-    for choice in choices.into_iter().rev() {
+    for (idx, choice) in choices.into_iter().rev() {
         let finish_reason = match choice.finish_reason {
             Some(ref fr) => fr.trim().to_lowercase(),
             None => continue,
@@ -141,8 +177,8 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
             continue;
         }
 
-        let idx = 0; // relative index within the reversed scan
         let message = choice.message.as_ref();
+        let choice_index = i32::try_from(idx).unwrap_or(i32::MAX);
 
         if finish_reason == "tool_calls" {
             return StopGatewayContext {
@@ -150,7 +186,7 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
                 eligible: false,
                 source: "chat".to_string(),
                 reason: "finish_reason_tool_calls".to_string(),
-                choice_index: Some(idx),
+                choice_index: Some(choice_index),
                 has_tool_calls: Some(true),
             };
         }
@@ -161,7 +197,7 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
                 eligible: false,
                 source: "chat".to_string(),
                 reason: format!("finish_reason_{}", finish_reason),
-                choice_index: Some(idx),
+                choice_index: Some(choice_index),
                 has_tool_calls: Some(false),
             };
         }
@@ -173,7 +209,7 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
                 eligible: false,
                 source: "chat".to_string(),
                 reason: "finish_reason_stop_with_embedded_tool_markers".to_string(),
-                choice_index: Some(idx),
+                choice_index: Some(choice_index),
                 has_tool_calls: Some(false),
             };
         }
@@ -189,7 +225,7 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
                 eligible: false,
                 source: "chat".to_string(),
                 reason: "finish_reason_stop_reasoning_only_empty_assistant".to_string(),
-                choice_index: Some(idx),
+                choice_index: Some(choice_index),
                 has_tool_calls: Some(has_tc),
             };
         }
@@ -199,7 +235,7 @@ fn inspect_chat(choices: Vec<ChatChoice>) -> StopGatewayContext {
             eligible: !has_tc,
             source: "chat".to_string(),
             reason: format!("finish_reason_{}", finish_reason),
-            choice_index: Some(idx),
+            choice_index: Some(choice_index),
             has_tool_calls: Some(has_tc),
         };
     }
@@ -311,11 +347,24 @@ fn has_embedded_tool_markers(message: Option<&ChatMessage>) -> bool {
 
 fn contains_tool_marker(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::String(s) => TOOL_MARKER_PATTERN.iter().any(|pat| s.contains(pat)),
+        serde_json::Value::String(s) => contains_tool_marker_text(s),
         serde_json::Value::Array(arr) => arr.iter().any(|v| contains_tool_marker(v)),
         serde_json::Value::Object(obj) => obj.values().any(|v| contains_tool_marker(v)),
         _ => false,
     }
+}
+
+fn contains_tool_marker_text(value: &str) -> bool {
+    let lower = value.to_lowercase();
+    TOOL_MARKER_PATTERN
+        .iter()
+        .map(|marker| marker.trim_start_matches("<|").trim_end_matches("|>"))
+        .any(|token| {
+            let Some(token_index) = lower.find(token) else {
+                return false;
+            };
+            lower[..token_index].contains("<|") && lower[token_index + token.len()..].contains("|>")
+        })
 }
 
 fn has_visible_text(value: Option<&serde_json::Value>) -> bool {
@@ -401,6 +450,37 @@ fn has_tool_like_output(value: &serde_json::Value) -> bool {
         || type_str.contains("tool")
 }
 
+fn normalize_source(value: Option<&serde_json::Value>) -> String {
+    match value
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("chat") => "chat".to_string(),
+        Some("responses") => "responses".to_string(),
+        Some("none") => "none".to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+fn normalize_optional_non_negative_i32(value: Option<&serde_json::Value>) -> Option<i32> {
+    match value? {
+        serde_json::Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                Some(i32::try_from(integer.max(0)).unwrap_or(i32::MAX))
+            } else if let Some(unsigned) = number.as_u64() {
+                Some(i32::try_from(unsigned).unwrap_or(i32::MAX))
+            } else {
+                number
+                    .as_f64()
+                    .map(|float| i32::try_from((float.floor() as i64).max(0)).unwrap_or(i32::MAX))
+            }
+        }
+        _ => None,
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -421,6 +501,29 @@ mod tests {
         assert!(result.observed);
         assert!(result.eligible);
         assert_eq!(result.reason, "finish_reason_stop");
+    }
+
+    #[test]
+    fn chat_choice_index_preserves_last_matching_choice_position() {
+        let payload = json!({
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": { "role": "assistant", "content": "old" }
+                },
+                {
+                    "index": 1,
+                    "finish_reason": "length",
+                    "message": { "role": "assistant", "content": "latest" }
+                }
+            ]
+        });
+        let result = inspect(&payload);
+        assert!(result.observed);
+        assert!(!result.eligible);
+        assert_eq!(result.choice_index, Some(1));
+        assert_eq!(result.reason, "finish_reason_length");
     }
 
     #[test]
@@ -481,7 +584,7 @@ mod tests {
             "choices": [{
                 "index": 0,
                 "finish_reason": "stop",
-                "message": { "role": "assistant", "content": "<|tool_call_begin|>test" }
+                "message": { "role": "assistant", "content": "<|  TOOL_CALL_BEGIN  |>test" }
             }]
         });
         let result = inspect(&payload);
@@ -530,5 +633,33 @@ mod tests {
         let result = inspect(&payload);
         assert!(!result.observed);
         assert!(!result.eligible);
+    }
+
+    #[test]
+    fn normalizes_metadata_context_with_camel_case_fields() {
+        let context = normalize_stop_gateway_context(&json!({
+            "observed": true,
+            "eligible": false,
+            "source": " CHAT ",
+            "reason": " finish_reason_stop ",
+            "choiceIndex": 2.7,
+            "hasToolCalls": true
+        }))
+        .expect("context");
+        assert!(context.observed);
+        assert!(!context.eligible);
+        assert_eq!(context.source, "chat");
+        assert_eq!(context.reason, "finish_reason_stop");
+        assert_eq!(context.choice_index, Some(2));
+        assert_eq!(context.has_tool_calls, Some(true));
+    }
+
+    #[test]
+    fn rejects_invalid_metadata_context() {
+        assert!(normalize_stop_gateway_context(&json!({
+            "eligible": true,
+            "source": "chat"
+        }))
+        .is_none());
     }
 }

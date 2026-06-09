@@ -2,9 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
-import { isWindsurfRuntimeIdentity } from '../../../providers/core/contracts/windsurf-provider-contract.js';
 import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
-import { enforceWindsurfStartupProbeForHandle } from './windsurf-startup-probe.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
@@ -202,28 +200,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   })();
 
   const failedRuntimeKeys = new Set<string>();
-  const windsurfInspectLoggedRuntimeKeys = new Set<string>();
-  const windsurfRuntimeProviderCounts = new Map<string, number>();
-
-  for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
-    const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
-    if (!providerKey || !isInRoutingScope(providerKey) || !runtime) {
-      continue;
-    }
-    const runtimeProfile = runtime as ProviderRuntimeProfile;
-    const runtimeKey = runtimeProfile.runtimeKey || providerKey;
-    const isWindsurfIdentity = isWindsurfRuntimeIdentity({
-      providerFamily: runtimeProfile.providerFamily,
-      providerId: runtimeProfile.providerId,
-      providerKey,
-      compatibilityProfile: runtimeProfile.compatibilityProfile
-    });
-    if (!isWindsurfIdentity) {
-      continue;
-    }
-    windsurfRuntimeProviderCounts.set(runtimeKey, (windsurfRuntimeProviderCounts.get(runtimeKey) || 0) + 1);
-  }
-
   for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
     const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
     if (!providerKey) {
@@ -237,15 +213,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     }
     const runtimeProfile = runtime as ProviderRuntimeProfile;
     const runtimeKey = runtimeProfile.runtimeKey || providerKey;
-    const isWindsurfIdentity = isWindsurfRuntimeIdentity({
-      providerFamily: runtimeProfile.providerFamily,
-      providerId: runtimeProfile.providerId,
-      providerKey,
-      compatibilityProfile: runtimeProfile.compatibilityProfile
-    });
-    if (isWindsurfIdentity && !windsurfInspectLoggedRuntimeKeys.has(runtimeKey)) {
-      windsurfInspectLoggedRuntimeKeys.add(runtimeKey);
-    }
 
     const authTypeFromRuntime =
       runtimeProfile && (runtimeProfile as any).auth && typeof (runtimeProfile as any).auth.type === 'string'
@@ -313,19 +280,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
         const credentialMissing = isCredentialMissingInitError(error);
-        if (isWindsurfRuntimeIdentity({ providerKey, runtimeKey })) {
-          try {
-            console.warn('[windsurf.runtime.init.fail]', JSON.stringify({
-              providerKey,
-              runtimeKey,
-              credentialMissing: credentialMissing.missing,
-              reason: credentialMissing.reason,
-              error: error instanceof Error ? error.message : String(error),
-            }));
-          } catch {
-            // non-blocking debug
-          }
-        }
         failedRuntimeKeys.add(runtimeKey);
         if (error instanceof Error) {
           server.providerRuntimeInitErrors.set(runtimeKey, error);
@@ -440,25 +394,13 @@ export async function createProviderHandle(
   runtime: ProviderRuntimeProfile
 ): Promise<ProviderHandle> {
   const protocolType = normalizeProviderType(runtime.providerType);
-  const rawProviderFamily = runtime.providerFamily || protocolType;
-  const providerFamily = isWindsurfRuntimeIdentity({
-    providerFamily: runtime.providerFamily,
-    providerId: runtime.providerId,
-    providerKey: runtimeKey,
-  })
-    ? 'windsurf'
-    : rawProviderFamily;
+  const providerFamily = runtime.providerFamily || protocolType;
   const providerProtocol =
-    providerFamily === 'windsurf'
-      ? mapProviderProtocol(protocolType, providerFamily)
-      : ((typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
-        ? (runtime.outboundProfile.trim() as ProviderProtocol)
-        : undefined) ?? mapProviderProtocol(protocolType, providerFamily));
+    (typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
+      ? (runtime.outboundProfile.trim() as ProviderProtocol)
+      : undefined) ?? mapProviderProtocol(protocolType, providerFamily);
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
-  if (providerFamily !== 'windsurf') {
-    await enforceWindsurfStartupProbeForHandle({ providerFamily, runtimeKey, instance });
-  }
   const providerId = runtime.providerId || runtimeKey.split('.')[0];
   return {
     runtimeKey,
@@ -559,19 +501,6 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
         ...(tokenFile ? { tokenFile } : {})
       };
     }
-    if (rawType === 'windsurf-account' || rawType === 'windsurf-devin-token') {
-      return {
-        ...auth,
-        type: 'apikey',
-        rawType: auth.rawType ?? rawType,
-        value: typeof auth.value === 'string' ? auth.value : '',
-        mobile: pickString(authRecord.mobile, authRecord.account, authRecord.username),
-        password: pickString(authRecord.password),
-        accountFile: pickString(authRecord.accountFile, authRecord.account_file),
-        accountAlias: pickString(authRecord.accountAlias, authRecord.account_alias, runtimeAccountAlias),
-        tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
-      };
-    }
     const value = await server.resolveApiKeyValue(runtime, auth);
     return { ...auth, type: 'apikey', value };
   }
@@ -644,7 +573,7 @@ export async function resolveApiKeyValue(
       : typeof (auth as { type?: unknown })?.type === 'string'
         ? String((auth as { type?: string }).type).trim().toLowerCase()
         : '';
-  if (rawType === 'qwenchat-guest' || rawType === 'windsurf-account' || rawType === 'windsurf-devin-token') {
+  if (rawType === 'qwenchat-guest') {
     return '';
   }
 

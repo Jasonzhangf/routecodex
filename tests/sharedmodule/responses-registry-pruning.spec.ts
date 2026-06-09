@@ -1,24 +1,18 @@
 import {
-  consumeResponsesOutputTextMeta,
   consumeResponsesPayloadSnapshotByAliases,
   consumeResponsesPassthrough,
   consumeResponsesPassthroughByAliases,
   consumeResponsesPayloadSnapshot,
-  registerResponsesOutputTextMeta,
   registerResponsesPassthrough,
   registerResponsesPayloadSnapshot
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.js';
 
 describe('responses registry pruning', () => {
-  it('registers and consumes payload snapshots and output text metadata through native registry', () => {
+  it('registers and consumes payload snapshots through native registry', () => {
     registerResponsesPayloadSnapshot('resp-roundtrip', {
       id: 'resp-roundtrip',
       object: 'response',
       output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-    });
-    registerResponsesOutputTextMeta('resp-roundtrip-meta', {
-      hasField: true,
-      value: 'ok'
     });
 
     expect(consumeResponsesPayloadSnapshot('resp-roundtrip')).toMatchObject({
@@ -26,12 +20,6 @@ describe('responses registry pruning', () => {
       object: 'response'
     });
     expect(consumeResponsesPayloadSnapshot('resp-roundtrip')).toBeUndefined();
-    expect(consumeResponsesOutputTextMeta('resp-roundtrip-meta')).toEqual({
-      hasField: true,
-      value: 'ok',
-      raw: undefined
-    });
-    expect(consumeResponsesOutputTextMeta('resp-roundtrip-meta')).toBeUndefined();
   });
 
   it('consumes and clears all alias keys for retained payload snapshots and passthrough payloads', () => {

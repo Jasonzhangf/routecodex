@@ -33,10 +33,9 @@ src/sse/
 │   └── base-aggregator.ts           # 基础聚合器抽象类
 ├── shared/                          # 共享工具和组件
 │   ├── index.ts                     # 共享模块导出
-│   ├── serializers/                 # 事件序列化适配器
-│   │   ├── index.ts
-│   │   ├── base-serializer.ts
-│   │   ├── chat-event-serializer.ts
+│   ├── serializers/                 # StreamWriter 使用的协议事件序列化函数
+│   │   ├── anthropic-event-serializer.ts
+│   │   ├── gemini-event-serializer.ts
 │   │   └── responses-event-serializer.ts
 │   ├── utils/                       # 工具函数
 │   │   ├── index.ts
@@ -45,14 +44,7 @@ src/sse/
 │   │   └── error-utils.ts
 │   ├── chat-utils.ts               # Chat协议专用工具
 │   └── responses-utils.ts          # Responses协议专用工具
-└── test/                           # 测试文件
-    ├── index.ts
-    ├── chat-converter.test.ts
-    ├── responses-converter.test.ts
-    ├── serializers.test.ts
-    └── utils/
-        ├── test-helpers.ts
-        └── mock-data.ts
+└── test/                           # 已迁出：SSE 回归测试由仓库 tests/ 与架构 gate 承载
 ```
 
 ### 模块组织原则
@@ -91,7 +83,6 @@ utils.ts
 ✅ 正确示例:
 class ChatJsonToSseConverter
 class ResponsesSseToJsonConverter
-class BaseEventSerializer
 class ValidationUtils
 
 ❌ 错误示例:
@@ -738,7 +729,6 @@ class BatchProcessor {
 ### 1. 依赖注入
 ```typescript
 interface ConverterDependencies {
-  eventSerializer: EventSerializer<any>;
   validator: SchemaValidator;
   errorHandler: ErrorHandler;
   timeUtils: TimeUtils;

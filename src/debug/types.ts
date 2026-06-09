@@ -77,32 +77,6 @@ export interface ProviderHarnessResult {
   context?: Record<string, unknown>;
 }
 
-export interface WindsurfStaticRequestLens {
-  metadataKeys: string[];
-  metadataIdentity: Record<string, unknown>;
-  topLevelKeys: string[];
-  completionsRequestKeys: string[];
-  configuration: Record<string, unknown> | null;
-  systemPromptPresent: boolean;
-  systemPromptPreview: string | null;
-  promptRowKinds: string[];
-  promptRowKeyMatrix: string[][];
-}
-
-export interface WindsurfStaticRequestHarnessInput {
-  runtime: ProviderHarnessRuntime;
-  request: Record<string, unknown>;
-  metadata: ProviderHarnessMetadata;
-  dependencies?: ModuleDependencies;
-}
-
-export interface WindsurfStaticRequestHarnessResult {
-  preprocess: Record<string, unknown>;
-  semanticConversation: unknown[];
-  outboundRequest: Record<string, unknown>;
-  lens: WindsurfStaticRequestLens;
-}
-
 export interface ProviderDryRunOptions {
   runtime: ProviderHarnessRuntime;
   request: Record<string, unknown>;

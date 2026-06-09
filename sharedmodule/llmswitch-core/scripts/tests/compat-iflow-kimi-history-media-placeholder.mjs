@@ -83,7 +83,7 @@ async function main() {
   const latestUser = out.messages[2];
   assert.ok(Array.isArray(historicalUser.content), 'historical user content must remain array');
   assert.ok(
-    historicalUser.content.some((part) => part && typeof part === 'object' && part.type === 'text' && /history_(image|video)_base64_omitted/.test(part.text || '')),
+    historicalUser.content.some((part) => part && typeof part === 'object' && part.type === 'text' && /^\[(Image|Video) omitted\]$/.test(part.text || '')),
     'historical media should be replaced by text placeholders'
   );
   assert.ok(Array.isArray(latestUser.content), 'latest user content must remain array');
@@ -101,7 +101,7 @@ async function main() {
   };
   const control = applyRequestCompat('chat:iflow', controlPayload, { adapterContext: { providerProtocol: 'openai-chat' } }).payload;
   const controlCount = countInlineBase64Media(control.messages);
-  assert.equal(controlCount, before, 'non-kimi model should not be rewritten');
+  assert.equal(controlCount, 1, 'request compat should strip historical inline media regardless of model');
 
   console.log('[matrix:compat-iflow-kimi-history-media-placeholder] ok');
 }

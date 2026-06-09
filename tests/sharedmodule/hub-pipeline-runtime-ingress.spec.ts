@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const setHubPolicyRuntimePolicy = jest.fn();
-
 const engineInstances: Array<{
   initialize: jest.Mock;
   updateDeps: jest.Mock;
@@ -41,20 +39,11 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
   }
 }));
 
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.js', async () => {
-  return {
-    applyHubProviderOutboundPolicy: jest.fn((value: unknown) => value),
-    recordHubPolicyObservation: jest.fn(),
-    setHubPolicyRuntimePolicy
-  };
-});
-
 const { HubPipeline } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js');
 
 describe('HubPipeline runtime ingress wiring', () => {
   beforeEach(() => {
     engineInstances.length = 0;
-    setHubPolicyRuntimePolicy.mockClear();
   });
 
   it('registers native router runtime ingress and unregisters on dispose', () => {
@@ -62,12 +51,22 @@ describe('HubPipeline runtime ingress wiring', () => {
       virtualRouter: {} as any
     });
 
-    expect(setHubPolicyRuntimePolicy).toHaveBeenCalledTimes(1);
     expect(engineInstances).toHaveLength(1);
     expect(engineInstances[0]!.registerProviderRuntimeIngress).toHaveBeenCalledTimes(1);
 
     pipeline.dispose();
 
     expect(engineInstances[0]!.unregisterProviderRuntimeIngress).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast when native router runtime deps update fails', () => {
+    const pipeline = new HubPipeline({
+      virtualRouter: {} as any
+    });
+    engineInstances[0]!.updateDeps.mockImplementationOnce(() => {
+      throw new Error('native deps rejected');
+    });
+
+    expect(() => pipeline.updateRuntimeDeps({ healthStore: null })).toThrow('native deps rejected');
   });
 });

@@ -8,50 +8,6 @@ import {
   safeStringify
 } from './native-shared-conversion-semantics-core.js';
 
-export function normalizeContentPartWithNative(
-  part: unknown,
-  reasoningCollector: string[]
-): { normalized: Record<string, unknown> | null; reasoningCollector: string[] } {
-  const capability = 'normalizeOutputContentPartJson';
-  const fail = (reason?: string) =>
-    failNativeRequired<{ normalized: Record<string, unknown> | null; reasoningCollector: string[] }>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const partJson = safeStringify(part ?? null);
-  const collectorJson = safeStringify(Array.isArray(reasoningCollector) ? reasoningCollector : []);
-  if (!partJson || !collectorJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(partJson, collectorJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    if (!parsed) {
-      return fail('invalid payload');
-    }
-    const normalized =
-      parsed.normalized === null
-        ? null
-        : parsed.normalized && typeof parsed.normalized === 'object' && !Array.isArray(parsed.normalized)
-          ? (parsed.normalized as Record<string, unknown>)
-          : fail('invalid payload');
-    const nextCollector = Array.isArray(parsed.reasoningCollector)
-      ? parsed.reasoningCollector.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-    return { normalized, reasoningCollector: nextCollector };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function normalizeMessageContentPartsWithNative(
   parts: unknown,
   reasoningCollector: string[]

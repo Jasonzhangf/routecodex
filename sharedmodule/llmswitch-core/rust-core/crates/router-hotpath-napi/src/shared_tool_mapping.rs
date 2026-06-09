@@ -18,13 +18,6 @@ struct ToolMappingOptions {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ToolMappingSingleInput {
-    tool: Value,
-    options: Option<ToolMappingOptions>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ToolMappingListInput {
     tools: Value,
     options: Option<ToolMappingOptions>,
@@ -803,24 +796,6 @@ fn resolve_sanitize_mode(options: Option<&ToolMappingOptions>) -> String {
 }
 
 #[napi]
-pub fn bridge_tool_to_chat_definition_json(input_json: String) -> NapiResult<String> {
-    let input: ToolMappingSingleInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let sanitize_mode = resolve_sanitize_mode(input.options.as_ref());
-    let output = bridge_tool_to_chat_definition_impl(&input.tool, sanitize_mode.as_str());
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn chat_tool_to_bridge_definition_json(input_json: String) -> NapiResult<String> {
-    let input: ToolMappingSingleInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let sanitize_mode = resolve_sanitize_mode(input.options.as_ref());
-    let output = chat_tool_to_bridge_definition_impl(&input.tool, sanitize_mode.as_str());
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn map_bridge_tools_to_chat_with_options_json(input_json: String) -> NapiResult<String> {
     let input: ToolMappingListInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -1090,11 +1065,12 @@ mod tests {
     #[test]
     fn bridge_tool_to_chat_definition_web_search() {
         let input = serde_json::json!({
-          "tool": { "type": "web_search" },
+          "tools": [{ "type": "web_search" }],
           "options": { "sanitizeMode": "responses" }
         });
-        let raw = bridge_tool_to_chat_definition_json(input.to_string()).unwrap();
+        let raw = map_bridge_tools_to_chat_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["type"], "web_search");
         assert_eq!(parsed["function"]["name"], "web_search");
     }
@@ -1102,11 +1078,12 @@ mod tests {
     #[test]
     fn chat_tool_to_bridge_definition_anthropic_denormalize() {
         let input = serde_json::json!({
-          "tool": { "type": "function", "function": { "name": "shell_command", "parameters": {} } },
+          "tools": [{ "type": "function", "function": { "name": "shell_command", "parameters": {} } }],
           "options": { "sanitizeMode": "anthropic_denormalize" }
         });
-        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let raw = map_chat_tools_to_bridge_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["name"], "Bash");
         assert_eq!(parsed["function"]["name"], "Bash");
     }
@@ -1114,7 +1091,7 @@ mod tests {
     #[test]
     fn chat_tool_to_bridge_definition_fills_missing_object_properties() {
         let input = serde_json::json!({
-          "tool": {
+          "tools": [{
             "type": "function",
             "function": {
               "name": "user_ask",
@@ -1123,11 +1100,12 @@ mod tests {
                 "additionalProperties": true
               }
             }
-          },
+          }],
           "options": { "sanitizeMode": "responses" }
         });
-        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let raw = map_chat_tools_to_bridge_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["name"], "user_ask");
         assert_eq!(parsed["parameters"]["type"], "object");
         assert_eq!(parsed["parameters"]["additionalProperties"], true);
@@ -1137,7 +1115,7 @@ mod tests {
     #[test]
     fn chat_tool_to_bridge_definition_sanitizes_required_shape() {
         let input = serde_json::json!({
-          "tool": {
+          "tools": [{
             "type": "function",
             "function": {
               "name": "user_ask",
@@ -1147,11 +1125,12 @@ mod tests {
                 "required": ["ok", 1, null]
               }
             }
-          },
+          }],
           "options": { "sanitizeMode": "responses" }
         });
-        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let raw = map_chat_tools_to_bridge_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["parameters"]["required"], serde_json::json!(["ok"]));
     }
 
@@ -1200,7 +1179,7 @@ mod tests {
     #[test]
     fn bridge_tool_to_chat_definition_preserves_namespace_child_tools() {
         let input = serde_json::json!({
-          "tool": {
+          "tools": [{
             "type": "namespace",
             "name": "mcp__computer_use",
             "description": "Computer Use",
@@ -1213,11 +1192,12 @@ mod tests {
                 "defer_loading": true
               }
             ]
-          },
+          }],
           "options": { "sanitizeMode": "responses" }
         });
-        let raw = bridge_tool_to_chat_definition_json(input.to_string()).unwrap();
+        let raw = map_bridge_tools_to_chat_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["type"], "namespace");
         assert_eq!(parsed["name"], "mcp__computer_use");
         assert_eq!(parsed["tools"][0]["name"], "get_app_state");
@@ -1227,7 +1207,7 @@ mod tests {
     #[test]
     fn chat_tool_to_bridge_definition_preserves_namespace_child_tools() {
         let input = serde_json::json!({
-          "tool": {
+          "tools": [{
             "type": "namespace",
             "name": "mcp__computer_use",
             "description": "Computer Use",
@@ -1240,11 +1220,12 @@ mod tests {
                 "defer_loading": true
               }
             ]
-          },
+          }],
           "options": { "sanitizeMode": "responses" }
         });
-        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let raw = map_chat_tools_to_bridge_with_options_json(input.to_string()).unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let parsed = &parsed.as_array().unwrap()[0];
         assert_eq!(parsed["type"], "namespace");
         assert_eq!(parsed["name"], "mcp__computer_use");
         assert_eq!(parsed["tools"][0]["name"], "press_key");
@@ -1547,19 +1528,21 @@ mod tests {
     #[test]
     fn flattened_tool_mapping_trims_description_via_shared_helper() {
         let input = serde_json::json!({
-            "tool": {
+            "tools": [{
                 "type": "function",
                 "function": {
                     "name": "demo_tool",
                     "description": "  demo desc  "
                 }
-            },
+            }],
             "options": {
                 "sanitizeMode": "responses"
             }
         });
-        let raw = bridge_tool_to_chat_definition_json(input.to_string()).expect("mapped tool");
+        let raw =
+            map_bridge_tools_to_chat_with_options_json(input.to_string()).expect("mapped tool");
         let parsed: Value = serde_json::from_str(&raw).expect("json");
+        let parsed = &parsed.as_array().expect("mapped array")[0];
         assert_eq!(parsed["function"]["description"], "demo desc");
     }
 

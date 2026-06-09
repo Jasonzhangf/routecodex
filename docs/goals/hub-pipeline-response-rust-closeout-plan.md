@@ -349,3 +349,23 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
   - It throws `ProviderProtocolError` only from Rust-provided error descriptors.
 - Added residue gate coverage blocking TS action branching, TS missing-executor descriptors, unsupported-action ownership, and TS chat payload reader revival.
 - Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` under `hub.response_post_servertool_client_projection`.
+
+## 2026-06-09 Slice: Shared Response Zero-Consumer Wrapper Deletion
+
+### Audit Result
+
+- The live response path still exposed several zero-consumer TS/native wrapper entrypoints in shared conversion files:
+  - `extractOutputSegments` and `normalizeContentPart` in `output-content-normalizer.ts`.
+  - `normalizeChatResponseReasoningTools` in `reasoning-tool-normalizer.ts`.
+  - `bridgeToolToChatDefinition`, `chatToolToBridgeDefinition`, `stringifyArgs`, `ToolCallFunction`, and `ToolCallItem` in `tool-mapping.ts`.
+  - `normalizeResponsesToolCallIds` and `resolveToolCallIdStyle` in `responses-tool-utils.ts`.
+- `rg` found no live source consumer for these wrapper exports. Remaining live callers either use the full Rust-owned response projection or call the list/native owner directly.
+- Keeping these wrappers left duplicate response-side tool/reasoning/output mapping surfaces beside the Rust owners.
+
+### Implementation Result
+
+- Physically deleted the zero-consumer TS wrapper exports from the shared conversion files above.
+- Removed the unused single-tool native bridge wrappers and Rust NAPI exports for `bridgeToolToChatDefinitionJson`, `chatToolToBridgeDefinitionJson`, `extractOutputSegmentsJson`, and `normalizeOutputContentPartJson`.
+- Kept live wrappers that still act as thin native invocation glue, such as `normalizeMessageContentParts`, `normalizeMessageReasoningTools`, `mapBridgeToolsToChat`, `mapChatToolsToBridge`, and `createToolCallIdTransformer`.
+- Updated coverage scripts so they exercise only live exports.
+- Added `tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts` to lock TS wrapper deletion, native bridge deletion, required-export deletion, and Rust NAPI export deletion.

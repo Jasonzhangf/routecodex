@@ -71,7 +71,7 @@
 - 必查：
   - `shared_responses_conversation_utils.rs`
   - `responses-conversation-store-native.ts`
-  - `route-aware-responses-continuation.ts`
+  - `hub_pipeline_blocks/responses_resume.rs`
   - toolContinuation 在 request / response / store 三处不漂移
 
 ### P1：field transparency / protocol mapping audit 完整性
@@ -80,7 +80,7 @@
   - `responses-field-transparency.spec.ts`
   - `responses-cross-protocol-audit-matrix.spec.ts`
   - `responses-cross-protocol-reasoning-mapping.spec.ts`
-  - `real-sample-hub-io-compare.spec.ts`
+  - 旧 `real-sample-hub-io-compare.spec.ts` 已删除；真实样本覆盖必须迁入现存 matrix/fixture gate 后再启用。
 
 ### P2：finish_reason / tool_calls / sanitize 一致性
 - 目标：只要最终 payload 有非空 tool_calls，finish_reason 必须是 tool_calls；无合法 tool_calls 时不得把 sanitize 变空误报成功
@@ -98,11 +98,9 @@
 - `.../hub_bridge_actions/bridge_input.rs`
 
 ### TS orchestration / store / remap
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-working-request-blocks.ts`
 - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts`
 - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
-- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.ts`
+- 已删除旧 TS owner：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
 
 ### SSE / response builders
 - `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
@@ -116,7 +114,7 @@
 - `tests/sharedmodule/responses-cross-protocol-reasoning-mapping.spec.ts`
 - `tests/sharedmodule/responses-cross-protocol-audit-matrix.spec.ts`
 - `tests/sharedmodule/chat-process-roundtrip-integration.spec.ts`
-- `tests/sharedmodule/real-sample-hub-io-compare.spec.ts`
+- 旧 `tests/sharedmodule/real-sample-hub-io-compare.spec.ts` 已删除；不得作为当前必跑测试引用。
 - `sharedmodule/llmswitch-core/tests/responses/responses-openai-bridge.spec.ts`
 
 ## 执行顺序

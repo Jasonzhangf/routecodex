@@ -4,7 +4,7 @@
  *
  * 目标：
  * - 构造一条带 exec_command JSON arguments 的 chat 响应；
- * - 通过 llmswitch-core 的 response 工具过滤管线做统一治理；
+ * - 通过 llmswitch-core 当前 Responses bridge / native projection 做统一投影；
  * - 校验最终 JSON 形状（必须包含 cmd，且不暴露 toon）；
  * - 再通过 Responses 映射验证 /v1/responses 视图同样保持 JSON 语义。
  */
@@ -20,7 +20,6 @@ const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 const { importCoreModule } = await import(coreLoaderUrl);
 
 async function main() {
-  const { runChatResponseToolFilters } = await importCoreModule('conversion/shared/tool-filter-pipeline');
   const { buildResponsesPayloadFromChat } = await importCoreModule(
     'conversion/responses/responses-openai-bridge'
   );
@@ -58,14 +57,7 @@ async function main() {
     ]
   };
 
-  // 通过 response 工具管线运行，触发统一的工具参数治理/归一化。
-  const filtered = await runChatResponseToolFilters(chatPayload, {
-    entryEndpoint: '/v1/chat/completions',
-    requestId: 'req_exec_args',
-    profile: 'openai-chat'
-  });
-
-  const choice = filtered?.choices?.[0];
+  const choice = chatPayload?.choices?.[0];
   const msg = choice?.message;
   const toolCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
   if (!toolCalls.length) {
@@ -112,7 +104,7 @@ async function main() {
 
   // 延伸验证：基于 chat 结果构建 Responses payload，确保 /v1/responses 视图中的
   // function_call.arguments 同样保持 exec_command JSON 语义，而不会重新出现 toon。
-  const responsesPayload = buildResponsesPayloadFromChat(filtered, {
+  const responsesPayload = buildResponsesPayloadFromChat(chatPayload, {
     requestId: 'verify_exec_command_args'
   });
   const outputItems = Array.isArray(responsesPayload?.output) ? responsesPayload.output : [];

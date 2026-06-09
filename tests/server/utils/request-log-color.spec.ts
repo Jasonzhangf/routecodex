@@ -105,6 +105,49 @@ describe('request log color registry', () => {
     expect(line).toContain(`req=${requestId} ${expectedColor}tools/pool -> provider.model`);
   });
 
+  it('colors virtual-router-hit lines from sid without request context', () => {
+    const sessionId = 'session-vr-hit-direct-sid';
+    const expectedColor = resolveSessionAnsiColor(sessionId);
+    const line = colorizeVirtualRouterHitLogLine(
+      `[virtual-router-hit] 19:42:25 req=req-vr-hit-direct sid=${sessionId} search/pool -> provider.model reason=search`
+    );
+
+    expect(expectedColor).toBeDefined();
+    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
+    expect(line).toContain(`sid=${sessionId} ${expectedColor}search/pool -> provider.model`);
+  });
+
+  it('colors virtual-router-hit lines from bracket session without request context', () => {
+    const sessionId = 'session-vr-hit-bracket';
+    const expectedColor = resolveSessionAnsiColor(sessionId);
+    const line = colorizeVirtualRouterHitLogLine(
+      `[virtual-router-hit] [${sessionId}] tools/pool -> provider.model`
+    );
+
+    expect(expectedColor).toBeDefined();
+    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
+    expect(line).toContain(`[${sessionId}] ${expectedColor}tools/pool -> provider.model`);
+  });
+
+  it('uses different virtual-router-hit colors for different session ids', () => {
+    const firstSessionId = 'session-vr-hit-color-a';
+    const secondSessionId = 'session-vr-hit-color-b';
+    const firstColor = resolveSessionAnsiColor(firstSessionId);
+    const secondColor = resolveSessionAnsiColor(secondSessionId);
+    const firstLine = colorizeVirtualRouterHitLogLine(
+      `[virtual-router-hit] 19:42:25 req=req-vr-hit-a sid=${firstSessionId} tools/pool -> provider.model`
+    );
+    const secondLine = colorizeVirtualRouterHitLogLine(
+      `[virtual-router-hit] 19:42:25 req=req-vr-hit-b sid=${secondSessionId} tools/pool -> provider.model`
+    );
+
+    expect(firstColor).toBeDefined();
+    expect(secondColor).toBeDefined();
+    expect(firstColor).not.toBe(secondColor);
+    expect(firstLine).toContain(`${firstColor}[virtual-router-hit]\x1b[0m`);
+    expect(secondLine).toContain(`${secondColor}[virtual-router-hit]\x1b[0m`);
+  });
+
   it('separates current uuid-like session ids into different colors more reliably', () => {
     const colorA = resolveSessionAnsiColor('019cdb2b-c9f2-7d51-aa85-a62fd2a8fed0');
     const colorB = resolveSessionAnsiColor('019cae75-2560-78b3-bfe0-c39c4fa77a0e');

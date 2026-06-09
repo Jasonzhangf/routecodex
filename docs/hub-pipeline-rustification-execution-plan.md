@@ -30,12 +30,16 @@ The work is complete only when all of the following are true:
 ### In Scope
 
 - `sharedmodule/llmswitch-core/src/conversion/hub/**`
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/stages/req_process/**`
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/stages/resp_process/**`
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/**`
 - `sharedmodule/llmswitch-core/src/conversion/tool-governance/**`
 - `sharedmodule/llmswitch-core/src/conversion/tool-surface/**`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/**`
 - Associated tests, goldens, and residue-audit scripts that prove Rust-only authority
+
+### Deleted Legacy Scope
+
+- `sharedmodule/llmswitch-core/src/conversion/pipeline/**` has been physically deleted and is no longer an in-scope migration target.
+- The deleted V2 pipeline codecs and helpers must not be revived as compatibility shims; equivalent request/response semantics belong in Rust owning nodes.
 
 ### Explicitly Out of Scope
 
@@ -77,7 +81,7 @@ High-priority review targets must include at least:
 - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper-from-chat.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper-from-chat.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
-- `sharedmodule/llmswitch-core/src/conversion/pipeline/stages/resp_process/**`
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/**`
 - `sharedmodule/llmswitch-core/src/conversion/tool-surface/**`
 
 ### Exit Criteria

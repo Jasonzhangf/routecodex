@@ -25,9 +25,9 @@ const { HubRequestExecutor, __requestExecutorTestables } = await import(
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
-    providerType: 'windsurf',
-    providerFamily: 'windsurf',
-    providerId: 'windsurf',
+    providerType: 'openai',
+    providerFamily: 'openai',
+    providerId: 'openai',
     instance: {
       processIncoming: jest.fn().mockImplementation(processImpl),
       cleanup: jest.fn()
@@ -39,8 +39,8 @@ function createExecutor(handle: ProviderHandle) {
   const pipelineResult: PipelineExecutionResult = {
     providerPayload: { data: { messages: [{ role: 'user', content: 'ping' }] } },
     target: {
-      providerKey: 'windsurf.ws-pro-2.gpt-5.4-medium',
-      providerType: 'windsurf',
+      providerKey: 'openai.key2.gpt-5.4-medium',
+      providerType: 'openai',
       outboundProfile: 'openai-responses',
       runtimeKey: 'runtime:key',
       processMode: 'standard'
@@ -113,9 +113,9 @@ describe('HubRequestExecutor no-response regression guard', () => {
   });
 
   it('should preserve concrete provider error instead of generic no-response fallback when failure helper drops lastError', async () => {
-    const providerError = Object.assign(new Error('windsurf raw stream ended with no content'), {
-      code: 'WINDSURF_SERVICE_UNREACHABLE',
-      upstreamCode: 'WINDSURF_SERVICE_UNREACHABLE',
+    const providerError = Object.assign(new Error('provider raw stream ended with no content'), {
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
       status: 502,
       statusCode: 502,
       retryable: true,
@@ -135,14 +135,14 @@ describe('HubRequestExecutor no-response regression guard', () => {
     const { executor, request } = createExecutor(handle);
 
     await expect(executor.execute(request)).rejects.toMatchObject({
-      message: 'windsurf raw stream ended with no content'
+      message: 'provider raw stream ended with no content'
     });
   });
 
   it('should preserve provider code and status on final thrown error instead of throwing bare Provider execution failed without response', async () => {
-    const providerError = Object.assign(new Error('windsurf raw stream ended with no content'), {
-      code: 'WINDSURF_SERVICE_UNREACHABLE',
-      upstreamCode: 'WINDSURF_SERVICE_UNREACHABLE',
+    const providerError = Object.assign(new Error('provider raw stream ended with no content'), {
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
       status: 502,
       statusCode: 502,
       retryable: true,
@@ -162,8 +162,8 @@ describe('HubRequestExecutor no-response regression guard', () => {
     const { executor, request } = createExecutor(handle);
 
     await expect(executor.execute(request)).rejects.toMatchObject({
-      code: 'WINDSURF_SERVICE_UNREACHABLE',
-      upstreamCode: 'WINDSURF_SERVICE_UNREACHABLE',
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
       statusCode: 502
     });
   });

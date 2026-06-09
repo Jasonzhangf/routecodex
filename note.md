@@ -1,5 +1,334 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-09 servertool loop warning TS duplicate cleanup
+
+- 发现 `sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts` 中 `appendStopMessageLoopWarning` 是旧 TS 语义残留：本地拼 warning 文本、`Number.isFinite` / `Math.floor` / `Math.max` clamp repeat count，但 live mainline 已通过 `backend-route-mainline-block.ts::appendLoopWarning` 调 `injectLoopWarningWithNative`。
+- Rust/native 真源已存在：`sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs::inject_loop_warning`，NAPI wrapper 为 `injectLoopWarningWithNative`。
+- 本 slice 物理删除旧 TS export，只保留 `buildStopMessageLoopPayload` 作为 native payload builder shell；`appendStopMessageLoopWarning` 作为 backend-route client-inject/reenter 参数名暂保留，因为它是 callback slot，不是 TS warning owner。
+
+## 2026-06-09 5555 forwarder route_failed closeout
+
+- User invariant restated: priority pools are ordered, `default` is a configured pool, and if `default` has providers it must not become an empty provider pool. Pool-internal transient/provider errors must not remove the final provider and turn selection into `PROVIDER_NOT_AVAILABLE`.
+- Root cause confirmed in Rust VR selection: `routerDirectInboundProtocol` same-protocol logic was acting as a hard availability filter. For router-direct and forwarder real targets, cross-protocol candidates could be dropped before direct boundary handling, so a non-empty configured pool could appear empty.
+- Fix applied in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs`: same-protocol is now a preference. If no same-protocol candidate exists, selection keeps the original candidates; forwarder real-target resolution uses the same rule.
+- Forwarder error-path decision: config parse/materialization errors fail fast; health/quota/transient target unavailability is recorded and ordered selection continues; router-direct protocol mismatch is not provider availability and belongs to direct boundary handling; explicit incompatible `provider.model` direct media still fails fast at its existing boundary.
+- Live evidence after `build:min`, `install:global`, and `routecodex restart --port 5555`: `routecodex --version` is `0.90.3023`; `http://127.0.0.1:5555/health` returned `ready:true,pipelineReady:true`; live request marker `RCC5555_FORWARDER_LAYER_20260609T083545` returned HTTP 200/SSE with `pong`.
+- Exact live log evidence is in `~/.rcc/logs/server-5520.log` because the active multi-port process writes shared logs there: `[port:5555 group:gateway_priority_5555]` request `openai-responses-router-gpt-5.5-20260609T083545816-325158-7041` hit `default/gateway-priority-5555-priority-default -> 1token.key1.gpt-5.5`, completed status 200, usage `router-direct:default -> 1token.key1.gpt-5.5`.
+
+## 2026-06-09 global package native required-export manifest drift
+
+- 启动故障现象：
+  - `routecodex` 全局包启动时报错 `native bootstrapVirtualRouterConfigJson is required but unavailable`
+  - stack 指向 `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-virtual-router-bootstrap-config.js`
+- 已证实不是 `.node` 缺导出：
+  - `/opt/homebrew/.../router_hotpath_napi.node` 与 repo `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node` sha256 相同
+  - 直接 `require()` 全局 `.node` 可见 `bootstrapVirtualRouterConfigJson`
+- 真根因：
+  - `loadNativeRouterHotpathBinding()` 会先用 `hasCompleteNativeBinding(binding, REQUIRED_NATIVE_EXPORTS)` 校验全量导出
+  - 全局包里的 `native-router-hotpath-required-exports.js` 比 repo dist 旧，额外要求了 12 个当前 native 已无的导出：
+    - `extractOutputSegmentsJson`
+    - `chunkStringJson`
+    - `flattenByCommaJson`
+    - `packShellArgsJson`
+    - `splitCommandStringJson`
+    - `bridgeToolToChatDefinitionJson`
+    - `chatToolToBridgeDefinitionJson`
+    - `normalizeOutputContentPartJson`
+    - `registerResponsesReasoningJson`
+    - `consumeResponsesReasoningJson`
+    - `registerResponsesOutputTextMetaJson`
+    - `consumeResponsesOutputTextMetaJson`
+  - 结果：loader 把实际完整可用的 native 绑定当成“不完整绑定”丢弃，后续 bootstrap 再报 `bootstrapVirtualRouterConfigJson unavailable`
+- 结论：
+  - 这是全局包 JS required-export manifest 与 native `.node` 版本错配
+  - 修复点不是 VR bootstrap，不是 provider/router 配置；是同步全局包 `native-router-hotpath-required-exports.js`
+
+## 2026-06-09 session storm backoff cap correction
+
+- 用户纠正：错误本身必须原样暴露；错误风暴只需要挡住重复触发，不应指数增长到长时间惩罚。
+- 当前策略：所有 surfaced error 都可进入 session storm backoff；等待上限硬锁 3000ms，环境变量只能调低不能调高。
+- 修正边界：`ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS` / `RCC_SESSION_STORM_BACKOFF_BASE_MS` 也必须受 3000ms 上限约束，否则首次等待或 hard block 会越过上限。
+
+## 2026-06-09 Hub response servertoolRuntimeAction planner closeout
+
+- 审计点：`provider-response.ts` 仍在 TS 判断 Rust `servertoolRuntimeAction` 的 `requireReenterPipeline` / `requireRuntimeExecutor`，并拥有缺 executor 错误 descriptor。
+- 本 slice 方向：Rust `hub_pipeline_lib/effect_plan.rs` 新增 `plan_provider_response_servertool_runtime_actions`，TS 只执行 Rust plan 的 IO callback 与 Rust-described error throw。
+
+## 2026-06-09 router-direct protocol mismatch 与错误风暴拆分
+
+- 用户纠正：`protocol mismatch` 本身和连续失败风暴必须拆开处理。
+- 当前修复边界：router-direct same-protocol 判断发现 `inbound=openai-responses` 但 provider 是 `anthropic-messages/openai-chat` 时，不再构造 `router-direct failed without relay` 错误，不记录 session storm；它只是 direct skip，进入 Hub relay。
+- session storm backoff 只治理 relay/VR/provider 后真正抛出的 provider unavailable / upstream / malformed / deterministic client tool args 等错误，不能吞掉或改写原始错误。
+
+## 2026-06-09 stopless live matrix resumed after relay install sync
+
+## 2026-06-09 5555 stopless live blocker further narrowed to router-direct skip-without-relay
+
+- 新收敛事实：
+  - `scripts/tests/stopless-5555-live-probe.mjs` 在 `http://127.0.0.1:5555` 上的三次 `gpt-5.5 + x-route-hint=search` 尝试返回：
+    - `request_id=openai-responses-provider-20260609T044801520-323262-5145`
+    - `request_id=openai-responses-provider-20260609T044801658-323263-5146`
+    - `request_id=openai-responses-provider-20260609T044802733-323264-5147`
+  - 三次都不是 stopless 语义错误，而是 `router-direct` 直接失败：
+    - server log: `No available providers after applying routing instructions (code=PROVIDER_NOT_AVAILABLE)`
+- 根因进一步收敛：
+  - 5555 的 `search` 路由池是跨协议 provider（MiniMax / mimo family）。
+  - router port 默认 `sameProtocolBehavior=direct`，入口是 `openai-responses` 时，`executeRouterDirectPipelineForPort(...)` 会按同协议筛选 direct candidate。
+  - 当 direct candidate 不可用时，`executePortAwarePipeline(...)` 原逻辑不是回 Hub relay，而是：
+    - 记录 `router-direct.failed_no_relay`
+    - 直接抛错结束
+  - 这和用户要求“inbound/outbound 不一样就直接 relay”一致冲突。
+- 本轮唯一代码修改点：
+  - `src/server/runtime/http-server/index.ts`
+  - 将 router port direct skip 语义从：
+    - `used=false -> failed_no_relay -> throw`
+    - 改为
+    - `used=false -> router-direct.relay -> executePipeline(nextInput)`
+- 定向回归：
+  - `tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts`
+  - `tests/server/runtime/http-server/error-pipeline-contract.spec.ts`
+  - 结果：14/14 PASS
+- 当前待验证：
+  - 安装新运行体并 `routecodex restart --port 5555`
+  - 重新执行 `node scripts/tests/stopless-5555-live-probe.mjs`
+  - 观察 5555 live 是否从 `PROVIDER_NOT_AVAILABLE` 恢复为 managed relay stopless 入口（首轮 continue / resumed continue / allow-stop / needs_user_input）
+
+- 新增关键 live 事实：repo 源码里的 cross-protocol relay 修复此前并没有进入 5555 真实运行体；`/opt/homebrew/lib/node_modules/routecodex/dist/server/runtime/http-server/index.js` 一度缺少两个关键分支：
+  - top-level `if (directResult.requiresHubRelay) { ... executePipeline(...) }`
+  - inner `if (!directOutcome.used) return { ..., ...(directOutcome.requiresHubRelay ? { requiresHubRelay: true } : {}) }`
+- 先用定向 Jest 重新锁定源码真相：
+  - `tests/server/runtime/http-server/router-direct-pipeline.spec.ts`
+  - `tests/server/runtime/http-server/router-direct-cross-protocol-relay.spec.ts`
+  - 22/22 PASS
+- 然后执行：
+  - `ROUTECODEX_INSTALL_INPLACE_BUILD=1 npm run install:global`
+  - `routecodex restart --port 5555`
+  - `curl http://127.0.0.1:5555/health`
+- 安装后再次检查全局 dist，两个 `requiresHubRelay` 分支都已存在；说明 5555 后续 live 请求终于跑的是新包，不再是旧的 `failed_no_relay` 运行体。
+
+- 5555 当前 stopless continue/live 证据：
+  - 手动 managed search 请求：`request_id=openai-responses-mini27.key1-MiniMax-M2.7-20260609T034255349-322818-4701`
+  - 命中日志：`search/gateway-priority-5555-weighted-search -> mini27.key1.MiniMax-M2.7.MiniMax-M2.7`
+  - 返回：`status=completed` 且 `finish_reason=tool_calls`，客户端得到 `requires_action + exec_command`
+  - 这证明 stopless 首轮继续在当前 5555 live 运行体上成立。
+
+- 5555 当前 submit_tool_outputs 第二轮 continue/live 证据：
+  - 第二轮 request：`openai-responses-mini27.key1-MiniMax-M2.7-20260609T034327792-322823-4706`
+  - 日志中 `stop_message_auto stage=summary` 显示：
+    - `result=trigger_stop_schema_continue_next_step`
+    - `used=1`
+    - `left=2`
+  - 客户端再次得到 `requires_action + exec_command`
+  - 这证明当前 5555 live 已经不是“一轮就停”；第二轮恢复仍会继续 stopless。
+
+- 5555 当前 submit_tool_outputs 历史完整性证据：
+  - 第三轮 provider request 样本：
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/mini27.key1.MiniMax-M2.7/req_1780947848348_138f2e11/provider-request.json`
+  - 样本中的 `messages[]` 明确包含：
+    1. 首轮 user message
+    2. 第一轮 assistant `exec_command`
+    3. 第一轮 tool output
+    4. 第二轮 assistant `exec_command`
+    5. 第二轮 tool output
+  - 这证明 `/submit_tool_outputs` 恢复链没有退化回“第一轮 user-only payload”，历史已完整带回上游 provider request。
+
+- 当前未闭环点也已用 live 证据定位清楚：
+  - 第三轮 submit 请求 `openai-responses-mini27.key1-MiniMax-M2.7-20260609T034408348-322829-4712` 没有完成 allow-stop；
+  - 失败原因不是 stopless owner，而是上游 provider 业务错误：
+    - `provider_status_2056` 后重试
+    - 最终 `provider_status_2049`
+    - server log: `MALFORMED_RESPONSE ... invalid api key`
+  - 结论：当前这条链路已经证明 stopless 可跨两轮恢复，第三轮失败归因于 provider 可用性/鉴权，不是 stopless 历史恢复回退。
+
+- 5555 当前 allow-stop markdown/live 证据：
+  - 手动 managed search allow-stop 请求：`request_id=openai-responses-mimo.key2-mimo-v2.5-20260609T034510462-322836-4719`
+  - 返回 `status=completed`
+  - `output_text` 为：
+    - `## 完成内容`
+    - `- 结论: 已完成 allow-stop live 验证`
+    - `- 已完成: allow-stop response`
+    - `- 证据: 5555 live probe`
+  - 响应中未出现 `stopreason`、`has_evidence`、`needs_user_input`、schema JSON 原文。
+  - 这证明当前运行体上的 allow-stop 用户可见投影已经是 markdown summary，而不是 schema 直出。
+
+- 当前 stopless live 结论（截至本轮）：
+  1. relay 修复已真正进入 5555 live 运行体；
+  2. stopless 首轮 continue 成立；
+  3. stopless 第二轮 `/submit_tool_outputs` continue 成立；
+  4. provider request 历史完整性已在线证明；
+  5. allow-stop markdown summary 已在线证明；
+  6. 仍缺“同一路径第三轮 allow-stop 成功闭环”或“budget exhausted live 闭环”，当前被 provider `mini27` 的上游业务错误阻断。
+
+## 2026-06-09 stopless live matrix continued: needs_user_input / stream ok, budget exhausted still blocked
+
+- 新增 `needs_user_input=true` 的 5555 live 证据：
+  - `request_id=openai-responses-minimonth.key1-MiniMax-M2.7-20260609T034903270-322859-4742`
+  - 返回：
+    - `status=completed`
+    - `output_text="## 需要确认\n请确认：你希望今天 23:00 部署，还是明天 10:00 部署？"`
+  - 响应中未出现 `needs_user_input`、`stopreason`、schema JSON 原文。
+  - 结论：当前 5555 live 上 `needs_user_input` 用户可见契约成立。
+
+- 新增 `stream=true` allow-stop 的 5555 live 证据：
+  - SSE 文件：`/tmp/stopless-stream-allow-response.sse`
+  - terminal 事件：`response.completed`
+  - `responseId=06764fd4a00f93ee87dcb2642ca127c9`
+  - 用户可见文本：
+    - `## 完成内容`
+    - `- 结论: 已完成 stream allow-stop live 验证`
+    - `- 已完成: stream allow-stop response`
+  - 结论：`stream=true` 当前也会输出 markdown summary，不泄漏 schema。
+
+- 更新后的 probe 脚本已固化有效 managed live 路径：
+  - 文件：`scripts/tests/stopless-5555-live-probe.mjs`
+  - 默认行为改为：`STOPLESS_ROUTE_HINT=search`
+  - 当前在线回归结果：`/tmp/stopless-5555-live-probe.json`
+    - `chosenModel=gpt-5.5`
+    - 实际命中 provider：`minimonth.key1.MiniMax-M2.7`
+    - 首轮 `requires_action`
+    - 第一轮 submit 后仍 `requires_action`
+    - 第二轮 submit 后仍 `requires_action`
+  - 结论：脚本层面已可稳定复现“不是一轮就停”的 managed stopless live 入口。
+
+- `budget exhausted` 当前新的 live 反证：
+  - 使用更强约束 prompt（每轮都强制输出完全相同 continue schema）后，`mimo.key2.mimo-v2.5` 与 `minimonth.key1.MiniMax-M2.7` 两条路径都表现为：
+    1. round0 -> `requires_action`
+    2. round1 -> `requires_action`
+    3. round2 -> `requires_action`
+    4. round3 -> `EMPTY_ASSISTANT_RESPONSE`
+  - 代表性请求：
+    - `openai-responses-mimo.key2-mimo-v2.5-20260609T035143243-322875-4758`
+    - `openai-responses-minimonth.key1-MiniMax-M2.7-20260609T035019140-322865-4748`
+  - 这不是预算正常收敛成 markdown summary，而是第三次继续后 provider 返回 `completed + output=[]`，被当前链路投成 `EMPTY_ASSISTANT_RESPONSE`。
+
+- 更关键的新反证：`minimonth` 第三轮 provider request 再次塌成“只有首轮 user message”
+  - 文件：`~/.rcc/codex-samples/openai-responses/ports/5555/minimonth.key1.MiniMax-M2.7/req_1780948219140_84573df6/provider-request.json`
+  - 直接证据：
+    - `body.messages` 里只有最初 user 提示
+    - 没有第一轮/第二轮的 `exec_command` assistant tool call
+    - 没有对应 tool output
+  - 同一请求的 provider response `thinking` 也明确写了“there is no function_call_output tool result in this context”。
+  - 结论：第三轮 user-only collapse 在 live 上仍然存在，但它不是 `responses-conversation-store` 单独的多轮 resume 真源问题。
+
+- 本地最小复现进一步收敛：
+  - 新增测试：
+    - `tests/sharedmodule/responses-continuation-store.spec.ts`
+    - case: `third submit_tool_outputs resume must preserve cumulative exec_command history`
+  - 结果：PASS
+  - 含义：`responses-conversation-store` 的最小多轮 resume 在本地 store 层能保住累计历史；live 的 third-round collapse 更可能发生在 handler / pipeline continuation / live request normalization 边界，而不是 store 基础 resume 真源本身。
+
+## 2026-06-09 stopless 停止设定测试设计与 /goal 基线
+
+## 2026-06-09 responses SSE / relay / direct architecture audit workbench
+
+- 审计目标：对照 OpenAI Responses 官方协议与 Vercel AI SDK 流式契约，审计 RouteCodex `/v1/responses` SSE 在 relay 与 router-direct/provider-direct 两条路径上的架构边界、事件契约、工具恢复、错误处理、metadata 隔离、历史恢复一致性。
+- 本地 owner 初步定位：
+  - relay/Hub 主链：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/**`
+  - SSE 入站/解码：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_decode_semantics.rs`
+  - SSE 出站/client 语义：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+  - host handler：`src/server/handlers/responses-handler.ts`
+  - same-protocol direct：`src/server/runtime/http-server/router-direct-pipeline.ts`、`src/server/runtime/http-server/provider-direct-pipeline.ts`
+- 审计重点：
+  - `__sse_responses` 是否只作为 transport wrapper，未在 direct path 误进入 Hub response conversion。
+  - `submit_tool_outputs` 第二/三轮恢复是否在 relay 与 direct retention 两套语义下保持一致，不丢历史、不重写 persisted prefix。
+  - SSE terminal event / done 事件 / started error / finish reason 是否与官方 Responses 事件面一致。
+  - Vercel SDK transport 与 raw HTTP path 是否共用同一协议真源，避免双实现漂移。
+- 已知相关测试面：
+  - `tests/server/handlers/responses-handler.*`
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`
+  - `tests/server/runtime/http-server/router-direct-pipeline.spec.ts`
+  - `tests/providers/core/runtime/openai-responses-sdk-transport.spec.ts`
+  - `sharedmodule/llmswitch-core/tests/responses/responses-openai-bridge.spec.ts`
+
+- stopless 停止设定的完整交付文档当前以 `docs/goals/stopless-full-delivery-plan.md` 为主引用，已补入 2026-06-09 可用 live baseline：
+  - `gpt-5.5` managed 路径只用于 `skip_goal_active` / `skip_plan_mode`
+  - `mini27.MiniMax-M2.7` / `minimonth.MiniMax-M2.7` 用于 allow-stop / continue-needed
+  - explicit `direct/direct` 样本不计入 stopless live 验收
+- 本轮 `/goal` 提示词应只引用现有 plan 文档，不再重复长测试矩阵；正文保留主目标、硬约束、验证类别、完成标准。
+- 文档真相已与 Rust owner 对齐：`sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs` 当前预算常量是 `STOP_SCHEMA_PROVIDED_MAX_REPEATS = 3`、`STOP_SCHEMA_MISSING_MAX_REPEATS = 3`；旧的 “missing-schema 10 轮” 设计已失效，后续测试设计与 `/goal` 一律按统一 `3/3` 收敛执行。
+- 2026-06-09 当前时刻 live 反证：
+  - `curl http://127.0.0.1:5555/health` 返回 `ready=true`
+  - 定向 Jest 仍绿：`tests/servertool/stop-message-auto.spec.ts`、`tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+  - 但当前重新执行 `/tmp/stopless_live_probe.mjs` 首轮即返回 `502 HTTP_HANDLER_ERROR`
+  - 并行重试 `mini27.MiniMax-M2.7` / `minimonth.MiniMax-M2.7` 各 3-6 次也全部 `502 Upstream provider error`
+  - 样本证据显示这不是 stopless owner 直接回归，而是 5555 显式 M2.7 provider 当前可用性波动/额度问题：
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/mini27.key1.MiniMax-M2.7/req_1780942664618_e721b19a/provider-response.json` 含 `status_msg = "usage limit exceeded"`
+    - 同目录历史样本 `req_1780942656205_b5176013` 仍证明稍早同一运行版本可以正常进入 stopless continue
+    - `minimonth` 历史样本 `req_1780942725055_b8972c1c` / `req_1780942746284_9fe1787a` 也证明稍早可正常完成 `needs_user_input` 与 submit_tool_outputs 恢复
+- 为了避免继续依赖 `/tmp` 临时脚本，新增仓库脚本 `scripts/tests/stopless-5555-live-probe.mjs`：
+  - 默认按 `mini27,minimonth` 顺序重试 5555 首轮 continue
+  - 命中 `exec_command` 后自动执行两轮 `submit_tool_outputs`
+  - 无可用 live path 时输出结构化失败证据到 `/tmp/stopless-5555-live-probe.json`
+- 同一 probe 改打 `http://127.0.0.1:10000` 时直接 `fetch failed`；因此当前环境下 10000 不能作为 stopless live 替代验收口，5555 仍是唯一正式 live 入口。
+- 本轮再次校正文档真相：`docs/goals/stopless-stop-condition-verification-plan.md` 中 Rust unit matrix 也必须统一写成 `budget_exhausted_after_three_missing_schema`；后续 `/goal` prompt 与测试设计一律按 `3/3` 执行，不再允许 10 轮旧口径回流。
+- 本轮继续补全了 `docs/goals/stopless-full-delivery-plan.md` 的“7.6 在线验证执行设计”和“7.7 交付物清单”：
+  - 明确每个 live case 必须保留 `request_id / response.id / tool_call_id / 样本路径 / 日志时间段`
+  - 明确 stopless 完整提交不是只改逻辑，而是代码、测试、live 证据、文档、review、commit、push 一起交付
+
+## 2026-06-09 stopless 完整交付提交文档收敛
+
+- 新增单一交付文档：`docs/goals/stopless-complete-submission-plan.md`
+- 用途：把 stopless 停止设定测试设计、5555 live 验证矩阵、交付物、DoD 收敛到一份可直接给 `/goal` 引用的 plan，避免在 `stopless-stop-condition-verification-plan.md`、`stopless-full-delivery-plan.md`、`stopless-complete-delivery-plan.md` 三份文档之间来回拼接。
+- 文档真相已锁：
+  - 停止判定唯一 owner 仍是 `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`
+  - TS 唯一 shell 仍是 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+  - `/submit_tool_outputs` 累计历史 owner 仍是 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`
+  - 预算口径统一按 Rust 现状 `3/3`
+
+## 2026-06-09 stopless live probe default-entry correction
+
+- `scripts/tests/stopless-5555-live-probe.mjs` 已收敛默认 live 入口：
+  - 默认 `models` 从 `MiniMax-M2.7,mimo-v2.5,gpt-5.5` 改为只打 `gpt-5.5`
+  - 每次 probe 自动带唯一 `sessionId/conversationId`
+  - 请求头同步带 `x-session-id/x-conversation-id`
+- 收敛依据：
+  - 早前 verified 5555 live stopless 样本的 requestId 形态是 `openai-responses-router-gpt-5.5-*`
+  - 当前显式 `MiniMax-M2.7` / `mimo-v2.5` probe 会落到 `thinking/gateway-priority-5555-priority-thinking -> 1token.key1.gpt-5.5`，并把 stop schema 原文直接返回，属于 `invalid_direct_or_no_stopless_path`
+- 最新 probe 结果：
+  - `/tmp/stopless-5555-live-probe.json`
+  - `finalStatus=provider_not_available_or_session_backoff`
+  - 三次 `gpt-5.5` 尝试全部 `502 PROVIDER_NOT_AVAILABLE`
+  - 没有再次出现 schema 直出；当前 blocker 从“入口走错 direct/thinking”进一步收敛为“正确入口修正后仍被 5555 当前 provider availability / session backoff 阻断”
+
+## 2026-06-09 stopless user-visible shell fix + live blocker refresh
+
+- 唯一代码修改点已收敛到 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：
+  - 保留 allow-stop 普通场景的“summary + 非控制正文”；
+  - 仅对 `schemaGate.reason_code === "stop_schema_needs_user_input"` 走 `replaceStopSummaryContent(...)`，确保 terminal 可见内容只显示问题 markdown，不再把原 assistant 进展尾巴拼回去。
+- 定向验证已通过：
+  - `tests/servertool/stop-message-auto.spec.ts`
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- 运行体同步事实：
+  - `ROUTECODEX_INSTALL_INPLACE_BUILD=1 npm run install:global` 成功；
+  - `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/servertool/handlers/stop-message-auto.js` 已包含 `replaceStopSummaryContent`。
+- 新 live blocker（关键）：
+  - 全局安装 + restart 后，5555 上之前可用的显式 `mini27.MiniMax-M2.7` / `minimonth.MiniMax-M2.7` 路径退化为 `direct/direct` 并再次报 `router-direct failed without relay: protocol mismatch`。
+  - 直接证据：`~/.rcc/logs/server-5520.log` 中 request
+    - `openai-responses-router-mini27.MiniMax-M2.7-20260609T022404236-322355-4238`
+    - `openai-responses-router-minimonth.MiniMax-M2.7-20260609T022410710-322359-4242`
+    均命中 `failed_no_relay`。
+- 影响：
+  - 当前无法继续用显式 M2.7 路径完成 5555 `needs_user_input` / resume-chain / stream 的 stopless live 复验；
+  - 这已不是 stopless shell 逻辑本身，而是 5555 direct/relay 入口再次阻断了 stopless live 通道。
+
+## 2026-06-09 stopless live verification correction
+
+- `/goal active` 的旧坏结论需要收回一半：此前用于判定“5555 goal-active 仍会触发 stopless”的 probe 使用了显式 `model=mini27.MiniMax-M2.7` / `minimonth.MiniMax-M2.7`，日志命中 `direct/direct`，不属于 stopless 主链，不能作为 stopless 验证证据。
+- 直接证据：
+  - `~/.rcc/logs/server-5520.log` 对 `goal-active-live` 的请求行是 `direct/direct -> mini27.key1.MiniMax-M2.7...` / `direct/direct -> minimonth.key1.MiniMax-M2.7...`，最终 `finish_reason=tool_calls`，且没有 `stop_message_auto stage=compare` 记录。
+  - 因此这类 explicit provider/model request 只能证明 direct path 行为，不能证明 stopless 继续/停止真相。
+- 当前更强真相：
+  - 本地原位探针证明 Rust `entryOriginRequest` 仍完整保留 RCC fence；`syncStoplessGoalStateFromRequest(...)` 在本地可把 `stopless start` 正确持久化为 `session:* -> stoplessGoalState.status=active`。
+  - 5555 managed route live probe 使用 `model=gpt-5.5` + `sessionId=goal-active-live-managed` 时，请求命中 `thinking/gateway-priority-5555-priority-thinking -> 1token.key1.gpt-5.5.gpt-5.5`，返回 `200 completed`，无 `required_action`，无 `exec_command`。这证明 `/goal active` 在受管 5555 路径上已经可以 skip stopless。
+  - 该 managed probe 的 persisted `session:goal-active-live-managed` 仍为 `null`；现阶段只能证明“当前 request 显式 goal state 命中 skip”，不能证明“goal state 会在 managed route 上持久化到后续轮次”。
+- 新边界：
+  - 5555 默认 managed `gpt-5.5` 目标是 Codex 型模型，会自然暴露 harness `instructions` / `exec_command` 能力，不适合验证“模型只吐 stop schema JSON”的 allow-stop/continue-needed case。
+  - 10000 当前经 `127.0.0.1:10000` 与 `curl /health` 都返回 empty reply / remote closed；在这个环境问题未消除前，不能用 loopback 10000 补 stopless live 证据。
+  - 后续 stopless live matrix 必须明确区分：
+    1. 5555 direct target：无效于 stopless 验证。
+    2. 5555 managed Codex target：可验证 skip/no-exec/no-required_action，但不适合验证纯 stop schema 渲染。
+    3. 10000 或 5555 的非-Codex managed target：才适合验证 allow-stop markdown、continue-needed、budget exhausted。
+
 ## 2026-06-08 5555 cross-protocol relay live verification
 
 - Root cause owner stayed in `src/server/runtime/http-server/index.ts`: `executeRouterDirectPipelineForPort()` dropped `directOutcome.requiresHubRelay` when returning `used:false`, so outer router-direct entry could not see the relay contract and wrongly threw `router-direct failed without relay`.
@@ -238,6 +567,16 @@
   - PASS `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` (6 tests).
   - PASS `npx tsc --noEmit --pretty false`.
   - PASS `git diff --check`.
+
+## 2026-06-09 stopless 停止设定测试设计收敛
+
+- 目标收敛：用户当前要的是“stopless 停止设定的完整测试设计 + 可直接执行的 /goal 提示词”，不是继续零散补 case。
+- 文档真源收敛到 `docs/goals/stopless-stop-condition-verification-plan.md`，并显式补齐：
+  - skip / continue / allow-stop / reset 四大类场景
+  - Rust / TS-native / HTTP blackbox / 5555 live 四层测试矩阵
+  - 5555 live 证据模板
+  - 最终可 review/commit/push 的交付 gate
+- 这份设计的执行前提仍然是 live-first：没有 5555 request/response/sample/log 证据，不能宣称 stopless 完整交付。
 - Review correction: deleted TS media-route tests are covered by Rust/native VR tests in `selection.rs` and `routing/config.rs` for image route queue/order, multimodal-first, vision fallback, and visual-capability filtering. Keep future image/multimodal fixes in Rust VR selection/features, not TS VR runtime.
 - Boundary note: `servertool-core` now has Rust outcome/CLI projection contracts and tests, but live stopless projection still uses the existing TS CLI projection bridge. Do not claim full servertool outcome migration until the Rust outcome builders are live-wired.
 - Test correction: `responses-handler.servertool-cli-projection.blackbox` now asserts current contract: model stop text remains the Responses reasoning truth, while CLI `--input-json` carries continuation prompt; tests must not force continuationPrompt to overwrite reasoning.
@@ -17050,6 +17389,15 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - Current disk path scan is clean: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*qoder*'` returned no matches. `git ls-files` still lists deleted tracked paths until commit, which is expected for the current removal slice.
 - Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npx tsc --noEmit --pretty false`; `npm run verify:llmswitch-core-tsc`; `git diff --check`.
 
+## 2026-06-09 Windsurf/Cascade removal current pass
+
+- User direction: remove Windsurf repository code only; do not stop workers and do not edit runtime config as a shortcut.
+- Rechecked active code/package/test/script scope: `rg -n -i "windsurf|cascade|WINDSURF_" package.json package-lock.json src sharedmodule scripts tests --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/*.snap'` returned no matches.
+- Rechecked disk path scope: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- Current git still shows deleted tracked Windsurf/Cascade paths until commit; that is expected and is the physical removal slice, not live residue.
+- Current docs/entry scan result: only removal guard references remain in `AGENTS.md` and `.agents/skills/rcc-dev-skills/SKILL.md`; no active implementation/design entry points remain.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `git diff --check`; `git diff --cached --check`; root `npx tsc --noEmit --pretty false`; `npm run verify:llmswitch-core-tsc`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`.
+
 ## 2026-06-09 Hub Pipeline zero-consumer session identifier wrapper removed
 
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/session-identifiers.ts`; it had no production importers and only forwarded to native `native-hub-pipeline-session-identifiers-semantics.ts`.
@@ -17064,6 +17412,45 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - Added the deleted path to the Hub residue audit zero-consumer forbidden list.
 - Updated rustification baseline by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -49`, `nonNativeFileCount -1`, `nonNativeLocTotal -49`, and conversion topDir totals.
 - Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `rg -n "adapter-context-fields|ADAPTER_CONTEXT_CWD|STANDARD_ADAPTER_CONTEXT_FIELDS" src sharedmodule tests scripts docs --glob '!**/node_modules/**'` only hits the residue gate; `git diff --check`.
+
+## 2026-06-09 Hub Pipeline empty compat action barrel removed
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/compat/actions/index.ts`; it was a 0-byte empty barrel with no importer/dynamic entry and only remained in the rustification baseline.
+- Added the deleted path to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so the empty barrel cannot be restored as a zero-consumer wrapper.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by removing the file entry and decrementing only the file counts; LOC totals are unchanged because the file was empty.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `rg -n "compat/actions/index|conversion/compat/actions/index|from ['\\\"].*compat/actions['\\\"]|from ['\\\"].*compat/actions/index|import\\(['\\\"].*compat/actions" src sharedmodule tests scripts docs --glob '!**/node_modules/**'` only hits the residue gate; `git diff --check`.
+
+## 2026-06-09 Servertool compaction-detect forwarding shell removed
+
+- Deleted `sharedmodule/llmswitch-core/src/servertool/handlers/compaction-detect.ts`; it was a 2 LOC zero-consumer forwarding shell over `conversion/compaction-detect.ts`, which already calls native `isCompactionRequestWithNative`.
+- Updated `stop-message-auto.ts` to import `isCompactionRequest` directly from `../../conversion/compaction-detect.js`, preserving the existing Rust/native semantic owner and removing the extra servertool handler wrapper.
+- Added the deleted handler shell to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` zero-consumer forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -2`, `nonNativeFileCount -1`, `nonNativeLocTotal -2`, and servertool topDir totals.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 Servertool memory extract-responses-input dead helper removed
+
+- Deleted `sharedmodule/llmswitch-core/src/servertool/handlers/memory/extract-responses-input.ts`; strict import/dynamic scan found no runtime/test/script/doc importer, and it only remained in the rustification baseline plus a `verify-servertool-rust-only` allowed-import comment.
+- Removed the `memory/extract-responses-input` allowlist entry from `scripts/verify-servertool-rust-only.mjs`; a dead helper must not survive as an allowed TS handler runtime import.
+- Added the deleted helper to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` zero-consumer forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -17`, `nonNativeFileCount -1`, `nonNativeLocTotal -17`, and servertool topDir totals.
+- Verification PASS: `npm run verify:servertool-rust-only`; Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`; `rg -n "extract-responses-input|extractResponsesUserInput|memory/extract-responses-input" ...` only hits the residue gate.
+
+## 2026-06-09 Conversion reasoning-utils zero-consumer native wrapper removed
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-utils.ts`; strict import/dynamic scan found no runtime/test/script/doc importer and no public `conversion/index.ts` export.
+- Native truth remains in `native-shared-conversion-semantics-reasoning.ts` via `extractReasoningSegmentsWithNative` and `sanitizeReasoningTaggedTextWithNative`; the deleted file was only an unused TS wrapper over those native exports.
+- Added the deleted wrapper to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` zero-consumer forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -28`, and conversion topDir totals.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`; `rg -n "reasoning-utils|extractReasoningSegments\\(|sanitizeReasoningTaggedText\\(" ...` only hits the residue gate.
+
+## 2026-06-09 Conversion tool-argument-repairer zero-consumer wrapper removed
+
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/tool-argument-repairer.ts`; full scan found no runtime/test/script/doc consumer of `ToolArgumentRepairer`, `repairToolArguments`, or `validateToolArguments`.
+- Native tool argument repair truth remains in `native-shared-conversion-semantics-toolcalls.ts` and `native-shared-conversion-semantics-misc.ts`; active consumers such as `jsonish.ts` and `text-markup-normalizer.ts` already call native wrappers directly.
+- Added the deleted wrapper to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` zero-consumer forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` by decrementing only this deletion: `prodTsFileCount -1`, `prodTsLocTotal -70`, and conversion topDir totals.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`; `rg -n "tool-argument-repairer|ToolArgumentRepairer|repairToolArguments\\(|validateToolArguments\\(" ...` only hits the residue gate.
 
 ## 2026-06-09 stopless terminal final reasoning closeout
 
@@ -17081,3 +17468,939 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
   - needs_user_input PASS: request_id `openai-responses-mini27.key1-MiniMax-M2.7-20260609T003648512-321621-3504`, response id `067622a1d7ecea8b48f337485fbf8fc0`, output only shows `## 需要确认` plus the user question.
   - stream allow-stop PASS: response id `067622a1a0e82e7a5f74d929b9617bf9`; SSE `response.completed` only contains message output text markdown, no reasoning event/item and no schema fields.
 - One transient live failure during resume was upstream/provider, not stopless: sample `~/.rcc/codex-samples/openai-responses/port-5555/req_1780936478774_87bbfdb3/provider-response.json` shows MiniMax `status_code=2049 invalid api key`.
+
+## 2026-06-09 stopless goal-active live followup
+
+- 继续补 5555 live matrix 时，`plan mode` 已拿到线上 skip 证据：`minimonth.MiniMax-M2.7` 请求 `openai-responses-minimonth.key1-MiniMax-M2.7-20260609T005305190-321725-3608` 返回 `completed`，无 `required_action`/`exec_command`，但用户可见 `output_text` 仍是原始 stop schema markdown fenced JSON，说明该 case 证明的是“skip stopless”，不是“透明 summary 投影”。
+- `goal active` live probe 先暴露出唯一错误点：`/v1/responses` 入口的 `buildServerToolAdapterContext` 没把 `entryOriginRequest` 挂到 `capturedChatRequest`，导致 RCC `stopless start` 目标状态根本没进入 `syncStoplessGoalStateFromRequest`。源码本地验证（`npx tsx` 直接调用当前 source）在加上 `metadata.sessionId` 后已证明修复生效：`capturedChatRequest` 被重写为目标正文，`stoplessGoalState.status=active`，`__rt.stoplessGoalStateSource=directive`。
+- 修复后 5555 `goal active` 行为已从“错误触发 stopless requires_action + exec_command”变成“无 `required_action` / 无 `exec_command`”，但三个 MiniMax provider 都在上游阶段返回 502，尚未拿到 200 completed 的最终业务响应，因此目前只能证明 skip 行为已命中，不能把该项算作完整 live 闭环。
+- `goal active` 失败前的旧坏样本真相：`~/.rcc/codex-samples/openai-responses/port-5555/req_1780937759751_2a1bc632/provider-request.json` 显示 provider 请求正文残留 `stopless start` / `</rcc**>`，证明修前 RCC fence 在该路径上没有被正确消费。
+- `budget_exhausted` live probe 仍未闭环：已成功拿到 2 轮 continue（`resp_1780937514559` -> `resp_1780937527571`），但第 3 轮被上游 `MALFORMED_RESPONSE` 打断；另有多次首轮 `HTTP_HANDLER_ERROR` / 502 噪音，当前不足以宣称 budget exhausted 线上通过。
+
+## 2026-06-09 router-direct protocol mismatch storm split
+
+- User correction: distinguish the original protocol mismatch error from the repeated error storm.
+- Fix scope: `router-direct failed without relay: protocol mismatch...` remains a thrown error; the storm side now uses existing session storm backoff state to record and wait repeated same-scope direct failures.
+- No empty reply / success rewrite / relay fallback / payload sanitizer added.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts tests/server/runtime/http-server/router-direct-cross-protocol-relay.spec.ts --runInBand --no-cache --forceExit`; `npx tsc --noEmit --pretty false`; `git diff --check` targeted.
+
+## 2026-06-09 Windsurf/Cascade repository removal verification
+
+- User correction: "remove Windsurf" means remove repository code/docs/tests/scripts only; do not stop other workers/processes and do not edit runtime config as a shortcut.
+- Current active source/package/test/script/doc scan is clean without excluding removed Windsurf/Cascade doc names: `rg -n -i "windsurf|cascade|WINDSURF_" package.json package-lock.json src sharedmodule scripts tests docs --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/*.snap' --glob '!samples/**'` returned no matches.
+- Current disk path scan is clean: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- `git diff --name-status -- docs src sharedmodule scripts tests package.json package-lock.json | rg -i 'windsurf|cascade'` shows only tracked `D` entries for the physical removal slice, so remaining git hits are deleted paths awaiting commit rather than live files.
+- Deleted-path and provider-specific leak gates are green: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`.
+- Type/build gates are green: `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`; `npm run build:min` completed and generated version `0.90.3013`.
+- Added function-map owner coverage for post-servertool `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` projection because `build:min` caught a stale canonical builder owner. The Rust owner is `hub_resp_outbound_client_semantics_blocks/responses_payload.rs`; TS remains native invocation glue.
+- Post-servertool projection gate is green: `npm run verify:hub-response-post-servertool-client-projection` -> Rust `project_post_servertool` 2/2 passed.
+
+## 2026-06-09 llmswitch-core orphan src test assets removed
+
+- Deleted four tracked `sharedmodule/llmswitch-core/src` test assets that were outside active test/build entrypoints:
+  - `sharedmodule/llmswitch-core/src/sse/test/gemini-converter.test.ts`
+  - `sharedmodule/llmswitch-core/src/sse/test/responses-converter-failfast.test.ts`
+  - `sharedmodule/llmswitch-core/src/test/anthropic-tool-selection-from-chat.ts`
+  - `sharedmodule/llmswitch-core/src/test/stats-center.spec.ts`
+- Evidence before deletion: root Jest roots are only `src`, `tests`, and `webui/src`; llmswitch-core `tsconfig.json` excludes `src/**/test/**`, `src/**/*.test.*`, and `src/**/*.spec.*`; `sharedmodule/llmswitch-core/test/tsconfig.json` excludes `**/*.spec.ts` and `**/*.test.ts`; package/script scan found no caller; rustification baseline did not count these paths.
+- Added the four paths to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so they stay physically absent.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`. Residual `rg` hits only the residue gate.
+
+## 2026-06-09 llmswitch-core remaining orphan src test assets removed
+
+- Continued Phase 0 dead-code inventory under `sharedmodule/llmswitch-core/src/sse/test` and `sharedmodule/llmswitch-core/src/test`.
+- Kept `sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts` and `sharedmodule/llmswitch-core/src/test/responses-sse-closed-loop.ts` because `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` still list them as verification assets.
+- Deleted the remaining tracked orphan source-side test/diagnostic assets with no active package/script/function-map consumer and excluded from llmswitch-core `tsconfig.json`: `src/sse/test/anthropic-converter.test.ts`, ignored local `src/sse/test/chat-converter.test.ts`, tracked `src/sse/test/responses-converter.test.ts`, `src/test/anthropic-bridge-closed-loop.ts`, `src/test/anthropic-chat-request-closed-loop.ts`, `src/test/anthropic-request-closed-loop.ts`, `src/test/anthropic-snapshot-closed-loop.ts`, `src/test/anthropic-sse-closed-loop.ts`, `src/test/codex-samples-analyzer.ts`, and `src/test/responses-request-closed-loop.ts`.
+- Updated SSE docs to point tests to root `tests/` and `docs/architecture/verification-map.yml`; removed stale script comment referencing deleted `anthropic-snapshot-closed-loop`.
+- Added all deleted paths to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`; final scan hits only that residue gate. `find sharedmodule/llmswitch-core/src/sse/test sharedmodule/llmswitch-core/src/test -type f` now returns only the two function-map-retained Responses closed-loop scripts.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json` ok true; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`. Rustification baseline unchanged because these files are excluded source-side test/diagnostic assets.
+
+## 2026-06-09 SSE isolated type residues removed
+
+- Continued Phase 0 dead-code inventory under `sharedmodule/llmswitch-core/src/sse/types`.
+- Deleted three isolated legacy type-design files: `conversion-context.ts`, `stream-state.ts`, and `utility-types.ts`.
+- Evidence: `types/index.ts` does not export these files; runtime converters use protocol-specific types (`chat-types.ts`, `responses-types.ts`, `anthropic-types.ts`, `gemini-types.ts`) and `registry/sse-codec-registry.ts` owns its local `JsonToSseContext` / `SseToJsonContext`; exact scan after deletion hits only `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+- `stream-state.ts` only imported `conversion-context.ts`, so the three files formed an isolated dead cluster with no active package/script/function-map consumer.
+- Added the three paths to Hub residue forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` with `node scripts/ci/llmswitch-rustification-audit.mjs --write-baseline`; current baseline metrics are `prodTsFileCount=335`, `prodTsLocTotal=65938`, `nonNativeFileCount=152`, `nonNativeLocTotal=30489`.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json` matches baseline and `ok=true`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 SSE serializer dead public surface removed
+
+- Continued Phase 0 dead-code inventory under `sharedmodule/llmswitch-core/src/sse/shared/serializers`.
+- Initial full-directory deletion was rejected by evidence: `shared/writer.ts` still actively serializes Responses/Anthropic/Gemini events through serializer helpers.
+- Shrunk `shared/writer.ts` to direct imports from the three live serializer files: `responses-event-serializer.ts`, `anthropic-event-serializer.ts`, and `gemini-event-serializer.ts`.
+- Deleted dead public/factory surface and unused Chat serializer implementation: `base-serializer.ts`, `chat-event-serializer.ts`, `index.ts`, and `types.ts`.
+- Made `responses-event-serializer.ts` self-contained by removing its dependency on the deleted `base-serializer.ts` interface; live behavior stays `defaultResponsesEventSerializer.serializeToWire(...)`.
+- Updated SSE docs to remove stale serializer registry/interface/factory descriptions and point only to writer-used protocol serializers.
+- Added deleted serializer files to Hub residue forbidden files.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json` with `node scripts/ci/llmswitch-rustification-audit.mjs --write-baseline`; current baseline metrics are `prodTsFileCount=331`, `prodTsLocTotal=65140`, `nonNativeFileCount=148`, `nonNativeLocTotal=29691`.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json` matches baseline and `ok=true`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 stopless stop-condition test design + goal prompt entry
+
+- For "完整 stopless 提交" planning, the authoritative test design doc is `docs/goals/stopless-stop-condition-verification-plan.md`; the full delivery contract doc is `docs/goals/stopless-complete-delivery-plan.md`.
+- The stop-condition matrix is already scoped into four layers: Rust owner truth, TS/native thin-shell projection, HTTP blackbox, and port 5555 live matrix. Acceptance requires all four, and live remains the final gate.
+- `/goal` prompt generation should reference the above docs directly instead of duplicating long phase text in chat; keep only objective, hard rules, verification classes, and completion signal in the prompt body.
+
+## 2026-06-09 Windsurf/Cascade repository removal recheck
+
+- User correction remains active: remove Windsurf/Cascade repository code/docs/tests/scripts only; do not stop any local worker/process and do not edit runtime config as a shortcut.
+- Active live-file scan is clean: `rg -n -i "windsurf|cascade|WINDSURF_" package.json package-lock.json src sharedmodule scripts tests docs --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/*.snap' --glob '!samples/**'` returned no matches.
+- Disk path scan is clean: `find src sharedmodule tests scripts docs -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- Remaining git hits for Windsurf/Cascade are tracked `D` entries only, meaning deleted files awaiting commit, not live source residue.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi`; `git diff --check`.
+
+## 2026-06-09 llmswitch-core zero-consumer wrapper/diagnostic residues removed
+
+- Continued Phase 0 dead-code inventory under `sharedmodule/llmswitch-core/src`.
+- Deleted 0-consumer TS native wrappers with no public barrel/function-map/verification-map/dynamic-loader consumer: `conversion/payload-budget.ts`, `conversion/protocol-state.ts`, `conversion/shared/reasoning-tool-parser.ts`, and `http/sse-response.ts`.
+- Deleted dead best-effort regression capture diagnostic side path: `tools/regression-capture.ts`, `tools/apply-patch/regression-capturer.ts`, and `tools/exec-command/regression-capturer.ts`.
+- Removed the only static importer residue from `tools/tool-registry.ts`; the import was unused at runtime and the only call site was a commented-out `captureExecCommandRegression` block.
+- Added all seven deleted paths to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+- Residual scan after deletion only finds native protocol-state exports, normal provider `wrapUpstreamSseResponse` tests/runtime names, and the residue gate entries; no deleted wrapper/diagnostic live importer remains.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json`; current baseline metrics are `prodTsFileCount=324`, `prodTsLocTotal=64827`, `nonNativeFileCount=144`, `nonNativeLocTotal=29474`.
+- Verification PASS: Hub residue audit 96/96; `node scripts/ci/llmswitch-rustification-audit.mjs --json` matches baseline and `ok=true`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi`; `git diff --check`.
+
+## 2026-06-09 llmswitch-core stale coverage gate residues removed
+
+- Rebuilt the Phase 0 dead-code inventory with `.js` import specifiers correctly resolved back to `.ts`; the first graph attempt was invalid because it treated source `.js` specifiers as real `.js` files and falsely marked all prod TS as zero-incoming.
+- Confirmed `snapshot-recorder`, `native-failure-policy`, `native-hub-vr-node-contracts`, `native-virtual-router-bootstrap-*`, compat actions, `mcp-injection`, and `reasoning-normalizer` are dynamic/profile/doc/test consumed and must not be deleted from static zero-incoming output.
+- Found stale matrix coverage entries that still imported modules already deleted in the previous slice: `coverage-bridge-protocol-blackbox.mjs` imported `protocol-state` and `payload-budget`, and `run-matrix-ci.mjs` still invoked `coverage-parse-loose-json.mjs`.
+- Removed old coverage-only module keepalives and their source owners: `conversion/bridge-id-utils.ts`, `conversion/bridge-metadata.ts`, `conversion/jsonish.ts`, `conversion/metadata-passthrough.ts`, `sse/shared/constants.ts`, `tools/apply-patch/json/parse-loose.ts`, `tools/apply-patch/patch-text/fuzzy-match.ts`, `tools/apply-patch/validation/shared.ts`, and `tools/tool-description-utils.ts`.
+- Deleted stale orphan coverage scripts `scripts/tests/coverage-parse-loose-json.mjs` and `scripts/tests/coverage-reasoning-tool-parser.mjs`; `run-matrix-ci.mjs` no longer schedules the deleted parse-loose coverage gate.
+- Trimmed `scripts/tests/coverage-bridge-protocol-blackbox.mjs` so it only covers live bridge modules and no longer imports deleted protocol-state/payload-budget/jsonish/metadata helper wrappers.
+- Added the deleted source/helper/script paths to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+- Updated `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json`; current baseline metrics are `prodTsFileCount=315`, `prodTsLocTotal=63964`, `nonNativeFileCount=139`, `nonNativeLocTotal=28710`.
+- Verification PASS: Hub residue audit 96/96; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi`; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `npm run build` in `sharedmodule/llmswitch-core`; `node scripts/tests/coverage-bridge-protocol-blackbox.mjs` -> 13/13; `git diff --check`.
+
+## 2026-06-09 removed provider literal cleanup
+
+- User correction remains active: repository cleanup only; do not stop workers/processes and do not edit runtime config as a shortcut.
+- Current active source/package/test/script/doc scan is clean after neutralizing the last old provider literals in `AGENTS.md` and `.agents/skills/rcc-dev-skills/SKILL.md`: `rg -n -i "windsurf|cascade|WINDSURF_" AGENTS.md .agents/skills/rcc-dev-skills/SKILL.md package.json package-lock.json src sharedmodule scripts tests docs --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/*.snap' --glob '!samples/**'` returned no matches.
+- Current disk path scan is clean: `find src sharedmodule scripts tests docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`.
+
+## 2026-06-09 legacy TS tool-governance script residue removed
+
+- Continued Hub Pipeline Rustification Phase 0 cleanup by removing stale script/doc entrypoints that still referenced deleted TS `conversion/hub/tool-governance` and `conversion/shared/tool-filter-pipeline` APIs.
+- Migrated `scripts/tests/exec-command-loop.mjs` away from `runChatResponseToolFilters` to the current `buildResponsesPayloadFromChat` bridge/native projection while preserving the root `verify:exec-command` JSON shape check for Chat and Responses views.
+- Deleted stale llmswitch-core matrix scripts: `coverage-hub-tool-governance.mjs`, `tool-governance-check.mjs`, `tool-governance-native-compare.mjs`, `response-tool-text-canonicalize-invoke.mjs`, and `response-tool-text-canonicalize-tool-namespace.mjs`.
+- Deleted obsolete TS P1 deterministic-fix plan docs: `docs/plans/p1-deterministic-fix-plan.md`, `docs/goals/p1-deterministic-fix-execution-plan.md`, and `docs/plans/next-step-deterministic-fix-execution.md`; updated `hardcode-fallback-arch-audit-plan.md` to point at `hubpipeline-rust-closeout-master-plan.md` instead.
+- Updated `tests/v2/README.md` so new tool-governance tests must use Rust/native owner or thin bridge APIs rather than deleted V2 `ToolGovernanceEngine` / `runChatResponseToolFilters` paths.
+- Added the deleted script/doc paths to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`; residue gate stays 97/97.
+- Updated rustification audit baseline to current metrics: `prodTsFileCount=304`, `prodTsLocTotal=62722`, `nonNativeFileCount=129`, `nonNativeLocTotal=27422`.
+- Verification PASS: `npm run verify:exec-command`; Hub residue audit 97/97; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `cd sharedmodule/llmswitch-core && npm run build`; `node scripts/tests/coverage-bridge-protocol-blackbox.mjs` 12/12; `cargo check -p router-hotpath-napi` with existing warnings only; `git diff --check`.
+
+## 2026-06-09 llmswitch matrix missing-script guard added
+
+- Continued Phase 0 script residue cleanup by auditing `sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs` for referenced `scripts/tests/*.mjs` files that no longer exist.
+- Removed stale matrix entries for missing scripts: `compat-iflow-qwen-tool-tokens.mjs`, `coverage-engine-health.mjs`, `clock-tool-schema-openai-strict.mjs`, and `clock-session-scope-daemon-context.mjs`.
+- Added a generic residue gate to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`: `run-matrix-ci.mjs` must not reference missing llmswitch-core test scripts. This locks the class, not just the four filenames.
+- Current matrix reference audit: 99 `scripts/tests/*.mjs` references, all existing.
+- Verification PASS: Hub residue audit 98/98; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node scripts/ci/llmswitch-rustification-audit.mjs --json`; `cd sharedmodule/llmswitch-core && npm run build`; `npm run verify:exec-command`; `node scripts/tests/coverage-bridge-protocol-blackbox.mjs` 12/12; `git diff --check`.
+
+## 2026-06-09 removed provider repository cleanup revalidated
+
+- User correction remains active: remove removed-provider repository code/docs/tests/scripts only; do not stop other workers/processes and do not edit runtime config as a shortcut.
+- Current live-file scan is clean: `rg -n -i 'windsurf|cascade|WINDSURF_' AGENTS.md .agents/skills/rcc-dev-skills/SKILL.md package.json package-lock.json src sharedmodule scripts tests docs --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/*.snap' --glob '!samples/**'` returned no matches.
+- Current disk path scan is clean: `find src sharedmodule scripts tests docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no matches.
+- Remaining git references are deleted tracked paths only, meaning physical removal is staged in the worktree and not live source residue.
+- Config was not changed in this pass: `git diff --name-only -- config '*.toml' '.rcc/**'` returned no paths.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi`; `git diff --check`.
+
+## 2026-06-09 stale resp_process matrix gates removed
+
+- Continued Hub Pipeline Rustification Phase 0 cleanup by resolving the unfinished `apply-patch-native-regression-matrix.mjs` failure.
+- Root cause: the failing block asserted old `runServerSideToolEngine` followup output (`APPLY_PATCH_REQUIRES_READ_BEFORE_RETRY` + `preserve_tools`) instead of current Rust/native apply_patch freeform contract. The valid native normalize/validate coverage remains in `apply-patch-native-regression-matrix.mjs`; the old servertool block was removed.
+- Deleted stale matrix scripts that still depended on removed TS stage wrappers or obsolete behavior:
+  - `sharedmodule/llmswitch-core/scripts/tests/response-apply-patch-loop-guard.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/glm-responses-compat.mjs`
+- `response-apply-patch-loop-guard.mjs` expected old "oscillating add/delete apply_patch calls are removed" behavior; current Rust apply_patch guard is schema/patch-grammar validation and guard-patch generation, not arbitrary add/delete churn filtering.
+- `glm-responses-compat.mjs` still imported deleted `resp_inbound` / `resp_process` TS stage shell dist paths, so it was removed from `run-matrix-ci.mjs` rather than resurrecting old wrappers.
+- Updated `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` so `tool.apply_patch_freeform_contract` points at `apply-patch-native-regression-matrix.mjs` instead of the deleted loop guard.
+- Updated `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` and `docs/audit/p0-hub-stage-residue-matrix.md` to state current truth: provider-response enters Rust HubPipeline total entry; resp_process stage1 governance is Rust-owned; the deleted TS stage wrapper is not a fallback, safety net, or test entry.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so active Rust closeout docs cannot target retired stage wrapper APIs and the two stale scripts stay physically deleted.
+- Verification PASS: `cd sharedmodule/llmswitch-core && node scripts/tests/apply-patch-native-regression-matrix.mjs`; matrix missing-script audit `95 refs / 94 unique / missing=[]`; Hub residue audit 99/99; `npm run verify:apply-patch-freeform-contract`; `npm run verify:function-map-required-tests`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node scripts/ci/llmswitch-rustification-audit.mjs --json` ok true and baseline unchanged (`prodTsFileCount=304`, `prodTsLocTotal=62722`, `nonNativeFileCount=129`, `nonNativeLocTotal=27422`); `cd sharedmodule/llmswitch-core && npm run build`; `npm run verify:apply-patch-regressions`; bridge blackbox 12/12; `npm run verify:exec-command`; `cargo check -p router-hotpath-napi` with existing warnings only; `git diff --check`.
+
+## 2026-06-09 removed provider code-only pass
+
+- User correction for this pass: do not stop any worker/process and do not edit runtime config; remove only repository code/docs/tests/scripts residue.
+- Active code/package/runtime scan is clean: no `windsurf`/`cascade` text hits in `package.json`, `package-lock.json`, `scripts`, `src`, `sharedmodule`, or `tests` after excluding generated/vendor/target artifacts.
+- Focused provider entry verification PASS: `tests/provider/provider-factory.test.ts`, `src/providers/profile/__tests__/provider-profile-loader.spec.ts`, and `tests/server/http-server/runtime-auth-normalization.spec.ts` all passed, 25/25.
+- Architecture gates remain PASS: `npm run verify:architecture-deleted-path` and `npm run verify:architecture-provider-specific-leaks`.
+- Compile gates remain PASS: root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi` passed with existing warnings only; `git diff --check` and `git diff --cached --check` passed.
+
+## 2026-06-09 stale req_inbound stage3 matrix gates removed
+
+- Continued Hub Pipeline Rustification Phase 0 cleanup by auditing scripts that still imported deleted `dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/*` files.
+- Red evidence: `node sharedmodule/llmswitch-core/scripts/tests/responses-shell-like-function-call-normalize.mjs` failed with `ERR_MODULE_NOT_FOUND` for deleted `req_inbound_stage3_context_capture/index.js`; `coverage-hub-req-inbound-context-capture-orchestration.mjs` failed the same way for deleted `context-capture-orchestration.js`.
+- Deleted stale scripts rather than restoring TS stage wrappers:
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-shell-like-function-call-normalize.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-context-capture-orchestration.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-context-tool-snapshot.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-responses-context-snapshot.mjs`
+- Removed the deleted scripts from `sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs`; current matrix reference audit is `92 refs / 91 unique / missing=[]`.
+- Added all four scripts to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` forbidden files so the old TS stage3 matrix entrypoints cannot be restored.
+- Current Rust owner coverage passed: `cargo test -p router-hotpath-napi hub_req_inbound_tool_call_normalization --lib -- --nocapture` (35/35) and `cargo test -p router-hotpath-napi hub_req_inbound_context_capture --lib -- --nocapture` (17/17).
+- Verification PASS: Hub residue audit 99/99; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node scripts/ci/llmswitch-rustification-audit.mjs --json` ok true and baseline unchanged (`prodTsFileCount=304`, `prodTsLocTotal=62722`, `nonNativeFileCount=129`, `nonNativeLocTotal=27422`); `cd sharedmodule/llmswitch-core && npm run build`; `git diff --check`; `git diff --cached --check`.
+
+## 2026-06-09 stopless stop-condition verification plan tightened
+
+- User requested a complete stopless stop-condition test design plus a `/goal` prompt that drives full stopless delivery, not a partial patch.
+- Reused existing goal docs instead of creating a parallel source of truth: `docs/goals/stopless-full-delivery-plan.md`, `docs/goals/stopless-stop-condition-verification-plan.md`, `docs/goals/stopless-full-delivery-goal-prompt.md`.
+- Added an explicit gate for the current live blocker: multi-round `/v1/responses/{id}/submit_tool_outputs` resume must preserve cumulative `function_call_output` / tool output history; if provider requests collapse back to the first user-only message, stopless delivery is blocked.
+- Added matrix coverage requirements for third-round resume history integrity in blackbox and 5555 live probes so “first round works” no longer counts as sufficient evidence.
+
+## 2026-06-09 removed provider code-only pass rechecked after user correction
+
+- User correction for this pass: remove Windsurf/Cascade repository code; do not stop other workers/processes and do not edit runtime config as a shortcut.
+- Active non-doc code/package/script/test scan is clean: `git grep -n -i -E 'windsurf|cascade' -- ':!docs' ':!*.md' ':!samples' ':!package-lock.json' ':!.beads' ':!node_modules' ':!sharedmodule/llmswitch-core/dist' ':!dist'` returned no matches.
+- Focused deletion verification PASS: `tests/provider/provider-factory.test.ts`, `tests/providers/core/runtime/provider-failure-policy.spec.ts`, and `tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts` passed 37/37.
+- Runtime setup provider-merge test was updated away from the removed provider fixture to a generic OpenAI fixture; its mock now exports the current `clearUnresolvedResponsesConversationRequests` bridge dependency.
+- Error-chain red gate exposed a separate local policy smell while validating removed-provider cleanup: executor provider error reporting had a local `affectsHealth` wrapper and retry execution plan used local terminal-reroute variable names. Fixed by removing unused `affectsHealthOverride`, passing `outcome.affectsHealth` directly, and renaming terminal decisions to policy-decision names.
+- Verification PASS: `node scripts/architecture/verify-architecture-deleted-path.mjs`; `node scripts/architecture/verify-architecture-provider-specific-leaks.mjs`; red/error/provider preprocessor Jest 33/33; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 removed provider worker-safe verification pass
+
+- User correction repeated: do not stop any other worker/process, do not edit runtime config, and remove repository removed-provider code directly.
+- No process stop/restart/kill command was used in this pass.
+- Active code/package/script/test/doc scan is clean: `git grep -n -i -E 'windsurf|cascade|WINDSURF_' -- package.json package-lock.json scripts src sharedmodule tests ':!sharedmodule/llmswitch-core/dist' ':!dist' ':!**/*.snap'` returned no matches.
+- Disk path scan is clean: `find package.json package-lock.json scripts src sharedmodule tests docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no paths.
+- Deleted tracked paths remain visible only as `D` entries in `git diff --name-status`; those are the physical removal slice awaiting commit, not live source residue.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; focused provider/profile/runtime-auth/provider-merge Jest 28/28; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi` with existing warnings only; `git diff --check`; `git diff --cached --check`.
+- Full `npm run build` remains blocked before build by unrelated untracked repo-sanity files: `scripts/tests/stopless-5555-live-probe.mjs` and `tests/sharedmodule/virtual-router-router-direct-protocol-filter.spec.ts`. These were not touched.
+
+## 2026-06-09 stale req_outbound compat matrix gates removed
+
+- Continued Hub Pipeline Rustification Phase 0 cleanup by auditing active llmswitch-core matrix scripts that still imported deleted `dist/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage3_compat/index.js` or the deleted old `dist/router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js` bridge path.
+- `coverage-hub-req-outbound-compat.mjs` was migrated to native-only import from `dist/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js`; all old TS wrapper import/assert blocks were removed.
+- Deleted stale scripts instead of restoring TS stage wrappers:
+  - `sharedmodule/llmswitch-core/scripts/tests/compat-iflow-reasoning-replay-20260206.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/compat-profile-auto-resolve.mjs`
+- Red evidence before deletion/migration:
+  - both stale scripts failed with `ERR_MODULE_NOT_FOUND` for deleted `req_outbound_stage3_compat/index.js`;
+  - after temporary native import, both asserted old TS wrapper-only `chat:iflow` reasoning/thinking behavior that current Rust owner does not implement;
+  - `coverage-hub-req-outbound-compat.mjs` also asserted old `chat:gemini-cli` profile behavior that is not in current Rust `profile.rs` / `request_stage.rs`.
+- Kept current Rust-owned iflow coverage by updating `compat-iflow-kimi-history-media-placeholder.mjs` to assert the real generic `strip_historical_media` contract: historical inline media becomes `[Image omitted]` / `[Video omitted]`, and only latest-turn media remains inline regardless of model.
+- Removed the two stale scripts from `run-matrix-ci.mjs` and added them to `hub-pipeline-stage-residue-audit.spec.ts` forbidden files. Added a generic residue gate so llmswitch matrix scripts cannot import deleted TS stage dist wrappers or the deleted old virtual-router bridge dist path.
+- Current matrix reference audit: `90 refs / 89 unique / missing=[]`.
+- Verification PASS: `node sharedmodule/llmswitch-core/scripts/tests/compat-iflow-kimi-history-media-placeholder.mjs`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-outbound-compat.mjs`; Hub residue audit 100/100; `cargo test -p router-hotpath-napi req_outbound_stage3_compat --lib -- --nocapture` 162/162; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node scripts/ci/llmswitch-rustification-audit.mjs --json` ok true; `cd sharedmodule/llmswitch-core && npm run build`; `git diff --check`; `git diff --cached --check`.
+
+## 2026-06-09 stale matrix dist-owner scripts removed
+
+- Continued Hub Pipeline Rustification Phase 0 cleanup by auditing llmswitch-core matrix/scripts that still imported deleted or legacy dist owners: `dist/conversion/hub/node-support.js`, `dist/conversion/hub/policy/policy-engine.js`, `dist/conversion/hub/process/chat-process.js`, `dist/conversion/hub/response/provider-response.js`, `dist/conversion/compat/actions/gemini-web-search.js`, `dist/conversion/hub/pipeline/compat/native-adapter-context.js`, `dist/servertool/handlers/followup-request-builder.js`, and direct `dist/servertool/handlers/web-search.js`.
+- Red evidence before deletion:
+  - `loop-rt-gemini.mjs` failed with `ERR_MODULE_NOT_FOUND` for deleted `hub/node-support.js`; only its Gemini SSE roundtrip half was still valid and was kept.
+  - `hub-policy-enforce-*.mjs` asserted old TS policy flatten/sanitize behavior and failed current contract.
+  - `servertool-followup-skip.mjs`, `servertool-continue-execution-followup.mjs`, `servertool-followup-preserve-tools.mjs`, `servertool-followup-requires-action.mjs`, and `servertool-followup-history-media-single-source.mjs` depended on deleted servertool followup/chat-process owners or old followup behavior.
+  - `web-search-route-tools-clean.mjs` and `web-search-backend-smoke.mjs` asserted old web_search compat/backend behavior instead of current Rust/servertool contracts.
+- Deleted stale scripts instead of restoring deleted TS owners:
+  - `hub-policy-enforce-responses.mjs`
+  - `hub-policy-enforce-openai-chat.mjs`
+  - `hub-policy-enforce-anthropic.mjs`
+  - `hub-policy-enforce-gemini.mjs`
+  - `servertool-followup-skip.mjs`
+  - `servertool-continue-execution-followup.mjs`
+  - `web-search-route-tools-clean.mjs`
+  - `servertool-followup-preserve-tools.mjs`
+  - `servertool-followup-requires-action.mjs`
+  - `web-search-backend-smoke.mjs`
+  - `servertool-followup-history-media-single-source.mjs`
+  - `coverage-hub-chat-process-entry-client-inject.mjs`
+- `loop-rt-gemini.mjs` now covers only live Gemini SSE JSON<->SSE roundtrip; deleted inbound conversion smoke is not restored because `node-support.js` is no longer a live owner.
+- Removed deleted scripts from `run-matrix-ci.mjs`; current matrix reference audit is `80 refs / 79 unique / missing=[]`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to forbid the deleted scripts and the old dist-owner imports listed above.
+- Updated `docs/chat-semantic-expansion-plan.md` so active plan no longer names deleted `runHubChatProcess` as the current chat_process entry; current wording points to the Rust total HubPipeline request entry.
+
+## 2026-06-09 stopless stop-condition delivery design refresh
+
+- Reused existing stopless goal docs instead of creating a second parallel plan: `docs/goals/stopless-full-delivery-plan.md`, `docs/goals/stopless-complete-delivery-plan.md`, `docs/goals/stopless-stop-condition-verification-plan.md`.
+- Tightened the verification plan so stop-budget assertions must use `used/maxRepeats/left/action` contract instead of ambiguous natural-language “第几轮” wording.
+- Locked current live blocker into the acceptance plan: multi-round `/v1/responses/{id}/submit_tool_outputs` must preserve prior `function_call_output` history in `provider-request.json`; otherwise stopless is not shippable.
+- Added closeout gates to the verification plan: review + `git diff --check` + doc/note updates + commit/push evidence are part of the final stopless delivery bar, not optional follow-up work.
+- Added explicit final delivery command stack to the verification plan so `/goal` execution cannot skip Rust owner tests, TS/blackbox tests, build sync, 5555 live matrix, or commit/push evidence.
+
+## 2026-06-09 Windsurf/Cascade removal verification pass
+
+- User correction for this pass: remove Windsurf/Cascade repository code directly; do not stop or restart other workers/processes and do not edit runtime config.
+- Live content scan is clean: `rg -n -i 'windsurf|cascade|WINDSURF|CASCADE' package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src docs .agents/skills/rcc-dev-skills/SKILL.md AGENTS.md --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/target/**' --glob '!**/coverage/**' --glob '!**/*.lock'` returned no matches.
+- Live filename scan is clean: `rg --files package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src docs .agents AGENTS.md | rg -i 'windsurf|cascade'` returned no matches.
+- `package.json` script scan is clean: no script name or command contains Windsurf/Cascade tokens.
+- Remaining Windsurf/Cascade paths in `git diff --name-only --diff-filter=D` are deleted tracked paths only; no live disk path remains.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; focused provider/profile/runtime Jest 59/59; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo check -p router-hotpath-napi` with existing warnings only; `git diff --check`; `git diff --cached --check`.
+- One transient verification mistake corrected: the first focused Jest command used deleted path `tests/providers/profile/provider-profile-loader.spec.ts`; real current test path is `src/providers/profile/__tests__/provider-profile-loader.spec.ts`, and the corrected run passed.
+
+## 2026-06-09 package script and stale protocol doc dead-path cleanup
+
+- Continued Hub Pipeline Rustification Phase 0 dead-code inventory by scanning package scripts, llmswitch matrix, docs, and tests for references to deleted tests/scripts/docs.
+- Removed deleted/stale package script entries instead of restoring legacy tests:
+  - `tests/servertool/recursive-detection-guard.spec.ts`
+  - `tests/providers/auth/tokenfile-auth.iflow.spec.ts`
+  - `tests/manager/quota/quota-manager-refresh.spec.ts`
+  - `tests/manager/quota/provider-quota-daemon-module.spec.ts`
+  - `tests/server/http-server/session-header-injection.spec.ts`
+  - `tests/sharedmodule/mcp-tool-descriptions.spec.ts`
+  - `tests/sharedmodule/goal-request-user-input-sample-regression.spec.ts`
+  - `tests/sharedmodule/resp-process-tool-allowlist-contract.spec.ts`
+  - `tests/sharedmodule/tool-governor-exec-command-guard.spec.ts`
+  - `tests/sharedmodule/real-sample-hub-io-compare.spec.ts`
+  - `tests/sharedmodule/anthropic-semantics-stage2.spec.ts`
+  - `tests/sharedmodule/responses-semantics-snapshot.spec.ts`
+- Deleted stale docs that were not referenced anywhere and still described removed SSE/parser/converter experiment entrypoints:
+  - `sharedmodule/llmswitch-core/docs/responses-sse-experiments.md`
+  - `sharedmodule/llmswitch-core/docs/SSE_PARSER_ANALYSIS_AND_INTEGRATION_PLAN.md`
+  - `sharedmodule/llmswitch-core/docs/SYMMETRIC_ADAPTER_ARCHITECTURE.md`
+- Deleted `tests/sharedmodule/anthropic-client-remap-namespace-fallback.spec.ts` after `npm run test:protocol-compat-regression` exposed it as old fallback semantics: it expected `shell_command` to be restored to Anthropic `Bash` from `semantics.anthropic/clientToolsRaw`; current runtime returns canonical `shell_command`, and the goal forbids restoring namespace fallback behavior.
+- Updated `test:protocol-compat-regression` to current existing Anthropic gates: `provider-compat-anthropic.spec.ts` and `anthropic-tool-schema-stability.spec.ts`.
+- Updated old audit/plan docs so `real-sample-hub-io-compare.spec.ts` is explicitly marked deleted and not current coverage, and fixed outdated Anthropic test commands to existing tests.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` with:
+  - deleted stale SSE/docs and Anthropic namespace fallback test paths must stay absent;
+  - package scripts must not reference missing test files.
+- Verification PASS: llmswitch matrix reference audit `78 refs / 77 unique / missing=[]`; package script test-path audit `[]`; Hub residue audit `101/101`; `npm run test:protocol-compat-regression` `7/7`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`; `git diff --cached --check`.
+- One earlier `test:protocol-compat-regression` run failed before cleanup and then stayed open due Jest handles; no process kill/restart was used. The corrected gate was rerun separately and passed.
+
+## 2026-06-09 5555 stopless live entry re-audit: fresh probes are invalid while router-direct stays direct
+
+- New live fact on current `0.90.3019`: fresh `/v1/responses` stopless probes on port 5555 do not enter the stopless path even with `x-route-hint: search`.
+- Direct evidence:
+  - fresh probe response on 5555 returned raw stop schema text directly:
+    - `{"stopreason":2,"reason":"第一轮还没做完","next_step":"等待 stop_message_auto 工具结果后继续第二轮验证"}`
+  - no `required_action`
+  - no `exec_command`
+  - no stopless rewrite
+- Matching server log evidence from `~/.rcc/logs/server-5555.log`:
+  - `thinking/gateway-priority-5555-priority-thinking -> 1token.key1.gpt-5.5.gpt-5.5 reason=thinking:user-input|route_hint:search`
+  - usage route: `router-direct:thinking/- -> provider=1token.key1.gpt-5.5`
+- Additional live evidence:
+  - even when the request body includes prior `function_call_output` to force a continuation/tool-shaped request, current 5555 still routes through router-direct same-protocol direct paths such as:
+    - `router-direct:tools/- -> provider=1token.key1.gpt-5.4-mini.gpt-5.5`
+    - `router-direct:longcontext/- -> provider=1token.key1.gpt-5.5`
+- Strong conclusion:
+  1. this is not proof that stopless owner failed;
+  2. this proves the 5555 live request never entered the relay/managed stopless path;
+  3. while 5555 router port keeps `sameProtocolBehavior=direct`, any request classified as same-protocol direct will bypass stopless by design;
+  4. therefore 5555 stopless live validation has a hard precondition: the request must enter relay/managed path, or the port must run with `sameProtocolBehavior=relay`.
+- Probe script updated:
+  - `scripts/tests/stopless-5555-live-probe.mjs`
+  - now records `probeMode` / `probeTag`
+  - default model list: `gpt-5.5,MiniMax-M2.7,mimo-v2.5`
+- if response is `completed` and leaks stop schema text with no `exec_command`, final status is marked `invalid_direct_or_no_stopless_path` instead of a generic `no_live_stopless_path`
+
+## 2026-06-09 stopless stop-condition delivery prompt baseline
+
+- For this handoff, do not create another parallel stopless plan. Reuse:
+  - `docs/goals/stopless-stop-condition-verification-plan.md` as the stop-condition test SSOT
+  - `docs/goals/stopless-full-delivery-plan.md` as the full implementation scope
+  - `docs/goals/stopless-complete-delivery-plan.md` as the final delivery/commit closure contract
+- The `/goal` prompt for "完整功能的 stopless 提交" must stay short and only reference those docs; detailed phases and file lists stay in the docs, not the prompt body.
+- Final acceptance for a shippable stopless submission still requires all four layers together: Rust owner tests, TS/native focused tests, HTTP blackbox tests, and 5555 live evidence.
+- Live acceptance must explicitly include `third-round history preservation`: each `submit_tool_outputs` round must preserve cumulative `function_call_output` / tool output history in `provider-request.json`.
+
+## 2026-06-09 Windsurf/Cascade removal direct pass
+
+- User correction for this pass: remove Windsurf/Cascade repository code directly; do not stop/restart/kill other workers and do not edit runtime config as a workaround.
+- Verified live content is clean: `rg -n -i 'windsurf|cascade|WINDSURF|CASCADE' package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src docs .agents/skills/rcc-dev-skills/SKILL.md AGENTS.md --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/target/**' --glob '!**/coverage/**' --glob '!**/*.lock'` returned no matches.
+- Verified live path and package script surfaces are clean: `find package.json package-lock.json scripts src sharedmodule tests docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no paths; package script scan returned `[]`.
+- Verified git state distinction: `git diff --name-status --diff-filter=ACMR -- package.json package-lock.json scripts src sharedmodule tests docs .agents AGENTS.md | rg -i 'windsurf|cascade'` returned no matches; `git diff --name-status --diff-filter=D ... | rg -i 'windsurf|cascade'` shows only tracked deletion entries awaiting commit.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit` passed 102/102; `git diff --check` passed.
+- Adjacent residue fix: `scripts/install-verify.mjs` no longer imports retired Responses SSE owner `dist/v2/conversion/conversion-v3/sse/index.js`; it now loads current public `rcc-llmswitch-core/dist/sse/index.js`.
+
+## 2026-06-09 router-direct protocol mismatch and storm split
+
+- Root cause: router-direct OpenAI Responses requests reached Virtual Router without a preserved inbound protocol constraint, so VR could select `anthropic-messages` / `openai-chat` targets and only fail later in direct protocol checks.
+- Fix shape: preserve `routerDirectInboundProtocol` through MetaRoute carrier; filter VR forced/prefer/pool/direct-model candidates by provider protocol; remove router-direct cross-protocol Hub relay residue; keep protocol mismatch fail-fast.
+- Storm rule: original error and error storm are separate. Storm backoff may delay repeated same-session failures and log release-visible `recorded/wait/completed`, but must not rewrite the original error into empty reply, success, relay fallback, or sanitized payload.
+- Live 5555 evidence after global install `0.90.3022`: health `ready=true`; `/v1/responses` search smoke `rcc-search-protocol-smoke-3022` returned HTTP 200 `status=completed` and routed to `1token.key1.gpt-5.5` with no new `protocol mismatch/failed_no_relay`.
+- Live storm evidence after `0.90.3022`: two `mini27.MiniMax-M2.7` direct requests with session `rcc-router-direct-storm-3022` both returned HTTP 502 with original `PROVIDER_NOT_AVAILABLE / Upstream provider error`; timings `0.336s -> 1.076s`; server log had exactly one `request.session_storm_backoff.recorded` per request and one wait/completed pair before the second request.
+
+## 2026-06-09 Hub policy/allowlist TS wrapper deletion
+
+- Phase 0 dead-code slice: removed TS Hub policy/spec/allowlist wrappers after confirming live HubPipeline only forwards `config.policy` into Rust total entry and does not call TS `applyHubProviderOutboundPolicy` / `recordHubPolicyObservation`.
+- Deleted source/test/dist residue:
+  - `sharedmodule/llmswitch-core/src/conversion/hub/policy/policy-engine.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/protocol-field-allowlists.ts`
+  - `tests/sharedmodule/hub-policy-provider-outbound-reasoning-filter.spec.ts`
+  - `tests/sharedmodule/hub-policy-observe-allowlist.spec.ts`
+  - matching ignored `dist/conversion/protocol-field-allowlists.*` and `dist/conversion/hub/policy/*` generated files.
+- Kept Rust/native truth: `hub_protocol_spec_semantics.rs` owns allowlist/spec/sanitize behavior; `coverage-hub-protocol-field-allowlists.mjs` and `coverage-bridge-protocol-blackbox.mjs` now validate native bridge policy exports directly.
+- Updated `HubPipelineConfig` policy types into the pipeline type shell only; removed `setHubPolicyRuntimePolicy` global setter and the test mock that kept that dead TS policy module alive.
+- Gate extension: `hub-pipeline-stage-residue-audit.spec.ts` now locks the deleted source/test/dist paths absent.
+- Verification PASS: `coverage-hub-protocol-field-allowlists.mjs` 7/7; `coverage-bridge-protocol-blackbox.mjs` 12/12; `hub-pipeline-runtime-ingress.spec.ts` 2/2; `hub-pipeline-stage-residue-audit.spec.ts` 102/102; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `cargo test -p router-hotpath-napi hub_protocol_spec_semantics --lib -- --nocapture` 7/7; `sharedmodule/llmswitch-core npm run build`; `git diff --check`; `verify:architecture-deleted-path`.
+- Post-build path check: `find sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/dist tests/sharedmodule -path '*conversion/protocol-field-allowlists*' -o -path '*conversion/hub/policy/policy-engine*' -o -path '*conversion/hub/policy/protocol-spec*' -o -name 'hub-policy-provider-outbound-reasoning-filter.spec.ts' -o -name 'hub-policy-observe-allowlist.spec.ts'` returned no paths.
+
+## 2026-06-09 Windsurf/Cascade removal recheck after user correction
+
+- User correction for this pass: remove repository Windsurf/Cascade code directly; do not stop other workers/processes and do not edit runtime config.
+- Live executable/documentation surface is clean: current `rg -n -i 'windsurf|cascade|WINDSURF_|CASCADE'` over `package.json`, `package-lock.json`, `src`, `scripts`, `tests`, `sharedmodule/llmswitch-core/src`, `sharedmodule/llmswitch-core/scripts`, `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`, `docs`, `.agents/skills/rcc-dev-skills/SKILL.md`, and `AGENTS.md` returned no matches after excluding generated/vendor/target outputs.
+- Live path surface is clean: `find package.json package-lock.json src scripts tests sharedmodule docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no paths.
+- Package script surface is clean: package script scan for Windsurf/Cascade returned `[]`.
+- Git state distinction remains correct: ACMR diff paths contain no Windsurf/Cascade matches; remaining `windsurf|cascade` git hits are tracked `D` entries only, meaning physical deletions awaiting commit.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit` passed 102/102; `git diff --check` passed.
+
+## 2026-06-09 conversion/shared source-side emit artifact cleanup
+
+- Phase 0 generated-artifact slice: removed ignored/untracked source-side emit artifacts under `sharedmodule/llmswitch-core/src/conversion/shared`.
+- Evidence before deletion: `find sharedmodule/llmswitch-core/src/conversion/shared -maxdepth 1 \( -name '*.js' -o -name '*.d.ts' -o -name '*.js.map' \)` found only generated `.js`/`.d.ts` artifacts; `git ls-files --error-unmatch` classified them as untracked; `git check-ignore -v` mapped them to `.gitignore:107` / `.gitignore:108`.
+- Deleted artifacts: `openai-message-normalize-contract.{js,d.ts}`, `openai-message-normalize-control-text.{js,d.ts}`, `openai-message-normalize-tool-history.{js,d.ts}`, `reasoning-tool-normalizer.d.ts`, `responses-conversation-store-native.d.ts`, `responses-conversation-store-types.{js,d.ts}`, `responses-conversation-store.{js,d.ts}`, `responses-reasoning-registry.d.ts`, `responses-response-utils.d.ts`, `responses-tool-utils.d.ts`, `tool-mapping.d.ts`.
+- Extended `hub-pipeline-stage-residue-audit.spec.ts` with an explicit deleted-artifact gate; did not blanket-ban `conversion/shared` TS because several shared wrappers still need separate import graph / Rust owner proof.
+- Aligned `text-markup-normalizer` Jest expectations to Rust native owner contract, not TS semantics: Rust accepts noisy/quote JSON tool call wrappers, preserves `command` for shell-command input, and rejects RCC heredoc closing marker glued to payload.
+- Verification PASS: source-side artifact `find` now returns no paths; `hub-pipeline-stage-residue-audit.spec.ts` passed 103/103; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `text-markup-normalizer`/`openai-message-normalize` focused Jest passed 14/14; Rust `hub_text_markup_normalizer` passed 17/17; Rust `normalize_assistant_text` passed 22/22; `git diff --check`.
+
+## 2026-06-09 conversion/shared reasoning-mapping zero-consumer wrapper deletion
+
+- Phase 0 zero-consumer wrapper slice: deleted `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-mapping.ts` and ignored `dist/conversion/shared/reasoning-mapping.{js,d.ts}` after import graph showed no runtime/test/script consumer outside the public `conversion/index.ts` barrel.
+- Removed `export * from './shared/reasoning-mapping.js'` from `sharedmodule/llmswitch-core/src/conversion/index.ts`.
+- Native truth remains `mapReasoningContentToResponsesOutputWithNative` in `native-shared-conversion-semantics-toolcalls.ts`; this slice removes only the unused TS public middle wrapper.
+- Extended `hub-pipeline-stage-residue-audit.spec.ts` deleted-file list so `reasoning-mapping` source/dist residue cannot return.
+- Verification PASS: `rg -n "reasoning-mapping|mapReasoningContentToResponsesOutput\b"` has no live consumer hits beyond the residue gate/native owner; `hub-pipeline-stage-residue-audit.spec.ts` passed 103/103; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`.
+
+## 2026-06-09 conversion/shared tool-harvester zero-consumer wrapper deletion
+
+- Phase 0 zero-consumer wrapper slice: deleted `sharedmodule/llmswitch-core/src/conversion/shared/tool-harvester.ts` and ignored `dist/conversion/shared/tool-harvester.{js,d.ts}` after import graph showed no runtime/test/script consumer outside the public `conversion/index.ts` barrel and its own coverage script.
+- Deleted stale wrapper-only coverage script `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-harvester.mjs` and removed its `run-matrix-ci.mjs` entry; matrix missing-ref audit remains clean.
+- Removed `export * from './shared/tool-harvester.js'` from `sharedmodule/llmswitch-core/src/conversion/index.ts`.
+- Native truth remains `tool_harvester.rs` / `harvestToolsJson`, exposed by `native-hub-bridge-action-semantics-tools-post.ts`; this slice removes only the unused TS public middle wrapper.
+- Extended `hub-pipeline-stage-residue-audit.spec.ts` deleted-file list so tool-harvester source/dist/coverage residue cannot return.
+- Verification PASS: `rg -n "tool-harvester|coverage-tool-harvester|harvestTools\b"` has no live consumer hits beyond residue gate and a README note; matrix refs `77 / 76 unique / missing=[]`; `hub-pipeline-stage-residue-audit.spec.ts` passed 103/103; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; Rust `cargo test -p router-hotpath-napi tool_harvester --lib -- --nocapture` passed 8/8; `git diff --check`.
+
+## 2026-06-09 conversion/shared streaming-text-extractor zero-consumer wrapper deletion
+
+- Phase 0 zero-consumer wrapper slice: deleted `sharedmodule/llmswitch-core/src/conversion/shared/streaming-text-extractor.ts` and ignored `dist/conversion/shared/streaming-text-extractor.{js,d.ts}` after import graph showed no runtime/test/script consumer outside the public `conversion/index.ts` barrel and its own coverage script.
+- Deleted stale wrapper-only coverage script `sharedmodule/llmswitch-core/scripts/tests/coverage-streaming-text-extractor.mjs`.
+- Removed `export * from './shared/streaming-text-extractor.js'` from `sharedmodule/llmswitch-core/src/conversion/index.ts`.
+- Updated `sharedmodule/llmswitch-core/src/sse/README.md` to stop listing the removed TS helper as a live SSE shared module.
+- Native truth remains `streaming_tool_extractor.rs` plus native exports `extractStreamingToolCallsJson`, `createStreamingToolExtractorStateJson`, `resetStreamingToolExtractorStateJson`, and `feedStreamingToolExtractorJson`; this slice removes only the unused TS public middle wrapper.
+- Extended `hub-pipeline-stage-residue-audit.spec.ts` deleted-file list so streaming-text-extractor source/dist/coverage residue cannot return.
+- Verification PASS: `rg -n "streaming-text-extractor|coverage-streaming-text-extractor|createStreamingToolExtractor\b|StreamingTextToolExtractor\b"` only hits the residue gate; matrix refs `77 / 76 unique / missing=[]`; `hub-pipeline-stage-residue-audit.spec.ts` passed 103/103; Rust `cargo test -p router-hotpath-napi streaming_tool_extractor --lib -- --nocapture` passed 3/3.
+
+## 2026-06-09 Windsurf/Cascade removal final live-literal cleanup
+
+- User correction for this pass: remove repository Windsurf/Cascade code directly; do not stop/restart/kill other workers and do not edit runtime config as a workaround.
+- The remaining live executable-surface string hit was an untracked red test that named the retired provider while asserting `provider-response-converter` has no provider-specific TS projection branch.
+- Updated `tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts` to keep the same boundary as a generic provider-specific branch ban: no `providerFamily === ...` and no `convert.bridge.<provider>_native_<protocol>_direct` event pattern.
+- Verification PASS: active content scan over package/scripts/src/tests/llmswitch src/scripts/Rust/doc/agent surfaces returned no Windsurf/Cascade matches; active path scan returned no matches; ACMR diff scan returned no matches; deleted-path scan shows only tracked `D` entries awaiting commit.
+- Verification PASS: package script scan returned `[]`; `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts --runInBand --no-cache --forceExit` passed 2/2; `npm run verify:architecture-deleted-path` passed; `git diff --check` passed.
+
+## 2026-06-09 conversion/shared reasoning-normalizer zero-consumer wrapper deletion
+
+- Phase 0 zero-consumer wrapper slice: deleted `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-normalizer.ts` after function-level grep showed no active code/test/script importer; remaining references were docs, residue gate, native required exports, and historical fixture text.
+- Deleted ignored generated residue: `sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-normalizer.{js,d.ts}`.
+- Updated active docs to stop naming the removed TS wrapper as the SSE/inbound owner; Rust/native owner is `hub_bridge_actions/reasoning.rs` plus native required exports such as `normalizeReasoningIn*PayloadJson`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so source/dist `reasoning-normalizer` cannot return.
+- Historical fixture `tests/fixtures/goal-request-user-input-real-samples/provider-request.goal.nested-after-fix.json` still contains old transcript text mentioning `reasoning-normalizer`; it is sample evidence, not live importer, so it was not rewritten.
+- Verification PASS: active importer scan excluding fixtures returned no `reasoning-normalizer` / `stripReasoningTransportNoise` / `valueMayContainReasoningMarkup` hits; source/dist path scan returned no files; matrix refs `78 / 77 unique / missing=[]`; `hub-pipeline-stage-residue-audit.spec.ts` passed 103/103; Rust `cargo test -p router-hotpath-napi reasoning_normalizer --lib -- --nocapture` passed 4/4; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `npm run verify:architecture-deleted-path`; `git diff --check`.
+
+## 2026-06-09 responses-response-utils stale coverage consumer cleanup
+
+- Phase 0 residue follow-up: `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-response-utils.mjs` still imported deleted wrapper exports `collectToolCallsFromResponses` and `resolveFinishReason`, which could preserve old TS wrapper expectations through matrix coverage.
+- Updated the coverage script to validate only the current live API `buildChatResponseFromResponses`, with tool-call and finish-reason assertions read from the Rust full conversion result.
+- Updated `tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts` so coverage scripts cannot reintroduce consumers for the deleted wrapper exports.
+- Adjusted passthrough assertion from reference equality to structural equality because current native glue returns an equivalent object, not the original reference; this preserves semantic verification without adding fallback or alternate conversion.
+- Verification PASS: `node sharedmodule/llmswitch-core/scripts/tests/coverage-responses-response-utils.mjs`; `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts --runInBand --no-cache --forceExit` passed 2/2; grep over the coverage script, `responses-response-utils.ts`, and matrix runner found no deleted wrapper names; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+## 2026-06-09 Windsurf/Cascade repository removal verification + responses-tool-utils wrapper cleanup
+
+- User correction for this pass: remove Windsurf/Cascade repository code only; do not stop/restart/kill other workers and do not edit runtime config.
+- Verified active source/script/test/package/agent scope has no live `windsurf`/`cascade` hits after excluding generated/vendor/target/history/samples; remaining git hits are tracked `D` entries for the physical removal slice or historical memory/sample text.
+- Verified no config workaround in this pass: `git diff --name-only | rg -n "(^|/)config\\.toml$|\\.rcc|config\\.windsurf|windsurf.*config|config.*windsurf"` returned no matches.
+- Gate evidence PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts --runInBand --no-cache --forceExit`; `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit` passed 103/103; `npm run verify:llmswitch-core-tsc`; `git diff --check`.
+- Adjacent Phase 0 cleanup finished: removed zero-consumer wrapper exports `normalizeResponsesToolCallIds` and `resolveToolCallIdStyle` from `sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts`; retained live thin glue `createToolCallIdTransformer`, `enforceToolCallIdStyle`, `stripInternalToolingMetadata`, and `sanitizeResponsesFunctionName`.
+- Updated `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs` to validate the live helper contract instead of the deleted whole-payload wrapper contract; verification PASS: `node sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs`.
+
+## 2026-06-09 conversion/shared deleted-wrapper dist residue cleanup
+
+- Phase 0 residue slice: `tool-argument-repairer.ts` and `reasoning-utils.ts` source wrappers were already deleted, but ignored dist artifacts still existed under `sharedmodule/llmswitch-core/dist/conversion/shared/`.
+- Evidence before deletion: `git ls-files --error-unmatch` reported all four dist files untracked; `git check-ignore -v` mapped them to `sharedmodule/llmswitch-core/.gitignore:5:dist/`; active source/script/test search only hit the residue audit.
+- Deleted ignored dist residue:
+  - `sharedmodule/llmswitch-core/dist/conversion/shared/reasoning-utils.{js,d.ts}`
+  - `sharedmodule/llmswitch-core/dist/conversion/shared/tool-argument-repairer.{js,d.ts}`
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` so those dist artifacts cannot return after build/regeneration.
+- Verification PASS: residue audit 103/103; `npm run verify:llmswitch-core-tsc`; matrix refs `refs=76 unique=75 missing=[]`; dist path scan returned no `reasoning-utils` / `tool-argument-repairer`; `git diff --check`.
+
+## 2026-06-09 deleted-source matching dist residue cleanup
+
+- Phase 0 generated residue slice: scanned all `git diff --diff-filter=D` entries under `sharedmodule/llmswitch-core/src/**/*.ts` and found 56 ignored/untracked dist outputs whose source files are already physically deleted.
+- Evidence: source-to-dist scan listed 56 candidates; `git ls-files --error-unmatch` classified all 56 as untracked; candidates mapped to already deleted TS owners such as conversion adapters, hub-feature/session-identifiers, SSE legacy serializers/types, old servertool handlers, and tool regression helpers.
+- Deleted all 56 matching `sharedmodule/llmswitch-core/dist/**/*.js|*.d.ts|*.js.map` files and extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` with `retiredSourceDistBases` so these outputs cannot return.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit` passed 103/103; `npm run verify:llmswitch-core-tsc`; source-to-dist residue scan now reports `remaining=0`; `git diff --check`.
+
+## 2026-06-09 Windsurf/Cascade removal recheck for direct user request
+
+- User constraint for this pass: remove Windsurf-related code only; do not edit config and do not stop/restart/kill other workers.
+- Rechecked active live surfaces after the existing physical removal slice: `rg -n -i 'windsurf|cascade|WINDSURF_|CASCADE'` over `package.json`, `package-lock.json`, `src`, `scripts`, `tests`, llmswitch source/scripts/Rust owner paths, `docs`, `.agents/skills/rcc-dev-skills/SKILL.md`, and `AGENTS.md` returned no matches after excluding generated/vendor/target/coverage/sample history.
+- Rechecked live filename surface: `find package.json package-lock.json src scripts tests sharedmodule docs .agents -iname '*windsurf*' -o -iname '*cascade*'` returned no paths.
+- Git state distinction: ACMR diff paths contain no Windsurf/Cascade matches; D diff paths contain only tracked deletion entries for removed Windsurf/Cascade docs, scripts, runtime source, fixtures, and tests awaiting commit.
+- Gate evidence PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `git diff --check`.
+
+## 2026-06-09 conversion/shared marker-lifecycle public surface cleanup
+
+- Phase 0 public-surface cleanup: `sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts` has a single live external runtime consumer, `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts`, which only imports `cleanMarkerSyntaxInPlace` and `hasMarkerSyntax`.
+- Narrowed internal marker parser/helper exports to private implementation details: `MarkerSyntaxMatch`, `StripMarkerSyntaxResult`, `stripMarkerSyntaxFromText`, `stripMarkerSyntaxFromContent`, and `stripMarkerSyntaxFromMessages`.
+- Removed unused exported `stripMarkerSyntaxFromRequest` and its now-unused `StandardizedRequest` import; no live importer remains for that request-level TS helper.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block re-exporting those internal marker parser/helper symbols as public API.
+- Verification PASS: residue audit passed 104/104; `npm run verify:llmswitch-core-tsc`; focused stopmessage marker Jest passed 3/3; `git diff --check`.
+
+## 2026-06-09 Windsurf/Cascade repository removal request recheck
+
+- User constraint for this pass: remove Windsurf-related repository code; do not stop/restart/kill other workers/processes; do not edit config as a workaround.
+- Rechecked active content surface: `rg -n -i "windsurf|cascade|codeium" src sharedmodule tests scripts docs package.json AGENTS.md .agents || true` returned no live matches.
+- Rechecked active path surface: `find . -path './.git' -prune -o -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*codeium*'` found only vendor `node_modules/caniuse-lite/data/features/css-cascade-*` false positives and `.git`.
+- Git state distinction: `git diff --name-status | rg -i "windsurf|cascade|codeium"` shows tracked `D` entries only for removed Windsurf/Cascade docs, scripts, provider runtime, Rust projection, fixtures, and tests.
+- Related map hygiene fix: `verify:function-map-compile-gate` exposed `hub.response_post_servertool_client_projection` owner/allowed_paths drift; fixed `docs/architecture/function-map.yml` so the Rust NAPI owner directory covers the two canonical builders without duplicate child-path redefinition.
+- Verification PASS: `node scripts/architecture/verify-architecture-deleted-path.mjs`; `node scripts/architecture/verify-architecture-provider-specific-leaks.mjs`; `npm run verify:llmswitch-core-tsc`; focused provider/profile/preprocessor/family Jest passed 31/31; `npm run verify:function-map-compile-gate`; `git diff --check`.
+
+## 2026-06-09 output-content-normalizer public wrapper cleanup
+
+- Phase 0 public-surface cleanup: `sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts` still has a live consumer for `normalizeMessageContentParts` from `src/sse/shared/responses-output-normalizer.ts`, so the file stays.
+- Removed zero-consumer public wrappers `extractOutputSegments` and `normalizeContentPart`; their only active consumer was stale `coverage-output-content-normalizer.mjs`.
+- Removed matching unused native TS bridge functions `extractOutputSegmentsWithNative` and `normalizeContentPartWithNative`, and removed dead required native capabilities `extractOutputSegmentsJson` / `normalizeOutputContentPartJson` from `native-router-hotpath-required-exports.ts`.
+- Removed unused Rust NAPI public functions `extract_output_segments_json` and `normalize_output_content_part_json`; kept Rust internal `extract_output_segments` and `normalize_content_part` because they are still used by Rust response utilities / message content normalization.
+- Updated `coverage-output-content-normalizer.mjs` to validate only the live `normalizeMessageContentParts` contract and extended `hub-pipeline-stage-residue-audit.spec.ts` to block re-export of the deleted wrappers.
+- Fixed an adjacent stale residue gate: stop-message runtime state checks now lock Rust `servertool-core::persisted_lookup` as owner and inspect TS only as native wrapper, rather than requiring TS to implement loop-state semantics.
+- Verification PASS: residue audit + native required exports Jest passed 110/110; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-output-content-normalizer.mjs`; residual scan for deleted wrapper/capability names hits only the residue gate; `git diff --check`.
+2026-06-09 00:00 CST servertool runtime stop-message state slice: wired servertool-core persisted_lookup runtime state/stage/state-key through router-hotpath-napi, TS runtime-utils functions collapsed to native wrappers; verification in progress.
+
+2026-06-09 00:20 CST servertool runtime stop-message state slice verification:
+- PASS cargo fmt --package servertool-core --package router-hotpath-napi
+- PASS cargo test -p servertool-core state_key --lib -- --nocapture (3/3)
+- PASS cargo test -p servertool-core runtime_stop --lib -- --nocapture (3/3)
+- PASS cargo test -p router-hotpath-napi runtime_stop --lib -- --nocapture (2/2)
+- PASS cargo test -p router-hotpath-napi state_key --lib -- --nocapture (1/1)
+- PASS node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+- PASS npm run verify:servertool-rust-only
+- PASS npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+- PASS focused stop-message/hub residue Jest (155 passed, 16 skipped)
+- PASS focused CLI/servertool shadow Jest (19/19)
+- PASS cargo test -p servertool-core --lib -- --nocapture (130/130)
+- PASS cargo test -p servertool-cli --test cli_blackbox -- --nocapture (8/8)
+- PASS npx tsc --noEmit --pretty false
+- PASS git diff --check
+
+2026-06-09 00:35 CST followup flowId mini-slice:
+- Moved `runtime-utils.ts::readServerToolFollowupFlowId` to `servertool-core::persisted_lookup::read_servertool_followup_flow_id`.
+- Added bridge/export/wrapper: `readServertoolFollowupFlowIdJson` / `readServertoolFollowupFlowIdWithNative`.
+- PASS cargo test -p servertool-core followup_flow --lib -- --nocapture (1/1)
+- PASS cargo test -p router-hotpath-napi followup_flow --lib -- --nocapture (1/1)
+- PASS node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+- PASS npm run verify:servertool-rust-only
+- PASS npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+- PASS focused stop-message/hub residue Jest after serial rerun (155 passed, 16 skipped); earlier parallel build+Jest race produced native unavailable, not a code failure.
+- PASS focused CLI/servertool shadow Jest (19/19)
+- PASS cargo test -p servertool-core --lib -- --nocapture (131/131)
+- PASS cargo test -p servertool-cli --test cli_blackbox -- --nocapture (8/8)
+- PASS npx tsc --noEmit --pretty false
+- PASS git diff --check
+
+2026-06-09 01:05 CST Windsurf/Cascade removal current-pass verification:
+- User constraint followed: code cleanup only; no config edits; no worker/process stop/restart/kill.
+- Existing dirty diff physically deletes Windsurf/Cascade provider runtime, contract, profile, startup probe, Rust tool-history projection, docs, scripts, fixtures, and tests; current staged area is empty.
+- Active code/content scan PASS: `rg -n -i "windsurf|cascade|WINDSURF_|windsurf-chat-provider|windsurf-provider-contract" src sharedmodule scripts tests package.json package-lock.json --glob '!**/dist/**' --glob '!**/target/**' --glob '!**/node_modules/**' --glob '!**/*.map'` returned no matches.
+- Active route/architecture scan PASS: same token scan over `docs/architecture`, `docs/agent-routing`, `.agents/skills/rcc-dev-skills/SKILL.md`, and `AGENTS.md` returned no matches.
+- Deletion inventory evidence: `git diff --name-status | rg -i "windsurf|cascade"` shows only tracked `D` entries for removed Windsurf/Cascade paths.
+- Gate evidence PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 01:20 CST anthropic/tool-mapping public wrapper cleanup closeout:
+- Follow-up verification found stale ignored `dist/` artifacts reintroduced deleted symbols after normal incremental build: `sanitizeToolUseId`, `requireSystemText`, `ToolCallFunction`, `ToolCallItem`, `stringifyArgs`, `chatToolToBridgeDefinition*`.
+- Evidence: source scan was clean, but `sharedmodule/llmswitch-core/dist/**` still contained old emit; `git ls-files --error-unmatch` proved those dist files were untracked, and `git check-ignore -v` mapped them to `sharedmodule/llmswitch-core/.gitignore:5:dist/`. `sharedmodule/llmswitch-core/tsconfig.tsbuildinfo` was ignored by `.gitignore:7:*.tsbuildinfo`.
+- Physically deleted stale ignored emit for `tool-mapping`, `anthropic-message-utils-core`, native tool-definition bridge, native shared export barrel, native required exports, plus `tsconfig.tsbuildinfo`; then reran standard `npm run build --prefix sharedmodule/llmswitch-core`.
+- Verification PASS: clean standard build; residual scan including `dist` now only hits `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`; residue/native required exports Jest 110/110; `node sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs`; `git diff --check`.
+
+2026-06-09 01:45 CST bridge-to-chat single wrapper public surface cleanup:
+- Evidence before deletion: `bridgeToolToChatDefinition` had no runtime consumer; only `sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs` imported it. `bridgeToolToChatDefinitionWithNative`, `bridgeToolToChatDefinitionJson`, and `bridge_tool_to_chat_definition_json` existed only to serve that single wrapper and Rust tests.
+- Kept Rust internal `bridge_tool_to_chat_definition_impl` because live batch API `map_bridge_tools_to_chat_with_options_json` uses it for real runtime mappings.
+- Removed TS public wrapper `bridgeToolToChatDefinition`, native TS bridge `bridgeToolToChatDefinitionWithNative`, required native capability `bridgeToolToChatDefinitionJson`, Rust NAPI outward export `bridge_tool_to_chat_definition_json`, and unused Rust `ToolMappingSingleInput`.
+- Updated apply-patch freeform script and Rust unit tests to use `mapBridgeToolsToChat` / `map_bridge_tools_to_chat_with_options_json` with single-element arrays, avoiding a public single-item API solely for tests.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block bridge-to-chat single wrapper/native capability/Rust NAPI export resurrection.
+- Verification PASS: `cargo fmt -p router-hotpath-napi`; `npm run verify:llmswitch-core-tsc`; residue/native required exports Jest 110/110; `cargo test -p router-hotpath-napi shared_tool_mapping --lib -- --nocapture` 31/31; `npm run build --prefix sharedmodule/llmswitch-core`; `node sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs`; residual scan including `dist` only hits residue gate; `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 02:10 CST chat SSE serializer dead stream wrapper cleanup:
+- Evidence before deletion: `toSSETextStream` had no external consumer; only same-file self references. Live `serializeChatEventToSSE` is still used by `sse/shared/writer.ts` and `tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts`.
+- Removed zero-consumer `toSSETextStream`, the now-unused `PassThrough`/`Readable` import, `logChatSerializerNonBlocking`, and the deleted helper's generic `"chat sse serialization failed"` error frame.
+- Added `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` coverage to block `toSSETextStream`, the stream-wrapper primitive import in `chat-serializer.ts`, the non-blocking logger, and the generic error frame from returning.
+- Verification PASS for this slice: residual scan including `dist` only hits the residue gate; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; focused residue audit 106/106; `npx tsc --noEmit --pretty false`; `git diff --check`.
+- Adjacent known failure not claimed as slice evidence: `tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts` currently fails on existing `serializeChatEventToSSE` behavior (`event:` fields and `finish_reason: null`). This serializer function was not semantically changed in this slice, so track separately before using that test as a gate.
+
+2026-06-09 servertool CLI-result runtime state Rust slice:
+- Moved stopless client `exec_command` CLI-result request-record scanning from `runtime-utils.ts` to `servertool-core::persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context`.
+- Rust now owns request-like record collection (`__raw_request_body` / `capturedEntryRequest` / `capturedChatRequest`), stop_message_auto CLI command seed parsing from POSIX single-quoted `--input-json`, command seed lookup by call_id/tool_call_id/id, Rust CLI result validation, and `client_exec_result` snapshot construction.
+- Native bridge/export chain added: `resolveRuntimeStopMessageStateFromAdapterContextJson` in `servertool_core_blocks.rs` / `router-hotpath-napi/src/lib.rs`, `resolveRuntimeStopMessageStateFromAdapterContextWithNative` in TS wrapper, and required export entry.
+- `runtime-utils.ts::resolveRuntimeStopMessageStateFromAdapterContext` is now a native-only shell after `readRuntimeMetadata`; removed TS helpers `decodePosixSingleQuotedArgument`, `parseStopMessageCliInputFromCommand`, `readStopMessageCliCommandMap`, `findLastStopMessageCliCommandSeed`, `resolveRuntimeStopMessageStateFromRequestRecord`, and `readPositiveInteger`.
+- Gate hardened: `npm run verify:servertool-rust-only` now asserts Rust owner/native export presence and blocks TS revival of CLI command parsing / POSIX quote decode / request-record restoration / `client_exec_result` construction in `runtime-utils.ts`.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi`; `cargo test -p servertool-core adapter_context --lib -- --nocapture` (4/4); `cargo test -p servertool-core runtime_stop --lib -- --nocapture` (4/4); `cargo test -p router-hotpath-napi adapter_context --lib -- --nocapture` (12/12); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; native direct load export check for `resolveRuntimeStopMessageStateFromAdapterContextJson`; `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused stop-message/hub residue Jest (156 passed, 16 skipped); focused CLI/shadow Jest (19/19); `cargo test -p servertool-core --lib -- --nocapture` (135/135); `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` (8/8); `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 response shared wrapper closeout continuation:
+- Current slice scoped to shared response zero-consumer wrapper deletion only; ignored unrelated dirty VR/Windsurf/servertool/request diffs.
+- Added independent red gate tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts to lock TS wrapper deletion plus native bridge / required export / Rust NAPI public export deletion for output-content, reasoning-tool-normalizer, tool-mapping, and responses-tool-utils.
+- Updated docs/goals/hub-pipeline-response-rust-closeout-plan.md, function-map.yml, and verification-map.yml for this slice.
+
+2026-06-09 observed live HTTP_400 during response closeout:
+- Request openai-responses-router-gpt-5.5-20260609T052857503-323496-5379 on port 5520 first hit 1token.key1.gpt-5.5 twice with HTTP_502, then rerouted to asxs.crsa.gpt-5.5 and failed HTTP_400.
+- Upstream error from server log: Invalid input[31].content array too long; expected max length 0, got length 1.
+- Saved ~/.rcc/codex-samples/openai-responses/port-unknown/req_1780956778028_96ircjo0f/provider-request.json shows input[31] as legal function_call_output with output field and no content field; sample may represent first provider payload or pre-runtime payload, while asxs runtime/SDK likely transformed shape before send.
+- This is request/provider/reroute send-shape scope, not the current response shared wrapper deletion slice.
+
+2026-06-09 Windsurf/Cascade repository-code removal recheck:
+- User constraint followed: did not stop/restart/kill any worker and did not edit runtime config.
+- Current repository state has Windsurf/Cascade provider/runtime/docs/scripts/tests/fixtures as tracked deletions; no staged area at start of recheck.
+- PASS active code scan: `rg -n "(?i)windsurf|cascade|WINDSURF" src sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src sharedmodule/llmswitch-core/scripts scripts tests package.json --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**'` returned no matches.
+- PASS path scan: `find src sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src scripts tests -iname '*windsurf*' -o -iname '*cascade*'` returned no existing paths.
+- PASS dist scan: `rg -n "(?i)windsurf|cascade|WINDSURF" dist sharedmodule/llmswitch-core/dist --glob '!**/node_modules/**' --glob '!**/target/**'` returned no matches.
+- PASS gates/tests: `node scripts/architecture/verify-architecture-deleted-path.mjs`; `node scripts/architecture/verify-architecture-provider-specific-leaks.mjs`; focused Jest for provider factory/profile/phase3/error-chain (46/46); `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 responses reasoning registry TS wrapper cleanup closeout:
+- Completed post-native-rebuild verification for removing TS public wrappers/types and JS required exports for Rust-internal responses reasoning/output-text-meta registry APIs.
+- Kept live TS payload snapshot / passthrough wrappers; kept Rust internal reasoning/output-text-meta functions because Rust response outbound owners call them directly.
+- PASS focused Jest after native rebuild: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`, `tests/sharedmodule/responses-registry-pruning.spec.ts`, `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` (114/114).
+- PASS `npm run build --prefix sharedmodule/llmswitch-core`.
+- PASS residual scan including `sharedmodule/llmswitch-core/dist`: deleted wrapper/export names only appear in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` residue gates.
+- PASS `npx tsc --noEmit --pretty false`; PASS `git diff --check`.
+
+2026-06-09 SSE shared utils zero-consumer helper cleanup:
+- Evidence: `ObjectUtils`, `ArrayUtils`, `StreamUtils`, `REGEX_PATTERNS`, and `PerformanceUtils` only appeared in `sharedmodule/llmswitch-core/src/sse/shared/utils.ts` and stale dist; live imports use other utils (`StringUtils`, `TimeUtils`, `ValidationUtils`, `IdUtils`, `ErrorUtils`).
+- Removed the zero-consumer helper namespaces/constants plus the now-unused `Readable` import from `sharedmodule/llmswitch-core/src/sse/shared/utils.ts`.
+- Added `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` gate to block those public helpers/constants from returning.
+- PASS deleted-symbol scan including dist: removed names only appear in the residue gate.
+- PASS `npm run verify:llmswitch-core-tsc`; PASS focused residue audit (108/108); PASS `npm run build --prefix sharedmodule/llmswitch-core`; PASS `npx tsc --noEmit --pretty false`; PASS `git diff --check`.
+
+2026-06-09 SSE public barrel bidirectional facade cleanup:
+- Evidence: `createBidirectionalConverters`, `bidirectionalConverters`, and `autoConvert` had no live source/test/script/package consumers outside `sharedmodule/llmswitch-core/src/sse/index.ts`; remaining references were stale README examples.
+- Removed the zero-consumer bidirectional public factory/singleton and its auto-detect conversion facade from `sharedmodule/llmswitch-core/src/sse/index.ts`.
+- Removed stale `README-RESPONSES.md` examples that referenced the retired facade and non-existent `chatToResponses` / `responsesToChat` methods.
+- Added residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block the retired facade from returning in source docs/barrel.
+- PASS deleted-symbol scan including dist: removed names only appear in the residue gate.
+- PASS `npm run verify:llmswitch-core-tsc`; PASS focused residue audit (109/109); PASS `npm run build --prefix sharedmodule/llmswitch-core`; PASS `npx tsc --noEmit --pretty false`; PASS `git diff --check`.
+
+2026-06-09 Anthropic shared alias coercion public surface narrowing:
+- Evidence: `coerceAnthropicAliasRecord` had exactly one live source consumer: `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts`; no scripts/tests/docs/package consumers used it as a public helper.
+- Moved `coerceAnthropicAliasRecord` into `anthropic-message-utils.ts` as a private file-local helper and removed the public export from `anthropic-message-utils-openai-response.ts`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block `export function coerceAnthropicAliasRecord` from returning.
+- PASS `npm run verify:llmswitch-core-tsc`; PASS focused residue audit (109/109); PASS `npm run build --prefix sharedmodule/llmswitch-core`; PASS post-build scan: symbol remains only as private helper/use in `anthropic-message-utils` plus the residue gate; PASS `npx tsc --noEmit --pretty false`; PASS `git diff --check`.
+
+2026-06-09 conversion shared tooling public shell wrapper cleanup:
+- Evidence: `sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts` exported `ShellArgs` and `chunkString` with no live external consumers; previous slice had already removed zero-consumer `splitCommandString` / `packShellArgs` / `flattenByComma`.
+- Removed remaining zero-consumer TS public wrapper/type `ShellArgs` and `chunkString`, plus shell-utils native wrapper exports `chunkStringWithNative`, `splitCommandStringWithNative`, `packShellArgsWithNative`, and `flattenByCommaWithNative`.
+- Removed corresponding JS required native capabilities and Rust NAPI exports: `chunkStringJson`, `splitCommandStringJson`, `packShellArgsJson`, `flattenByCommaJson`, `chunk_string_json`, `split_command_string_json`, `pack_shell_args_json`, `flatten_by_comma_json`.
+- Removed Rust helper implementations and tests that existed only to serve those public NAPI APIs: `to_string_array`, `split_command_string_impl`, `pack_shell_args_impl`, `flatten_by_comma_impl`, `ChunkStringInput`, `chunk_string_impl`, and four JSON wrapper tests.
+- Preserved live Rust and TS truth: `repairFindMeta` / `repairFindMetaJson` remains used by exec-command normalize; Rust `chunk_string_by_bytes` remains used by tool harvester; unrelated `tool-registry.ts` local `ShellArgs` and SSE `StringUtils.chunkString` are different owners and were not changed.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block retired TS wrappers, native bridge wrappers, required capabilities, and Rust NAPI exports from returning.
+- PASS scans: deleted-symbol scan across source/dist/tests/scripts/docs/Rust only hits residue gate plus unrelated different-owner `tool-registry.ts` local `ShellArgs`, SSE `StringUtils.chunkString`, and offline `normalizeShellArgsJSON` script.
+- PASS verification: `cargo fmt -p router-hotpath-napi`; `cargo test -p router-hotpath-napi shared_tooling --lib -- --nocapture` (37/37); `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `npm run build --prefix sharedmodule/llmswitch-core`; residue/native required exports Jest (114/114); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; direct native probe shows retired exports undefined and live `repairFindMetaJson` / `deriveToolCallKeyJson` functions present; `git diff --check`.
+
+2026-06-09 Windsurf/Cascade removal direct recheck:
+- User constraint followed: remove repository Windsurf/Cascade code only; did not stop/restart/kill workers and did not edit runtime config.
+- Active executable/code surface scan is clean: `rg -n -i "windsurf|cascade|codeium|WINDSURF_|CASCADE"` over `package.json`, `package-lock.json`, `src`, `scripts`, `tests`, llmswitch `src/scripts`, and router-hotpath Rust source returned no matches after excluding generated/vendor/target/snap/map outputs.
+- Live filename scan is clean: `find package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*codeium*'` returned no paths.
+- Git state distinction: ACMR diff has no Windsurf/Cascade/Codeium matches; `D` diff shows only tracked deletion entries for removed Windsurf/Cascade runtime, scripts, fixtures, and tests awaiting commit.
+- Config-diff check is clean: `git diff --name-only | rg "(^|/)config\\.toml$|(^|/)config\\.[^/]*\\.toml$|\\.rcc|windsurf.*config|config.*windsurf"` returned no matches.
+- PASS gates/tests: `node scripts/architecture/verify-architecture-deleted-path.mjs`; `node scripts/architecture/verify-architecture-provider-specific-leaks.mjs`; `npx tsc --noEmit --pretty false`; focused Jest provider factory/profile loader/phase3/error-chain 35/35; `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+- 2026-06-09 live /v1/responses HTTP_400 evidence: upstream rejected `function_call_output.content` (`Invalid input[31].content array too long`) after router-direct retries. Fix scope: Rust direct decision now marks openai-responses `function_call_output` with own `content` as invalid provider wire; TS direct wrapper preserves native decision; router-direct projects invalid wire as 400 contract error before provider send; provider retry/session storm backoff capped at 3s.
+
+2026-06-09 servertool record metadata resolver Rust slice:
+- Moved `runtime-utils.ts::resolveBdWorkingDirectoryForRecord` and `resolveStopMessageFollowupProviderKey` semantics to `servertool-core::persisted_lookup`.
+- Rust now owns request-record + runtime metadata traversal for BD working directory and followup provider key. Working directory keeps key-priority semantics: scan all `workdir` locations before all `cwd` locations before all `workingDirectory` locations.
+- Native bridge/export chain added: `resolveBdWorkingDirectoryForRecordJson` and `resolveStopMessageFollowupProviderKeyJson` in `servertool_core_blocks.rs` / `router-hotpath-napi/src/lib.rs`, wrappers in `native-servertool-core-semantics.ts`, required exports in `native-router-hotpath-required-exports.ts`.
+- `runtime-utils.ts` now calls native wrappers for both functions; removed TS helper semantics `readSessionScopeValue`, `readHubCaptureContextValue`, `readProviderKeyFromMetadata`, and `toNonEmptyText`.
+- Gate hardened: `npm run verify:servertool-rust-only` asserts Rust owner/native export presence and blocks TS revival of the removed metadata walkers and local resolver semantics.
+- Verification PASS: `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; native direct export load for both new exports; `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused stop-message/hub residue Jest (162 passed, 16 skipped); focused CLI/shadow Jest (19 passed); `cargo test -p servertool-core --lib -- --nocapture` (137 passed); `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` (8 passed); `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 Windsurf/Cascade code-removal user-request pass:
+- User direction for this pass: remove Windsurf-related repository code only; do not stop/restart/kill workers and do not edit config.
+- Current evidence before validation: `rg -n -i "windsurf|cascade"` over active `package.json`, `src`, `sharedmodule/llmswitch-core/src`, router-hotpath Rust source, scripts, and tests returned no live matches after excluding generated/vendor/target outputs.
+- Current deletion inventory: `git diff --name-status -- src sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src tests scripts package.json | rg -i "windsurf|cascade"` shows only tracked `D` entries for removed provider runtime, contract, startup probe, debug harness, scripts, fixtures, tests, compat profile, and Rust projection.
+- Factory/profile/server startup diff confirms live references are removed: no `WindsurfChatProvider`, provider type/module mapping, profile metadata extraction, runtime auth exception, startup probe, or Rust `mod windsurf_tool_history_projection` remains in active source.
+
+2026-06-09 responses-tool-utils public type narrowing:
+- Evidence: `CallIdTransformer` had no external consumers; current `rg` showed it only inside `sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts` signatures and residue gate text.
+- Changed `export interface CallIdTransformer` to file-local `interface CallIdTransformer`; runtime behavior unchanged because live exports remain `createToolCallIdTransformer`, `enforceToolCallIdStyle`, `ToolCallIdStyle`, `stripInternalToolingMetadata`, and `sanitizeResponsesFunctionName`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to scan `responses-tool-utils.ts` and block `export interface CallIdTransformer` from returning.
+- Verification PASS: deleted-public-symbol scan only finds file-local interface/signatures plus the residue gate; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 tool-mapping public type narrowing:
+- Evidence: `BridgeToolMapOptions` had no external source/test/script/doc/package consumers; current `rg` finds only file-local signatures in `sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts` plus residue gate text.
+- Changed `export interface BridgeToolMapOptions` to file-local `interface BridgeToolMapOptions`; runtime behavior unchanged because live public wrappers remain `mapBridgeToolsToChat`, `mapChatToolsToBridge`, and `mapToolsForProvider`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block `export interface BridgeToolMapOptions` from returning.
+- Verification PASS: deleted-public-symbol scan only finds file-local interface/signatures plus the residue gate; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 anthropic OpenAI wrapper public type narrowing:
+- Evidence: `BuildAnthropicFromOpenAIOptions` had no external source/test/script/doc/package consumers; current `rg` finds only file-local signatures in `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts` plus residue gate text.
+- Changed `export interface BuildAnthropicFromOpenAIOptions` to file-local `interface BuildAnthropicFromOpenAIOptions` and removed the barrel `export type` from `anthropic-message-utils.ts`; runtime behavior unchanged because `buildAnthropicFromOpenAIChat` remains public and still delegates to native.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block direct export and barrel type re-export of `BuildAnthropicFromOpenAIOptions`.
+- Verification PASS: deleted-public-symbol scan only finds file-local interface/signature plus residue gate; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 anthropic shared barrel public surface narrowing:
+- Evidence: `mapAnthropicToolsToChat`, `normalizeAnthropicToolName`, and `denormalizeAnthropicToolName` had no external source/test/script/doc/package consumers through `anthropic-message-utils.ts`; only internal shared modules still use them. `mapChatToolsToAnthropicTools` has external tests and was preserved.
+- Removed barrel re-exports for internal tool-name helpers and `mapAnthropicToolsToChat` from `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts`; did not delete live implementations or change runtime mappings.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block those internal helpers from returning through the public barrel.
+- Verification PASS: re-export scan shows no external/barrel re-export hits, only internal implementation/use plus gate text; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 conversion barrel normalizeChatRequest public surface narrowing:
+- Evidence: `normalizeChatRequest` still has an internal live owner path (`chat-request-filters.ts` direct import) and focused tests, so it was not deleted. No source/test/script/doc/package consumer imports it through `sharedmodule/llmswitch-core/src/conversion/index.ts` or the API shim.
+- Removed `normalizeChatRequest` from the public conversion barrel and from `src/types/llmswitch-core-api-shim.d.ts`; internal direct import remains unchanged.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to block `normalizeChatRequest` from returning through the public conversion barrel.
+- Verification PASS: scan shows `normalizeChatRequest` only in internal direct import/implementation, focused tests, and residue gate. Initial focused Jest failed because native `normalizeOpenaiMessageJson` artifact was unavailable; after `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`, focused Jest passed 112/112. Also PASS: `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 legacy llmswitch-core ambient API shim deletion:
+- Evidence: `src/types/llmswitch-core-api-shim.d.ts` declared legacy ambient modules `rcc-llmswitch-core/api` and `rcc-llmswitch-core/dist/sse/json-to-sse/index.js`, but repository scan found no imports of those module IDs. Remaining symbol hits (`normalizeTools`, `buildSystemToolGuidance`, `SchemaValidator`, SSE converters) belong to real implementation modules, not shim consumers.
+- Physically deleted `src/types/llmswitch-core-api-shim.d.ts`; `tsconfig.json` only includes `src/types` as a broad `typeRoots`, not this file specifically.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` dead-code gate so the shim path must stay absent.
+- Verification PASS: legacy module-id scan only finds the residue gate / real implementation symbols, not shim imports; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 conversion barrel native wrapper public surface narrowing:
+- Evidence: `mapReqInboundBridgeToolsToChatWithNative`, `normalizeProviderProtocolTokenWithNative`, `buildAnthropicToolAliasMapWithNative`, and `applyClaudeThinkingToolSchemaCompatWithNative` had no repository consumer through `sharedmodule/llmswitch-core/src/conversion/index.ts`; live users import the concrete native wrapper owner paths directly.
+- Removed those four native helper re-exports from `conversion/index.ts`; did not delete native wrappers or direct owner imports.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` public conversion barrel gate to block those helper names from returning through the barrel.
+- Verification PASS: symbol scan shows only direct implementation/use sites plus docs/tests/gate, no `conversion/index.ts` re-export; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 servertool runtime context resolver Rust slice:
+- Moved `runtime-utils.ts::getCapturedRequest`, `resolveClientConnectionState`, `hasCompactionFlag`, and `resolveEntryEndpoint` semantics to `servertool-core::persisted_lookup`.
+- Rust now owns captured request priority (`capturedEntryRequest` before `capturedChatRequest`), object-only client connection state, compaction flag normalization, and entry endpoint priority (`record.entryEndpoint` before `metadata.entryEndpoint` before `/v1/chat/completions`).
+- Native bridge/export chain added: `getCapturedRequestJson`, `resolveClientConnectionStateJson`, `hasCompactionFlagJson`, `resolveEntryEndpointJson` in `servertool_core_blocks.rs` / `router-hotpath-napi/src/lib.rs`, wrappers in `native-servertool-core-semantics.ts`, required exports in `native-router-hotpath-required-exports.ts`.
+- `runtime-utils.ts` now calls native wrappers for all four functions; `npm run verify:servertool-rust-only` asserts Rust owner/native export presence and blocks TS local semantic revival.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi`; `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` (22 passed); `cargo test -p router-hotpath-napi runtime_context_helpers --lib -- --nocapture` (1 passed); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; native direct export load for 4 new exports; `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused runtime-utils Jest (5 passed); focused stop-message/hub residue Jest (163 passed, 16 skipped); `cargo test -p servertool-core --lib -- --nocapture` (140 passed); `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` (8 passed); focused CLI/shadow Jest (19 passed); `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 Windsurf/Cascade removal user-request verification:
+- User constraint for this pass: remove Windsurf-related repository code only; do not stop/restart/kill workers and do not edit runtime config.
+- Active content scan PASS: `rg -n -i "windsurf|cascade|codeium|WINDSURF_|CASCADE|CODEIUM" package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src docs AGENTS.md .agents/skills/rcc-dev-skills/SKILL.md --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/target/**' --glob '!**/coverage/**' --glob '!**/*.snap' --glob '!**/*.map'` returned no matches.
+- Active path scan PASS: `find package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src docs .agents -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*codeium*'` returned no paths.
+- Git state distinction: ACMR diff paths have no Windsurf/Cascade/Codeium matches; D diff paths contain only tracked deletion entries for removed Windsurf/Cascade docs, scripts, provider runtime, Rust projection, fixtures, and tests awaiting commit.
+- Config-diff check PASS: `git diff --name-only | rg "(^|/)config\\.toml$|(^|/)config\\.[^/]*\\.toml$|\\.rcc|windsurf.*config|config.*windsurf"` returned no matches.
+- Gate PASS: `npm run verify:architecture-deleted-path` checked 62 deleted paths stay absent; `npm run verify:architecture-provider-specific-leaks` checked 95 files.
+
+2026-06-09 servertool followup tool content limit Rust slice:
+- Moved `runtime-utils.ts::resolveStopMessageFollowupToolContentMaxChars` numeric/env/model policy to `servertool-core::persisted_lookup::resolve_stop_message_followup_tool_content_max_chars`.
+- Rust owns the preserved policy: non-empty env string parses finite positive number, floors it, clamps to at least 64, and invalid env returns `None` without falling through to model defaults; absent env with `kimi-k2.5` or `kimi-k2.5-*` model returns 1200; other models return `None`.
+- Native bridge/export chain added: `resolveStopMessageFollowupToolContentMaxCharsJson` in `servertool_core_blocks.rs` / `router-hotpath-napi/src/lib.rs`, wrapper in `native-servertool-core-semantics.ts`, required export in `native-router-hotpath-required-exports.ts`.
+- `runtime-utils.ts` now only reads `process.env.ROUTECODEX_STOPMESSAGE_FOLLOWUP_TOOL_CONTENT_MAX_CHARS` and calls native; `npm run verify:servertool-rust-only` blocks TS revival of `Number`, `Math.max`, `Math.floor`, `kimi-k2.5`, and lowercase model policy inside that function.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi --check`; `cargo test -p servertool-core followup_tool_content_max_chars --lib -- --nocapture`; `cargo test -p router-hotpath-napi followup_tool_content_max_chars --lib -- --nocapture`; native build; direct export load; `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; focused runtime-utils Jest 6/6; `cargo test -p servertool-core --lib -- --nocapture` 141/141; `cargo test -p servertool-cli --test cli_blackbox -- --nocapture` 8/8; focused stop-message/hub residue Jest 164 passed + 16 skipped; CLI/shadow Jest 19/19; `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 servertool persist stop-message state Rust slice:
+- Moved `runtime-utils.ts::persistStopMessageState` empty-state decision to `servertool-core::persisted_lookup::plan_persist_stop_message_state`.
+- Rust owns the preserved clear/save contract: clear only when stop-message fields are blank/non-finite, no lifecycle stamp, and no non-stop routing/pre-command state; save when stop state, lifecycle stamp, provider allow/disable maps, forced/prefer target, stopless goal state, or pre-command state exists.
+- TS now converts `RoutingInstructionState` Set/Map fields to JSON arrays for native input and keeps only `saveRoutingInstructionStateSync(stickyKey, null | state)` IO.
+- Native bridge/export chain added: `planPersistStopMessageStateJson` in `servertool_core_blocks.rs` / `router-hotpath-napi/src/lib.rs`, wrapper in `native-servertool-core-semantics.ts`, required export in `native-router-hotpath-required-exports.ts`.
+- Gate hardened: `npm run verify:servertool-rust-only` asserts Rust owner/native export presence and blocks TS empty-state semantic revival in `persistStopMessageState`.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi --check`; focused Rust tests for `persist_stop_message_state_plan` and NAPI bridge 1/1 each; native build; direct export probe (`planPersistStopMessageStateJson:function`, clear plan); `npm run verify:servertool-rust-only`; llmswitch-core tsc; focused runtime-utils Jest 7/7; servertool-core full lib 142/142; servertool-cli blackbox 8/8; focused stop-message/hub residue Jest 165 passed + 16 skipped; CLI/shadow Jest 19/19; root tsc; `git diff --check`.
+
+2026-06-09 Windsurf/Cascade removal user-request revalidation:
+- User constraint for this pass: remove Windsurf-related repository code only; do not stop/restart/kill workers and do not edit runtime config.
+- Live executable surface is clean: `rg -n -i "windsurf|cascade|codeium|WINDSURF_|CASCADE|CODEIUM"` over package, src, scripts, tests, llmswitch src/scripts, and router-hotpath Rust source returned no matches after excluding generated/vendor/target outputs.
+- Live path surface is clean: `find package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*codeium*'` returned no paths.
+- Docs/agent live surface is clean: `rg -n -i "windsurf|cascade|codeium|WINDSURF_|CASCADE|CODEIUM" docs AGENTS.md .agents/skills/rcc-dev-skills/SKILL.md` returned no matches; corresponding filename scan returned no paths.
+- Git state distinction remains correct: ACMR diff paths have no Windsurf/Cascade/Codeium matches; D diff paths contain only tracked deletion entries for removed Windsurf/Cascade scripts, provider runtime, Rust projection, fixtures, and tests.
+- Config-diff check remains clean: no `config.toml`, provider TOML, `.rcc`, or Windsurf config path appears in current diff.
+- Gate PASS: `npm run verify:architecture-deleted-path` checked 62 deleted paths stay absent; `npm run verify:architecture-provider-specific-leaks` checked 95 files.
+
+2026-06-09 args-mapping zero-consumer wrapper deletion:
+- Evidence: `sharedmodule/llmswitch-core/src/conversion/args-mapping.ts` only wrapped native `normalizeArgsBySchemaWithNative` and `normalizeToolsWithNative`; repository scan found no live imports except the public conversion barrel.
+- Physically deleted the TS source wrapper and removed `export * from './args-mapping.js'` from `sharedmodule/llmswitch-core/src/conversion/index.ts`; native capabilities remain available through their native owner wrappers and required exports.
+- Removed stale dist residues `sharedmodule/llmswitch-core/dist/conversion/args-mapping.js` and `.d.ts`; `npm run build --prefix sharedmodule/llmswitch-core` regenerated dist without the stale barrel export.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to keep source and dist args-mapping paths absent.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `git diff --check`; post-build scan only finds `args-mapping` in the residue gate.
+
+2026-06-09 coverage bridge blackbox args-mapping residue removal:
+- Evidence: after deleting `dist/conversion/args-mapping.js`, `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` still dynamically imported that deleted dist owner and ran two assertions against `normalizeArgsBySchema` / `normalizeTools`.
+- Removed the stale dynamic import and the two args-mapping assertions; the script now covers only live bridge/protocol owners.
+- Extended the script-import residue gate to block `dist/conversion/args-mapping.js` from returning in llmswitch matrix scripts.
+- Verification PASS: `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` (10/10); focused residue Jest (109/109); `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 conversion barrel helper public surface narrowing:
+- Evidence: `repairFindMeta`, `mapBridgeToolsToChat`, `mapChatToolsToBridge`, `flattenChatToolsForFunctionCalling`, `augmentOpenAITools`, `augmentAnthropicTools`, and `buildSystemToolGuidance` have live direct-owner consumers, but no repository consumer imports them through `sharedmodule/llmswitch-core/src/conversion/index.ts` / `dist/conversion/index.js`.
+- Removed `export * from './shared/tooling.js'`, `export * from './shared/tool-mapping.js'`, and `export * from '../guidance/index.js'` from the conversion public barrel; live direct-owner imports and `dist/guidance/index.js` remain unchanged.
+- Extended the public conversion barrel residue gate to block those helper modules from returning through `conversion/index.ts`.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` (10/10); post-build scan confirms source/dist conversion barrels no longer export those modules; `git diff --check`.
+
+2026-06-09 V2 conversion pipeline public barrel narrowing:
+- Evidence: `ProtocolConversionPipeline`, `PipelineValidationError`, `Protocol*Pipeline*` option/result types, `pipeline/schema`, `pipeline/hooks`, `pipeline/meta`, `CodecRegistry`, `SchemaValidator`, and legacy `conversion/types` still have internal direct-owner usage, but no repository consumer imports them through `sharedmodule/llmswitch-core/src/conversion/index.ts` / `dist/conversion/index.js`.
+- Removed those V2 pipeline/codec/schema/type exports from the conversion public barrel; implementation files and direct imports remain unchanged.
+- Kept public barrel exports that are still consumed through `dist/conversion/index.js`: `convertProviderResponse` and `runStandardChatRequestFilters`.
+- Extended the public conversion barrel residue gate to block legacy V2 pipeline/codec/schema/type exports from returning through `conversion/index.ts`.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` (10/10); final source/dist conversion barrel scan only finds the forbidden tokens in the residue gate; `git diff --check`.
+
+2026-06-09 conversion barrel minimum export surface:
+- Evidence: repository import scan found only two live consumers of `dist/conversion/index.js`: scripts importing `convertProviderResponse` and `scripts/tools-dev/run-llmswitch-chat.mjs` importing `runStandardChatRequestFilters`.
+- Reduced `sharedmodule/llmswitch-core/src/conversion/index.ts` to explicit exports for only `convertProviderResponse` and `runStandardChatRequestFilters`.
+- Added residue gate patterns blocking Hub bridge/runtime/pipeline/types, `StageRecorder`, text markup normalizer, and Responses bridge modules from returning through the conversion public barrel.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; dist export probe shows exactly `["convertProviderResponse","runStandardChatRequestFilters"]`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` (10/10); `git diff --check`.
+- Additional probe note: `openai-chat-json-text-body.mjs` and `anthropic-sse-error-event-status.mjs` successfully loaded `convertProviderResponse` from the barrel before failing on existing provider-response/native behavior assertions, so those failures are not evidence of missing barrel exports.
+
+2026-06-09 legacy conversion codec registry and schema validator deletion:
+- Evidence: after conversion public barrel narrowing, `sharedmodule/llmswitch-core/src/conversion/codec-registry.ts` and `schema-validator.ts` had no live importers; scans found only self definitions and stale docs/dist residues. `types.ts` still has live codec/filter imports and was not deleted.
+- Physically deleted source files `codec-registry.ts` and `schema-validator.ts`, plus stale dist `.js` and `.d.ts` outputs.
+- Updated `sharedmodule/llmswitch-core/src/conversion/README.md` to describe the current Rust-owned boundary and mark those legacy modules as deleted. Updated `docs/refactoring/compatibility-v2-architecture-design.md` to prevent the historical V2 sketch from being treated as current implementation truth.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` deleted-path gate to keep source and dist registry/validator files absent.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; post-build `ls` confirms source/dist files absent; residue scan only finds deleted-path/anti-revival documentation; `git diff --check`.
+
+2026-06-09 conversion codecs source-side emit cleanup:
+- Evidence: `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.d.ts` was an ignored source-side TypeScript emit artifact (`.gitignore` rule `sharedmodule/llmswitch-core/src/**/*.d.ts`), had no importer, and was the only `.d.ts/.js/.js.map` artifact under `src/conversion/codecs`.
+- Physically deleted the ignored artifact; live `gemini-openai-codec.ts` and direct consumers remain unchanged.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` source-side emit gate to keep the artifact absent.
+- Verification PASS: focused residue Jest (109/109); `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; post-build `find sharedmodule/llmswitch-core/src/conversion/codecs -maxdepth 1 \( -name '*.d.ts' -o -name '*.js' -o -name '*.js.map' \)` returned no files; `git diff --check`.
+
+2026-06-09 5555 fin / SSE incomplete log-order correction:
+- User correction: simple 5555 health or small curl stream probe does not prove the real request can finish. It only proves the listener/basic terminal path can work.
+- Live routing evidence must be separated by requestId and policy group. Current multi-port process writes active 5555 traffic into `~/.rcc/logs/server-5520.log`; `~/.rcc/logs/server-5555.log` can be stale after startup. Filter 5555 with `gateway-priority-5555` / `port":5555` / exact requestId, and do not use 5520 `client_close` or `UPSTREAM_STREAM_TIMEOUT` as 5555 proof.
+- Latest targeted 5555 stream probe `RCC5555_SEARCH_STREAM_FIN_1780961929` entered `thinking/gateway-priority-5555-priority-thinking -> 1token.key1.gpt-5.5` and emitted `response.done` + `[DONE]`, but this remains a small control probe, not evidence that the user's real stuck workflow completes.
+- Code finding: `src/server/handlers/handler-response-utils.ts` logged `completed(status=200)` in `outboundStream.on('end')` before terminal repair and before `upstream_stream_incomplete` classification. This allowed an incomplete SSE to appear successful in logs before the explicit incomplete error.
+- Fix slice: moved stream success logging behind terminal/incomplete classification; if terminal is still missing and conversation was not preserved for client close, only `response.sse.stream.error` / `upstream_stream_incomplete` is logged, not request success.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts --runInBand` (17/17); `npm run jest:run -- --runTestsByPath tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts --runInBand` (3/3, PASS printed; Jest runner had an open handle and was ended by explicit PID 10501 after PASS).
+
+2026-06-09 removed-provider cleanup revalidation:
+- User correction for this slice: remove removed-provider repository code only; do not stop/restart/kill any worker/process and do not change config.
+- Current tracked deletion surface contains only removed-provider code/docs/tests/scripts/fixtures as `D` entries; active tracked source/test/script/package/architecture scans have no `windsurf` / `cascade` / `codeium` matches outside historical memory/workbench files.
+- Evidence commands: `git grep -n -i -E "windsurf|cascade|codeium" -- src tests scripts package.json sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src .agents/skills/rcc-dev-skills/SKILL.md AGENTS.md docs/agent-routing docs/architecture` returned no matches; `rg -n -i -e "windsurf|cascade|codeium" ...` over the same active roots returned no matches.
+- Gate owner remains `scripts/architecture/verify-architecture-deleted-path.mjs` for deleted paths and `scripts/architecture/verify-architecture-provider-specific-leaks.mjs` for Hub/VR provider-specific branch residue.
+
+2026-06-09 conversion root source-side emit cleanup:
+- Evidence: `find sharedmodule/llmswitch-core/src/conversion -type f \( -name '*.d.ts' -o -name '*.js' -o -name '*.js.map' \)` found 15 ignored artifacts under the conversion root/responses/types surface; `git check-ignore -v` mapped them to `sharedmodule/llmswitch-core/src/**/*.d.ts` / `src/**/*.js`; `git ls-files sharedmodule/llmswitch-core/src/conversion | rg '\.(d\.ts|js|js\.map)$'` found no tracked emit files.
+- Import risk: source/tests intentionally import TS sources via `.js` specifiers such as `responses-openai-bridge.js`, `response-payload.js`, `runtime-metadata.js`, and `types/bridge-message-types.js`; side-by-side emitted `.js` files can shadow the live `.ts` owner in source-side execution. These artifacts are not semantic truth.
+- Physically deleted 15 ignored artifacts: `bridge-actions.d.ts`, `bridge-instructions.d.ts`, `bridge-message-utils.d.ts`, `bridge-policies.d.ts`, `compaction-detect.d.ts`, `mcp-injection.d.ts`, `responses-host-policy.d.ts`, `responses-openai-bridge.d.ts`, `responses-openai-bridge/response-payload.d.ts`, `responses-openai-bridge/types.d.ts`, `responses-openai-bridge/types.js`, `runtime-metadata.d.ts`, `types.d.ts`, `types.js`, and `types/bridge-message-types.js`.
+- Extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` source-side emit gate to keep these artifacts absent.
+- Post-delete inventory returned no `.d.ts` / `.js` / `.js.map` under `sharedmodule/llmswitch-core/src/conversion`.
+- Verification PASS: focused residue Jest 109/109; `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; post-build artifact scan still empty; `git diff --check`.
+
+2026-06-09 llmswitch-core src-wide source-side emit cleanup:
+- Evidence: after conversion cleanup, `find sharedmodule/llmswitch-core/src -type f \( -name '*.d.ts' -o -name '*.js' -o -name '*.js.map' \)` still found 4 ignored artifacts: `runtime/user-data-paths.d.ts`, `runtime/user-data-paths.js`, `shared/common-utils.d.ts`, and `shared/common-utils.js`.
+- `git check-ignore -v` mapped them to `sharedmodule/llmswitch-core/src/**/*.d.ts` / `src/**/*.js`; `git ls-files sharedmodule/llmswitch-core/src | rg '\.(d\.ts|js|js\.map)$'` found no tracked emit files.
+- Import risk: `sharedmodule/llmswitch-core/src` has live `.ts` owners for `runtime/user-data-paths.ts` and `shared/common-utils.ts`, while many source files import them via `.js` specifiers. Side-by-side `.js` artifacts shadow the live TS owners during source-side execution.
+- Physically deleted the 4 ignored artifacts and added a broad residue gate: `llmswitch-core src must not keep side-by-side TS emit artifacts`, scanning all `sharedmodule/llmswitch-core/src` for `.js` / `.d.ts` / `.js.map`.
+- Post-delete inventory returned no `.d.ts` / `.js` / `.js.map` under `sharedmodule/llmswitch-core/src`.
+- Verification PASS: focused residue Jest 110/110; `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; post-build full `sharedmodule/llmswitch-core/src` artifact scan still empty; `git diff --check`.
+
+2026-06-09 5555 route_failed / VR hit visibility correction:
+- User log at 07:56:26 for request `openai-responses-router-gpt-5.5-20260609T075626741-324835-6718` does not prove 5555 had no route candidates. Targeted log lookup shows the same request emitted `[virtual-router-hit] ... search/gateway-priority-5520-priority-search -> 1token.key1.gpt-5.4-mini...`, then `router-direct.route_failed`. Therefore the selected routing policy group was 5520, not 5555.
+- `/Users/fanzhang/.rcc/config.toml` has non-empty `gateway_priority_5555` routing pools for coding/thinking/tools/search/web_search/multimodal/longcontext/default. If a request should be 5555 but logs show `gateway-priority-5520`, root-cause direction is client base_url / Host / socket.localPort / port context, not 5555 availability.
+- Observability fix: `src/server/utils/request-log-color.ts` now colors `[virtual-router-hit]` by explicit `sid=` or `[virtual-router-hit] [session]` before falling back to registered request context, so different sessions are visibly different even without prior request registry.
+- Multi-port console fix: `src/server/runtime/http-server/port-log-context.ts` prefixes routed request-context console output and per-port files with `[port:<matchedPort> group:<routingPolicyGroup>]`, so a single multi-port process no longer hides 5555/5520 identity behind the main server log filename.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/utils/request-log-color.spec.ts --runInBand` (14/14); `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/entry-port-snapshot-isolation.red.spec.ts --runInBand` (2/2, PASS printed; open Jest runner was ended by explicit PID 46719 after PASS); `npx tsc --noEmit --pretty false --incremental false`.
+
+2026-06-09 llmswitch-core stale dist residue cleanup:
+- Evidence: reverse `dist -> src` owner scan found 5 dist-only residue pairs with no source owner: `dist/conversion/hub/response/response-runtime-anthropic-helpers.{js,d.ts}`, `dist/conversion/shared/reasoning-tool-parser.{js,d.ts}`, `dist/servertool/handlers/empty-reply-continue.{js,d.ts}`, `dist/servertool/handlers/memory/extract-responses-input.{js,d.ts}`, and `dist/servertool/handlers/stop-message-auto/visible-text.{js,d.ts}`.
+- `git ls-files` for those dist paths returned no tracked files, and `git check-ignore -v` mapped all of them to `sharedmodule/llmswitch-core/.gitignore: dist/`.
+- Live source owners are absent for all five pairs. Existing references are only residue gates, red tests, docs, or memory. `empty-reply-continue`, `extract-responses-input`, `visible-text`, `reasoning-tool-parser`, and `response-runtime-anthropic-helpers` are already deleted source-side semantics and must not survive as dist-only executable residue.
+- Physically deleted the 10 ignored dist files and extended `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` forbidden file list to keep them absent.
+- Post-delete reverse `dist -> src` owner scan returned no dist-only `.js` / `.d.ts` / `.js.map` files without a source owner.
+
+2026-06-09 servertool default/implicit Gemini snapshot Rust owner:
+- Migrated `runtime-utils.ts::{resolveDefaultStopMessageSnapshot,resolveImplicitGeminiStopMessageSnapshot}` semantics into `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`.
+- Rust now owns default snapshot stop eligibility, custom/default text, positive finite maxRepeats floor, implicit Gemini provider/endpoint gating, adapter `__rt.stopGatewayContext` eligibility, empty assistant reply detection, Responses visible/tool-like output detection, and `source: default|auto` snapshot construction.
+- Native bridge/export chain: `servertool_core_blocks.rs` -> `router-hotpath-napi/src/lib.rs` -> `native-servertool-core-semantics.ts`; required exports added: `resolveDefaultStopMessageSnapshotJson`, `resolveImplicitGeminiStopMessageSnapshotJson`.
+- `runtime-utils.ts` no longer imports `stop-gateway-context.js` or `ai-followup.js`; the two snapshot functions are native-only thin shells. `verify-servertool-rust-only` now blocks TS revival of `isStopEligibleForServerTool`, `extractResponsesOutputText`, `hasToolLikeOutput`, `isEmptyAssistantReply`, Gemini `/v1/responses` checks, response output/tool checks, default `继续执行`, and local `Math.floor`/`Number.isFinite` maxRepeats logic.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi --check`; `cargo test -p servertool-core --lib -- --nocapture` (149/149); `cargo test -p router-hotpath-napi stop_message_snapshot --lib -- --nocapture` (2/2); `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; direct `.node` export probe for both new exports; `npm run verify:servertool-rust-only`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `npm run jest:run -- --runTestsByPath tests/servertool/stop-message-runtime-utils.continuation.spec.ts --runInBand --forceExit` (9/9); wider stop-message/hub residue Jest (168 passed, 16 skipped); root `npx tsc --noEmit --pretty false`; `git diff --check`.
+- Probe note: a first direct probe using TS source import failed because Node could not resolve `.ts` file imports with `.js` specifiers; the valid direct probe used `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node` after native build.
+
+2026-06-09 Windsurf/Cascade removal direct user request pass:
+- User constraint for this pass: remove repository Windsurf/Cascade code directly; do not stop/restart/kill other workers/processes and do not edit runtime config as workaround.
+- Current active content surface is clean: `rg -n -i "windsurf|cascade|codeium|WINDSURF_|CASCADE|CODEIUM"` over package, source, scripts, tests, llmswitch source/scripts, router-hotpath/servertool Rust source, docs, `AGENTS.md`, and `.agents/skills/rcc-dev-skills/SKILL.md` returned no matches after excluding generated/vendor/target/coverage/snap/map outputs.
+- Current active filename surface is clean: `find package.json package-lock.json src scripts tests sharedmodule/llmswitch-core/src sharedmodule/llmswitch-core/scripts sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src docs .agents -iname '*windsurf*' -o -iname '*cascade*' -o -iname '*codeium*'` returned no paths.
+- Git state distinction is clean: ACMR diff paths contain no Windsurf/Cascade/Codeium matches; remaining matches are tracked `D` entries only for removed provider runtime, contract, startup probe, Rust projection, compat profile, debug harness, scripts, fixtures, tests, and docs awaiting commit.
+- Config-diff check is clean: no `config.toml`, provider TOML, `.rcc`, or Windsurf config path appears in current diff.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; package script scan returned no Windsurf/Cascade/Codeium scripts.
+2026-06-09 servertool loop-state slice: current TS owner found in sharedmodule/llmswitch-core/src/servertool/loop-state-block.ts. TS still normalizes serverToolLoopState and computes repeatCount/startedAtMs/stopPairRepeatCount/stopPairWarned policy. Planned migration keeps stable JSON/SHA1 hashing in TS as crypto/IO helper, and moves read/normalize + repeat/flow-only/stop-pair policy into servertool-core Rust with NAPI/native wrapper/gate.
+
+2026-06-09 servertool loop-state slice completed:
+- Added `servertool-core/src/loop_state_contract.rs` as Rust owner for `read_servertool_loop_state` and `plan_servertool_loop_state`.
+- Rust now owns loop state normalization, payload-vs-flow-only tracking, `__servertool_auto__`, repeat count, startedAt reuse, stop pair repeat count, and warned preservation/reset.
+- `loop-state-block.ts` is a thin shell: stable JSON/SHA1 hash helpers + runtime metadata read + `readServertoolLoopStateWithNative` / `planServertoolLoopStateWithNative`.
+- `verify-servertool-rust-only` now asserts Rust owner/native exports and blocks TS revival of `sameFlow`, `samePayload`, `prevCount`, `previousPair*`, `__servertool_auto__`, and local numeric floor/clamp logic.
+- Verification PASS: Rust fmt check; servertool-core loop-state focused and full lib 154/154; router-hotpath-napi loop-state bridge 2/2; native build and direct `.node` export probe; `npm run verify:servertool-rust-only`; llmswitch-core/root tsc; `tests/servertool/loop-state-block.spec.ts` 3/3; full `tests/servertool/stop-message-flow-followup-reentry.spec.ts` 9/9; `git diff --check`.
+
+2026-06-09 V2 conversion pipeline scaffold deletion:
+- Evidence: `sharedmodule/llmswitch-core/src/conversion/pipeline/index.ts` had no live external importer after the conversion public barrel was narrowed; `schema/index.ts` was a pure barrel. The only internal dependency on the generic `ProtocolConversionPipeline` scaffold was `OpenAIOpenAIPipelineCodec`, which can call the existing native inbound/outbound helpers directly.
+- Physically deleted tracked source files `sharedmodule/llmswitch-core/src/conversion/pipeline/index.ts` and `sharedmodule/llmswitch-core/src/conversion/pipeline/schema/index.ts`.
+- Physically deleted ignored stale dist outputs `dist/conversion/pipeline/index.{js,d.ts}` and `dist/conversion/pipeline/schema/index.{js,d.ts}` after `git check-ignore` proved they are dist artifacts.
+- Updated `protocol-hooks.ts` and `openai-chat-helpers.ts` to import canonical chat types from `schema/canonical-chat.ts` directly.
+- Collapsed `OpenAIOpenAIPipelineCodec` off the deleted generic TS pipeline scaffold: it now directly calls native format parse / semantic map / standardized conversion helpers, then preserves same-protocol OpenAI wire fields `tools`, `tool_choice`, and `parallel_tool_calls`; empty intermediate `parameters` wrapper is removed from OpenAI wire output.
+- Updated `sharedmodule/llmswitch-core/src/conversion/pipeline/README.md` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to lock the deleted scaffold/barrel and matching dist outputs absent.
+- Verification PASS: `npm run build --prefix sharedmodule/llmswitch-core`; `npm run verify:llmswitch-core-tsc`; focused residue Jest 110/110; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; root `npx tsc --noEmit --pretty false`; one-shot OpenAI pipeline probe asserted `tool_choice`, `parallel_tool_calls`, and no `parameters` wrapper; deleted dist scan returned absent; `git diff --check`.
+- Probe caveat: `node sharedmodule/llmswitch-core/scripts/tests/openai-tool-choice-single-source.mjs` printed its pass line but did not naturally exit because of an existing open handle; the equivalent one-shot probe with explicit `process.exit(0)` was used as the reliable exit-code evidence.
+
+2026-06-09 V2 conversion pipeline meta/hook scaffold contraction:
+- Evidence: after deleting the generic `ProtocolConversionPipeline`, `ConversionMetaBag` was only used by `ResponsesOpenAIPipelineCodec` to store one `responsesContext` by requestId; `protocol-hooks.ts` only needed `ProtocolPipelineContext` for remaining V2 codec direct helpers. Generic parser/serializer/validation/hook result types had no live consumers.
+- Replaced `ResponsesOpenAIPipelineCodec` request meta store with direct `Map<string, JsonObject>` context store; request side stores cloned `ResponsesRequestContext` directly and response side restores it directly.
+- Physically deleted tracked source `sharedmodule/llmswitch-core/src/conversion/pipeline/meta/meta-bag.ts` and ignored dist outputs `dist/conversion/pipeline/meta/meta-bag.{js,d.ts}`.
+- Contracted `sharedmodule/llmswitch-core/src/conversion/pipeline/hooks/protocol-hooks.ts` to export only `ProtocolPipelineContext`; generic `ProtocolPipelineHooks`, parser/serializer/cleanup/augmentation/validation hook types, hook args, parse/result types, and meta-bag imports are gone.
+- Updated `sharedmodule/llmswitch-core/src/conversion/pipeline/README.md` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to lock `meta-bag` absent and prevent generic hook scaffold restoration.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; focused residue Jest 111/111; focused Responses pipeline Jest 1/1; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; root `npx tsc --noEmit --pretty false`; one-shot Responses V2 context-store request/response probe; deleted source/dist meta scan returned absent; `git diff --check`.
+
+2026-06-09 V2 conversion pipeline full source/test/docs closeout:
+- Evidence: after deleting `sharedmodule/llmswitch-core/src/conversion/pipeline/**`, remaining references were stale docs/red-test expectations and one tracked test `tests/sharedmodule/responses-openai-pipeline-request-parameters.spec.ts` importing the deleted `ResponsesOpenAIPipelineCodec`.
+- Physically deleted the stale test and updated `docs/goals/request-field-chatprocess-equivalence-audit-plan.md` so V2 pipeline codecs are recorded as deleted forbidden duplicate request-semantics entrances, not pending migration targets.
+- Updated `tests/red-tests/request_field_semantics_must_not_use_raw_context_metadata.test.ts` to require the deletion note and keep source/dist pipeline roots plus the stale test absent.
+- Updated `docs/hub-pipeline-rustification-execution-plan.md` to stop pointing at old `conversion/pipeline/stages/**`; current stage scope is `conversion/hub/pipeline/stages/**`, while deleted `conversion/pipeline/**` is forbidden legacy scope.
+- Removed the empty legacy directory tree after confirming it contained no files; `sharedmodule/llmswitch-core/src/conversion/pipeline` and matching dist root are absent.
+- Verification PASS: focused residue/red Jest 115/115; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; root `npx tsc --noEmit --pretty false`; source/dist pipeline root scan absent; `git diff --check`.
+2026-06-09 servertool stop-gateway slice: stop-gateway-context.ts still has TS fallback inspect, embedded tool marker scans, reasoning-only empty detection, tool-like Responses output detection, and metadata StopGatewayContext normalization. This conflicts with Rust-only/no fallback direction. Planned migration: fix Rust stop_gateway_context choiceIndex, add Rust normalize_stop_gateway_context, expose native normalizeStopGatewayContextJson, make TS stop-gateway-context.ts a native-only shell plus metadata IO writer.
+
+2026-06-09 servertool stop-gateway slice completed:
+- `servertool-core/src/stop_gateway_context.rs` now owns stop gateway inspect/eligibility, embedded tool marker detection, reasoning-only empty assistant detection, Responses tool-like output detection, last matching chat choice index preservation, and `normalize_stop_gateway_context`.
+- `stop-gateway-context.ts` is native-only for inspect and metadata normalization; it only writes/reads runtime metadata through existing metadata IO helpers and no longer has TS fallback inspect, local marker scans, tool-like output scan, or swallowed metadata write failure.
+- Native bridge/export chain added `normalize_stop_gateway_context_json` through `servertool_core_blocks.rs`, `router-hotpath-napi/src/lib.rs`, `native-servertool-core-semantics.ts`, and required export `normalizeStopGatewayContextJson`.
+- `verify-servertool-rust-only` now locks stop-gateway Rust owner/native export/TS thin shell and blocks TS fallback/semantic revival.
+- Verification PASS: `cargo fmt --package servertool-core --package router-hotpath-napi --check`; `cargo test -p servertool-core stop_gateway --lib -- --nocapture` 12/12; `cargo test -p router-hotpath-napi stop_gateway --lib -- --nocapture` 1/1; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; direct `.node` export probe; `npm run jest:run -- --runTestsByPath tests/servertool/stop-gateway-context.spec.ts --runInBand --forceExit` 5/5; `npm run verify:servertool-rust-only`; llmswitch-core/root tsc; `cargo test -p servertool-core --lib -- --nocapture` 157/157; `git diff --check`.
+
+2026-06-09 servertool stop-message compare-context slice completed:
+- Current TS owner found in `sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.ts`: local context normalization, numeric floor/clamp, mode/decision normalization, progress summary formatting, and swallowed metadata write failure. This conflicted with Rust-only/no fallback direction and matched the just-closed stop-gateway pattern.
+- Added `servertool-core/src/stop_message_compare_context.rs` as Rust owner for `normalize_stop_message_compare_context` and `format_stop_message_compare_context`.
+- Rust now owns compare context validation, `mode` / `decision` normalization, boolean truthiness compatibility, non-negative integer flooring/clamping, default `remaining=max-used`, optional progress fields, and summary format string.
+- TS `stop-message-compare-context.ts` is now native-only plus runtime metadata IO. It calls `normalizeStopMessageCompareContextWithNative` / `formatStopMessageCompareContextWithNative` and no longer contains local `Number.isFinite` / `Math.floor` / `Math.max` / Boolean / formatter semantics or catch-swallowed metadata writes.
+- Native bridge/export chain added `normalize_stop_message_compare_context_json` and `format_stop_message_compare_context_json` through `servertool_core_blocks.rs`, `router-hotpath-napi/src/lib.rs`, `native-servertool-core-semantics.ts`, and required exports.
+- `verify-servertool-rust-only` now locks compare-context Rust owner/native export/TS thin shell and blocks TS semantic revival.
+- Verification PASS: Rust fmt check; `cargo test -p servertool-core stop_message_compare --lib -- --nocapture` 3/3; `cargo test -p router-hotpath-napi stop_message_compare --lib -- --nocapture` 1/1; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`; direct `.node` export probe for both new exports; `npm run jest:run -- --runTestsByPath tests/servertool/stop-message-compare-context.spec.ts --runInBand --forceExit` 5/5; `npm run verify:servertool-rust-only`; llmswitch-core/root tsc; `cargo test -p servertool-core --lib -- --nocapture` 160/160; `cargo test -p servertool-cli -- --nocapture` 8/8 blackbox; `git diff --check`.
+
+2026-06-09 hub types zero-consumer barrel deletion:
+- Inventory result: `sharedmodule/llmswitch-core/src/conversion/hub/types/index.ts` was a pure type barrel and the only Hub/servertool 0-consumer source candidate besides a Jest test and dynamically loaded `snapshot-recorder.ts`; `snapshot-recorder.ts` remains live via `importCoreDist('conversion/hub/snapshot-recorder')`.
+- No package export or dynamic `importCoreDist('conversion/hub/types')` / `conversion/hub/types/index` consumer was found. Existing code imports concrete type modules (`chat-envelope`, `json`, `standardized`, etc.) directly.
+- Physically deleted tracked source `sharedmodule/llmswitch-core/src/conversion/hub/types/index.ts` and ignored stale dist outputs `sharedmodule/llmswitch-core/dist/conversion/hub/types/index.{js,d.ts}`.
+- Added `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` forbidden paths so the barrel and dist artifacts stay absent.
+- Verification PASS: strict import/dynamic scan only finds the residue gate itself; source/dist absent check; focused residue Jest 110/110; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; `git diff --check`.
+
+2026-06-09 Windsurf/Cascade removal recheck per direct user request:
+- Constraint followed: did not stop/restart/kill workers and did not edit runtime config; this pass only verified and locked repository code deletion.
+- Active filename scan `rg --files | rg -i "windsurf|cascade|codeium"` returned no paths.
+- Active content scan over package, source, scripts, tests, llmswitch source/scripts, router-hotpath/servertool Rust source, docs, `.agents`, and `AGENTS.md` returned no `windsurf|cascade|codeium` matches after excluding generated/vendor/target/coverage/snap/map outputs.
+- Git diff distinction: `git diff --name-only --diff-filter=ACMR | rg -i "windsurf|cascade|codeium"` returned no active modified/added/copied/renamed paths; remaining matches are tracked `D` entries only for removed Windsurf/Cascade runtime, contract, probe, harness, scripts, fixtures, tests, and docs.
+- Verification PASS: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; root `npx tsc --noEmit --pretty false`; `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 route-aware Responses continuation TS owner deletion closeout:
+- Deleted source/test/dist remain absent: `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/route-aware-responses-continuation.ts`, `tests/sharedmodule/route-aware-responses-continuation.spec.ts`, and ignored dist `route-aware-responses-continuation.{js,d.ts}`.
+- Updated stale active docs `docs/goals/followup-meta-outbound-whitelist-plan.md` and `docs/goals/direct-relay-responses-continuation-plan.md` so the current owner is Rust `hub_pipeline_blocks/responses_resume.rs` + `shared_responses_conversation_utils.rs`; old TS owner/test are documented only as forbidden legacy.
+- Residual reference scan for `route-aware-responses-continuation|resolveRouteAwareResponsesContinuation` now only finds forbidden/deleted context in docs plus `hub-pipeline-stage-residue-audit.spec.ts` forbidden path entries.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --forceExit` (110/110); `cargo test -p router-hotpath-napi responses_resume --lib -- --nocapture` (10/10, existing warning noise); `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` (10/10); `git diff --check`.
+
+2026-06-09 Windsurf/Cascade removal no-worker-stop follow-up:
+- User correction for this pass: do not stop/restart/kill other workers; remove/verify repository Windsurf-related code only.
+- Live source scan over `src`, `sharedmodule`, `scripts`, `tests`, `package.json`, and `package-lock.json` returned no `windsurf|cascade|codeium` content matches after excluding generated/target/map outputs.
+- Live filename scan over `src`, `sharedmodule`, `scripts`, and `tests` returned no Windsurf/Cascade/Codeium paths. Tracked path audit shows `existing: []`; all 58 matched tracked paths are currently deleted (`D`) provider runtime/contract/probe/harness/script/fixture/test/doc paths.
+- Verification PASS: `npm run verify:architecture-deleted-path` checked 62 deleted paths absent; `npm run verify:architecture-provider-specific-leaks` checked 94 files across 7 target roots with no provider-specific leaks.
+
+2026-06-09 VR native wrapper 0-consumer deletion:
+- Static import graph over Hub/VR/servertool/native wrappers returned 6 zero-incoming candidates. Kept known live exceptions: `snapshot-recorder.ts` via `importCoreDist('conversion/hub/snapshot-recorder')`, `native-failure-policy.ts` via dynamic failure-policy bridge/runtime, `native-hub-vr-node-contracts.ts` via contract/help tests, and `response-runtime.anthropic-hidden-reasoning.test.ts` via verification map.
+- Confirmed `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-routing.ts` and `native-virtual-router-stop-message-state-semantics.ts` had no live static importer, no dynamic loader, no package/test consumer, and only stale docs/config references. Rust native capabilities remain in `router-hotpath-napi`; only the unused TS wrappers were deleted.
+- Physically deleted tracked wrappers and ignored dist outputs: `native-virtual-router-bootstrap-routing.{ts,js,d.ts}` and `native-virtual-router-stop-message-state-semantics.{ts,js,d.ts}`.
+- Updated `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to keep these source/dist wrappers absent; removed both paths from `rustification-audit-baseline.json`; updated `docs/goals/virtual-router-full-rustification-audit.md` rows to `已删：2026-06-09 0-consumer wrapper`.
+- Recomputed static 0-consumer inventory after deletion: now only 4 known exceptions remain (`response-runtime.anthropic-hidden-reasoning.test.ts`, `snapshot-recorder.ts`, `native-failure-policy.ts`, `native-hub-vr-node-contracts.ts`).
+- Verification PASS: JSON parse of `rustification-audit-baseline.json`; source/dist absent check; focused residue Jest 110/110; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; `git diff --check`.
+- Follow-up finding: `sharedmodule/llmswitch-core/config/rust-migration-modules.json` is broadly stale and lists many already-deleted `src/router/virtual-router/...` / old Hub stage paths. Treat this as a separate manifest-governance cleanup slice; do not patch one entry only and leave the manifest misleading.
+## 2026-06-09 5555 Codex client repeated disconnect / response.completed contract
+- Live screenshot at ~09:01 showed Codex client reconnecting with `Stream disconnected before completion: stream closed before response.completed` while 5555 requests continued routing.
+- Exact 5555 request `openai-responses-router-gpt-5.5-20260609T090123986-325330-7213` entered `[port:5555 group:gateway_priority_5555]`, selected `tools/gateway-priority-5555-weighted-tools -> mini27.key1.MiniMax-M2.7`, triggered `stop_message_auto`, and server logged `completed(status=200, finish_reason=tool_calls)`.
+- Client snapshot `~/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-mini27.key1-MiniMax-M2.7-20260609T090123986-325330-7213/client-response_server.json` ends with `event: response.done` + `data: [DONE]` but has no `event: response.completed`.
+- Root-cause direction: current Codex client expects `response.completed` before close even for `requires_action`/tool_calls. Existing project rules/tests that forbid `response.completed` for required_action conflict with live client behavior and must be corrected at the SSE terminal projection owner, not by treating VR/provider completion as enough evidence.
+
+2026-06-09 shadow-gate migration manifest dead system deletion:
+- Evidence: `sharedmodule/llmswitch-core/config/rust-migration-modules.json` was broadly stale: prepared modules pointed to many already-deleted `src/router/virtual-router/...`, old Hub stage, old semantic-mapper, and deleted dist paths. A one-entry patch would leave the manifest misleading.
+- Consumer audit: root and llmswitch-core `package.json` expose no `verify:shadow-gate:*`, `check-shadow-coverage-gate`, `promote-shadow-module`, or `run-ci-coverage` scripts. Remaining code references were only the old shadow-gate scripts importing each other and stale docs/history. Therefore the manifest/shadow-gate system is dead, not an active gate.
+- Physically deleted tracked dead files: `sharedmodule/llmswitch-core/config/rust-migration-modules.json`, `sharedmodule/llmswitch-core/docs/rust-migration-gates.md`, `scripts/check-shadow-coverage-gate.mjs`, `scripts/lib/rust-migration-manifest.mjs`, `scripts/promote-shadow-module.mjs`, `scripts/run-ci-coverage.mjs`, and `scripts/verify-shadow-gate-all.mjs` under `sharedmodule/llmswitch-core/`.
+- Updated `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` to keep those files absent and to fail if root/core package scripts restore `verify:shadow-gate`, `check-shadow-coverage-gate`, `verify-shadow-gate-all`, `promote-shadow-module`, `rust-migration-modules.json`, or `run-ci-coverage`.
+- Incidental tsc blocker fixed in `native-servertool-core-semantics.ts::parseServertoolTimeoutMsWithNative`: `Number.isInteger(parsed)` did not narrow `unknown`; added `typeof parsed === 'number'` before integer/non-negative checks. Runtime semantics unchanged.
+- Verification PASS: focused residue Jest 111/111; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; root `npx tsc --noEmit --pretty false`; `node sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` 10/10; `git diff --check`; post-delete scan only finds old shadow-gate tokens in the residue gate itself.
+
+2026-06-09 Windsurf/Cascade removal no-worker-stop verification:
+- User constraint for this pass: remove/verify Windsurf-related repository code only; do not stop/restart/kill other workers/processes and do not edit runtime config as workaround.
+- Active content scan over package, source, scripts, tests, llmswitch source/scripts, router-hotpath/servertool Rust source, docs, `AGENTS.md`, and `.agents/skills/rcc-dev-skills/SKILL.md` returned no `windsurf|cascade|codeium|WINDSURF_|CASCADE|CODEIUM` matches after excluding generated/vendor/target/coverage/snap/map outputs.
+- Active filename scan over package, source, scripts, tests, llmswitch source/scripts, router-hotpath/servertool Rust source, docs, and `.agents` returned no Windsurf/Cascade/Codeium paths.
+- Git diff distinction: ACMR diff paths contain no Windsurf/Cascade/Codeium matches; remaining matched paths are tracked `D` entries only for removed Windsurf/Cascade docs, scripts, provider runtime, Rust projection, fixtures, and tests awaiting commit.
+- Config-diff check returned no `config.toml`, provider TOML, `.rcc`, or Windsurf config path changes.
+- Verification PASS in this pass: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.

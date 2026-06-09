@@ -6,7 +6,6 @@
  */
 
 import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-provider-contract.js';
-import type { WindsurfProviderRuntimeOptions } from '../core/contracts/windsurf-provider-contract.js';
 import type { ProviderConcurrencyConfig, ProviderRpmConfig } from '../core/api/provider-types.js';
 
 export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini';
@@ -106,7 +105,6 @@ export interface ProviderProfile {
     defaultModel?: string;
     supportedModels?: string[];
     deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
-    windsurf?: Partial<WindsurfProviderRuntimeOptions>;
     concurrency?: ProviderConcurrencyConfig;
     rpm?: ProviderRpmConfig;
     /**

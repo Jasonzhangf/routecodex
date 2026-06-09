@@ -65,18 +65,13 @@ export {
 } from './native-shared-conversion-semantics-toolcalls.js';
 export {
   normalizeChatMessageContentWithNative,
-  normalizeContentPartWithNative,
   normalizeMessageContentPartsWithNative,
   normalizeOpenaiMessageWithNative,
   normalizeOpenaiToolWithNative
 } from './native-shared-conversion-semantics-openai.js';
 export {
-  chunkStringWithNative,
   deriveToolCallKeyWithNative,
-  flattenByCommaWithNative,
-  packShellArgsWithNative,
   repairFindMetaWithNative,
-  splitCommandStringWithNative
 } from './native-shared-conversion-semantics-shell-utils.js';
 export {
   buildProviderProtocolErrorWithNative,
@@ -112,8 +107,6 @@ export {
   repairArgumentsToStringWithNative
 } from './native-shared-conversion-semantics-misc.js';
 export {
-  bridgeToolToChatDefinitionWithNative,
-  chatToolToBridgeDefinitionWithNative,
   collectToolCallsFromResponsesWithNative,
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
@@ -340,46 +333,6 @@ export function normalizeToolsWithNative(tools: unknown): Array<Record<string, u
     }
     const parsed = parseJson(raw);
     return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function extractOutputSegmentsWithNative(
-  source: Record<string, unknown> | undefined,
-  itemsKey: string = 'output'
-): { textParts: string[]; reasoningParts: string[] } {
-  const capability = 'extractOutputSegmentsJson';
-  const fail = (reason?: string) =>
-    failNativeRequired<{ textParts: string[]; reasoningParts: string[] }>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const sourceJson = safeStringify(source ?? null);
-  if (!sourceJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(sourceJson, String(itemsKey || 'output'));
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    if (!parsed) {
-      return fail('invalid payload');
-    }
-    const textParts = Array.isArray(parsed.textParts)
-      ? parsed.textParts.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-    const reasoningParts = Array.isArray(parsed.reasoningParts)
-      ? parsed.reasoningParts.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-    return { textParts, reasoningParts };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

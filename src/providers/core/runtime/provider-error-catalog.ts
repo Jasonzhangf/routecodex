@@ -102,7 +102,7 @@ export function normalizeKnownProviderError(input: {
 
 // SSOT: provider-agnostic 公共错误码冻结集合 (added 2026-06-05, /goal fallback-arch-audit Phase 2).
 // 从 ENTRIES 自动聚合 (class === 'unrecoverable' | 'recoverable' 包含网络码 | recoverable 阻断子集)。
-// provider-specific 错误码 (windsurf / deepseek) 必须在各自 contract 暴露，**禁止**进入本 catalog。
+// provider-specific 错误码必须在各自 contract 暴露，**禁止**进入本 catalog。
 export const PROVIDER_UNRECOVERABLE_CODES: ReadonlySet<string> = new Set<string>(
   ENTRIES.filter((e) => e.class === 'unrecoverable').flatMap((e) => e.aliases)
 );

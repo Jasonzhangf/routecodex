@@ -87,9 +87,6 @@ export function mapProviderModule(providerType: string): string {
 
 export function mapProviderProtocol(providerType?: string, providerFamily?: string): ProviderProtocol {
   const family = typeof providerFamily === 'string' ? providerFamily.trim().toLowerCase() : '';
-  if (family === 'windsurf') {
-    return 'openai-responses';
-  }
   const normalized = normalizeProviderType(providerType);
   if (normalized === 'responses') {
     return 'openai-responses';

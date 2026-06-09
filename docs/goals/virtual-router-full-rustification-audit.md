@@ -2,6 +2,8 @@
 
 审计日期：2026-05-31
 
+2026-06-09 closeout: 静态 0-consumer 复查确认 `native-virtual-router-bootstrap-routing.ts` 与 `native-virtual-router-stop-message-state-semantics.ts` 没有 runtime/static/dynamic/test consumer；当前 TS wrapper 与 dist 产物已物理删除，Rust native capability 保留为 Rust 真源能力。
+
 ## 一、Former VR wrapper TS helper audit（80 文件）
 
 ### 结论：**全部合规，零违规**
@@ -56,7 +58,7 @@
 | native-servertool-core-semantics.ts | 142 | 10 | 0 |
 | native-router-hotpath-quota-buckets.ts | 137 | 6 | 0 |
 | native-virtual-router-bootstrap-providers.ts | 131 | 2 | 2 |
-| native-virtual-router-bootstrap-routing.ts | 114 | 1 | 2 |
+| native-virtual-router-bootstrap-routing.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
 | native-snapshot-hooks.ts | 113 | 3 | 2 |
 | native-stop-message-auto-semantics.ts | 117 | 10 | 3 |
 | native-virtual-router-routing-instructions-semantics.ts | 144 | 3 | 2 |
@@ -70,7 +72,7 @@
 | native-shared-conversion-semantics-tool-definitions.ts | 199 | 6 | 7 |
 | native-virtual-router-stop-message-actions-semantics.ts | 102 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-virtual-router-stop-message-semantics.ts | 97 | 2 | 2 |
-| native-virtual-router-stop-message-state-semantics.ts | 82 | 2 | 2 |
+| native-virtual-router-stop-message-state-semantics.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
 | native-router-hotpath.ts | 199 | 11 | 2 |
 | native-hub-pipeline-req-inbound-semantics-tools.ts | 284 | 8 | 3 |
 | native-hub-pipeline-req-outbound-semantics-parsers.ts | 308 | 1 | 1 |
@@ -215,7 +217,7 @@
 | `cooldown_provider` | 164 | policy | 写 cooldown |
 | `cooldown_provider_until_midnight_persisted` | 186 | policy | 写 cooldown |
 | `record_success` | 207 | policy | 清 cooldown + trip |
-| `clear_windsurf_managed_persisted_503_family` | 224 | policy | 清 503 状态 |
+| persisted 503 family cleanup | 224 | policy | 清 503 状态 |
 | `trip_provider` | 250 | policy | 写 trip |
 | `is_available` | 273 | policy | 读 availability（可能触发 auto-trip） |
 | `snapshot` | 299 | facade | 读状态 |
@@ -237,7 +239,7 @@
 | 目标层 | 包含方法 | 说明 |
 |---|---|---|
 | health_state_store | configure, register_providers, clear_runtime_state, clear_imported_persisted_state, export_persistable_state, import_persistable_state | 状态持久化 |
-| health_policy | record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, record_success, clear_windsurf_managed_persisted_503_family, trip_provider, is_available, cooldown_remaining_ms, is_persisted_503_daily_cooldown_active, consume_persisted_503_reprobe_if_available, record_http_502_failure, record_http_429_failure, record_recoverable_failure | 策略判定 |
+| health_policy | record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, record_success, persisted 503 family cleanup, trip_provider, is_available, cooldown_remaining_ms, is_persisted_503_daily_cooldown_active, consume_persisted_503_reprobe_if_available, record_http_502_failure, record_http_429_failure, record_recoverable_failure | 策略判定 |
 | health_facade | new, snapshot, describe_state, config | 对外接口 |
 
 ---

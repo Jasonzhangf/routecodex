@@ -43,6 +43,7 @@
 3. 唯一可见出口：stopless 只投影 `exec_command`，不恢复内部 servertool identity，不走 followup/reenter 私有链路。
 4. 无 fallback：判定错就 fail-fast；不允许 schema sanitizer、provider 特例、临时旁路。
 5. 线上优先：没有 5555 live 证据，不宣称 stopless 完成交付。
+6. 停止预算真源以 Rust `stop-message-core` 为准：provided schema=3，missing schema=3。旧的 missing-schema 10 次设计已失效，文档/测试必须同步修正。
 
 ## 5. 风险点
 
@@ -59,6 +60,23 @@
 2. TS/Native 定向层：锁 CLI projection、visible summary、request restore。
 3. HTTP 黑盒层：锁 `/v1/responses` 与 `/v1/responses.submit_tool_outputs` 整体契约。
 4. 5555 live 层：锁真实运行版本、真实 provider、真实日志样本。
+
+## 6.1 当前 live 基线（2026-06-09）
+
+当前已验证、可复用的 5555 live 基线如下，后续 stopless 停止设定验证必须基于这个基线继续：
+
+1. `gpt-5.5` managed 路径可用于验证 `skip_goal_active` / `skip_plan_mode`
+   - 证据文件：`/tmp/goal_active_live_managed.json`
+   - 已证实：返回 `completed`，无 `required_action`，无 `exec_command`
+   - 边界：这是 Codex/harness 型目标，不适合验证“模型只输出 stop schema”的纯 allow-stop/continue-needed 渲染契约
+2. `mini27.MiniMax-M2.7` 与 `minimonth.MiniMax-M2.7` 可用于验证 stopless allow-stop / continue-needed
+   - 证据文件：`/tmp/stopless_allow_m2_results.json`
+   - 证据文件：`/tmp/stopless_continue_m2_results.json`
+   - 已证实：allow-stop 时 `completed + markdown`；continue-needed 时 `requires_action + exec_command`
+3. `minimax.MiniMax-M3` 当前 upstream 存在 `MALFORMED_RESPONSE`
+   - 仅可作为异常样本，不计入 stopless 成功验收
+4. 通过 explicit provider/model 命中 `direct/direct` 的请求，不计入 stopless live 验证
+   - 这类样本只能证明 direct path 行为，不能证明 stopless 主链真相
 
 ## 7. 详细测试矩阵
 
@@ -84,7 +102,7 @@
 9. `stopreason=2` 且 `next_step` 非空，继续执行并消耗 budget。
 10. `stopreason=2` 缺 `next_step`，继续执行并消耗 budget。
 11. 连续 3 次 provided-schema invalid/continue 后 budget exhausted。
-12. 连续 10 次 missing-schema 后 budget exhausted。
+12. 连续 3 次 missing-schema 后 budget exhausted。
 13. `submit_tool_outputs resume` 仍然 eligible，不允许无条件 skip。
 14. `allow_stop` / 非 stop / 工具响应之后，下一次 stop 从 `used=0` 重新计数。
 
@@ -182,11 +200,17 @@
    - 断言最终 summary 明确说明停止
 5. missing-schema budget
    - 连续制造缺 schema 的 stop
-   - 断言前 9 次仍继续，第 10 次预算耗尽
+   - 断言前 2 次继续，第 3 次 budget exhausted，不允许再保留旧的 10 轮长链
 6. reset 语义
    - 先触发 stopless 1 次
    - 再让模型产生一次非 stop 或工具调用
    - 再次 stop 时断言 `repeatCount` 从 0 开始
+7. `needs_user_input=true`
+   - 断言最终用户只看到问题本身
+   - 不显示 schema 原文与空 section
+8. stream=true
+   - 断言与 stream=false 的 stopless 决策一致
+   - 记录 SSE terminal event 与最终 client-visible output
 
 live 证据要求：
 
@@ -230,7 +254,7 @@ live 证据要求：
    - 验证：requires_action，再次投影 `exec_command`。
 4. 缺 `stopreason`
    - 预期：`continue_missing_schema`
-   - 验证：不计 invalid budget，走 missing-schema 计数。
+   - 验证：计入 missing-schema 连续 stop 计数，总阈值为 3。
 5. `stopreason` 非数字或越界
    - 预期：`continue_invalid_schema`
    - 验证：计入 provided-schema invalid budget。
@@ -258,10 +282,10 @@ live 证据要求：
 4. 第 4 次 `stopreason=2`
    - 预期：`budget_exhausted`
    - 验证：不再投影新 `exec_command`，输出最终停止说明。
-5. 连续 missing-schema 第 1-9 次
-   - 预期：`continue`
-   - 验证：仍允许继续，不误算到 provided-schema budget。
-6. 第 10 次 missing-schema
+5. 连续 missing-schema 第 1-3 次
+   - 预期：前两次 `continue`，第 3 次到达统一收敛上限
+   - 验证：missing-schema 与 invalid/provided-schema 都受同一个 3 轮收敛原则约束，但计数原因码仍需可区分。
+6. 第 3 次 missing-schema
    - 预期：`budget_exhausted`
 7. 连续 invalid-schema 第 1-3 次
    - 预期：`continue`
@@ -326,6 +350,73 @@ live 证据要求：
 5. 5555 reset
    - 证据：插入一次非 stop/工具调用后，后续 stop 从 `repeatCount=0` 重算。
 
+## 7.6 在线验证执行设计
+
+目标：把“停止设定正确”从单测提升为 5555 当前运行版本的可重复事实。
+
+### A. 探针分层
+
+1. 仓库内 live probe
+   - 文件：`scripts/tests/stopless-5555-live-probe.mjs`
+   - 责任：发起首轮 `/v1/responses`，提取 `exec_command`，本地执行 CLI，再自动提交 `submit_tool_outputs`
+2. provider 样本取证
+   - 目录：`~/.rcc/codex-samples/openai-responses/ports/5555/**`
+   - 责任：固定 client-request / provider-request / provider-response / client-response 真相
+3. 运行日志取证
+   - 文件：`~/.rcc/logs/server-5555.log`
+   - 责任：固定 stopless 入口、resume、allow-stop、budget-exhausted 的时间线
+
+### B. 每个 live case 的固定执行法
+
+1. 生成唯一 `sessionId` / `conversationId`
+   - 禁止复用旧 scope，避免 `stopMessageUsed` / persisted state 污染
+2. 首轮发 `/v1/responses`
+   - 记录 `request_id`、`response.id`、`status`
+3. 若返回 `requires_action`
+   - 提取 `tool_call_id`
+   - 执行 `routecodex servertool run stop_message_auto --input-json ...`
+   - 保留 CLI stdout/stderr
+4. 回提 `/v1/responses/{id}/submit_tool_outputs`
+   - 记录第 2 轮 `request_id`、`response.id`、`status`
+5. 如仍为 `requires_action`
+   - 重复一次，直到 `completed` 或 `budget_exhausted`
+6. 对每轮都落盘结构化证据
+   - `/tmp/stopless-5555-live-probe.json` 或 case 专用 JSON
+   - 样本路径
+   - 日志时间段
+
+### C. live 失败分类
+
+1. upstream/provider 不可用
+   - 现象：首轮直接 `502 HTTP_HANDLER_ERROR` / `Upstream provider error`
+   - 结论：不能宣称 stopless 完成，只能记录“live blocker 在 provider 可用性”
+2. stopless 未触发
+   - 现象：应为 stop 路径却直接 `completed`
+   - 先查：是否误命中 `direct/direct`，若是则该样本无效
+3. stopless 只触发一轮
+   - 现象：首轮 `requires_action`，第一次 resume 后直接 `completed`
+   - 先查：`submit_tool_outputs` 是否被错误 skip 或 repeatCount/reset 提前清零
+4. allow-stop 透明性错误
+   - 现象：client visible text 仍含 schema JSON / 控制字段
+   - 先查：`stop_message_auto` terminal visible shell owner
+5. budget/reset 错误
+   - 现象：第 4 次前提前耗尽，或非 stop 后未 reset
+   - 先查：Rust stop-message-core repeat counter owner
+
+## 7.7 交付物清单
+
+必须一起交付，不接受“只改逻辑”或“只补测试”：
+
+1. 唯一 owner 修复代码
+2. Rust 单测与 TS/blackbox 回归测试
+3. 5555 live probe 脚本与最新证据文件
+4. `docs/goals/stopless-full-delivery-plan.md` 更新
+5. `note.md` 排障记录
+6. `MEMORY.md` 仅追加已线上验证结论
+7. review 结论
+8. 单一 stopless 主题 commit
+9. push 结果与 commit SHA
+
 ## 8. 实施步骤
 
 1. 审核 stopless 唯一 owner 链，找出恢复轮次与 visible summary 的唯一错误点。
@@ -355,10 +446,11 @@ live 证据要求：
 1. source 中不存在已知错误的 stopless 早退 owner。
 2. stop schema 不再出现在任何用户可见 summary/text/reasoning 槽位。
 3. submit_tool_outputs 恢复轮次可再次 stopless，而不是一轮后停掉。
-4. 预算、allow-stop、missing-schema、invalid-schema、reset 在测试与 live 行为一致。
+4. 预算、allow-stop、missing-schema、invalid-schema、reset 在测试与 live 行为一致，且当前统一预算真相为 provided=3 / missing=3。
 5. 5555 live 矩阵关键用例有真实证据。
 6. `note.md` 记录排障线索，`MEMORY.md` 只记录已线上验证结论。
 7. 完成 review、commit、push。
+8. commit 对应的 live 证据能回溯到 requestId / responseId / tool_call_id / 日志 / 样本文件。
 
 ## 11. 失败判定
 

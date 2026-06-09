@@ -21,7 +21,7 @@ describe('provider-error-catalog SSOT: public code sets', () => {
     expect(PROVIDER_UNRECOVERABLE_CODES.has('MODEL_DISABLED')).toBe(true);
     expect(PROVIDER_UNRECOVERABLE_CODES.has('NO_SUCH_MODEL')).toBe(true);
     // provider-specific must NOT leak into provider-agnostic catalog
-    expect(PROVIDER_UNRECOVERABLE_CODES.has('WINDSURF_RATE_LIMITED')).toBe(false);
+    expect(PROVIDER_UNRECOVERABLE_CODES.has('PROVIDER_SPECIFIC_RATE_LIMITED')).toBe(false);
     expect(PROVIDER_UNRECOVERABLE_CODES.has('DEEPSEEK_SESSION_CREATE_FAILED')).toBe(false);
   });
 
@@ -43,7 +43,7 @@ describe('provider-error-catalog SSOT: public code sets', () => {
     expect(PROVIDER_BLOCKING_RECOVERABLE_CODES.has('SSE_DECODE_ERROR')).toBe(true);
     expect(PROVIDER_BLOCKING_RECOVERABLE_CODES.has('SSE_TO_JSON_ERROR')).toBe(true);
     expect(PROVIDER_BLOCKING_RECOVERABLE_CODES.has('UPSTREAM_EMPTY_OUTPUT')).toBe(true);
-    // provider-specific WINDSURF_RATE_LIMITED must NOT leak
-    expect(PROVIDER_BLOCKING_RECOVERABLE_CODES.has('WINDSURF_RATE_LIMITED')).toBe(false);
+    // provider-specific codes must NOT leak
+    expect(PROVIDER_BLOCKING_RECOVERABLE_CODES.has('PROVIDER_SPECIFIC_RATE_LIMITED')).toBe(false);
   });
 });

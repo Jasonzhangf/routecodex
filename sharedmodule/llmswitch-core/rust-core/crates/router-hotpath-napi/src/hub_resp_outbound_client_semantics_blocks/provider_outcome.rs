@@ -14,7 +14,10 @@ fn is_context_overflow_stop_reason(normalized_stop_reason: &str) -> bool {
 fn is_empty_output_terminal_stop_reason(normalized_stop_reason: &str) -> bool {
     matches!(
         normalized_stop_reason,
-        "max_tokens" | "model_context_window_exceeded" | "context_window_exceeded" | "context_length_exceeded"
+        "max_tokens"
+            | "model_context_window_exceeded"
+            | "context_window_exceeded"
+            | "context_length_exceeded"
     )
 }
 

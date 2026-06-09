@@ -2,7 +2,6 @@
 
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
-import { captureExecCommandRegression } from './exec-command/regression-capturer.js';
 import { validateApplyPatchArgumentsWithNative } from '../native/router-hotpath/native-chat-process-governance-semantics.js';
 
 type UnknownRecord = Record<string, unknown>;
@@ -198,13 +197,6 @@ export function validateToolCall(
       );
       if (!validation.ok) {
         const reason = validation.reason || 'unknown';
-        // captureExecCommandRegression({
-        //   errorType: reason,
-        //   originalArgs: typeof argsString === 'string' ? argsString : String(argsString ?? ''),
-        //   normalizedArgs: typeof argsString === 'string' ? argsString : String(argsString ?? ''),
-        //   validationError: reason,
-        //   source: 'tool-registry.validateToolCall'
-        // });
         return { ok: false, reason, message: validation.message };
       }
       return { ok: true, normalizedArgs: validation.normalizedArgs };

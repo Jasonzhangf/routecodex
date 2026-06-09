@@ -73,13 +73,23 @@ describe('request field semantics no raw/context/metadata backfill', () => {
   it('documents duplicate request-semantics entrances until Rust equivalence tests delete them', () => {
     const doc = read('docs/goals/request-field-chatprocess-equivalence-audit-plan.md');
     for (const token of [
-      'responses-openai-pipeline.ts',
+      'V2 conversion pipeline codecs have been physically deleted',
       'hub_bridge_actions/history.rs',
       'provider-response-utils.ts',
       'responses-handler.ts',
       '等价语义红测缺口',
     ]) {
       expect(doc).toContain(token);
+    }
+  });
+
+  it('keeps deleted V2 conversion pipeline codecs absent', () => {
+    for (const relativePath of [
+      'sharedmodule/llmswitch-core/src/conversion/pipeline',
+      'sharedmodule/llmswitch-core/dist/conversion/pipeline',
+      'tests/sharedmodule/responses-openai-pipeline-request-parameters.spec.ts',
+    ]) {
+      expect(fs.existsSync(path.join(ROOT, relativePath))).toBe(false);
     }
   });
 });

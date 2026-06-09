@@ -39,9 +39,6 @@ export { GeminiSseToJsonConverter } from './sse-to-json/index.js';
 
 // 共享工具导出
 export * from './shared/utils.js';
-// 序列化器暂时禁用以专注核心SSE转换功能
-// export * from './shared/serializers/index.js';
-
 // 类型导出
 export * from './types/index.js';
 
@@ -145,46 +142,10 @@ export function createGeminiConverters() {
 }
 
 /**
- * 工厂函数：创建完整的双向转换器（支持Chat和Responses协议）
- */
-export function createBidirectionalConverters() {
-  const chat = createChatConverters();
-  const responses = createResponsesConverters();
-  const anthropic = createAnthropicConverters();
-  const gemini = createGeminiConverters();
-
-  return {
-    chat,
-    responses,
-    anthropic,
-    gemini,
-
-    /**
-     * 自动检测协议类型并执行转换
-     */
-    async autoConvert(input: any, options: any = {}) {
-      // 根据输入数据的结构自动检测协议类型
-      if (input.object === 'chat.completion') {
-        return await chat.roundTrip(input, options);
-      } else if (input.object === 'response') {
-        return await responses.roundTrip(input, options);
-      } else if (input.type === 'message') {
-        return await anthropic.roundTrip(input, options);
-      } else if (Array.isArray(input?.candidates)) {
-        return await gemini.roundTrip(input, options);
-      } else {
-        throw new Error(`无法识别的协议类型: ${input.object}`);
-      }
-    }
-  };
-}
-
-/**
  * 默认转换器实例
  */
 export const chatConverters = createChatConverters();
 export const responsesConverters = createResponsesConverters();
-export const bidirectionalConverters = createBidirectionalConverters();
 export const anthropicConverters = createAnthropicConverters();
 export const geminiConverters = createGeminiConverters();
 

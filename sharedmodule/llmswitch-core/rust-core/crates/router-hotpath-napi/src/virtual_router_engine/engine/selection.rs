@@ -182,16 +182,10 @@ fn apply_non_availability_filters(
     excluded_keys: &HashSet<String>,
     server_tool_required: bool,
     bound_alias_prefix: Option<&str>,
-    router_direct_inbound_protocol: Option<&str>,
 ) -> Vec<String> {
     let mut scoped: Vec<String> =
         filter_candidates_by_state(candidates, routing_state, provider_registry)
             .into_iter()
-            .filter(|key| {
-                router_direct_inbound_protocol
-                    .map(|protocol| provider_registry.provider_protocol_matches(key, protocol))
-                    .unwrap_or(true)
-            })
             .filter(|key| {
                 provider_registry
                     .get(key)
@@ -231,10 +225,15 @@ fn filter_router_direct_protocol(
     else {
         return candidates;
     };
-    candidates
-        .into_iter()
+    let compatible: Vec<String> = candidates
+        .iter()
         .filter(|key| provider_registry.provider_protocol_matches(key, protocol))
-        .collect()
+        .cloned()
+        .collect();
+    if compatible.is_empty() {
+        return candidates;
+    }
+    compatible
 }
 
 impl VirtualRouterEngineCore {
@@ -488,22 +487,21 @@ impl VirtualRouterEngineCore {
             if multimodal_route_requested
                 && (route_name == "multimodal" || route_name == DEFAULT_ROUTE)
             {
-                let capability_filtered = if features.has_image_attachment
-                    && !features.has_remote_video_attachment
-                {
-                    filter_pools_by_visual_capability_with_forwarders(
-                        &pools,
-                        &self.provider_registry,
-                        Some(&self.forwarder_registry),
-                    )
-                } else {
-                    filter_pools_by_capability_with_forwarders(
-                        &pools,
-                        &self.provider_registry,
-                        Some(&self.forwarder_registry),
-                        "multimodal",
-                    )
-                };
+                let capability_filtered =
+                    if features.has_image_attachment && !features.has_remote_video_attachment {
+                        filter_pools_by_visual_capability_with_forwarders(
+                            &pools,
+                            &self.provider_registry,
+                            Some(&self.forwarder_registry),
+                        )
+                    } else {
+                        filter_pools_by_capability_with_forwarders(
+                            &pools,
+                            &self.provider_registry,
+                            Some(&self.forwarder_registry),
+                            "multimodal",
+                        )
+                    };
                 if !capability_filtered.is_empty() {
                     pools = capability_filtered;
                 } else if select_default_pool_for_multimodal && route_name == "multimodal" {
@@ -563,7 +561,6 @@ impl VirtualRouterEngineCore {
                     &excluded_keys,
                     server_tool_required,
                     bound_alias_prefix,
-                    router_direct_inbound_protocol.as_deref(),
                 );
                 let mut available = self.apply_standard_filters(
                     env,
@@ -776,15 +773,11 @@ impl VirtualRouterEngineCore {
             .unwrap_or_default();
         let mut available_real_keys: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        let mut protocol_compatible_real_keys: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let now = now_ms();
         for target in &cloned_targets {
             let available = !target.disabled
-                && router_direct_inbound_protocol
-                    .map(|protocol| {
-                        self.provider_registry
-                            .provider_protocol_matches(&target.provider_key, protocol)
-                    })
-                    .unwrap_or(true)
                 && !excluded_keys.contains(&target.provider_key)
                 && (self.is_provider_available(env, &target.provider_key)
                     || self
@@ -792,13 +785,27 @@ impl VirtualRouterEngineCore {
                         .has_persisted_503_reprobe_available(&target.provider_key, now));
             if available {
                 available_real_keys.insert(target.provider_key.clone());
+                if router_direct_inbound_protocol
+                    .map(|protocol| {
+                        self.provider_registry
+                            .provider_protocol_matches(&target.provider_key, protocol)
+                    })
+                    .unwrap_or(true)
+                {
+                    protocol_compatible_real_keys.insert(target.provider_key.clone());
+                }
             }
         }
+        let selectable_real_keys = if protocol_compatible_real_keys.is_empty() {
+            &available_real_keys
+        } else {
+            &protocol_compatible_real_keys
+        };
 
         let selected = self.forwarder_registry.select(
             key,
             &mut self.load_balancer,
-            |provider_key: &str| available_real_keys.contains(provider_key),
+            |provider_key: &str| selectable_real_keys.contains(provider_key),
             forwarder_sticky_session_id,
         );
         if let Ok(real) = &selected {
@@ -2180,7 +2187,7 @@ mod tests {
     }
 
     #[test]
-    fn router_direct_fails_when_route_pool_has_no_inbound_protocol_match() {
+    fn router_direct_keeps_cross_protocol_route_candidate_for_relay_boundary() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
         providers.insert(
@@ -2221,7 +2228,7 @@ mod tests {
         core.health_manager.register_providers(&keys);
         core.quota_manager.register_providers(&keys);
 
-        let error = core
+        let selected = core
             .select_provider(
                 "search",
                 &json!({
@@ -2238,10 +2245,84 @@ mod tests {
                 None,
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
             )
-            .expect_err("router-direct must not select a cross-protocol target");
+            .expect("router-direct protocol mismatch belongs to the direct boundary, not pool availability");
 
-        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
-        assert!(error.contains("No available providers after applying routing instructions"));
+        assert_eq!(selected.provider_key, "chat.key1.chat-model");
+        assert_eq!(selected.route_used, "search");
+    }
+
+    #[test]
+    fn router_direct_keeps_cross_protocol_forwarder_target_for_relay_boundary() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "chat.key1.chat-model".to_string(),
+            json!({
+                "providerKey": "chat.key1.chat-model",
+                "providerType": "openai",
+                "outboundProfile": "openai-chat",
+                "modelId": "chat-model",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.chat.chat-model".to_string(),
+            json!({
+                "forwarderId": "fwd.chat.chat-model",
+                "protocol": "openai",
+                "modelId": "chat-model",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "targets": [
+                    {"providerKey": "chat.key1.chat-model", "priority": 1, "disabled": false}
+                ],
+                "stickyKey": "none"
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+        let routing = Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![json!({
+                "id": "gateway-priority-5555-default",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.chat.chat-model"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "default",
+                &json!({
+                    "routerDirectInboundProtocol": "openai-responses"
+                }),
+                &ClassificationResult {
+                    route_name: "default".to_string(),
+                    confidence: 1.0,
+                    reasoning: "default".to_string(),
+                    candidates: vec!["default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect(
+                "forwarder protocol mismatch belongs to the direct boundary, not pool availability",
+            );
+
+        assert_eq!(selected.provider_key, "chat.key1.chat-model");
+        assert_eq!(selected.route_used, "default");
     }
 
     #[test]
@@ -2413,7 +2494,7 @@ mod tests {
     #[test]
     fn singleton_provider_with_active_503_health_cooldown_stays_filtered_until_startup_import_probe(
     ) {
-        let provider_key = "windsurf.managed.gpt-5.5-low";
+        let provider_key = "primary.gpt-5.5-low";
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
         providers.insert(

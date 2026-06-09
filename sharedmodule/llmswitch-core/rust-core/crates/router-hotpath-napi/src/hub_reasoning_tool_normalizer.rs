@@ -4759,7 +4759,7 @@ exec_command
         let text = r#"
 Thinking through the next step.
 <tool_call name="exec_command">
-<arg_key>cmd</arg_key><arg_value>rg "windsurf|provider" src tests</arg_value>
+<arg_key>cmd</arg_key><arg_value>rg "provider|runtime" src tests</arg_value>
 </tool_call>
 "#;
 

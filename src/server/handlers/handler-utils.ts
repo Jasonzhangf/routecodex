@@ -693,6 +693,12 @@ const PIPELINE_METADATA_ALLOWED_CLIENT_FIELDS = new Set<string>([
   'requestSource',
   'experimentFlag',
   'appVersion',
+  'sessionId',
+  'session_id',
+  'conversationId',
+  'conversation_id',
+  'client_tmux_session_id',
+  'rcc_session_client_tmux_session_id',
 ]);
 
 const PIPELINE_METADATA_DENIED_CLIENT_FIELDS = new Set<string>([

@@ -15,6 +15,17 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function payloadContainsRccFence(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  try {
+    return JSON.stringify(payload).includes('<**rcc**>');
+  } catch {
+    return false;
+  }
+}
+
 export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   baseContext: Record<string, unknown>,
   entryOriginRequest: unknown
@@ -60,6 +71,15 @@ export function syncStoplessGoalStateFromCapturedRequest(
   baseContext: Record<string, unknown>,
   onError?: (error: unknown) => void
 ): void {
+  const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const capturedEntryRequest = asFlatRecord(baseContext.capturedEntryRequest);
+  if (
+    capturedEntryRequest
+    && payloadContainsRccFence(capturedEntryRequest)
+    && (!capturedChatRequest || !payloadContainsRccFence(capturedChatRequest))
+  ) {
+    baseContext.capturedChatRequest = capturedEntryRequest;
+  }
   try {
     syncStoplessGoalStateFromRequest(baseContext);
   } catch (error) {

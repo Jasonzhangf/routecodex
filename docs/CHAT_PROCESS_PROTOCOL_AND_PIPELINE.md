@@ -40,12 +40,11 @@
 3. **outbound 仅产出客户端协议白名单字段**；内部 metadata 只用于转换过程，不可泄露到客户端 payload。
 
 代码事实（当前实现骨架）：
-- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts:343`（resp inbound SSE decode）
-- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts:401`（resp inbound semantic map → `chatResponse`）
-- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts:426`（servertool orchestration）
-- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts:464`（resp process tool governance）
-- canonical chat completion 强制归一（hard gate）：`sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`（servertool orchestration 后、resp process 前）
-- canonical chat completion 兜底归一（best-effort bridge）：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage1_tool_governance/index.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`：TS 只调用 `executeHubPipelineWithNative` / `runProviderResponseRustHubPipeline` 并执行 Rust effect plan。
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`：响应链总入口，串联 `RespInboundFormatParse -> RespProcessToolGovernance -> RespProcessFinalize -> RespOutbound*`。
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` 与 `resp_process_stage1_tool_governance_blocks/`：response tool harvesting / governance 真源。
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts`：仅作为 native JSON/NAPI 薄桥接。
+- 已删除的 response governance TS stage wrapper 不得作为当前事实或测试入口恢复。
 
 ## 3) “强制语义映射”规则（进入 chat process 前）
 
@@ -134,10 +133,12 @@
 - canonicalize 失败时，按正常错误流返回（fail-fast / bubble up），而不是在 Host/Provider 做 payload 语义修补或旁路输出。
 
 代码事实（当前实现的 canonicalize 约束点）：
-- servertool orchestration 后、进入 resp process 前：hard gate（必须 canonical，否则抛错）：
+- provider response 入口先进入 Rust HubPipeline total entry：
   - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
-- resp process 内部保留 best-effort bridge（仅作为安全网；原则上不应再依赖它）：
-  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage1_tool_governance/index.ts`
+- canonicalize / response tool governance / finalize 在 Rust response chain 内完成：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs`
+- 已删除的 resp_process TS stage wrapper 不是 fallback、安全网或当前测试入口。
 
 ## 5) StageId 命名规范（你要求的点分风格）
 

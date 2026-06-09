@@ -258,7 +258,20 @@ live case matrix：
 7. needs_user_input=true
 8. stream=true
 9. stream=false
+
+Live entry precondition:
+
+1. 5555 stopless live evidence only counts when the request actually enters the relay/managed stopless path.
+2. If the request is classified into router-direct same-protocol direct, stopless is bypassed by design and any raw stop schema output is an invalid live sample, not a stopless regression proof.
+3. Current live audit must therefore record route evidence from `~/.rcc/logs/server-5555.log`; responses that show `router-direct:* -> 1token.*` or other same-protocol direct routes cannot be used as stopless acceptance evidence.
+4. If all fresh probes on 5555 remain same-protocol direct, the remaining blocker is no longer `stop_message_core` / `stop_message_auto` owner logic but the 5555 live entry path itself.
 10. `/v1/responses/:id/submit_tool_outputs`
+
+live 样本筛选硬规则：
+
+1. 命中 `direct/direct` 的 explicit provider/model 请求不计入 stopless 验证。
+2. 5555 上若命中 Codex 型 managed target，可用于验证 `skip_goal_active` / `skip_plan_mode` / `no required_action`，但不能把其原生 `instructions` / `exec_command` 行为误判为 stopless schema 契约。
+3. allow-stop markdown、continue-needed、budget exhausted 必须使用非 Codex 型 managed target 取证；若当前端口环境做不到，必须明确记录为环境边界，不能口头补全。
 
 每个 case 必须收集：
 

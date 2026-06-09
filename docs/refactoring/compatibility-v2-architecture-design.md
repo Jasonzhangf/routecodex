@@ -63,7 +63,6 @@ graph TB
 │   ├── glm-strategy.ts             # GLM特定策略
 │   ├── qwen-strategy.ts            # Qwen特定策略
 ├── utils/                          # 工具类
-│   ├── schema-validator.ts         # Schema验证器
 │   ├── type-converter.ts           # 类型转换器
 │   └── debug-helper.ts             # 调试助手
 ├── api/                            # API定义
@@ -75,6 +74,8 @@ graph TB
     ├── integration/                # 集成测试
     └── fixtures/                   # 测试数据
 ```
+
+备注：上述结构是历史设计草案，不是当前实现清单。`schema-validator.ts` 类型的 legacy TS validator 已物理删除；当前 Hub Pipeline runtime 语义不得从该草案恢复。
 
 ## 🔧 核心组件设计
 

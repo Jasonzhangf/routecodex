@@ -176,10 +176,7 @@ npx tsc --noEmit
 相关 TS 测试按实际改动补跑：
 
 ```bash
-cd sharedmodule/llmswitch-core
-npm test -- tests/sharedmodule/tool-governor-exec-command-guard.spec.ts
-npm test -- tests/sharedmodule/tool-registry-tools.spec.ts
-npm test -- tests/sharedmodule/exec-command-validator-shape-repair.spec.ts
+npm run jest:run -- --runTestsByPath tests/servertool/exec-command-guard.spec.ts tests/sharedmodule/tool-registry-tools.spec.ts tests/sharedmodule/exec-command-validator-shape-repair.spec.ts --runInBand --no-cache --forceExit
 ```
 
 ## 风险与规避

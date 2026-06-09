@@ -980,6 +980,53 @@ describe('stop_message_auto servertool', () => {
     expect(String(finalMessage.content)).not.toContain('needs_user_input');
   });
 
+  test('needs_user_input terminal response only shows the question markdown', async () => {
+    const sessionId = 'stopmessage-spec-session-needs-user-input-terminal';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 1
+    });
+
+    const chatResponse = buildStopChatResponse('chatcmpl-needs-user-input-terminal');
+    const message = ((chatResponse.choices as any[])[0].message as any);
+    message.content = [
+      '正在进行部署前检查。',
+      '{"stopreason":2,"reason":"需要确认部署窗口","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"请确认：你希望今天 23:00 部署，还是明天 10:00 部署？","next_suggested_path":"","needs_user_input":true,"learned":""}'
+    ].join('\n');
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: {
+        requestId: 'req-stopmessage-needs-user-input-terminal',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'debug this' }]
+        }
+      } as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-needs-user-input-terminal',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    const finalMessage = ((result.finalChatResponse.choices as any[])[0].message as any);
+    const content = String(finalMessage.content);
+    expect(content).toContain('## 需要确认');
+    expect(content).toContain('请确认：你希望今天 23:00 部署，还是明天 10:00 部署？');
+    expect(content).not.toContain('正在进行部署前检查');
+    expect(content).not.toContain('needs_user_input');
+    expect(content).not.toContain('stopreason');
+  });
+
   test('allow_stop does not fail when only requestId exists and no persisted scope key is available', async () => {
     const chatResponse = buildStopChatResponse('chatcmpl-allow-stop-requestid-only');
     ((chatResponse.choices as any[])[0].message as any).content = [

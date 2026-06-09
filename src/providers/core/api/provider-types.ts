@@ -45,7 +45,7 @@ export interface IProviderV2 extends ProviderModule {
  *
  * 注意：品牌/家族（glm、qwen 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
-export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mimoweb' | 'mock' | 'windsurf';
+export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mimoweb' | 'mock';
 
 /**
  * 服务协议类型映射
@@ -56,8 +56,7 @@ export const PROVIDER_TYPE_MAP = {
   ANTHROPIC: 'anthropic',
   GEMINI: 'gemini',
   MIMOWEB: 'mimoweb',
-  MOCK: 'mock',
-  WINDSURF: 'windsurf'
+  MOCK: 'mock'
 } as const;
 
 /**

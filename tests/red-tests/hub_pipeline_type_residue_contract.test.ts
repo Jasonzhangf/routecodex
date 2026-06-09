@@ -51,11 +51,16 @@ describe('Hub Pipeline type residue contract', () => {
     expect(checklist).toContain('resp_process_stage1_tool_governance');
   });
 
-  it('keeps current topology docs and live telemetry labels on canonical node names', () => {
-    const files = [
+  it('keeps legacy topology docs physically removed and live telemetry labels canonical', () => {
+    const deletedDocs = [
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/STAGE_CATALOG.md',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/README.md',
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/INTEGRATION_NOTES.md',
+    ];
+    const existingDocs = deletedDocs.filter((relative) => fs.existsSync(path.join(ROOT, relative)));
+    expect(existingDocs).toEqual([]);
+
+    const files = [
       'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
     ];
     const violations: string[] = [];

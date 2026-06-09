@@ -128,13 +128,9 @@ mod tests {
             ..RoutingFeatures::default()
         };
 
-        let error = direct_model_media_requirement_error(
-            "text",
-            "text-model",
-            &features,
-            &registry,
-        )
-        .expect("direct media requirement error");
+        let error =
+            direct_model_media_requirement_error("text", "text-model", &features, &registry)
+                .expect("direct media requirement error");
         assert!(error.contains("Direct model text.text-model cannot satisfy media requirement"));
     }
 
@@ -164,15 +160,13 @@ mod tests {
             ..RoutingFeatures::default()
         };
 
-        let error = direct_model_media_requirement_error(
-            "media",
-            "vision-model",
-            &features,
-            &registry,
-        )
-        .expect("remote video requires multimodal");
+        let error =
+            direct_model_media_requirement_error("media", "vision-model", &features, &registry)
+                .expect("remote video requires multimodal");
         assert!(error.contains("media requirement multimodal"));
-        assert!(direct_model_media_requirement_error("media", "mm-model", &features, &registry)
-            .is_none());
+        assert!(
+            direct_model_media_requirement_error("media", "mm-model", &features, &registry)
+                .is_none()
+        );
     }
 }

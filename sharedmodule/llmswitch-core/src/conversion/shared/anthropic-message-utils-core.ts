@@ -19,22 +19,6 @@ export function safeJson(v: unknown): string {
   }
 }
 
-export function sanitizeToolUseId(raw: string): string {
-  const trimmed = typeof raw === 'string' ? raw.trim() : '';
-  if (!trimmed) {
-    return `call_${Math.random().toString(36).slice(2, 10)}`;
-  }
-  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
-    return trimmed;
-  }
-  const sanitized = trimmed
-    .replace(/[^A-Za-z0-9_-]/g, '_')
-    .replace(/_{2,}/g, '_')
-    .replace(/^_+/, '')
-    .replace(/_+$/, '');
-  return sanitized || `call_${Math.random().toString(36).slice(2, 10)}`;
-}
-
 export function flattenAnthropicText(content: unknown): string {
   if (content == null) return '';
   if (typeof content === 'string') return content;
@@ -157,22 +141,6 @@ export function requireTrimmedString(value: unknown, context: string): string {
     );
   }
   return trimmed;
-}
-
-export function requireSystemText(block: unknown, context: string): string {
-  const text = flattenAnthropicText(block).trim();
-  if (!text) {
-    throw new ProviderProtocolError(
-      `Anthropic bridge constraint violated: ${context} must contain text`,
-      {
-        code: resolveProtocolErrorCode(context),
-        protocol: 'anthropic-messages',
-        providerType: 'anthropic',
-        details: { context }
-      }
-    );
-  }
-  return text;
 }
 
 export function normalizeAnthropicToolName(value: unknown): string | undefined {

@@ -4,8 +4,6 @@ import {
 } from './native-router-hotpath-policy.js';
 import {
   parseJson,
-  parseRecord,
-  parseStringArray,
   readNativeFunction,
   safeStringify
 } from './native-shared-conversion-semantics-core.js';
@@ -31,119 +29,6 @@ export function repairFindMetaWithNative(script: string): string {
     }
     const parsed = parseJson(raw);
     return typeof parsed === 'string' ? parsed : fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function splitCommandStringWithNative(input: string): string[] {
-  const capability = 'splitCommandStringJson';
-  const fail = (reason?: string) => failNativeRequired<string[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(input ?? '');
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseStringArray(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function packShellArgsWithNative(input: Record<string, unknown>): Record<string, unknown> {
-  const capability = 'packShellArgsJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(input ?? {});
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function flattenByCommaWithNative(items: string[]): string[] {
-  const capability = 'flattenByCommaJson';
-  const fail = (reason?: string) => failNativeRequired<string[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(Array.isArray(items) ? items : []);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseStringArray(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function chunkStringWithNative(
-  s: string,
-  minParts = 3,
-  maxParts = 12,
-  targetChunk = 12
-): string[] {
-  const capability = 'chunkStringJson';
-  const fail = (reason?: string) => failNativeRequired<string[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify({ s, minParts, maxParts, targetChunk });
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseStringArray(raw);
-    return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

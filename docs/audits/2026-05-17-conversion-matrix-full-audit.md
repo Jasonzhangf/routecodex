@@ -101,7 +101,7 @@
 - `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts`
 - `tests/server/runtime/http-server/executor/provider-response-converter.servertool-regression.spec.ts`
 - `tests/server/runtime/http-server/executor/provider-response-converter.finish-reason.spec.ts`
-- `tests/sharedmodule/real-sample-hub-io-compare.spec.ts`
+- 旧 `tests/sharedmodule/real-sample-hub-io-compare.spec.ts` 已删除；不得作为当前覆盖引用。
 - `tests/sharedmodule/responses-cross-protocol-audit-matrix.spec.ts`
 
 ## D. response 侧缺口

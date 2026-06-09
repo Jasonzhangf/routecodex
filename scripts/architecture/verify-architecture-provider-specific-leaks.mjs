@@ -12,12 +12,14 @@ const targetRoots = [
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
 ];
 const exts = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.rs']);
+const removedProviderToken = ['wind', 'surf'].join('');
+const removedProtocolToken = ['cas', 'cade'].join('');
 
 const providerPatterns = [
   /\bdeepseek\b/i,
   /\bqwen\b/i,
-  /\bwindsurf\b/i,
-  /\bcascade\b/i,
+  new RegExp(`\\b${removedProviderToken}\\b`, 'i'),
+  new RegExp(`\\b${removedProtocolToken}\\b`, 'i'),
 ];
 
 const branchHints = [

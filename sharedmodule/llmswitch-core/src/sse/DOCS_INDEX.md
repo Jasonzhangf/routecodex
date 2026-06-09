@@ -86,9 +86,8 @@ ARCHITECTURE.md → IMPLEMENTATION_GUIDE.md → README-RESPONSES.md
 - **Responses专用类型**: `types/responses-types.ts`
 
 ### 测试文件
-- **单元测试**: `test/chat-converter.test.ts`, `test/responses-converter.test.ts`
-- **回环测试脚本**: `../../scripts/test-chat-roundtrip.mjs`, `../../scripts/test-responses-roundtrip.mjs`
-- **演示脚本**: `../../scripts/demo-complete-sse-conversion.mjs`
+- **当前入口**: 仓库根目录 `tests/` 与 `docs/architecture/verification-map.yml`
+- **历史说明**: `src/sse/test/*` 已迁出并禁止恢复为 active 源内测试入口
 
 ### 实验数据目录
 - **Chat黄金样例**: `~/.routecodex/codex-samples/openai-chat/`

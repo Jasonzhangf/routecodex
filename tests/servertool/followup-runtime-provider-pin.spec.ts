@@ -1,6 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { resolveAdapterContextProviderKey } from '../../sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.js';
+import {
+  compactFollowupErrorReason,
+  normalizeClientInjectText,
+  readClientInjectOnly,
+  resolveAdapterContextProviderKey,
+  resolveServerToolFollowupTimeoutMs,
+  resolveServerToolTimeoutMs
+} from '../../sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.js';
 
 describe('servertool sticky provider pin', () => {
   test('prefers exact target providerKey over alias adapter providerKey', () => {
@@ -13,5 +20,47 @@ describe('servertool sticky provider pin', () => {
         }
       })
     ).toBe('mini27.key1.MiniMax-M2.7');
+  });
+
+  test('resolves timeout env policy through native contract', () => {
+    const previous = {
+      ROUTECODEX_SERVERTOOL_TIMEOUT_MS: process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS,
+      RCC_SERVERTOOL_TIMEOUT_MS: process.env.RCC_SERVERTOOL_TIMEOUT_MS,
+      LLMSWITCH_SERVERTOOL_TIMEOUT_MS: process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS,
+      ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS: process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
+      RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS: process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
+      LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS: process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS
+    };
+    try {
+      delete process.env.RCC_SERVERTOOL_TIMEOUT_MS;
+      delete process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS;
+      delete process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
+      delete process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
+      process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS = '1500.9';
+      process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = '2500.1';
+
+      expect(resolveServerToolTimeoutMs()).toBe(1500);
+      expect(resolveServerToolFollowupTimeoutMs()).toBe(2500);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
+  test('normalizes client inject policy through native contract', () => {
+    expect(readClientInjectOnly({ clientInjectOnly: ' true ' })).toBe(true);
+    expect(readClientInjectOnly({ clientInjectOnly: 'false' })).toBe(false);
+    expect(normalizeClientInjectText(' hello\n[Time/Date]: now\n<**hidden**>\n[Image omitted]\n\n\nworld ')).toBe('hello\n\nworld');
+  });
+
+  test('compacts followup error reason through native contract', () => {
+    expect(compactFollowupErrorReason('upstream http 503 refused')).toBe('HTTP_503');
+    expect(compactFollowupErrorReason('<html><body>bad</body></html>')).toBe('UPSTREAM_HTML_ERROR');
+    expect(compactFollowupErrorReason('')).toBeUndefined();
   });
 });
