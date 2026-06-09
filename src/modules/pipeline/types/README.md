@@ -1,16 +1,10 @@
 # Pipeline Types Module
-## Overview
-Pipeline types module contains TypeScript type definitions for the Hub Pipeline, ensuring type safety and consistency between Host and llmswitch-core.
-## Directory Structure
-```src/modules/pipeline/types/
-└── README. md                  # This file - type definitions overview
-```## Key Types### Pipeline Base TypesCore types for pipeline operation:- `PipelineRequest` - Incoming request structure
-- `PipelineResponse` - Response structure- `PipelineContext` - Execution context### Provider TypesProvider-related type definitions:- `ProviderRuntimeMetadata` - Runtime information for providers
-- `ProviderHealthStatus` - Health check types### Transformation TypesConversion and compatibility type definitions.## Usage```typescriptimport { PipelineRequest } from 'rcc-llmswitch-core';const request: PipelineRequest = {  // ...};```## Do / Don't
-**Do**
-- Import types from llmswitch-core for consistency
-- Use type guards and validators provided by the module**Don't**
-- Duplicate types that exist in llmswitch-core
-- Add business logic to type files## Related Documentation
-- `src/types/` - Host-level type definitions
-- `sharedmodule/llmswitch-core/dist/types/` - Source of truth for pipeline types
+
+This legacy Host directory no longer owns Hub Pipeline data structures. Only
+`external-types.ts` remains here for the still-live provider/runtime
+compatibility surface used by `pipeline-interfaces.ts`.
+
+Do not restore old `PipelineRequest`, `PipelineResponse`, provider config, or
+transformation type barrels here. Current request/response/control/data
+contracts belong to llmswitch-core Rust/native Hub Pipeline types. Host code
+should import concrete `src/types/**` or native/core bridge contracts directly.

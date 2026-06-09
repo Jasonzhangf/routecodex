@@ -18568,6 +18568,11 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - `src/modules/pipeline/types/common-types.ts`, `module.types.ts`, and `shared-dtos.ts` were pure one-line re-export aliases to `src/types/**`. `module.types.ts` and `shared-dtos.ts` had no consumers; `common-types.ts` only had six provider auth imports.
 - Repointed those provider auth imports to `src/types/common-types.js` and physically deleted the three alias files; added them to the deleted-path gate.
 
+2026-06-09 Hub Pipeline legacy type pruning:
+- `src/modules/pipeline/types/{base-types,provider-config-types,provider-types,transformation-types}.ts` had no external runtime/test consumers; they were only referenced by `pipeline-interfaces.ts` or inside the same legacy type cluster.
+- Pruned `pipeline-interfaces.ts` down to the still-live provider/runtime compatibility surface (`ModuleConfig`, `ProviderModule`, `ModuleDependencies`, `PipelineDebugLogger`, `PipelineDispatchCenter`) and removed unused PipelineManager/LLMSwitch/Compatibility/Transformation interfaces.
+- Physically deleted the four legacy type files and added them to the deleted-path gate.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.

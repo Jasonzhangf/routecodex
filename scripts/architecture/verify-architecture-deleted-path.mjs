@@ -89,6 +89,10 @@ const deletedPathDenylist = [
   'src/modules/pipeline/types/common-types.ts',
   'src/modules/pipeline/types/module.types.ts',
   'src/modules/pipeline/types/shared-dtos.ts',
+  'src/modules/pipeline/types/base-types.ts',
+  'src/modules/pipeline/types/provider-config-types.ts',
+  'src/modules/pipeline/types/provider-types.ts',
+  'src/modules/pipeline/types/transformation-types.ts',
 ];
 
 function parseOwners(text) {
