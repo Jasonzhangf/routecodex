@@ -518,7 +518,8 @@ servertool 的真正骨架层：
 允许存在：
 
 - `prepareRuntimeMetadataForServertoolsJson(...)` 的 TS 调用壳
-- `planChatServertoolOrchestrationBundleJson(...)` 的 TS 调用壳
+- `planChatWebSearchOperationsJson(...)` / `planContinueExecutionOperationsJson(...)` 等仍有测试或运行时消费者的最小 native 调用壳
+- Rust 内部 `plan_chat_servertool_orchestration_bundle(...)` helper 直连；不得恢复 standalone `planChatServertoolOrchestrationBundleJson(...)` public bridge
 
 不允许存在：
 

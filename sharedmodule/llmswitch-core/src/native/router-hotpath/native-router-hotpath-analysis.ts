@@ -115,19 +115,6 @@ export type ServertoolGenericFollowupPayload = {
   parameters?: Record<string, unknown>;
 };
 
-export type ServertoolFollowupFlowProfilePayload = {
-  noFollowup?: boolean;
-  autoLimit?: boolean;
-  flowOnlyLoopLimit?: boolean;
-  clientInjectOnly?: boolean;
-  clearStateOnFollowupFailure?: boolean;
-  seedLoopPayload?: boolean;
-  clientInjectSource?: string;
-  transparentReplayRequestSuffix?: string;
-  ignoreRequiresActionFollowup?: boolean;
-  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
-};
-
 export type ServertoolFollowupRuntimePlanPayload = {
   flowId?: string;
   outcomeMode: 'skip' | 'client_inject_only' | 'reenter';
@@ -505,38 +492,6 @@ export function parseServertoolGenericFollowupPayload(raw: string): ServertoolGe
     tools: parsed.tools,
     ...(parsed.parameters && typeof parsed.parameters === 'object' && !Array.isArray(parsed.parameters)
       ? { parameters: parsed.parameters as Record<string, unknown> }
-      : {})
-  };
-}
-
-export function parseServertoolFollowupFlowProfilePayload(raw: string): ServertoolFollowupFlowProfilePayload | null {
-  const parsed = parseJson('parseServertoolFollowupFlowProfilePayload', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return {};
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const profile = parsed as Record<string, unknown>;
-  return {
-    ...(profile.noFollowup === true ? { noFollowup: true } : {}),
-    ...(profile.autoLimit === true ? { autoLimit: true } : {}),
-    ...(profile.flowOnlyLoopLimit === true ? { flowOnlyLoopLimit: true } : {}),
-    ...(profile.clientInjectOnly === true ? { clientInjectOnly: true } : {}),
-    ...(profile.clearStateOnFollowupFailure === true ? { clearStateOnFollowupFailure: true } : {}),
-    ...(profile.seedLoopPayload === true ? { seedLoopPayload: true } : {}),
-    ...(typeof profile.clientInjectSource === 'string' && profile.clientInjectSource.trim()
-      ? { clientInjectSource: profile.clientInjectSource.trim() }
-      : {}),
-    ...(typeof profile.transparentReplayRequestSuffix === 'string' && profile.transparentReplayRequestSuffix.trim()
-      ? { transparentReplayRequestSuffix: profile.transparentReplayRequestSuffix.trim() }
-      : {}),
-    ...(profile.ignoreRequiresActionFollowup === true ? { ignoreRequiresActionFollowup: true } : {}),
-    ...(profile.contextDecorationMode === 'continue_execution_summary' || profile.contextDecorationMode === 'web_search_summary'
-      ? { contextDecorationMode: profile.contextDecorationMode }
       : {})
   };
 }

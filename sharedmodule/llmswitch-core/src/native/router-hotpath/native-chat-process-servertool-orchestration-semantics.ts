@@ -6,7 +6,6 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 import { formatUnknownError } from '../../shared/common-utils.js';
 import {
   parseServertoolDispatchPlanPayload,
-  parseServertoolFollowupFlowProfilePayload,
   parseServertoolFollowupRuntimePlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
@@ -32,11 +31,6 @@ export type NativePayloadContractSignal = {
   marker: string;
 };
 
-export type NativeChatServerToolBundlePlan = {
-  webSearch: NativeChatWebSearchPlan;
-  continueExecution: NativeContinueExecutionPlan;
-};
-
 export type NativeServertoolResponseStage = ReturnType<typeof parseServertoolResponseStagePayload> extends infer T
   ? Exclude<T, null>
   : never;
@@ -50,10 +44,6 @@ export type NativeServertoolOutcomePlan = ReturnType<typeof parseServertoolOutco
   : never;
 
 export type NativeServertoolAutoHookQueues = ReturnType<typeof parseServertoolAutoHookQueuesPayload> extends infer T
-  ? Exclude<T, null>
-  : never;
-
-export type NativeServertoolFollowupFlowProfile = ReturnType<typeof parseServertoolFollowupFlowProfilePayload> extends infer T
   ? Exclude<T, null>
   : never;
 
@@ -205,23 +195,6 @@ function parseContinueDirectiveInjection(raw: string): NativeContinueDirectiveIn
     changed: row.changed,
     messages: row.messages
   };
-}
-
-function parseServerToolBundlePlan(raw: string): NativeChatServerToolBundlePlan | null {
-  const parsed = parseJson('parseServerToolBundlePlan', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  const webSearchRaw = typeof row.webSearch === 'object' ? JSON.stringify(row.webSearch) : '';
-  const continueRaw =
-    typeof row.continueExecution === 'object' ? JSON.stringify(row.continueExecution) : '';
-  const webSearch = webSearchRaw ? parseWebSearchPlan(webSearchRaw) : null;
-  const continueExecution = continueRaw ? parseContinueExecutionPlan(continueRaw) : null;
-  if (!webSearch || !continueExecution) {
-    return null;
-  }
-  return { webSearch, continueExecution };
 }
 
 function parsePayloadContractSignal(raw: string): NativePayloadContractSignal | null {
@@ -460,29 +433,6 @@ export function planContinueExecutionOperationsWithNative(
     const runtimeMetadataJson = encodeJsonArg(capability, runtimeMetadata);
     const raw = invokeNativeStringCapability(capability, [runtimeMetadataJson, hasActiveStopMessage === true]);
     const parsed = parseContinueExecutionPlan(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function tryPlanChatServerToolBundleWithNative(
-  request: unknown,
-  runtimeMetadata: Record<string, unknown>,
-  hasActiveStopMessage: boolean
-): NativeChatServerToolBundlePlan | null {
-  const capability = 'planChatServertoolOrchestrationBundleJson';
-  const fail = (reason?: string) => failNativeRequired<NativeChatServerToolBundlePlan | null>(capability, reason);
-  try {
-    const requestJson = encodeJsonArg(capability, request ?? null);
-    const runtimeMetadataJson = encodeJsonArg(capability, runtimeMetadata);
-    const raw = invokeNativeStringCapability(capability, [
-      requestJson,
-      runtimeMetadataJson,
-      hasActiveStopMessage === true
-    ]);
-    const parsed = parseServerToolBundlePlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -753,21 +703,6 @@ export function runServertoolOrchestrationMutationWithNative(input: Record<strin
   }
 }
 
-export function resolveServertoolFollowupFlowProfileWithNative(
-  flowId: string
-): NativeServertoolFollowupFlowProfile {
-  const capability = 'resolveServertoolFollowupFlowProfileJson';
-  const fail = (reason?: string) => failNativeRequired<NativeServertoolFollowupFlowProfile>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapability(capability, [String(flowId || '')]);
-    const parsed = parseServertoolFollowupFlowProfilePayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function planServertoolFollowupRuntimeWithNative(
   flowId: string
 ): NativeServertoolFollowupRuntimePlan {
@@ -902,41 +837,6 @@ export function applyFollowupDeltaPlanWithNative(input: {
   }
 }
 
-export type NativeApplyPatchResult = {
-  ok: boolean;
-  payload: Record<string, unknown>;
-  patchedContent: string | null;
-  canonicalArgs: Record<string, unknown>;
-};
-
-export function runApplyPatchWithNative(input: {
-  toolCallId: string;
-  toolCallArguments: string;
-  workspace: string;
-  fileContent?: string;
-}): NativeApplyPatchResult {
-  const capability = 'runApplyPatchJson';
-  const fail = (reason?: string) => failNativeRequired<NativeApplyPatchResult>(capability, reason);
-  try {
-    if (isNativeDisabledByEnv()) {
-      return fail('native disabled');
-    }
-    const fn = readNativeFunction(capability);
-    if (!fn) {
-      return fail();
-    }
-    const inputJson = JSON.stringify(input);
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string') {
-      return fail('non-string result');
-    }
-    return JSON.parse(raw) as NativeApplyPatchResult;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function buildServertoolToolOutputPayloadWithNative(input: {
   base: Record<string, unknown>;
   toolCallId: string;
@@ -1002,14 +902,6 @@ function invokeWebSearchNativeRaw(capability: string, args: unknown[]): string {
   return invokeNativeStringCapability(capability, args);
 }
 
-export function webSearchResolveToolNameWithNative(raw: string | null): string {
-  return invokeWebSearchNative('webSearchResolveToolName', [raw]);
-}
-
-export function webSearchParseToolArgumentsWithNative(argumentsJson: string): string {
-  return invokeWebSearchNative('webSearchParseToolArgumentsJson', [argumentsJson]);
-}
-
 export function webSearchIsGeminiEngineWithNative(providerKey: string): boolean {
   return invokeWebSearchNative('webSearchIsGeminiEngine', [providerKey]) === 'true';
 }
@@ -1058,10 +950,6 @@ export function webSearchExtractAssistantMessageWithNative(chatResponseJson: str
 
 export function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string {
   return invokeWebSearchNativeRaw('webSearchBuildToolMessagesJson', [chatResponseJson]);
-}
-
-export function webSearchFindArrayWithNative(chatResponseJson: string): string {
-  return invokeWebSearchNativeRaw('webSearchFindArrayJson', [chatResponseJson]);
 }
 
 // ── Vision Pure Blocks ────────────────────────────────────────────────

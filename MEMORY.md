@@ -3108,3 +3108,10 @@ Tags: hub-pipeline, response-governance, dead-code, napi-export, rust-only, resi
 - Removed those public NAPI exports from `lib.rs` / required-export gate and removed `#[napi]` from stop-message action apply; no Rust semantic owner was deleted.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public bridge names and NAPI bridge functions from returning.
 Tags: virtual-router, stop-message, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Servertool utility public bridges removed
+- Exact scan found servertool utility wrappers `tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, and `webSearchFindArrayWithNative` had no live TS/runtime consumer.
+- Removed those TS wrappers, retired required-export entries, standalone NAPI surfaces `planChatServertoolOrchestrationBundleJson`, `resolveServertoolFollowupFlowProfileJson`, `webSearchFindArrayJson`, and the dead servertool `runApplyPatchJson` executor. Rust req-process servertool injection and followup runtime planning now call Rust-internal helpers directly instead of self-calling JSON/NAPI public bridges.
+- Apply_patch public contract truth remains `normalizeApplyPatchArgumentsJson` / `validateApplyPatchArgumentsJson`; `runApplyPatchJson` is deleted and must not be restored as a servertool executor.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired servertool utility bridge/export/NAPI names from returning.
+Tags: hub-pipeline, servertool, dead-code, napi-export, rust-only, residue-gate, apply-patch, 2026-06-09

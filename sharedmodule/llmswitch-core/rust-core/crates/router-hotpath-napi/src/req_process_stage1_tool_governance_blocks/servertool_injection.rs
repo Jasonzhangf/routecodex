@@ -1,9 +1,8 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::chat_servertool_orchestration::{
-    build_continue_execution_operations_json, plan_chat_servertool_orchestration_bundle_json,
+    build_continue_execution_operations, plan_chat_servertool_orchestration_bundle,
 };
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready_json;
@@ -11,66 +10,6 @@ use crate::shared_json_utils::parse_json_bool;
 use crate::web_search_mode::{
     resolve_web_search_execution_mode_from_value, WebSearchExecutionMode,
 };
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WebSearchPlan {
-    should_inject: bool,
-    #[serde(default)]
-    selected_engine_indexes: Vec<i64>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SimpleInjectPlan {
-    should_inject: bool,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ServerToolBundlePlan {
-    #[serde(default)]
-    web_search: WebSearchPlan,
-    #[serde(default)]
-    continue_execution: SimpleInjectPlan,
-}
-
-fn parse_json_array(raw: &str) -> Vec<Value> {
-    match serde_json::from_str::<Value>(raw) {
-        Ok(Value::Array(rows)) => rows,
-        _ => Vec::new(),
-    }
-}
-
-fn parse_bundle_plan(raw: &str) -> Option<ServerToolBundlePlan> {
-    serde_json::from_str::<ServerToolBundlePlan>(raw).ok()
-}
-
-fn pick_bool(value: Option<&Value>) -> Option<bool> {
-    match value {
-        Some(Value::Bool(v)) => Some(*v),
-        Some(Value::String(raw)) => {
-            let lowered = raw.trim().to_ascii_lowercase();
-            if lowered == "true" {
-                return Some(true);
-            }
-            if lowered == "false" {
-                return Some(false);
-            }
-            None
-        }
-        Some(Value::Number(raw)) => {
-            if raw.as_i64() == Some(1) {
-                return Some(true);
-            }
-            if raw.as_i64() == Some(0) {
-                return Some(false);
-            }
-            None
-        }
-        _ => None,
-    }
-}
 
 pub(crate) fn read_runtime_metadata(metadata: &Map<String, Value>) -> Map<String, Value> {
     metadata
@@ -84,49 +23,6 @@ pub(crate) fn resolve_client_inject_ready(metadata: &Map<String, Value>) -> bool
     let metadata_json = serde_json::to_string(&Value::Object(metadata.clone()))
         .unwrap_or_else(|_| "{}".to_string());
     parse_bool_or_default(resolve_client_inject_ready_json(metadata_json), true)
-}
-
-fn resolve_default_bundle_plan(
-    runtime_metadata: &Map<String, Value>,
-    has_active_stop_message: bool,
-) -> ServerToolBundlePlan {
-    let server_tool_followup =
-        pick_bool(runtime_metadata.get("serverToolFollowup")).unwrap_or(false);
-    let (web_search_indexes, has_direct_web_search_engine) = runtime_metadata
-        .get("webSearch")
-        .and_then(|v| v.as_object())
-        .and_then(|row| row.get("engines"))
-        .and_then(|v| v.as_array())
-        .map(|engines| {
-            let mut servertool_indexes: Vec<i64> = Vec::new();
-            let mut has_direct = false;
-            for (idx, engine) in engines.iter().enumerate() {
-                match resolve_web_search_execution_mode_from_value(engine) {
-                    WebSearchExecutionMode::Servertool => servertool_indexes.push(idx as i64),
-                    WebSearchExecutionMode::DirectRoute | WebSearchExecutionMode::DirectBuiltin => {
-                        has_direct = true
-                    }
-                }
-            }
-            (servertool_indexes, has_direct)
-        })
-        .unwrap_or_else(|| (Vec::new(), false));
-
-    // Single gate: direct-capable webSearch and servertool webSearch are mutually exclusive
-    // within the same request. Once direct mode is present, do not inject servertool websearch.
-    let web_search_should =
-        !has_direct_web_search_engine && !web_search_indexes.is_empty() && !server_tool_followup;
-    let continue_should = !(server_tool_followup || has_active_stop_message);
-
-    ServerToolBundlePlan {
-        web_search: WebSearchPlan {
-            should_inject: web_search_should,
-            selected_engine_indexes: web_search_indexes,
-        },
-        continue_execution: SimpleInjectPlan {
-            should_inject: continue_should,
-        },
-    }
 }
 
 fn read_selected_web_search_engines(
@@ -309,26 +205,6 @@ fn parse_bool_or_default(raw: NapiResult<String>, default: bool) -> bool {
     }
 }
 
-fn parse_ops_or_empty(raw: NapiResult<String>) -> Vec<Value> {
-    match raw {
-        Ok(payload) => parse_json_array(&payload),
-        Err(_) => Vec::new(),
-    }
-}
-
-fn parse_bundle_or_default(
-    raw: NapiResult<String>,
-    runtime_metadata: &Map<String, Value>,
-    has_active_stop_message: bool,
-) -> ServerToolBundlePlan {
-    match raw {
-        Ok(payload) => parse_bundle_plan(&payload).unwrap_or_else(|| {
-            resolve_default_bundle_plan(runtime_metadata, has_active_stop_message)
-        }),
-        Err(_) => resolve_default_bundle_plan(runtime_metadata, has_active_stop_message),
-    }
-}
-
 pub(crate) fn maybe_apply_servertool_orchestration(
     request: &mut Map<String, Value>,
     metadata: &Map<String, Value>,
@@ -349,23 +225,9 @@ pub(crate) fn maybe_apply_servertool_orchestration(
     let runtime_metadata = read_runtime_metadata(metadata);
     let has_active_stop_message = has_active_stop_message_for_continue_execution;
 
-    let request_value = Value::Object(request.clone());
-    let request_json = match serde_json::to_string(&request_value) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let runtime_metadata_json =
-        match serde_json::to_string(&Value::Object(runtime_metadata.clone())) {
-            Ok(v) => v,
-            Err(_) => "{}".to_string(),
-        };
-    let bundle_plan = parse_bundle_or_default(
-        plan_chat_servertool_orchestration_bundle_json(
-            request_json,
-            runtime_metadata_json,
-            has_active_stop_message,
-        ),
-        &runtime_metadata,
+    let bundle_plan = plan_chat_servertool_orchestration_bundle(
+        &Value::Object(request.clone()),
+        &Value::Object(runtime_metadata.clone()),
         has_active_stop_message,
     );
 
@@ -383,9 +245,11 @@ pub(crate) fn maybe_apply_servertool_orchestration(
         }
     }
 
-    operations.extend(parse_ops_or_empty(
-        build_continue_execution_operations_json(bundle_plan.continue_execution.should_inject),
-    ));
+    if let Value::Array(ops) =
+        build_continue_execution_operations(bundle_plan.continue_execution.should_inject)
+    {
+        operations.extend(ops);
+    }
     if operations.is_empty() {
         return;
     }
