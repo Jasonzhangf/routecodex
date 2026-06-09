@@ -1493,6 +1493,42 @@ pub fn parse_servertool_timeout_ms_json(input_json: String) -> NapiResult<String
 }
 
 #[napi]
+pub fn plan_servertool_timeout_watcher_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_timeout_watcher_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_adapter_client_disconnected_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::is_adapter_client_disconnected_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_client_disconnect_watcher_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_client_disconnect_watcher_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_client_disconnected_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_client_disconnected_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_timeout_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_timeout_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stop_message_fetch_failed_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_fetch_failed_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn read_client_inject_only_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::read_client_inject_only_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

@@ -360,6 +360,23 @@ export interface ServertoolTimeoutPolicyInput {
   raw?: unknown;
 }
 
+export interface ServertoolTimeoutWatcherPlan {
+  armed: boolean;
+  timeoutMs: number;
+}
+
+export interface ServertoolClientDisconnectWatcherPlan {
+  intervalMs: number;
+}
+
+export interface ServertoolErrorPlan {
+  message: string;
+  code: string;
+  category: string;
+  status: number;
+  details: Record<string, unknown>;
+}
+
 // ── Stop gateway context ────────────────────────────────────────────────────
 
 export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
@@ -1200,6 +1217,143 @@ export function parseServertoolTimeoutMsWithNative(input: ServertoolTimeoutPolic
     throw new Error('parseServertoolTimeoutMsJson native returned invalid timeout');
   }
   return parsed;
+}
+
+export function planServertoolTimeoutWatcherWithNative(timeoutMs: unknown): ServertoolTimeoutWatcherPlan {
+  const capability = 'planServertoolTimeoutWatcherJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolTimeoutWatcherJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ timeoutMs }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolTimeoutWatcherJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolTimeoutWatcherJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.armed !== 'boolean' || !Number.isInteger(record.timeoutMs) || (record.timeoutMs as number) < 0) {
+    throw new Error('planServertoolTimeoutWatcherJson native returned invalid plan');
+  }
+  return { armed: record.armed, timeoutMs: record.timeoutMs as number };
+}
+
+export function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean {
+  const capability = 'isAdapterClientDisconnectedJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('isAdapterClientDisconnectedJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(adapterContext ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`isAdapterClientDisconnectedJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`isAdapterClientDisconnectedJson native returned invalid bool: ${resultJson}`);
+}
+
+export function planClientDisconnectWatcherWithNative(pollIntervalMs: unknown): ServertoolClientDisconnectWatcherPlan {
+  const capability = 'planClientDisconnectWatcherJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planClientDisconnectWatcherJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ pollIntervalMs }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planClientDisconnectWatcherJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planClientDisconnectWatcherJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!Number.isInteger(record.intervalMs) || (record.intervalMs as number) <= 0) {
+    throw new Error('planClientDisconnectWatcherJson native returned invalid interval');
+  }
+  return { intervalMs: record.intervalMs as number };
+}
+
+export function planServertoolClientDisconnectedErrorWithNative(input: {
+  requestId: string;
+  flowId?: string;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolClientDisconnectedErrorJson', input),
+    'planServertoolClientDisconnectedErrorJson'
+  );
+}
+
+export function planServertoolTimeoutErrorWithNative(input: {
+  requestId: string;
+  phase: 'engine' | 'followup';
+  timeoutMs: unknown;
+  flowId?: string;
+  attempt?: unknown;
+  maxAttempts?: unknown;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolTimeoutErrorJson', input),
+    'planServertoolTimeoutErrorJson'
+  );
+}
+
+export function planStopMessageFetchFailedErrorWithNative(input: {
+  requestId: string;
+  reason: 'loop_limit';
+  elapsedMs?: unknown;
+  repeatCount?: unknown;
+  attempt?: unknown;
+  maxAttempts?: unknown;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planStopMessageFetchFailedErrorJson', input),
+    'planStopMessageFetchFailedErrorJson'
+  );
+}
+
+function callServertoolErrorPlanNative(capability: string, input: unknown): string {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  return resultJson;
+}
+
+function parseServertoolErrorPlan(resultJson: string, capability: string): ServertoolErrorPlan {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid error plan`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.message !== 'string' ||
+    typeof record.code !== 'string' ||
+    typeof record.category !== 'string' ||
+    !Number.isInteger(record.status) ||
+    !record.details ||
+    typeof record.details !== 'object' ||
+    Array.isArray(record.details)
+  ) {
+    throw new Error(`${capability} native returned invalid error plan`);
+  }
+  return {
+    message: record.message,
+    code: record.code,
+    category: record.category,
+    status: record.status as number,
+    details: record.details as Record<string, unknown>
+  };
 }
 
 export function readClientInjectOnlyWithNative(metadata: Record<string, unknown>): boolean {

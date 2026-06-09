@@ -148,10 +148,19 @@ owners:
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
     canonical_types:
       - ServertoolTimeoutPolicyInput
+      - ServertoolTimeoutWatcherPlan
+      - ServertoolClientDisconnectWatcherPlan
+      - ServertoolErrorPlan
       - ServertoolClientInjectTextInput
       - ServertoolProviderKeyInput
     canonical_builders:
       - parse_servertool_timeout_ms
+      - plan_servertool_timeout_watcher
+      - is_adapter_client_disconnected
+      - plan_client_disconnect_watcher
+      - plan_servertool_client_disconnected_error
+      - plan_servertool_timeout_error
+      - plan_stop_message_fetch_failed_error
       - read_client_inject_only
       - normalize_client_inject_text
       - compact_followup_error_reason
@@ -164,7 +173,9 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
       - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/timeout-error-block.spec.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -172,15 +183,17 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
       - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/timeout-error-block.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns timeout parsing, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution.
+      - servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution.
       - TS orchestration-policy-block may only read env/arguments and call native wrappers.
-      - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, or stop-gateway wrapper.
+      - TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.
+      - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.
 
   - feature_id: hub.servertool_backend_route_runtime
     status: active

@@ -301,6 +301,63 @@ pub fn parse_servertool_timeout_ms_json(input_json: &str) -> Result<String, Stri
     .map_err(|e| format!("serialize servertool timeout: {e}"))
 }
 
+pub fn plan_servertool_timeout_watcher_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolTimeoutWatcherInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool timeout watcher input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::plan_servertool_timeout_watcher(&input))
+        .map_err(|e| format!("serialize servertool timeout watcher: {e}"))
+}
+
+pub fn is_adapter_client_disconnected_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize adapter client disconnect input: {e}"))?;
+    Ok(
+        if orchestration_policy_contract::is_adapter_client_disconnected(&input) {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    )
+}
+
+pub fn plan_client_disconnect_watcher_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolClientDisconnectWatcherInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize client disconnect watcher input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::plan_client_disconnect_watcher(&input))
+        .map_err(|e| format!("serialize client disconnect watcher: {e}"))
+}
+
+pub fn plan_servertool_client_disconnected_error_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolClientDisconnectedErrorInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool client disconnected error input: {e}"))?;
+    serde_json::to_string(
+        &orchestration_policy_contract::plan_servertool_client_disconnected_error(&input),
+    )
+    .map_err(|e| format!("serialize servertool client disconnected error: {e}"))
+}
+
+pub fn plan_servertool_timeout_error_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolTimeoutErrorInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool timeout error input: {e}"))?;
+    serde_json::to_string(&orchestration_policy_contract::plan_servertool_timeout_error(&input)?)
+        .map_err(|e| format!("serialize servertool timeout error: {e}"))
+}
+
+pub fn plan_stop_message_fetch_failed_error_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::StopMessageFetchFailedErrorInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message fetch failed error input: {e}"))?;
+    serde_json::to_string(
+        &orchestration_policy_contract::plan_stop_message_fetch_failed_error(&input)?,
+    )
+    .map_err(|e| format!("serialize stop-message fetch failed error: {e}"))
+}
+
 pub fn read_client_inject_only_json(input_json: &str) -> Result<String, String> {
     let input: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize client inject metadata input: {e}"))?;
@@ -595,6 +652,79 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&timeout).expect("json"),
             json!(1200)
+        );
+        let timeout_watcher =
+            plan_servertool_timeout_watcher_json(&json!({ "timeoutMs": "50.8" }).to_string())
+                .expect("timeout watcher");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&timeout_watcher).expect("json"),
+            json!({ "armed": true, "timeoutMs": 50 })
+        );
+        let disconnected = is_adapter_client_disconnected_json(
+            &json!({ "clientConnectionState": { "disconnected": " true " } }).to_string(),
+        )
+        .expect("disconnected");
+        assert_eq!(disconnected, "true");
+        let disconnect_watcher =
+            plan_client_disconnect_watcher_json(&json!({ "pollIntervalMs": 1 }).to_string())
+                .expect("disconnect watcher");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&disconnect_watcher).expect("json"),
+            json!({ "intervalMs": 20 })
+        );
+        let disconnected_error = plan_servertool_client_disconnected_error_json(
+            &json!({ "requestId": " req-1 ", "flowId": " flow-1 " }).to_string(),
+        )
+        .expect("disconnected error");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&disconnected_error).expect("json"),
+            json!({
+                "message": "[servertool] client disconnected during followup flow=flow-1",
+                "code": "SERVERTOOL_CLIENT_DISCONNECTED",
+                "category": "INTERNAL_ERROR",
+                "status": 499,
+                "details": { "requestId": "req-1", "flowId": "flow-1" }
+            })
+        );
+        let timeout_error = plan_servertool_timeout_error_json(
+            &json!({
+                "requestId": "req-2",
+                "phase": "followup",
+                "timeoutMs": 1000.8,
+                "attempt": 2.1
+            })
+            .to_string(),
+        )
+        .expect("timeout error");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&timeout_error).expect("json"),
+            json!({
+                "message": "[servertool] followup timeout after 1000ms",
+                "code": "SERVERTOOL_TIMEOUT",
+                "category": "INTERNAL_ERROR",
+                "status": 504,
+                "details": { "requestId": "req-2", "phase": "followup", "timeoutMs": 1000, "attempt": 2 }
+            })
+        );
+        let fetch_failed = plan_stop_message_fetch_failed_error_json(
+            &json!({
+                "requestId": "req-3",
+                "reason": "loop_limit",
+                "elapsedMs": -1,
+                "attempt": 0
+            })
+            .to_string(),
+        )
+        .expect("fetch failed");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&fetch_failed).expect("json"),
+            json!({
+                "message": "fetch failed: network error (stopMessage loop detected)",
+                "code": "SERVERTOOL_TIMEOUT",
+                "category": "EXTERNAL_ERROR",
+                "status": 502,
+                "details": { "requestId": "req-3", "reason": "loop_limit", "elapsedMs": 0, "attempt": 1 }
+            })
         );
         let client_inject =
             read_client_inject_only_json(&json!({ "clientInjectOnly": " true " }).to_string())

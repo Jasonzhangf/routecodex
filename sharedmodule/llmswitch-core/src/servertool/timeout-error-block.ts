@@ -1,28 +1,23 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import {
+  ProviderProtocolError,
+  type ProviderErrorCategory,
+  type ProviderProtocolErrorCode
+} from '../conversion/provider-protocol-error.js';
+import {
+  isAdapterClientDisconnectedWithNative,
+  planClientDisconnectWatcherWithNative,
+  planServertoolClientDisconnectedErrorWithNative,
+  planServertoolTimeoutErrorWithNative,
+  planServertoolTimeoutWatcherWithNative,
+  planStopMessageFetchFailedErrorWithNative,
+  type ServertoolErrorPlan
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
+
+export const SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID = 'feature_id: hub.servertool_orchestration_policy';
 
 export function isAdapterClientDisconnected(adapterContext: AdapterContext): boolean {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return false;
-  }
-  const state = (adapterContext as { clientConnectionState?: unknown }).clientConnectionState;
-  if (state && typeof state === 'object' && !Array.isArray(state)) {
-    const disconnected = (state as { disconnected?: unknown }).disconnected;
-    if (disconnected === true) {
-      return true;
-    }
-    if (typeof disconnected === 'string' && disconnected.trim().toLowerCase() === 'true') {
-      return true;
-    }
-  }
-  const raw = (adapterContext as { clientDisconnected?: unknown }).clientDisconnected;
-  if (raw === true) {
-    return true;
-  }
-  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'true') {
-    return true;
-  }
-  return false;
+  return isAdapterClientDisconnectedWithNative(adapterContext);
 }
 
 export function withTimeout<T>(
@@ -30,12 +25,13 @@ export function withTimeout<T>(
   timeoutMs: number,
   buildError: () => Error
 ): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+  const plan = planServertoolTimeoutWatcherWithNative(timeoutMs);
+  if (!plan.armed) {
     return promise;
   }
   let timer: NodeJS.Timeout | undefined;
   return new Promise<T>((resolve, reject) => {
-    timer = setTimeout(() => reject(buildError()), timeoutMs);
+    timer = setTimeout(() => reject(buildError()), plan.timeoutMs);
     promise.then(resolve, reject).finally(() => {
       if (timer) {
         clearTimeout(timer);
@@ -53,13 +49,9 @@ export function createServerToolClientDisconnectedError(options: {
   requestId: string;
   flowId?: string;
 }): Error {
-  const error = new ServerToolClientDisconnectedError(
-    `[servertool] client disconnected during followup` + (options.flowId ? ` flow=${options.flowId}` : '')
-  );
-  (error as unknown as { details?: Record<string, unknown> }).details = {
-    requestId: options.requestId,
-    flowId: options.flowId
-  };
+  const plan = planServertoolClientDisconnectedErrorWithNative(options);
+  const error = new ServerToolClientDisconnectedError(plan.message);
+  (error as unknown as { details?: Record<string, unknown> }).details = plan.details;
   return error;
 }
 
@@ -78,10 +70,7 @@ export function createClientDisconnectWatcher(options: {
   flowId?: string;
   pollIntervalMs?: number;
 }): { promise: Promise<never>; cancel: () => void } {
-  const interval =
-    typeof options.pollIntervalMs === 'number' && Number.isFinite(options.pollIntervalMs) && options.pollIntervalMs > 0
-      ? Math.max(20, Math.floor(options.pollIntervalMs))
-      : 80;
+  const plan = planClientDisconnectWatcherWithNative(options.pollIntervalMs);
   let timer: NodeJS.Timeout | undefined;
   let active = true;
   const cancel = () => {
@@ -106,9 +95,9 @@ export function createClientDisconnectWatcher(options: {
         );
         return;
       }
-      timer = setTimeout(check, interval);
+      timer = setTimeout(check, plan.intervalMs);
     };
-    timer = setTimeout(check, interval);
+    timer = setTimeout(check, plan.intervalMs);
   });
   return { promise, cancel };
 }
@@ -130,24 +119,7 @@ export function createServerToolTimeoutError(options: {
   attempt?: number;
   maxAttempts?: number;
 }): ProviderProtocolError & { status?: number } {
-  const err = new ProviderProtocolError(
-    `[servertool] ${options.phase} timeout after ${options.timeoutMs}ms` +
-      (options.flowId ? ` flow=${options.flowId}` : ''),
-    {
-      code: 'SERVERTOOL_TIMEOUT',
-      category: 'INTERNAL_ERROR',
-      details: {
-        requestId: options.requestId,
-        phase: options.phase,
-        flowId: options.flowId,
-        timeoutMs: options.timeoutMs,
-        attempt: options.attempt,
-        maxAttempts: options.maxAttempts
-      }
-    }
-  ) as ProviderProtocolError & { status?: number };
-  err.status = 504;
-  return err;
+  return buildProviderProtocolError(planServertoolTimeoutErrorWithNative(options));
 }
 
 export function createStopMessageFetchFailedError(options: {
@@ -158,26 +130,15 @@ export function createStopMessageFetchFailedError(options: {
   attempt?: number;
   maxAttempts?: number;
 }): ProviderProtocolError & { status?: number } {
-  const err = new ProviderProtocolError('fetch failed: network error (stopMessage loop detected)', {
-    code: 'SERVERTOOL_TIMEOUT',
-    category: 'EXTERNAL_ERROR',
-    details: {
-      requestId: options.requestId,
-      reason: options.reason,
-      ...(typeof options.elapsedMs === 'number' && Number.isFinite(options.elapsedMs)
-        ? { elapsedMs: Math.max(0, Math.floor(options.elapsedMs)) }
-        : {}),
-      ...(typeof options.repeatCount === 'number' && Number.isFinite(options.repeatCount)
-        ? { repeatCount: Math.max(0, Math.floor(options.repeatCount)) }
-        : {}),
-      ...(typeof options.attempt === 'number' && Number.isFinite(options.attempt)
-        ? { attempt: Math.max(1, Math.floor(options.attempt)) }
-        : {}),
-      ...(typeof options.maxAttempts === 'number' && Number.isFinite(options.maxAttempts)
-        ? { maxAttempts: Math.max(1, Math.floor(options.maxAttempts)) }
-        : {})
-    }
+  return buildProviderProtocolError(planStopMessageFetchFailedErrorWithNative(options));
+}
+
+function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
+  const err = new ProviderProtocolError(plan.message, {
+    code: plan.code as ProviderProtocolErrorCode,
+    category: plan.category as ProviderErrorCategory,
+    details: plan.details
   }) as ProviderProtocolError & { status?: number };
-  err.status = 502;
+  err.status = plan.status;
   return err;
 }

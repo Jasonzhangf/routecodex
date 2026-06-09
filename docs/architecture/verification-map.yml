@@ -88,17 +88,19 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/timeout-error-block.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:min
     notes:
-      - servertool-core owns timeout, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers.
+      - servertool-core owns timeout watcher, client disconnect watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans.
 
   - feature_id: hub.servertool_backend_route_runtime
     change_risk: high

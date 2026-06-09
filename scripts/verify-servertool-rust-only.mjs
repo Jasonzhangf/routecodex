@@ -67,6 +67,7 @@ const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard
 const TS_STOP_MESSAGE_LOOP_PAYLOAD = `${SERVERTOOL_TS_DIR}/stop-message-loop-payload-block.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block.ts`;
+const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
@@ -1494,6 +1495,7 @@ function checkOrchestrationPolicyRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const tsShell = readRequired(TS_ORCHESTRATION_POLICY);
+  const timeoutShell = readRequired(TS_TIMEOUT_ERROR_BLOCK);
 
   assertContains(
     'servertool-orchestration-policy-rust-owner',
@@ -1503,6 +1505,12 @@ function checkOrchestrationPolicyRustOwner() {
   );
   for (const needle of [
     'pub fn parse_servertool_timeout_ms',
+    'pub fn plan_servertool_timeout_watcher',
+    'pub fn is_adapter_client_disconnected',
+    'pub fn plan_client_disconnect_watcher',
+    'pub fn plan_servertool_client_disconnected_error',
+    'pub fn plan_servertool_timeout_error',
+    'pub fn plan_stop_message_fetch_failed_error',
     'pub fn read_client_inject_only',
     'pub fn normalize_client_inject_text',
     'pub fn compact_followup_error_reason',
@@ -1517,6 +1525,12 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parse_servertool_timeout_ms_json',
+    'plan_servertool_timeout_watcher_json',
+    'is_adapter_client_disconnected_json',
+    'plan_client_disconnect_watcher_json',
+    'plan_servertool_client_disconnected_error_json',
+    'plan_servertool_timeout_error_json',
+    'plan_stop_message_fetch_failed_error_json',
     'read_client_inject_only_json',
     'normalize_client_inject_text_json',
     'compact_followup_error_reason_json',
@@ -1551,6 +1565,12 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsJson',
+    'planServertoolTimeoutWatcherJson',
+    'isAdapterClientDisconnectedJson',
+    'planClientDisconnectWatcherJson',
+    'planServertoolClientDisconnectedErrorJson',
+    'planServertoolTimeoutErrorJson',
+    'planStopMessageFetchFailedErrorJson',
     'readClientInjectOnlyJson',
     'normalizeClientInjectTextJson',
     'compactFollowupErrorReasonJson',
@@ -1599,6 +1619,40 @@ function checkOrchestrationPolicyRustOwner() {
       needle
     );
   }
+  for (const keyword of [
+    'Number.isFinite',
+    'Math.floor',
+    'Math.max',
+    'toLowerCase',
+    'clientConnectionState',
+    'clientDisconnected',
+    'disconnected',
+    "flow=${options.flowId}",
+    'timeout after ${options.timeoutMs}',
+  ]) {
+    if (timeoutShell.includes(keyword)) {
+      fail(
+        'servertool-timeout-error-ts-thin-shell',
+        `Forbidden TS timeout-error semantic "${keyword}" found in timeout-error-block.ts`
+      );
+    }
+  }
+  for (const needle of [
+    'planServertoolTimeoutWatcherWithNative',
+    'isAdapterClientDisconnectedWithNative',
+    'planClientDisconnectWatcherWithNative',
+    'planServertoolClientDisconnectedErrorWithNative',
+    'planServertoolTimeoutErrorWithNative',
+    'planStopMessageFetchFailedErrorWithNative',
+  ]) {
+    assertContains(
+      'servertool-timeout-error-ts-thin-shell',
+      TS_TIMEOUT_ERROR_BLOCK,
+      timeoutShell,
+      needle
+    );
+  }
+  pass('servertool-timeout-error-ts-thin-shell', 'timeout-error-block.ts consumes Rust timeout/disconnect/error plans only');
   pass('servertool-orchestration-policy-rust-owner', 'servertool-core owns orchestration policy parsing and compaction');
 }
 
