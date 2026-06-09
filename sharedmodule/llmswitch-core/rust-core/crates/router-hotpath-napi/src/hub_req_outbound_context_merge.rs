@@ -208,6 +208,7 @@ fn should_attach_req_outbound_context_snapshot(
     !key.is_empty()
 }
 
+#[cfg(test)]
 fn resolve_req_outbound_context_merge_plan(
     input: &ReqOutboundContextMergePlanInput,
 ) -> ReqOutboundContextMergePlanOutput {
@@ -308,32 +309,5 @@ pub fn select_tool_call_id_style_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let output = select_tool_call_id_style(&adapter_context, &snapshot, current_style);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn resolve_req_outbound_context_merge_plan_json(input_json: String) -> NapiResult<String> {
-    let input: ReqOutboundContextMergePlanInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_req_outbound_context_merge_plan(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn apply_req_outbound_context_snapshot_json(input_json: String) -> NapiResult<String> {
-    let input: ReqOutboundContextSnapshotApplyInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = apply_req_outbound_context_snapshot(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn should_attach_req_outbound_context_snapshot_json(
-    has_snapshot: bool,
-    context_metadata_key_json: String,
-) -> NapiResult<String> {
-    let context_metadata_key: Option<String> = serde_json::from_str(&context_metadata_key_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = should_attach_req_outbound_context_snapshot(has_snapshot, context_metadata_key);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

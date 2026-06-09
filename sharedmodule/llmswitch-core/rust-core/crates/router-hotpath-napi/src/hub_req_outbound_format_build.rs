@@ -1,4 +1,3 @@
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -344,21 +343,6 @@ pub fn build_format_request(input: FormatBuildInput) -> Result<FormatBuildOutput
     validate_payload_size(&payload)?;
 
     Ok(FormatBuildOutput { payload })
-}
-
-#[napi]
-pub fn build_format_request_json(input_json: String) -> napi::Result<String> {
-    if input_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Input JSON is empty"));
-    }
-
-    let input: FormatBuildInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-
-    let output = build_format_request(input).map_err(|e| napi::Error::from_reason(e))?;
-
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
 #[cfg(test)]
@@ -847,26 +831,6 @@ mod tests {
 
         let err = build_format_request(input).unwrap_err();
         assert_eq!(err, "Missing 'payload' field in format envelope");
-    }
-
-    #[test]
-    fn test_error_empty_json_input() {
-        let result = build_format_request_json("".to_string());
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Input JSON is empty"));
-    }
-
-    #[test]
-    fn test_error_invalid_json_input() {
-        let result = build_format_request_json("not valid json".to_string());
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to parse input JSON"));
     }
 
     #[test]

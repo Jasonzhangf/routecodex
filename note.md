@@ -18853,3 +18853,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Responses remap public wrapper deletion:
 - Inventory: `remapResponsesToolCallsWithNative` had zero external consumers; `remapResponsesToolCallsJson` was not a required export and only existed as root NAPI -> hub_bridge_actions binding.
 - Change: removed TS wrapper, root NAPI export, hub_bridge_actions re-export, and Rust binding body. Kept `remapChatToolCallsWithNative` because tests/active remap path still consume it.
+
+2026-06-09 Req outbound public wrapper deletion:
+- Inventory: `resolveReqOutboundContextMergePlanWithNative`, `buildReqOutboundFormatPayloadWithNative`, `applyReqOutboundContextSnapshotWithNative`, `normalizeToolSessionMessagesWithNative`, `updateToolSessionHistoryWithNative`, and `shouldAttachReqOutboundContextSnapshotWithNative` had no live source/runtime consumers. Their matching JSON exports only existed as public NAPI/required-export surfaces.
+- Change: removed those TS wrappers, TS-only parser/type shells, required-export entries, and Rust public JSON bridge functions. Kept Rust internal helpers (`build_format_request`, `apply_req_outbound_context_snapshot`, `normalize_tool_session_payload`, etc.) for active Hub mainline/tests.

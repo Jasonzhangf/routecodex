@@ -5,50 +5,26 @@ import {
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type {
-  NativeReqOutboundContextMergePlanInput,
-  NativeReqOutboundFormatBuildInput,
-  NativeReqOutboundContextMergePlan,
-  NativeReqOutboundContextSnapshotPatchInput,
-  NativeReqOutboundContextSnapshotPatch,
   NativeReqOutboundCompatAdapterContextInput,
   NativeReqOutboundStandardizedToChatInput,
   NativeReqOutboundStage3CompatInput,
   NativeReqOutboundStage3CompatOutput,
   NativeRespInboundStage3CompatInput,
-  NativeRespInboundStage3CompatOutput,
-  NativeToolSessionCompatInput,
-  NativeToolSessionCompatOutput,
-  NativeToolSessionHistoryUpdateInput,
-  NativeToolSessionHistoryUpdateOutput
+  NativeRespInboundStage3CompatOutput
 } from './native-hub-pipeline-req-outbound-semantics-types.js';
 import {
   parseRecord,
-  parseReqOutboundContextMergePlan,
-  parseReqOutboundFormatBuildOutput,
-  parseReqOutboundContextSnapshotPatch,
   parseReqOutboundCompatOutput,
-  parseToolSessionCompatOutput,
-  parseToolSessionHistoryUpdateOutput,
-  parseJsonObject,
-  parseBoolean
+  parseJsonObject
 } from './native-hub-pipeline-req-outbound-semantics-parsers.js';
 
 export type {
-  NativeReqOutboundContextMergePlanInput,
-  NativeReqOutboundFormatBuildInput,
-  NativeReqOutboundContextMergePlan,
-  NativeReqOutboundContextSnapshotPatchInput,
-  NativeReqOutboundContextSnapshotPatch,
   NativeReqOutboundCompatAdapterContextInput,
   NativeReqOutboundStandardizedToChatInput,
   NativeReqOutboundStage3CompatInput,
   NativeReqOutboundStage3CompatOutput,
   NativeRespInboundStage3CompatInput,
-  NativeRespInboundStage3CompatOutput,
-  NativeToolSessionCompatInput,
-  NativeToolSessionCompatOutput,
-  NativeToolSessionHistoryUpdateInput,
-  NativeToolSessionHistoryUpdateOutput
+  NativeRespInboundStage3CompatOutput
 } from './native-hub-pipeline-req-outbound-semantics-types.js';
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
@@ -76,93 +52,6 @@ function rethrowNativeStageError(capability: string, error: unknown): never {
     throw error;
   }
   return throwNativeExecutionError(capability, String(error ?? 'unknown'));
-}
-
-export function resolveReqOutboundContextMergePlanWithNative(
-  input: NativeReqOutboundContextMergePlanInput
-): NativeReqOutboundContextMergePlan {
-  const capability = 'resolveReqOutboundContextMergePlanJson';
-  const fail = (reason?: string) => failNativeRequired<NativeReqOutboundContextMergePlan>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('resolveReqOutboundContextMergePlanJson');
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify(input);
-  if (!inputJson) {
-    return throwNativeExecutionError(capability, 'json stringify failed');
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseReqOutboundContextMergePlan(raw);
-    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
-}
-
-export function buildReqOutboundFormatPayloadWithNative(
-  input: NativeReqOutboundFormatBuildInput
-): JsonObject {
-  const capability = 'buildFormatRequestJson';
-  const fail = (reason?: string) => failNativeRequired<JsonObject>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify({
-    formatEnvelope: input.formatEnvelope,
-    protocol: input.protocol
-  });
-  if (!inputJson) {
-    return throwNativeExecutionError(capability, 'json stringify failed');
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseReqOutboundFormatBuildOutput(raw);
-    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
-}
-
-export function applyReqOutboundContextSnapshotWithNative(
-  input: NativeReqOutboundContextSnapshotPatchInput
-): NativeReqOutboundContextSnapshotPatch {
-  const capability = 'applyReqOutboundContextSnapshotJson';
-  const fail = (reason?: string) => failNativeRequired<NativeReqOutboundContextSnapshotPatch>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('applyReqOutboundContextSnapshotJson');
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify(input);
-  if (!inputJson) {
-    return throwNativeExecutionError(capability, 'json stringify failed');
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseReqOutboundContextSnapshotPatch(raw);
-    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
 }
 
 export function runReqOutboundStage3CompatWithNative(
@@ -215,62 +104,6 @@ export function runRespInboundStage3CompatWithNative(
       return throwNativeExecutionError(capability, 'empty result');
     }
     const parsed = parseReqOutboundCompatOutput(raw);
-    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
-}
-
-export function normalizeToolSessionMessagesWithNative(
-  input: NativeToolSessionCompatInput
-): NativeToolSessionCompatOutput {
-  const capability = 'normalizeToolSessionMessagesJson';
-  const fail = (reason?: string) => failNativeRequired<NativeToolSessionCompatOutput>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify(input);
-  if (!inputJson) {
-    return throwNativeExecutionError(capability, 'json stringify failed');
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseToolSessionCompatOutput(raw);
-    return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
-}
-
-export function updateToolSessionHistoryWithNative(
-  input: NativeToolSessionHistoryUpdateInput
-): NativeToolSessionHistoryUpdateOutput {
-  const capability = 'updateToolSessionHistoryJson';
-  const fail = (reason?: string) => failNativeRequired<NativeToolSessionHistoryUpdateOutput>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify(input);
-  if (!inputJson) {
-    return throwNativeExecutionError(capability, 'json stringify failed');
-  }
-  try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseToolSessionHistoryUpdateOutput(raw);
     return parsed ?? throwNativeExecutionError(capability, 'invalid payload');
   } catch (error) {
     return rethrowNativeStageError(capability, error);
@@ -338,35 +171,6 @@ export function standardizedToChatEnvelopeWithNative(
     }
     const parsed = parseRecord(raw);
     return (parsed as JsonObject | null) ?? throwNativeExecutionError(capability, 'invalid payload');
-  } catch (error) {
-    return rethrowNativeStageError(capability, error);
-  }
-}
-
-export function shouldAttachReqOutboundContextSnapshotWithNative(
-  hasSnapshot: boolean,
-  contextMetadataKey: string | undefined
-): boolean {
-  const capability = 'shouldAttachReqOutboundContextSnapshotJson';
-  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('shouldAttachReqOutboundContextSnapshotJson');
-  if (!fn) {
-    return fail();
-  }
-  try {
-    const contextMetadataKeyJson = JSON.stringify(contextMetadataKey ?? null);
-    if (typeof contextMetadataKeyJson !== 'string') {
-      return throwNativeExecutionError(capability, 'json stringify failed');
-    }
-    const raw = fn(hasSnapshot, contextMetadataKeyJson);
-    if (typeof raw !== 'string' || !raw) {
-      return throwNativeExecutionError(capability, 'empty result');
-    }
-    const parsed = parseBoolean(raw);
-    return parsed === null ? throwNativeExecutionError(capability, 'invalid payload') : parsed;
   } catch (error) {
     return rethrowNativeStageError(capability, error);
   }

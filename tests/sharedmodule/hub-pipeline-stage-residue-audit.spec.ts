@@ -2735,6 +2735,69 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired req outbound context/tool-session public wrappers must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs',
+    ];
+    const retiredSymbols = [
+      'resolveReqOutboundContextMergePlanWithNative',
+      'buildReqOutboundFormatPayloadWithNative',
+      'applyReqOutboundContextSnapshotWithNative',
+      'normalizeToolSessionMessagesWithNative',
+      'updateToolSessionHistoryWithNative',
+      'shouldAttachReqOutboundContextSnapshotWithNative',
+      'resolveReqOutboundContextMergePlanJson',
+      'buildFormatRequestJson',
+      'applyReqOutboundContextSnapshotJson',
+      'normalizeToolSessionMessagesJson',
+      'updateToolSessionHistoryJson',
+      'shouldAttachReqOutboundContextSnapshotJson',
+      'resolve_req_outbound_context_merge_plan_json',
+      'build_format_request_json',
+      'apply_req_outbound_context_snapshot_json',
+      'normalize_tool_session_messages_json',
+      'update_tool_session_history_json',
+      'should_attach_req_outbound_context_snapshot_json',
+      'NativeReqOutboundContextMergePlanInput',
+      'NativeReqOutboundFormatBuildInput',
+      'NativeReqOutboundContextMergePlan',
+      'NativeReqOutboundContextSnapshotPatchInput',
+      'NativeReqOutboundContextSnapshotPatch',
+      'NativeToolSessionCompatInput',
+      'NativeToolSessionCompatOutput',
+      'NativeToolSessionHistoryUpdateInput',
+      'NativeToolSessionHistoryUpdateOutput',
+      'parseReqOutboundContextMergePlan',
+      'parseReqOutboundFormatBuildOutput',
+      'parseReqOutboundContextSnapshotPatch',
+      'parseToolSessionCompatOutput',
+      'parseToolSessionHistoryUpdateOutput',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
