@@ -61,7 +61,6 @@ mod hub_snapshot_hooks;
 mod hub_standardized_bridge;
 mod hub_submit_tool_outputs;
 mod hub_text_markup_normalizer;
-mod hub_tool_governance_semantics;
 mod hub_tool_session_compat;
 mod openai_openai_codec;
 mod req_outbound_stage3_compat;

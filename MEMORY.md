@@ -2952,3 +2952,9 @@ Tags: hub-pipeline, image-attachment-metadata, dead-code, napi-export, residue-g
 - Removed the standalone web-search hint wrapper, the duplicate OpenAI reasoning alias with uppercase `AI`, the response-only tool-name governance DTO/helper/export/tests, and the default-governance-rules NAPI export. Kept live Rust mainline owners: `analyzeChatWebSearchIntentJson`, the lowercase-ai reasoning wrapper used by TS, request governance, and internal `default_registry()` tests.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those zero-consumer export names from returning.
 Tags: hub-pipeline, dead-code, napi-export, web-search, reasoning, tool-governance, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline standalone tool-governance file removed
+- Exact scan found `governRequestJson` and `hub_tool_governance_semantics.rs` had no TS/runtime consumer after the response/default-rule zero-consumer exports were removed; remaining references were module declaration, local Rust tests, and historical docs.
+- Removed the Rust module/file and converted the shared JSON helper deletion gate into a retired-file-absent gate. Live request/tool governance remains in `req_process_stage1_tool_governance.rs`, chat governance modules, and typed Hub mainline boundaries.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `hub_tool_governance_semantics.rs` and `governRequestJson` from returning.
+Tags: hub-pipeline, tool-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

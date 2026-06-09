@@ -262,7 +262,7 @@ These categories can become deletion candidates only after the required proof ga
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/deepseek_web/response.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/response.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
-- 2026-06-09 update: the private `hub_tool_governance_semantics.rs` response helper formerly named `govern_tool_name_response` later proved to be a zero-consumer standalone governance surface and was physically deleted; do not restore `governToolNameResponseJson`.
+- 2026-06-09 update: the standalone `hub_tool_governance_semantics.rs` control surface later proved zero-consumer and was physically deleted; do not restore `governRequestJson`, `governToolNameResponseJson`, or `resolveDefaultToolGovernanceRulesJson`.
 - Phase 7B covered response finalize callers now enter `hub_resp_outbound_04_finalize_boundary.rs` instead of importing `finalize_chat_response` directly:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - Phase 8B-1 covered response codec finalize caller now enters `hub_resp_outbound_04_finalize_boundary.rs` instead of calling `finalize_chat_response_json` directly:

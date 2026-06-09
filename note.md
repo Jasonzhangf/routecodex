@@ -18764,3 +18764,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Slice: moved request-scoped/persisted stopless goal status normalization from `stop-message-auto.ts` into Rust `servertool-core::stopless_decision_context_goal::plan_stopless_decision_context_goal_status`.
 - TS now only passes `adapterContext` and persisted goal state to native, then uses Rust `goalStatus` for `StopMessageDecisionContext.goal_status`.
 - Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, and focused stop-message Jest suites.
+
+2026-06-09 HubPipeline standalone tool-governance file deletion:
+- Exact scan: `governRequestJson` / `hub_tool_governance_semantics.rs` had no TS/runtime consumer after response/default-rule exports were removed.
+- Change: removed module/file, removed module declaration, converted shared JSON helper gate to retired-file-absent, and updated residue gate/map/memory docs.
+- Verification: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust retired-file gate 1/1; Rust hub_pipeline_contracts 11/11; servertool bridge 1/1.

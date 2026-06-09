@@ -1091,21 +1091,12 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_object_trimmed_string_deletion_gate_removed_hub_tool_governance_local_wrapper() {
+    fn shared_read_object_trimmed_string_deletion_gate_removed_hub_tool_governance_file() {
         let path = crate_src_path("hub_tool_governance_semantics.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains(
-                "fn read_string_field(obj: &Map<String, Value>, key: &str) -> Option<String> {"
-            ),
-            "local read_string_field wrapper still present in {}",
+            !path.exists(),
+            "retired hub_tool_governance_semantics.rs must stay physically deleted: {}",
             path.display()
-        );
-        assert!(
-            source.contains("read_object_trimmed_string(obj, \"allowedCharacters\")")
-                || source.contains("read_object_trimmed_string(obj, \"allowed_characters\")"),
-            "hub_tool_governance_semantics.rs must use shared read_object_trimmed_string truth directly"
         );
     }
 

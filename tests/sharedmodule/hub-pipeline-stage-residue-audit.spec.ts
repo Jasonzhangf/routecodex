@@ -1827,6 +1827,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_unified_fastpath.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_post_governed_normalization_semantics.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_governance_semantics.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_target_utils.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_provider_key.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs',
@@ -1860,7 +1861,7 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/extractWebSearchSemanticsHintJson/);
       expect(source).not.toMatch(/inferSseEventTypeFromDataJson|detectSseProtocolKindJson|validateSseEventTypeJson/);
       expect(source).not.toMatch(/normalizeReasoningInOpenAIPayloadJson/);
-      expect(source).not.toMatch(/governToolNameResponseJson|resolveDefaultToolGovernanceRulesJson/);
+      expect(source).not.toMatch(/governRequestJson|governToolNameResponseJson|resolveDefaultToolGovernanceRulesJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
     }
