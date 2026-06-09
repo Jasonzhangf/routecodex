@@ -4,6 +4,31 @@ import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
 
 describe('servertool CLI command', () => {
   const originalServertoolBin = process.env.ROUTECODEX_SERVERTOOL_BIN;
+  const forbiddenStdoutMarkers = [
+    '"metadata"',
+    '"__rt"',
+    '"snapshot"',
+    '"debug"',
+    '"debugCarrier"',
+    '"ticket"',
+    '"restorationHandle"',
+    '"restorationStore"',
+    'reenterPipeline',
+    'providerInvoker',
+    'serverToolFollowup',
+    'serverToolFollowupSource',
+    '--ticket',
+    'stcli_',
+    'rcc_cli_',
+    'old_cli_',
+    'old_cli_result_'
+  ];
+
+  function expectNoPrivateServertoolCarrier(raw: string): void {
+    for (const marker of forbiddenStdoutMarkers) {
+      expect(raw).not.toContain(marker);
+    }
+  }
 
   beforeEach(() => {
     process.env.ROUTECODEX_SERVERTOOL_BIN = path.join(
@@ -44,6 +69,7 @@ describe('servertool CLI command', () => {
     ]);
 
     expect(errors).toEqual([]);
+    expectNoPrivateServertoolCarrier(output[0] ?? '');
     expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
@@ -87,6 +113,7 @@ describe('servertool CLI command', () => {
 
     expect(errors).toEqual([]);
     const payload = JSON.parse(output[0] ?? '{}');
+    expectNoPrivateServertoolCarrier(output[0] ?? '');
     expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
@@ -150,6 +177,7 @@ describe('servertool CLI command', () => {
     ]);
 
     expect(errors).toEqual([]);
+    expectNoPrivateServertoolCarrier(output[0] ?? '');
     expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
       ok: true,
       kind: 'servertool_fixture',
