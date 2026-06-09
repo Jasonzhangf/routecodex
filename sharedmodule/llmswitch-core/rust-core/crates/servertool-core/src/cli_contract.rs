@@ -145,6 +145,10 @@ pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
 }
 
 fn validate_cli_run_input(input: &ServertoolCliRunInput) -> Result<(), ServertoolCliError> {
+    validate_no_denied_cli_marker(&input.tool_name)?;
+    if let Some(flow_id) = input.flow_id.as_deref() {
+        validate_no_denied_cli_marker(flow_id)?;
+    }
     if !is_safe_tool_name(&input.tool_name) {
         return Err(ServertoolCliError::InvalidField("toolName"));
     }
@@ -355,6 +359,8 @@ pub fn build_client_exec_cli_projection_output(
     repeat_count: u32,
     max_repeats: u32,
 ) -> Result<Value, ServertoolCliError> {
+    validate_no_denied_cli_marker(tool_name)?;
+    validate_no_denied_cli_marker(flow_id)?;
     if !is_safe_tool_name(tool_name) {
         return Err(ServertoolCliError::InvalidField("toolName"));
     }
@@ -438,6 +444,9 @@ pub fn plan_client_exec_cli_projection_output(
         .as_object()
         .ok_or(ServertoolCliError::InvalidField("input"))?;
     let explicit_tool_name = input.tool_name.as_deref().and_then(read_optional_trimmed);
+    if let Some(tool_name) = explicit_tool_name.as_deref() {
+        validate_no_denied_cli_marker(tool_name)?;
+    }
     let flow_id = input
         .flow_id
         .as_deref()
@@ -449,6 +458,7 @@ pub fn plan_client_exec_cli_projection_output(
                 .map(|_| "servertool_cli_projection".to_string())
         })
         .ok_or(ServertoolCliError::MissingField("flowId"))?;
+    validate_no_denied_cli_marker(&flow_id)?;
     let tool_name = if flow_id == "stop_message_flow" {
         if let Some(explicit) = explicit_tool_name.as_deref() {
             if explicit != "stop_message_auto" {
@@ -691,6 +701,8 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
         .get("flowId")
         .and_then(|v| v.as_str())
         .ok_or(ServertoolCliError::MissingField("flowId"))?;
+    validate_no_denied_cli_marker(tool_name)?;
+    validate_no_denied_cli_marker(flow_id)?;
     if is_denied_cli_projection(tool_name) {
         return Err(ServertoolCliError::DeniedTool(tool_name.to_string()));
     }
@@ -1037,6 +1049,33 @@ mod tests {
     }
 
     #[test]
+    fn cli_rejects_old_markers_in_tool_name_and_explicit_flow() {
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "old_cli_123".to_string(),
+                input: json!({"value":1}),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("old marker in tool name must fail");
+        assert_eq!(err, ServertoolCliError::DeniedMarker("old_cli_"));
+
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "servertool_fixture".to_string(),
+                input: json!({"value":1}),
+                flow_id: Some("stcli_123".to_string()),
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("old marker in flow id must fail");
+        assert_eq!(err, ServertoolCliError::DeniedMarker("stcli_"));
+    }
+
+    #[test]
     fn cli_rejects_internal_carrier_in_input_json() {
         let err = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
@@ -1114,6 +1153,32 @@ mod tests {
                 stdout_preview: None,
             }),
             Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"))
+        );
+    }
+
+    #[test]
+    fn projection_plan_rejects_old_markers_in_explicit_tool_and_flow() {
+        assert_eq!(
+            plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+                tool_name: Some("old_cli_123".to_string()),
+                flow_id: Some("servertool_cli_projection".to_string()),
+                input: Some(json!({"value": 1})),
+                repeat_count: None,
+                max_repeats: None,
+                stdout_preview: None,
+            }),
+            Err(ServertoolCliError::DeniedMarker("old_cli_"))
+        );
+        assert_eq!(
+            plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+                tool_name: Some("servertool_fixture".to_string()),
+                flow_id: Some("rcc_cli_123".to_string()),
+                input: Some(json!({"value": 1})),
+                repeat_count: None,
+                max_repeats: None,
+                stdout_preview: None,
+            }),
+            Err(ServertoolCliError::DeniedMarker("rcc_cli_"))
         );
     }
 
@@ -1327,6 +1392,30 @@ mod tests {
     }
 
     #[test]
+    fn projection_output_rejects_old_markers_in_tool_and_flow() {
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "old_cli_123",
+                "servertool_cli_projection",
+                json!({"value":1}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedMarker("old_cli_"))
+        );
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "servertool_fixture",
+                "stcli_123",
+                json!({"value":1}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedMarker("stcli_"))
+        );
+    }
+
+    #[test]
     fn projection_rejects_internal_metadata_input() {
         assert_eq!(
             build_client_exec_cli_projection_output(
@@ -1393,6 +1482,20 @@ mod tests {
         assert_eq!(
             validate_client_exec_command_result(&raw.to_string()),
             Err(ServertoolCliError::DeniedMarker("old_cli_"))
+        );
+    }
+
+    #[test]
+    fn exec_result_validation_rejects_old_markers_in_tool_and_flow() {
+        let raw = json!({"toolName": "old_cli_123", "flowId": "servertool_cli_projection"});
+        assert_eq!(
+            validate_client_exec_command_result(&raw.to_string()),
+            Err(ServertoolCliError::DeniedMarker("old_cli_"))
+        );
+        let raw = json!({"toolName": "servertool_fixture", "flowId": "rcc_cli_123"});
+        assert_eq!(
+            validate_client_exec_command_result(&raw.to_string()),
+            Err(ServertoolCliError::DeniedMarker("rcc_cli_"))
         );
     }
 

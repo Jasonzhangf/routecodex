@@ -148,6 +148,38 @@ fn denied_cli_markers_fail_fast() {
 }
 
 #[test]
+fn denied_cli_markers_in_tool_name_and_flow_fail_fast() {
+    let tool_name_output = Command::new(bin())
+        .args(["run", "old_cli_123", "--input-json", r#"{"value":1}"#])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!tool_name_output.status.success());
+    let stderr = String::from_utf8_lossy(&tool_name_output.stderr);
+    assert!(
+        stderr.contains("SERVERTOOL_DENIED_CLI_MARKER: old_cli_"),
+        "stderr={stderr}"
+    );
+
+    let flow_output = Command::new(bin())
+        .args([
+            "run",
+            "servertool_fixture",
+            "--flow",
+            "stcli_123",
+            "--input-json",
+            r#"{"value":1}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!flow_output.status.success());
+    let stderr = String::from_utf8_lossy(&flow_output.stderr);
+    assert!(
+        stderr.contains("SERVERTOOL_DENIED_CLI_MARKER: stcli_"),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
 fn internal_carrier_fails_fast() {
     let output = Command::new(bin())
         .args([

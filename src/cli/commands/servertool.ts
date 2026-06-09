@@ -23,11 +23,16 @@ export function createServertoolCommand(
     .command('run <toolName>')
     .description('Run a RouteCodex servertool')
     .requiredOption('--input-json <json>', 'servertool input JSON object')
-    .action(async (toolName: string, options: { inputJson: string }) => {
+    .option('--flow <flowId>', 'servertool flow id')
+    .action(async (toolName: string, options: { inputJson: string; flow?: string }) => {
       try {
+        const args = ['run', toolName, '--input-json', options.inputJson];
+        if (typeof options.flow === 'string') {
+          args.push('--flow', options.flow);
+        }
         const result = execFileSync(
           resolveServertoolBinary(),
-          ['run', toolName, '--input-json', options.inputJson],
+          args,
           {
             encoding: 'utf8',
             timeout: 30_000,
