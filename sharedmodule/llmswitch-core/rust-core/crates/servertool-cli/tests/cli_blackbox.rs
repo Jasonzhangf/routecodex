@@ -4,6 +4,28 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_routecodex-servertool")
 }
 
+fn assert_no_internal_or_restoration_carrier(value: &serde_json::Value) {
+    let raw = serde_json::to_string(value).expect("serialize cli stdout");
+    for forbidden in [
+        "\"metadata\"",
+        "\"__rt\"",
+        "\"snapshot\"",
+        "\"debug\"",
+        "\"debugCarrier\"",
+        "\"ticket\"",
+        "--ticket",
+        "stcli_",
+        "rcc_cli_",
+        "old_cli_",
+        "old_cli_result_",
+    ] {
+        assert!(
+            !raw.contains(forbidden),
+            "servertool stdout must not contain forbidden carrier/marker {forbidden}: {raw}"
+        );
+    }
+}
+
 #[test]
 fn stop_message_auto_outputs_rust_owned_schema() {
     let output = Command::new(bin())
@@ -32,6 +54,7 @@ fn stop_message_auto_outputs_rust_owned_schema() {
         2
     );
     assert_eq!(value["injectedPromptPreview"], "continue with schema");
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -100,6 +123,7 @@ fn servertool_fixture_outputs_ordinary_exec_command_json() {
     assert_eq!(value["flowId"], "servertool_cli_projection");
     assert_eq!(value["input"], serde_json::json!({"value":1}));
     assert!(value.get("schemaGuidance").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
