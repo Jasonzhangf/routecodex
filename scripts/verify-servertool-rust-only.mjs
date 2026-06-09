@@ -3413,6 +3413,27 @@ function checkBackendRoutePolicyRustOwner() {
     runtimeShell,
     'planFollowupExecutionModeWithNative'
   );
+  const runtimeFunctionNames = Array.from(runtimeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (
+    runtimeFunctionNames.join(',') !==
+    [
+      'applyClientInjectOnlyMetadata',
+      'applyFollowupRuntimeMetadata',
+      'assertAutoLimitNotExceeded',
+      'materializeFollowupInjectionPayload',
+      'planFollowupMaterialization',
+      'resolveFollowupExecutionMode',
+      'resolveFollowupRuntimeActionPlan',
+      'resolveLoopPayload',
+    ].sort().join(',')
+  ) {
+    fail(
+      'backend-route-followup-runtime-ts-surface',
+      `backend-route-runtime-block.ts exported function surface changed; found exports: ${runtimeFunctionNames.join(',') || '(none)'}`
+    );
+  }
   const executionModeBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupExecutionMode');
   for (const keyword of [
     "decision.outcomeMode === 'skip'",
