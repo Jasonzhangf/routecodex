@@ -28,5 +28,6 @@ pub mod stop_visible_text;
 pub mod stopless_decision_context_goal;
 pub mod stopless_decision_context_signals;
 pub mod stopless_goal_state_contract;
+pub mod stopless_learned_note_contract;
 pub mod stopless_orchestration_contract;
 pub mod text_extraction;

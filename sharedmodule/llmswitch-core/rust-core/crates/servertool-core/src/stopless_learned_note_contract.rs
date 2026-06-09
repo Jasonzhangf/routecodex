@@ -1,0 +1,164 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessLearnedNotePlanInput {
+    pub adapter_context: Value,
+    pub request_id: String,
+    #[serde(default)]
+    pub parsed: Option<Value>,
+    #[serde(default)]
+    pub timestamp_ms: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessLearnedNoteWritePlan {
+    pub should_write: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    pub request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub timestamp_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub learned: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+pub fn plan_stopless_learned_note_write(
+    input: StoplessLearnedNotePlanInput,
+) -> StoplessLearnedNoteWritePlan {
+    let parsed = input.parsed.as_ref().unwrap_or(&Value::Null);
+    let learned = read_non_empty_string(parsed.get("learned"));
+    let timestamp_ms = input
+        .timestamp_ms
+        .as_ref()
+        .and_then(read_non_negative_floor_u64)
+        .unwrap_or(0);
+    StoplessLearnedNoteWritePlan {
+        should_write: learned.is_some(),
+        working_directory: resolve_working_directory_from_adapter_context(&input.adapter_context),
+        request_id: input.request_id,
+        session_id: read_non_empty_string(input.adapter_context.get("sessionId")),
+        timestamp_ms,
+        learned,
+        reason: read_non_empty_string(parsed.get("reason")),
+        evidence: read_non_empty_string(parsed.get("evidence")),
+    }
+}
+
+pub fn resolve_working_directory_from_adapter_context(adapter_context: &Value) -> Option<String> {
+    let record = adapter_context.as_object()?;
+    read_working_directory_fields(record).or_else(|| {
+        record
+            .get("__rt")
+            .and_then(Value::as_object)
+            .and_then(read_working_directory_fields)
+    })
+}
+
+fn read_working_directory_fields(record: &serde_json::Map<String, Value>) -> Option<String> {
+    ["cwd", "workdir", "workingDirectory", "clientWorkdir"]
+        .iter()
+        .find_map(|key| read_non_empty_string(record.get(*key)))
+}
+
+fn read_non_empty_string(value: Option<&Value>) -> Option<String> {
+    let raw = value?.as_str()?.trim();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.to_string())
+    }
+}
+
+fn read_non_negative_floor_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64().or_else(|| {
+            number
+                .as_f64()
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .map(|value| value.floor() as u64)
+        }),
+        Value::String(text) => text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value.floor() as u64),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn plans_stopless_learned_note_write_from_schema_report() {
+        let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+            adapter_context: json!({
+                "workdir": "/repo",
+                "sessionId": " session-1 "
+            }),
+            request_id: "req_1".to_string(),
+            parsed: Some(json!({
+                "learned": "  learned fact  ",
+                "reason": "  stop reason  ",
+                "evidence": "  log evidence  "
+            })),
+            timestamp_ms: Some(json!(1234.9)),
+        });
+
+        assert!(plan.should_write);
+        assert_eq!(plan.working_directory.as_deref(), Some("/repo"));
+        assert_eq!(plan.request_id, "req_1");
+        assert_eq!(plan.session_id.as_deref(), Some("session-1"));
+        assert_eq!(plan.timestamp_ms, 1234);
+        assert_eq!(plan.learned.as_deref(), Some("learned fact"));
+        assert_eq!(plan.reason.as_deref(), Some("stop reason"));
+        assert_eq!(plan.evidence.as_deref(), Some("log evidence"));
+    }
+
+    #[test]
+    fn skips_write_when_learned_is_empty_but_preserves_context_fields() {
+        let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+            adapter_context: json!({
+                "__rt": {
+                    "cwd": "/rt-repo"
+                },
+                "sessionId": "session-2"
+            }),
+            request_id: "req_2".to_string(),
+            parsed: Some(json!({
+                "learned": "   ",
+                "reason": "ignored"
+            })),
+            timestamp_ms: Some(json!("42")),
+        });
+
+        assert!(!plan.should_write);
+        assert_eq!(plan.working_directory.as_deref(), Some("/rt-repo"));
+        assert_eq!(plan.session_id.as_deref(), Some("session-2"));
+        assert_eq!(plan.timestamp_ms, 42);
+        assert_eq!(plan.learned, None);
+    }
+
+    #[test]
+    fn adapter_context_workdir_precedes_runtime_metadata_workdir() {
+        let workdir = resolve_working_directory_from_adapter_context(&json!({
+            "cwd": "/adapter",
+            "__rt": {
+                "cwd": "/runtime"
+            }
+        }));
+
+        assert_eq!(workdir.as_deref(), Some("/adapter"));
+    }
+}

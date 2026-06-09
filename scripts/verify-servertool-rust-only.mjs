@@ -56,6 +56,7 @@ const RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG = `${ROOT}/sharedmodule/llmswi
 const RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_persist_plan.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
+const RUST_SERVERTOOL_STOPLESS_LEARNED_NOTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_learned_note_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const RUST_SERVERTOOL_BLOCKED_REPORT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/blocked_report_contract.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
@@ -3724,6 +3725,48 @@ function checkStopMessageBlockedReportRustOwner() {
   );
 }
 
+// ── Check 15g: stopless learned-note write plan has Rust owner ─
+function checkStoplessLearnedNoteRustOwner() {
+  const rustLearnedNote = readRequired(RUST_SERVERTOOL_STOPLESS_LEARNED_NOTE);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
+
+  assertContains(
+    'stopless-learned-note-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod stopless_learned_note_contract'
+  );
+  for (const needle of [
+    'pub struct StoplessLearnedNotePlanInput',
+    'pub struct StoplessLearnedNoteWritePlan',
+    'pub fn plan_stopless_learned_note_write',
+    'pub fn resolve_working_directory_from_adapter_context',
+  ]) {
+    assertContains(
+      'stopless-learned-note-rust-owner',
+      RUST_SERVERTOOL_STOPLESS_LEARNED_NOTE,
+      rustLearnedNote,
+      needle
+    );
+  }
+  for (const keyword of [
+    'function readNonEmptyString',
+    'function persistStoplessLearnedNoteOnAllowStop',
+  ]) {
+    if (stopMessageAuto.includes(keyword)) {
+      warn(
+        'stopless-learned-note-ts-migration-pending',
+        `TS learned-note semantic remains pending native bridge deletion: ${keyword}`
+      );
+    }
+  }
+  pass(
+    'stopless-learned-note-rust-owner',
+    'servertool-core owns stopless learned-note write planning; TS IO bridge deletion is tracked'
+  );
+}
+
 // ── Check 16: servertool CLI result guard has Rust owner ──────
 function checkServertoolCliResultGuardRustOwner() {
   const rustCliResultGuard = readRequired(RUST_SERVERTOOL_CLI_RESULT_GUARD);
@@ -3936,6 +3979,7 @@ checkStopMessageCliProjectionSeedRustOwner();
 checkStoplessOrchestrationActionRustOwner();
 checkStoplessGoalStateSyncRustOwner();
 checkStopMessageBlockedReportRustOwner();
+checkStoplessLearnedNoteRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();
