@@ -204,7 +204,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "isCompactionRequestJson",
   "isShellLikeToolNameTokenJson",
   "looksLikeJsonStreamPrefixJson",
-  "inferSseEventTypeFromDataJson", "detectSseProtocolKindJson", "validateSseEventTypeJson",
   "assembleSseEventFromLinesJson", "parseSseEventWithConfigJson",
   "parseSseStreamWithConfigJson", "parseSseStreamChunkWithConfigJson",
   "mapResumeToolOutputsDetailedJson",

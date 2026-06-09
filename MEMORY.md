@@ -2934,3 +2934,9 @@ Tags: hub-pipeline, stop-message-state, dead-code, napi-export, residue-gate, 20
 - Removed the Rust module and required-export entries. Shared helper deletion tests no longer keep the deleted module as a scan root.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export names from returning. Target metadata/application semantics remain in Rust `req_process_stage2_route_select.rs`.
 Tags: hub-pipeline, target-utils, dead-code, napi-export, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline SSE sniffer standalone helper exports removed
+- Exact scan found `inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, and `validateSseEventTypeJson` only existed as required native exports; no TS wrapper/runtime consumer imported them.
+- Removed the standalone NAPI wrappers and required-export entries. The underlying Rust helper functions remain internal to `hub_resp_inbound_sse_stream_sniffer.rs` and are still exercised through `parseSseEventWithConfigJson` / stream parser exports.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those standalone helper export names from returning.
+Tags: hub-pipeline, sse-sniffer, dead-code, napi-export, residue-gate, 2026-06-09

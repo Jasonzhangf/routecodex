@@ -18739,3 +18739,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Slice: moved stop-message-auto decision-context signal parsing into Rust `servertool-core::stopless_decision_context_signals::plan_stopless_decision_context_signals`.
 - Rust now owns port stopMessage disabled detection, Responses submit_tool_outputs resume detection, and captured request Plan-mode detection; TS handler/runtime-utils only pass `adapterContext` / runtime metadata / captured request into native and consume the three booleans.
 - Verification PASS: `cargo fmt` for servertool-core/router-hotpath-napi, servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, native export probe, and `git diff --check`.
+
+2026-06-09 HubPipeline SSE sniffer standalone helper export removal:
+- Exact scan found `inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, and `validateSseEventTypeJson` had no TS wrapper/runtime consumer outside required exports.
+- Removed standalone NAPI wrappers and required exports; internal Rust helper functions remain used by `parseSseEventWithConfigJson` / stream parser exports.
+- Verified focused residue/native-required Jest, llmswitch-core tsc, function-map gate, Rust SSE sniffer tests, Rust Hub control/data contract tests, and diff check.

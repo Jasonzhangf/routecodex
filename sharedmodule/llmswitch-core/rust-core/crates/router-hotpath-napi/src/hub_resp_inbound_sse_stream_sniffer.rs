@@ -460,40 +460,6 @@ pub fn assemble_sse_event_from_lines_json(lines_json: String) -> NapiResult<Stri
 }
 
 #[napi]
-pub fn infer_sse_event_type_from_data_json(
-    raw_event_json: String,
-    enable_strict_validation: bool,
-    allowed_event_types_json: String,
-) -> NapiResult<String> {
-    let raw_event: Value = serde_json::from_str(&raw_event_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let allowed_event_types: Vec<String> = serde_json::from_str(&allowed_event_types_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output =
-        infer_sse_event_type_from_data(&raw_event, enable_strict_validation, &allowed_event_types);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn detect_sse_protocol_kind_json(event_type: String) -> NapiResult<String> {
-    let output = detect_sse_protocol_kind(&event_type);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn validate_sse_event_type_json(
-    event_type: String,
-    enable_strict_validation: bool,
-    allowed_event_types_json: String,
-) -> NapiResult<String> {
-    let allowed_event_types: Vec<String> = serde_json::from_str(&allowed_event_types_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output =
-        validate_sse_event_type(&event_type, enable_strict_validation, &allowed_event_types);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn parse_sse_event_with_config_json(
     sse_text: String,
     config_json: String,

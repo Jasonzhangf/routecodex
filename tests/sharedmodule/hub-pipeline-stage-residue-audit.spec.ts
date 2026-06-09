@@ -1855,6 +1855,7 @@ describe('hub pipeline stage residue audit', () => {
     for (const source of [nativeWrapper, nativeAnalysis, requiredExports]) {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
       expect(source).not.toMatch(/applyTargetMetadataJson|applyTargetToSubjectJson|extractTargetModelIdJson/);
+      expect(source).not.toMatch(/inferSseEventTypeFromDataJson|detectSseProtocolKindJson|validateSseEventTypeJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
     }
