@@ -385,7 +385,7 @@ describe("stop_message_flow reentry", () => {
     expect(invalid.executed).toBe(true);
     expect(fs.existsSync(path.join(tempWorkdir, "note.md"))).toBe(false);
 
-    const validSchemaWithLearned = '{"stopreason":0,"reason":"目标完成","has_evidence":1,"evidence":"测试通过","next_step":"","learned":"只在真正停止时写 note.md"}';
+    const validSchemaWithLearned = '{"stopreason":0,"reason":"目标完成","has_evidence":1,"evidence":"测试通过","issue_cause":"目标已验证","excluded_factors":"非无证据停止","diagnostic_order":"失败 schema -> 完整 schema -> note 写入","done_steps":"完成验证","next_step":"","learned":"只在真正停止时写 note.md"}';
     const valid = await runServerToolOrchestration({
       chat: buildStopResponse(validSchemaWithLearned),
       adapterContext: {

@@ -378,6 +378,9 @@ pub fn evaluate_stop_schema_gate(
                 parsed,
             );
         }
+        if let Some((reason_code, message)) = terminal_stop_missing_requirement(&parsed) {
+            return schema_invalid_followup(reason_code, used, provided_cap, message, parsed);
+        }
         let summary_prefix =
             build_allow_stop_summary_prefix_from_parsed(&parsed, stopreason, reason);
         return StopSchemaGateDecision {
@@ -454,6 +457,78 @@ pub fn evaluate_stop_schema_gate(
         "你没有提供 next_step，但仍给出了建议推进路径。若要继续，必须把当前最小下一步写入 next_step 并立即执行；否则直接停止并输出收尾总结。",
         parsed,
     )
+}
+
+fn terminal_stop_missing_requirement(
+    parsed: &StopSchemaParsed,
+) -> Option<(&'static str, &'static str)> {
+    if parsed.has_evidence != Some(1) {
+        return Some((
+            "stop_schema_has_evidence_missing",
+            "你声明 finished/blocked，但 has_evidence 不是数字 1。停止不成立。必须给出真实文件、日志、命令输出或测试结果证据；没有证据就继续调用工具验证。",
+        ));
+    }
+    if parsed
+        .evidence
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Some((
+            "stop_schema_evidence_missing",
+            "你声明 finished/blocked 且 has_evidence=1，但 evidence 为空。停止不成立。必须写明具体文件、日志、命令输出或测试结果证据；没有证据就继续调用工具验证。",
+        ));
+    }
+    if parsed
+        .done_steps
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Some((
+            "stop_schema_done_steps_missing",
+            "你声明 finished/blocked，但 done_steps 为空。停止不成立。必须写清已经完成的步骤；如果步骤未完成，继续执行下一步。",
+        ));
+    }
+    if parsed
+        .issue_cause
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Some((
+            "stop_schema_issue_cause_missing",
+            "你声明 finished/blocked，但 issue_cause 为空。停止不成立。必须写清问题原因或完成原因；如果原因未确认，继续排查。",
+        ));
+    }
+    if parsed
+        .excluded_factors
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Some((
+            "stop_schema_excluded_factors_missing",
+            "你声明 finished/blocked，但 excluded_factors 为空。停止不成立。必须写清已排除因素；如果没有排除证据，继续验证。",
+        ));
+    }
+    if parsed
+        .diagnostic_order
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Some((
+            "stop_schema_diagnostic_order_missing",
+            "你声明 finished/blocked，但 diagnostic_order 为空。停止不成立。必须写清排查顺序；如果顺序未闭环，继续执行最小下一步。",
+        ));
+    }
+    None
 }
 
 pub fn evaluate_goal_active_stop_loop(
@@ -1468,7 +1543,7 @@ mod tests {
     #[test]
     fn stop_schema_finished_or_blocked_with_reason_allows_stop() {
         let finished = evaluate_stop_schema_gate(
-            r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"next_step":"","learned":"缺 schema 计入连续 stop 预算"}"#,
+            r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"evidence":"cargo test green","issue_cause":"目标功能已验证","excluded_factors":"非相关配置未改动","diagnostic_order":"代码审计 -> 单测 -> 类型检查","done_steps":"补齐 Rust gate 并跑测试","next_step":"","learned":"缺 schema 计入连续 stop 预算"}"#,
             0,
             3,
         );
@@ -1483,7 +1558,7 @@ mod tests {
         );
 
         let blocked = evaluate_stop_schema_gate(
-            r#"{"stopreason":1,"reason":"缺少上游权限","has_evidence":1,"next_step":"等待授权"}"#,
+            r#"{"stopreason":1,"reason":"缺少上游权限","has_evidence":1,"evidence":"HTTP 401 from upstream","issue_cause":"credential expired","excluded_factors":"本地网络正常","diagnostic_order":"请求日志 -> provider 响应 -> auth 检查","done_steps":"确认上游拒绝","next_step":"等待授权"}"#,
             0,
             3,
         );
@@ -1502,6 +1577,49 @@ mod tests {
         assert_eq!(decision.reason_code, "stop_schema_reason_missing");
         assert!(decision.count_budget);
         assert!(decision.followup_text.unwrap().contains("没有给 reason"));
+    }
+
+    #[test]
+    fn stop_schema_terminal_requires_evidence_and_diagnostics() {
+        let missing_evidence_flag = evaluate_stop_schema_gate(
+            r#"{"stopreason":0,"reason":"完成","has_evidence":0,"evidence":"cargo test green","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(
+            missing_evidence_flag.reason_code,
+            "stop_schema_has_evidence_missing"
+        );
+        assert_eq!(missing_evidence_flag.action, StopSchemaGateAction::Followup);
+        assert!(missing_evidence_flag.count_budget);
+
+        for (payload, reason_code) in [
+            (
+                r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
+                "stop_schema_evidence_missing",
+            ),
+            (
+                r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"cargo test green","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"","next_step":""}"#,
+                "stop_schema_done_steps_missing",
+            ),
+            (
+                r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"cargo test green","issue_cause":"","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
+                "stop_schema_issue_cause_missing",
+            ),
+            (
+                r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"cargo test green","issue_cause":"已验证","excluded_factors":"","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
+                "stop_schema_excluded_factors_missing",
+            ),
+            (
+                r#"{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"cargo test green","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"","done_steps":"修改代码","next_step":""}"#,
+                "stop_schema_diagnostic_order_missing",
+            ),
+        ] {
+            let decision = evaluate_stop_schema_gate(payload, 0, 3);
+            assert_eq!(decision.action, StopSchemaGateAction::Followup);
+            assert_eq!(decision.reason_code, reason_code);
+            assert!(decision.count_budget);
+        }
     }
 
     #[test]
@@ -1625,7 +1743,7 @@ mod tests {
 {"event":"audit","message":"model mentioned stopreason in evidence text"}
 ```
 <stop_schema>
-{"stopreason":1,"reason":"工具被拒","has_evidence":1,"evidence":"上方日志","next_step":""}
+{"stopreason":1,"reason":"工具被拒","has_evidence":1,"evidence":"上方日志","issue_cause":"客户端拒绝工具调用","excluded_factors":"非 schema 解析问题","diagnostic_order":"证据 JSON -> stop schema","done_steps":"确认工具拒绝","next_step":""}
 </stop_schema>"#,
             0,
             3,
@@ -1684,7 +1802,7 @@ mod tests {
         assert!(invalid.followup_text.is_none());
 
         let valid = evaluate_stop_schema_gate(
-            r#"{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","next_step":""}"#,
+            r#"{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现已满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补测试并运行","next_step":""}"#,
             3,
             3,
         );
@@ -1805,7 +1923,7 @@ mod tests {
 
         // Second round: normal stopreason=0 → should still be at used=0
         let d2 = evaluate_stop_schema_gate(
-            r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"next_step":""}"#,
+            r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"evidence":"测试通过","issue_cause":"目标已验证","excluded_factors":"无需用户输入","diagnostic_order":"确认问题 -> 跑测试","done_steps":"完成实现","next_step":""}"#,
             0,
             3,
         );

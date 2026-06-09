@@ -222,9 +222,18 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.count_budget).toBe(true);
   });
 
-  test('stop schema gate allows blocked string stopreason', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+  test('stop schema gate requires evidence and diagnostics before terminal stop', () => {
+    const shallow = evaluateStopSchemaGateWithNative({
       assistantText: '{"stopreason":"blocked","reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":"0","evidence":"","next_step":""}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(shallow.action).toBe('followup');
+    expect(shallow.reason_code).toBe('stop_schema_has_evidence_missing');
+    expect(shallow.count_budget).toBe(true);
+
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"blocked","reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":""}',
       used: 5,
       maxRepeats: 3,
     });
@@ -297,7 +306,7 @@ describe('stop-message native decision (blackbox)', () => {
     expect(invalid.count_budget).toBe(true);
 
     const valid = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","next_step":""}',
+      assistantText: '{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补齐 Rust gate","next_step":""}',
       used: 3,
       maxRepeats: 3,
     });

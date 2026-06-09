@@ -28,6 +28,33 @@ const ORIGINAL_REASONING_STOP_GUARD_ENABLED = process.env.ROUTECODEX_REASONING_S
 const ORIGINAL_STOPMESSAGE_CONFIG_PATH = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
 const STOPMESSAGE_CONFIG_PATH = path.join(SESSION_DIR, 'stop-message.json');
 
+function terminalStopSchema(args: {
+  stopreason?: 0 | 1;
+  reason?: string;
+  evidence?: string;
+  doneSteps?: string;
+  issueCause?: string;
+  excludedFactors?: string;
+  diagnosticOrder?: string;
+  nextStep?: string;
+  nextSuggestedPath?: string;
+  learned?: string;
+} = {}): string {
+  return JSON.stringify({
+    stopreason: args.stopreason ?? 0,
+    reason: args.reason ?? '完成',
+    has_evidence: 1,
+    evidence: args.evidence ?? '日志通过',
+    issue_cause: args.issueCause ?? '目标已验证',
+    excluded_factors: args.excludedFactors ?? '无关路径已排除',
+    diagnostic_order: args.diagnosticOrder ?? '日志 -> 测试 -> 结果',
+    done_steps: args.doneSteps ?? '完成验证',
+    next_step: args.nextStep ?? '',
+    next_suggested_path: args.nextSuggestedPath ?? '',
+    learned: args.learned ?? ''
+  });
+}
+
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   const filename = `tmux-${sessionId}.json`;
@@ -719,7 +746,15 @@ describe('stop_message_auto servertool', () => {
     const chatResponse = buildStopChatResponse('chatcmpl-strip-schema-visible');
     ((chatResponse.choices as any[])[0].message as any).content = [
       '停止原因：工具权限被拒，任务阻塞。',
-      '{"stopreason":"blocked","reason":"工具权限被拒","has_evidence":1,"evidence":"exec_command rejected","next_step":""}'
+      terminalStopSchema({
+        stopreason: 1,
+        reason: '工具权限被拒',
+        evidence: 'exec_command rejected',
+        issueCause: '客户端拒绝工具执行',
+        excludedFactors: '非 stop schema 解析问题',
+        diagnosticOrder: '工具调用 -> 拒绝日志 -> 阻塞判定',
+        doneSteps: '确认工具权限被拒'
+      })
     ].join('\n');
 
     const result = await runServerSideToolEngine({
@@ -766,11 +801,11 @@ describe('stop_message_auto servertool', () => {
     const message = ((chatResponse.choices as any[])[0].message as any);
     message.content = [
       '已完成本轮校验。',
-      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+      terminalStopSchema()
     ].join('\n');
     message.reasoning_content = [
       '先给用户看这一段。',
-      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+      terminalStopSchema()
     ].join('\n');
     message.reasoning = {
       summary: [
@@ -778,7 +813,7 @@ describe('stop_message_auto servertool', () => {
           type: 'summary_text',
           text: [
             '阶段总结：输出已经可见。',
-            '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"日志通过","next_step":""}'
+            terminalStopSchema()
           ].join('\n')
         }
       ]
@@ -964,7 +999,15 @@ describe('stop_message_auto servertool', () => {
       '{"event":"audit","message":"model mentioned stopreason in user-visible evidence"}',
       '```',
       '<stop_schema>',
-      '{"stopreason":1,"reason":"上游工具拒绝","has_evidence":1,"evidence":"见上方日志","next_step":""}',
+      terminalStopSchema({
+        stopreason: 1,
+        reason: '上游工具拒绝',
+        evidence: '见上方日志',
+        issueCause: '上游拒绝当前工具请求',
+        excludedFactors: '非 visible evidence JSON 误解析',
+        diagnosticOrder: '证据 JSON -> stop schema -> final projection',
+        doneSteps: '确认上游工具拒绝'
+      }),
       '</stop_schema>'
     ].join('\n');
 
@@ -1050,7 +1093,14 @@ describe('stop_message_auto servertool', () => {
     ((chatResponse.choices as any[])[0].message as any).content = [
       '最终用户摘要：AP-008 创建完成；AP-013 创建完成。',
       '<stop_schema>',
-      '{"stopreason":0,"reason":"完成","has_evidence":1,"evidence":"任务输出","next_step":""}',
+      terminalStopSchema({
+        reason: '完成',
+        evidence: '任务输出',
+        issueCause: '任务已创建',
+        excludedFactors: '未发现额外阻塞',
+        diagnosticOrder: '创建输出 -> summary',
+        doneSteps: 'AP-008 创建完成；AP-013 创建完成'
+      }),
       '</stop_schema>'
     ].join('\n');
 

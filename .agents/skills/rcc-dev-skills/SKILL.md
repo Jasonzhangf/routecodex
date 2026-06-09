@@ -1713,7 +1713,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 ### Stopless schema gate 精华（2026-06-03）
 - stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
-- stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` / `issue_cause` / `excluded_factors` / `diagnostic_order` 只判空。followup prompt 必须质询六项：目标、过程、证据、问题原因、已排除因素、排查顺序；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema、无效 schema、`stopreason=2` 都计入同一个连续 stop 预算；非 stop/工具进展必须 reset；第三次连续 stop 预算耗尽并输出 summary。
+- stop schema 只校验数字字段 `stopreason` / `has_evidence`，文本字段判空但 terminal stop 必须严：`stopreason=0|1` 只有在 `reason`、`has_evidence=1`、`evidence`、`done_steps`、`issue_cause`、`excluded_factors`、`diagnostic_order` 都齐全时才允许 stop 并 prefix summary；浅 terminal schema 必须继续续杯并计入预算，禁止只凭 reason 放行。缺 schema、无效 schema、`stopreason=2` 都计入同一个连续 stop 预算；非 stop/工具进展必须 reset；第三次连续 stop 预算耗尽并输出 summary。
 - stopless summary 提示锁：任何 stopless system prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 也会增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
 
 ### 2026-06-04 stopless Responses followup 红测精华
