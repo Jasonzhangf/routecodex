@@ -387,7 +387,7 @@ fn insert_optional_floor(
     }
 }
 
-fn sanitize_followup_text(raw: &str) -> String {
+pub fn sanitize_followup_text(raw: &str) -> String {
     let without_stop_markers = remove_stopmessage_markers(raw);
     let without_time_tags = remove_time_tag_blocks(&without_stop_markers);
     let without_images = without_time_tags.replace("[Image omitted]", " ");

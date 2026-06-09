@@ -1771,6 +1771,7 @@ function checkOrchestrationPolicyRustOwner() {
     'pub fn plan_stop_message_fetch_failed_error',
     'pub fn read_client_inject_only',
     'pub fn normalize_client_inject_text',
+    'pub fn sanitize_followup_text',
     'pub fn compact_followup_error_reason',
     'pub fn resolve_adapter_context_provider_key',
   ]) {
@@ -1844,7 +1845,6 @@ function checkOrchestrationPolicyRustOwner() {
   for (const keyword of [
     'function parseTimeoutMs',
     'function parseBooleanLike',
-    'sanitizeFollowupText',
     'FOLLOWUP_ERROR_REASON_MAX_LENGTH',
     'httpCodeMatch',
     'Number.isFinite',
@@ -1859,6 +1859,21 @@ function checkOrchestrationPolicyRustOwner() {
       fail(
         'servertool-orchestration-policy-ts-thin-shell',
         `Forbidden TS orchestration policy semantic "${keyword}" found in orchestration-policy-block.ts`
+      );
+    }
+  }
+  const followupSanitize = readRequired(`${SERVERTOOL_TS_DIR}/handlers/followup-sanitize.ts`);
+  for (const keyword of [
+    'const TIME_TAG_BLOCK_RE',
+    'const STOPMESSAGE_MARKER_RE',
+    'const IMAGE_OMITTED_RE',
+    'function collapseBlankLines',
+    'replace(STOPMESSAGE_MARKER_RE',
+  ]) {
+    if (followupSanitize.includes(keyword)) {
+      warn(
+        'servertool-followup-sanitize-ts-migration-pending',
+        `TS followup sanitize semantic remains pending native bridge deletion: ${keyword}`
       );
     }
   }
