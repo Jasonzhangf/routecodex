@@ -386,6 +386,30 @@ fn internal_carrier_fails_fast() {
 }
 
 #[test]
+fn private_carrier_text_fails_fast() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "servertool_fixture",
+            "--input-json",
+            r#"{"value":"serverToolFollowup must not be restored"}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "private carrier text failure must not emit client-visible stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("SERVERTOOL_DENIED_INTERNAL_CARRIER: serverToolFollowup"),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
 fn restoration_handle_carrier_fails_fast() {
     for (input_json, carrier) in [
         (
