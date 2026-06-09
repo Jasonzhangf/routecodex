@@ -2958,3 +2958,9 @@ Tags: hub-pipeline, dead-code, napi-export, web-search, reasoning, tool-governan
 - Removed the Rust module/file and converted the shared JSON helper deletion gate into a retired-file-absent gate. Live request/tool governance remains in `req_process_stage1_tool_governance.rs`, chat governance modules, and typed Hub mainline boundaries.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `hub_tool_governance_semantics.rs` and `governRequestJson` from returning.
 Tags: hub-pipeline, tool-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline response-tool collect-names NAPI export removed
+- Exact scan found `collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json` had no TS/runtime consumer; remaining references were the Rust NAPI JSON wrapper and public re-export.
+- Removed only the zero-consumer NAPI wrapper/re-export. Kept internal `collect_tool_names_from_candidate` because it is still used by Rust `resolve_requested_tool_names`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the NAPI export/re-export names from returning.
+Tags: hub-pipeline, resp-process, tool-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

@@ -1848,6 +1848,14 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
       'utf8',
     );
+    const respToolGovernanceBindings = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/napi_bindings.rs'),
+      'utf8',
+    );
+    const respToolGovernanceReexports = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs'),
+      'utf8',
+    );
 
     expect({ existingFiles, existingTests, existingRetiredFiles }).toEqual({
       existingFiles: [],
@@ -1864,6 +1872,9 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/governRequestJson|governToolNameResponseJson|resolveDefaultToolGovernanceRulesJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
+    }
+    for (const source of [respToolGovernanceBindings, respToolGovernanceReexports, requiredExports]) {
+      expect(source).not.toMatch(/collectToolNamesFromCandidateJson|collect_tool_names_from_candidate_json/);
     }
   });
 

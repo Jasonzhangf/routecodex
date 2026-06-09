@@ -18769,3 +18769,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `governRequestJson` / `hub_tool_governance_semantics.rs` had no TS/runtime consumer after response/default-rule exports were removed.
 - Change: removed module/file, removed module declaration, converted shared JSON helper gate to retired-file-absent, and updated residue gate/map/memory docs.
 - Verification: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust retired-file gate 1/1; Rust hub_pipeline_contracts 11/11; servertool bridge 1/1.
+
+2026-06-09 HubPipeline response-tool collect-names NAPI export deletion:
+- Exact scan: `collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json` had no TS/runtime consumer; remaining references were Rust NAPI wrapper and public re-export.
+- Change: removed only the zero-consumer NAPI wrapper/re-export, kept internal `collect_tool_names_from_candidate` helper because Rust `resolve_requested_tool_names` still uses it.
+- Verification PASS: residue scan only docs/gate/memory refs plus internal Rust private helper; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust response tool-governance 195 passed / 1 ignored; `git diff --check` PASS.
