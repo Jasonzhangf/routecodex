@@ -1180,9 +1180,9 @@ mod tests {
         let submit_source = fs::read_to_string(&submit_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", submit_path.display(), error));
         assert!(
-            submit_source.contains("read_first_object_trimmed_string(row")
-                || submit_source.contains("read_first_object_trimmed_string(&row"),
-            "hub_submit_tool_outputs.rs must route prioritized tool id reads through shared_json_utils truth"
+            !submit_source.contains("build_submit_tool_outputs_payload"),
+            "retired submit_tool_outputs payload builder must not return in {}",
+            submit_path.display()
         );
     }
 

@@ -18817,3 +18817,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `sanitizeChatProcessMessagesWithNative` / `sanitizeChatProcessMessagesJson` had no TS/runtime consumer outside wrapper/required-export/root NAPI surfaces.
 - Change: removed public TS wrapper, required-export entry, and Rust root NAPI JSON wrapper; kept internal Rust sanitization helpers because request governance / responses context still use them.
 - Guard: residue gate scans only public TS/NAPI surfaces so internal Rust `shared_response_compat` helpers remain private implementation, not public bridge.
+
+2026-06-09 HubPipeline semantic mapper public wrapper deletion:
+- Inventory picked `native-hub-pipeline-semantic-mappers.ts`: 6/7 wrappers had zero TS/runtime consumers; live one is `normalizeServertoolFollowupPayloadShapeWithNative`.
+- Change: removed dead TS wrappers, `mapOpenaiChat*Json` required exports, Rust modules `hub_semantic_mapper_chat.rs` / `hub_provider_response_helpers.rs`, and the unused submit-tool-output payload builder from `hub_submit_tool_outputs.rs`; retained live followup shape normalizer.
+- Guard: residue gate blocks retired wrapper/export/module names; deleted obsolete `docs/goals/r1-tool-outputs-rustification-plan.md` because it described restoring the now-retired submit payload bridge.

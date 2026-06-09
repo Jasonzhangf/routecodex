@@ -113,8 +113,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "collectToolOutputsJson",
   "buildReqInboundToolOutputSnapshotJson",
   "mapBridgeToolsToChatJson",
-  "mapOpenaiChatToChatJson",
-  "mapOpenaiChatFromChatJson",
   "mapChatToolsToBridgeJson",
   "mapBridgeToolsToChatWithOptionsJson",
   "mapChatToolsToBridgeWithOptionsJson",

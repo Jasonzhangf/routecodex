@@ -2445,6 +2445,61 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired semantic mapper public wrappers and Rust modules must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_semantic_mapper_chat.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_provider_response_helpers.rs',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    expect(existingRetiredFiles).toEqual([]);
+
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_submit_tool_outputs.rs',
+    ];
+    const retiredSymbols = [
+      'mapOpenaiChatToChatWithNative',
+      'mapOpenaiChatFromChatWithNative',
+      'buildSubmitToolOutputsPayloadWithNative',
+      'extractToolSignaturesFromPayloadWithNative',
+      'hasNewGovernedServerToolCallsWithNative',
+      'responsesPayloadRequiresSubmitToolOutputsWithNative',
+      'mapOpenaiChatToChatJson',
+      'mapOpenaiChatFromChatJson',
+      'buildSubmitToolOutputsPayloadJson',
+      'extractToolSignaturesFromPayloadJson',
+      'hasNewGovernedServerToolCallsJson',
+      'responsesPayloadRequiresSubmitToolOutputsJson',
+      'hub_provider_response_helpers',
+      'hub_semantic_mapper_chat',
+      'map_openai_chat_to_chat_json',
+      'map_openai_chat_from_chat_json',
+      'build_submit_tool_outputs_payload_json',
+      'extract_tool_signatures_from_payload_json',
+      'has_new_governed_server_tool_calls_json',
+      'responses_payload_requires_submit_tool_outputs_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

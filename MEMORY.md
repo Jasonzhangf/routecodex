@@ -3011,3 +3011,9 @@ Tags: hub-pipeline, process-mode, dead-code, napi-export, rust-only, residue-gat
 - Removed the public TS wrapper, required-export entry, and Rust root NAPI JSON wrapper. Kept Rust `sanitize_chat_process_messages_value` / internal JSON helper private because current Rust mainline still uses chat-process message sanitization.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired public wrapper/export names from returning in public TS/NAPI surfaces.
 Tags: hub-pipeline, chat-process, sanitizer, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline semantic mapper public wrappers removed
+- Exact scan found `mapOpenaiChatToChatWithNative`, `mapOpenaiChatFromChatWithNative`, `buildSubmitToolOutputsPayloadWithNative`, `extractToolSignaturesFromPayloadWithNative`, `hasNewGovernedServerToolCallsWithNative`, and `responsesPayloadRequiresSubmitToolOutputsWithNative` had no TS/runtime consumer.
+- Removed the dead TS wrappers, `mapOpenaiChat*Json` required-export entries, retired Rust modules `hub_semantic_mapper_chat.rs` / `hub_provider_response_helpers.rs`, and the unused submit-tool-output payload builder in `hub_submit_tool_outputs.rs`. Kept live `normalizeServertoolFollowupPayloadShapeWithNative` / `normalizeServertoolFollowupPayloadShapeJson`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired wrapper/export/module names from returning; old `docs/goals/r1-tool-outputs-rustification-plan.md` was physically deleted because it only pointed to the retired submit payload bridge.
+Tags: hub-pipeline, semantic-mapper, submit-tool-outputs, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
