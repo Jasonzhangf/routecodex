@@ -395,6 +395,25 @@ mod tests {
     }
 
     #[test]
+    fn unknown_tool_is_rejected_by_projection_builder() {
+        let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "unknown_tool".to_string(),
+                flow_id: None,
+                input: json!({}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("unknown tool must fail-fast");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::UnsupportedTool("unknown_tool".to_string())
+        );
+    }
+
+    #[test]
     fn web_search_is_not_client_exec_cli_projection() {
         assert!(!is_client_exec_cli_projection("web_search"));
     }
@@ -576,6 +595,29 @@ mod tests {
         .expect("server io observation");
         assert_eq!(observed.flow_id, "servertool_server_io_internal");
         assert_eq!(observed.internal_kind, "server_io_internal:memory_cache");
+    }
+
+    #[test]
+    fn memory_cache_auto_is_rejected_by_client_projection_builder() {
+        let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "memory_cache_auto".to_string(),
+                flow_id: None,
+                input: json!({"key":"x"}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("memory_cache_auto must not project to client exec");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "memory_cache_auto".to_string(),
+                expected: ServertoolOutcome::ClientExecCliProjection,
+                actual: ServertoolOutcome::ServerIoInternal
+            }
+        );
     }
 
     #[test]

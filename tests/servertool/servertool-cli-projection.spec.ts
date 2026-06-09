@@ -1,5 +1,8 @@
 import {
   beforeAll,
+  describe,
+  expect,
+  it,
   jest
 } from '@jest/globals';
 
@@ -73,12 +76,18 @@ let buildServertoolCliProjectionForAutoFlow: typeof import(
 let buildServertoolCliProjectionForToolCall: typeof import(
   '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js'
 ).buildServertoolCliProjectionForToolCall;
+let buildClientVisibleProjectionShellWithNative: typeof import(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'
+).buildClientVisibleProjectionShellWithNative;
 
 beforeAll(async () => {
   ({
     buildServertoolCliProjectionForAutoFlow,
     buildServertoolCliProjectionForToolCall
   } = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js'));
+  ({
+    buildClientVisibleProjectionShellWithNative
+  } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'));
 });
 
 describe('servertool CLI projection', () => {
@@ -150,6 +159,23 @@ describe('servertool CLI projection', () => {
       requestId: 'req_tool_1'
     });
     expect((projection as any)[['tick', 'et'].join('')]).toBeUndefined();
+  });
+
+  it('uses parsed native shell payloads from the TypeScript bridge', () => {
+    const projection = buildClientVisibleProjectionShellWithNative({
+      requestId: 'req_obj_shell',
+      clientCallId: 'call_obj_shell_1',
+      nativeProjection: {
+        toolName: 'stop_message_auto',
+        flowId: 'stop_message_flow',
+        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\"}'"
+      },
+      reasoningText: 'parsed shell',
+      additionalToolCalls: []
+    } as any);
+
+    expect((projection as any).choices[0].message.reasoning_text).toBe('parsed shell');
+    expect((projection as any).__servertool_cli_projection.toolName).toBe('stop_message_auto');
   });
 
   it('uses native CLI command quoting for apostrophes in JSON input', () => {

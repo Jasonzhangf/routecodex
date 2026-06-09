@@ -1347,7 +1347,11 @@ export function buildClientVisibleProjectionShellWithNative(
   if (typeof resultJson !== 'string') {
     throw new Error(`buildClientVisibleProjectionShellJson native returned non-string: ${typeof resultJson}`);
   }
-  return JSON.parse(resultJson) as Record<string, unknown>;
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('buildClientVisibleProjectionShellJson native returned invalid projection shell');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {
