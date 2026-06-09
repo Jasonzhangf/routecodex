@@ -18784,3 +18784,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: passthrough-mode public NAPI wrappers (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) had no TS/runtime consumer; active hits were Rust wrappers/re-exports and internal helper tests.
 - Change: removed only zero-consumer public NAPI wrappers/re-exports, kept internal Rust helper functions because current Rust Hub mainline/tests still use them; full passthrough-mode semantic retirement remains a separate slice.
 - Verification PASS: residue scan only historical/docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust passthrough tests 20/20; `git diff --check` PASS.
+
+2026-06-09 HubPipeline legacy stage bridge API deletion:
+- Exact scan: `runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` had no TS/runtime or required-export consumer after `runHubPipelineStageJson` retirement; active hits were only Rust owner-pair wrappers/functions and tests preserving the old API.
+- Change: removed public NAPI wrappers, internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, legacy DTOs, and tests that existed only for the retired stage API.
+- Verification PASS: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust `hub_pipeline` tests 179/179; `git diff --check` PASS.

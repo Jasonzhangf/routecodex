@@ -186,10 +186,7 @@ mod responses_direct_route_decision_tests {
     }
 }
 
-use crate::hub_pipeline::{
-    run_hub_pipeline, run_req_inbound_pipeline, run_req_process_pipeline,
-    run_resp_outbound_pipeline, ChatEnvelope, HubPipelineInput, RoutingDecision,
-};
+use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_pipeline_blocks::adapter_context::{
     extract_adapter_context_metadata_fields, resolve_adapter_context_metadata_signals,
     resolve_adapter_context_object_carriers,
@@ -834,58 +831,6 @@ pub fn run_hub_pipeline_json(input_json: String) -> napi::Result<String> {
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
-#[napi_derive::napi]
-pub fn run_req_inbound_pipeline_json(
-    payload_json: String,
-    protocol: String,
-    endpoint: String,
-) -> napi::Result<String> {
-    if payload_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Payload JSON is empty"));
-    }
-
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload: {}", e)))?;
-
-    let envelope = run_req_inbound_pipeline(payload, &protocol, &endpoint)
-        .map_err(|e| napi::Error::from_reason(e))?;
-
-    serde_json::to_string(&envelope)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize envelope: {}", e)))
-}
-
-#[napi_derive::napi]
-pub fn run_req_process_pipeline_json(
-    envelope_json: String,
-    routing_json: String,
-) -> napi::Result<String> {
-    let envelope: ChatEnvelope = serde_json::from_str(&envelope_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse envelope: {}", e)))?;
-
-    let routing: RoutingDecision = serde_json::from_str(&routing_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse routing: {}", e)))?;
-
-    let processed =
-        run_req_process_pipeline(envelope, routing).map_err(|e| napi::Error::from_reason(e))?;
-
-    serde_json::to_string(&processed)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize processed: {}", e)))
-}
-
-#[napi_derive::napi]
-pub fn run_resp_outbound_pipeline_json(
-    payload_json: String,
-    protocol: String,
-) -> napi::Result<String> {
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload: {}", e)))?;
-
-    let envelope =
-        run_resp_outbound_pipeline(payload, &protocol).map_err(|e| napi::Error::from_reason(e))?;
-
-    serde_json::to_string(&envelope)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize envelope: {}", e)))
-}
 #[napi_derive::napi]
 pub fn describe_server_contracts_json() -> napi::Result<String> {
     serde_json::to_string(&describe_server_contracts()).map_err(|e| {

@@ -341,15 +341,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('legacy request-side Rust stage bridge owner pair must stay fixed', () => {
+  it('legacy request-side Rust stage bridge API must be physically removed', () => {
     const crateRoot = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
     );
-    const allowedOwnerFiles = new Set([
-      'hub_pipeline.rs',
-      'hub_pipeline_blocks/napi_bindings.rs',
-    ]);
     const symbols = [
       'run_req_inbound_pipeline',
       'run_req_inbound_pipeline_json',
@@ -365,7 +361,7 @@ describe('hub pipeline stage residue audit', () => {
       const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
       const source = fs.readFileSync(fullPath, 'utf8');
       for (const symbol of symbols) {
-        if (new RegExp(`\\b${symbol}\\b`).test(source) && !allowedOwnerFiles.has(relativePath)) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source)) {
           findings.push(`${relativePath}:${symbol}`);
         }
       }
@@ -374,15 +370,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('legacy response-side Rust stage bridge owner pair must stay fixed', () => {
+  it('legacy response-side Rust stage bridge API must be physically removed', () => {
     const crateRoot = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
     );
-    const allowedOwnerFiles = new Set([
-      'hub_pipeline.rs',
-      'hub_pipeline_blocks/napi_bindings.rs',
-    ]);
     const symbols = [
       'run_resp_outbound_pipeline',
       'run_resp_outbound_pipeline_json',
@@ -396,7 +388,7 @@ describe('hub pipeline stage residue audit', () => {
       const relativePath = path.relative(crateRoot, fullPath).split(path.sep).join('/');
       const source = fs.readFileSync(fullPath, 'utf8');
       for (const symbol of symbols) {
-        if (new RegExp(`\\b${symbol}\\b`).test(source) && !allowedOwnerFiles.has(relativePath)) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source)) {
           findings.push(`${relativePath}:${symbol}`);
         }
       }
@@ -454,18 +446,6 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
     );
     const ownerFilesBySymbol: Record<string, Set<string>> = {
-      run_req_process_pipeline: new Set([
-        'hub_pipeline.rs',
-        'hub_pipeline_blocks/napi_bindings.rs',
-      ]),
-      run_resp_outbound_pipeline: new Set([
-        'hub_pipeline.rs',
-        'hub_pipeline_blocks/napi_bindings.rs',
-      ]),
-      run_resp_outbound_pipeline_json: new Set([
-        'hub_pipeline.rs',
-        'hub_pipeline_blocks/napi_bindings.rs',
-      ]),
       apply_req_process_tool_governance: new Set([
         'hub_req_chatprocess_03_governance_boundary.rs',
         'req_process_stage1_tool_governance.rs',

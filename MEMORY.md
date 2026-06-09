@@ -2981,3 +2981,9 @@ Tags: hub-pipeline, passthrough, dead-code, napi-export, rust-only, residue-gate
 - Bare `gpt-5.5` in RouteCodex `/v1/models` is a Codex compatibility contract, not a provider runtime snapshot. It must keep Codex capability-signaling fields stable: `prefer_websockets=true`, `minimal_client_version=0.124.0`, `context_window=max_context_window=272000`, plus the full reasoning/verbosity/search/image/apply_patch metadata.
 - Provider-prefixed aliases may override runtime-derived fields such as `context_window/max_context_window`, `supports_streaming`, and provider description, but must not drift on Codex capability fields. Gate truth is `docs/design/codex-model-capability-contract.md` plus `npm run verify:models-capability-contract`.
 - Closeout for this contract requires full runtime proof, not just unit tests: `npm run build:min` -> `npm run install:global` -> `routecodex restart --port 5555` -> live `/health`, `/v1/models`, and a real `/v1/responses` request on the target port. The 2026-06-09 verified install/runtime version for this fix is `0.90.3043`.
+
+## 2026-06-09 HubPipeline legacy stage bridge APIs removed
+- Exact scan found `runReqInboundPipelineJson`, `runReqProcessPipelineJson`, and `runRespOutboundPipelineJson` had no TS/runtime or required-export consumer after `runHubPipelineStageJson` retirement; active references were only Rust owner-pair wrappers/functions and tests preserving the old API.
+- Removed the public NAPI wrappers, the internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, their legacy DTOs, and tests that existed only to exercise the retired stage API.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now fails if the legacy stage bridge API symbols return anywhere in active Rust source.
+Tags: hub-pipeline, stage-bridge, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

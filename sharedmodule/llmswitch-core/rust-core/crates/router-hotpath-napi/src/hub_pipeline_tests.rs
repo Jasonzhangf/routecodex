@@ -231,69 +231,6 @@ fn test_protocol_resolution_aliases() {
 }
 
 #[test]
-fn test_protocol_field_contract_inbound_preserves_openai_chat_fields_only() {
-    let payload = json!({
-        "model": "deepseek-v4-flash-free",
-        "messages": [
-            {"role": "user", "content": "继续"},
-            {
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": ".",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
-                }]
-            }
-        ],
-        "tools": [{
-            "type": "function",
-            "function": {"name": "exec_command", "parameters": {"type": "object", "properties": {}}}
-        }],
-        "parallel_tool_calls": false,
-        "tool_choice": "auto"
-    });
-
-    let result = run_req_inbound_pipeline(payload, "openai-chat", "/v1/responses").unwrap();
-    assert_eq!(result.protocol, "openai-chat");
-    assert_eq!(result.payload["messages"][1]["content"], "");
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
-    assert!(result.payload["messages"][1].get("thinking").is_none());
-}
-
-#[test]
-fn test_protocol_field_contract_chat_process_preserves_openai_chat_fields_only() {
-    let envelope = ChatEnvelope {
-        messages: vec![
-            json!({"role": "user", "content": "继续"}),
-            json!({
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": ".",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
-                }]
-            }),
-        ],
-        semantics: Some(json!({"model": "deepseek-v4-flash-free"})),
-        metadata: Some(json!({"providerProtocol": "openai-chat"})),
-    };
-    let routing = RoutingDecision {
-        provider_key: "opencode-zen-free.key1.deepseek-v4-flash-free".to_string(),
-        target_endpoint: "/v1/chat/completions".to_string(),
-        metadata: Some(json!({"providerProtocol": "openai-chat"})),
-    };
-
-    let result = run_req_process_pipeline(envelope, routing).unwrap();
-    assert_eq!(result.request["messages"][1]["content"], "");
-    assert_eq!(result.request["messages"][1]["reasoning_content"], ".");
-    assert!(result.request["messages"][1].get("thinking").is_none());
-}
-
-#[test]
 fn test_invalid_protocol_error() {
     let result = resolve_provider_protocol("invalid-protocol");
     assert!(result.is_err());
@@ -415,65 +352,6 @@ fn test_apply_outbound_stream_preference_passthrough_keeps_request_when_stream_u
     });
     let output = apply_outbound_stream_preference(&request, None, Some("passthrough"));
     assert_eq!(output, request);
-}
-
-#[test]
-fn test_null_payload_error() {
-    let result = run_req_inbound_pipeline(Value::Null, "openai-chat", "/v1/chat");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("cannot be null"));
-}
-
-#[test]
-fn test_empty_messages_error() {
-    let envelope = ChatEnvelope {
-        messages: vec![],
-        semantics: None,
-        metadata: None,
-    };
-    let routing = RoutingDecision {
-        provider_key: "openai.default".to_string(),
-        target_endpoint: "/v1/chat".to_string(),
-        metadata: None,
-    };
-
-    let result = run_req_process_pipeline(envelope, routing);
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("at least one message"));
-}
-
-#[test]
-fn test_req_inbound_pipeline_success() {
-    let payload = json!({"model": "gpt-4"});
-    let result = run_req_inbound_pipeline(payload, "openai-chat", "/v1/chat").unwrap();
-    assert_eq!(result.protocol, "openai-chat");
-    assert!(result.metadata.is_some());
-}
-
-#[test]
-fn test_req_process_pipeline_success() {
-    let envelope = ChatEnvelope {
-        messages: vec![json!({"role": "user", "content": "hello"})],
-        semantics: Some(json!({})),
-        metadata: Some(json!({"test": true})),
-    };
-    let routing = RoutingDecision {
-        provider_key: "openai.default".to_string(),
-        target_endpoint: "/v1/chat".to_string(),
-        metadata: Some(json!({"region": "us"})),
-    };
-
-    let result = run_req_process_pipeline(envelope, routing).unwrap();
-    assert!(result.request.get("messages").is_some());
-    assert_eq!(result.routing.provider_key, "openai.default");
-}
-
-#[test]
-fn test_resp_outbound_pipeline_success() {
-    let payload = json!({"choices": [{"message": {"role": "assistant", "content": "Hello"}}]});
-    let result = run_resp_outbound_pipeline(payload, "openai-chat").unwrap();
-    assert_eq!(result.protocol, "openai-chat");
-    assert!(result.payload.get("choices").is_some());
 }
 
 #[test]

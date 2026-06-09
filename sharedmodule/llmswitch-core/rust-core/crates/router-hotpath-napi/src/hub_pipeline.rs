@@ -47,54 +47,6 @@ pub struct HubPipelineError {
     pub details: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PipelineStageResult {
-    pub stage_id: String,
-    pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FormatEnvelope {
-    pub protocol: String,
-    pub payload: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatEnvelope {
-    pub messages: Vec<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoutingDecision {
-    pub provider_key: String,
-    pub target_endpoint: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProcessedRequest {
-    pub request: Value,
-    pub routing: RoutingDecision,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<Value>,
-}
-
 pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, String> {
     let request_id = input.request_id.clone();
     let endpoint = normalize_endpoint(&input.endpoint);
@@ -195,60 +147,6 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     })
 }
 
-pub fn run_req_inbound_pipeline(
-    payload: Value,
-    protocol: &str,
-    endpoint: &str,
-) -> Result<FormatEnvelope, String> {
-    if payload.is_null() {
-        return Err("Request payload cannot be null".to_string());
-    }
-
-    let normalized_protocol = resolve_provider_protocol(protocol)?;
-
-    Ok(FormatEnvelope {
-        protocol: normalized_protocol,
-        payload,
-        metadata: Some(serde_json::json!({
-            "endpoint": endpoint,
-            "processed": true
-        })),
-    })
-}
-
-pub fn run_req_process_pipeline(
-    envelope: ChatEnvelope,
-    routing: RoutingDecision,
-) -> Result<ProcessedRequest, String> {
-    if envelope.messages.is_empty() {
-        return Err("Chat envelope must contain at least one message".to_string());
-    }
-
-    let request = serde_json::json!({
-        "messages": envelope.messages,
-        "semantics": envelope.semantics,
-    });
-
-    Ok(ProcessedRequest {
-        request,
-        routing,
-        metadata: envelope.metadata,
-    })
-}
-
-pub fn run_resp_outbound_pipeline(
-    payload: Value,
-    protocol: &str,
-) -> Result<FormatEnvelope, String> {
-    let normalized_protocol = resolve_provider_protocol(protocol)?;
-
-    Ok(FormatEnvelope {
-        protocol: normalized_protocol,
-        payload,
-        metadata: None,
-    })
-}
-
 pub use crate::hub_pipeline_blocks::napi_bindings::{
     apply_direct_builtin_web_search_tool_json, apply_has_image_attachment_flag_json,
     apply_outbound_stream_preference_json, build_captured_chat_request_snapshot_json,
@@ -267,7 +165,6 @@ pub use crate::hub_pipeline_blocks::napi_bindings::{
     resolve_provider_protocol_json, resolve_router_metadata_runtime_flags_json,
     resolve_sse_protocol_from_metadata_json, resolve_sse_protocol_json,
     resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
-    run_req_inbound_pipeline_json, run_req_process_pipeline_json, run_resp_outbound_pipeline_json,
     sync_responses_context_from_canonical_messages_json, sync_session_identifiers_to_metadata_json,
 };
 
