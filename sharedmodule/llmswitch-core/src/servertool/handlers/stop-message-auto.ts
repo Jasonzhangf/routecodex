@@ -612,27 +612,6 @@ function readRequestScopedGoalState(adapterContext: unknown): {
   };
 }
 
-function collectFinishReasonsFromCurrentPayload(base: unknown): string[] | undefined {
-  if (!base || typeof base !== 'object' || Array.isArray(base)) {
-    return undefined;
-  }
-  const choices = Array.isArray((base as { choices?: unknown }).choices)
-    ? ((base as { choices: unknown[] }).choices as unknown[])
-    : [];
-  if (!choices.length) {
-    return undefined;
-  }
-  const reasons: string[] = [];
-  for (const choice of choices) {
-    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) continue;
-    const finishReason = (choice as { finish_reason?: unknown }).finish_reason;
-    if (typeof finishReason === 'string') {
-      reasons.push(finishReason);
-    }
-  }
-  return reasons.length > 0 ? reasons : undefined;
-}
-
 function isPlanModeActiveFromCapturedRequest(adapterContext: unknown): boolean {
   const captured = getCapturedRequest(adapterContext as any);
   if (!captured) {
@@ -720,7 +699,6 @@ const handler: ServerToolHandler = async (
     port_stop_message_disabled: isStopMessageDisabledByPort(ctx.adapterContext),
     followup_flow_id: followupFlowId || undefined,
     stop_eligible: stopGateway.eligible,
-    finish_reasons: collectFinishReasonsFromCurrentPayload(ctx.base),
     has_responses_submit_tool_outputs_resume: hasResponsesSubmitToolOutputsResume(ctx.adapterContext),
     persisted_snapshot: persistedSnap ? {
       text: String(persistedSnap.text ?? ''),

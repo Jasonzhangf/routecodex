@@ -18,7 +18,6 @@ import {
 
 function buildMinimalDecisionContext(args: {
   stopEligible: boolean;
-  finishReasons?: string[];
   persistedDefaultExhausted?: boolean;
   defaultEnabled?: boolean;
   defaultMaxRepeats?: number;
@@ -28,7 +27,6 @@ function buildMinimalDecisionContext(args: {
     port_stop_message_disabled: false,
     followup_flow_id: undefined,
     stop_eligible: args.stopEligible,
-    finish_reasons: args.finishReasons ?? [],
     has_responses_submit_tool_outputs_resume: false,
     persisted_snapshot: undefined,
     runtime_snapshot: undefined,
@@ -47,17 +45,15 @@ describe('stop-message native decision (blackbox)', () => {
   test('clean stop with default config → trigger', () => {
     const ctx = buildMinimalDecisionContext({
       stopEligible: true,
-      finishReasons: ['stop'],
     });
     const decision: StopMessageDecision = decideStopMessageActionWithNative(ctx);
     expect(decision.action).toBe('trigger');
     expect(decision.followup_text).toBeTruthy();
   });
 
-  test('non-stop finish_reason → skip', () => {
+  test('chatprocess stop-gateway ineligible → skip', () => {
     const ctx = buildMinimalDecisionContext({
       stopEligible: false,
-      finishReasons: ['length'],
     });
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
   });
@@ -65,7 +61,6 @@ describe('stop-message native decision (blackbox)', () => {
   test('default exhausted → skip', () => {
     const ctx = buildMinimalDecisionContext({
       stopEligible: true,
-      finishReasons: ['stop'],
       persistedDefaultExhausted: true,
     });
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
@@ -73,7 +68,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('goal active → skip', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       goal_status: 'active',
     };
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
@@ -83,7 +78,7 @@ describe('stop-message native decision (blackbox)', () => {
     'goal status %s does not skip clean stop',
     (goalStatus) => {
       const ctx: StopMessageDecisionContext = {
-        ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+        ...buildMinimalDecisionContext({ stopEligible: true }),
         goal_status: goalStatus,
       };
       const decision = decideStopMessageActionWithNative(ctx);
@@ -94,7 +89,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('plan mode active → skip', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       plan_mode_active: true,
     };
     const decision = decideStopMessageActionWithNative(ctx);
@@ -104,7 +99,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('port disabled → skip', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       port_stop_message_disabled: true,
     };
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
@@ -112,7 +107,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('persisted snapshot with used=0 → trigger', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       persisted_snapshot: {
         text: '继续执行',
         max_repeats: 3,
@@ -126,7 +121,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('persisted snapshot used >= max_repeats → skip', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       persisted_snapshot: {
         text: '继续执行',
         max_repeats: 3,
@@ -140,7 +135,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('stage_mode off → skip', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       persisted_snapshot: {
         text: '继续执行',
         max_repeats: 3,
@@ -154,7 +149,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('stop_message followup flow remains eligible for bounded continuation', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       followup_flow_id: 'stop_message_flow',
     };
     const decision = decideStopMessageActionWithNative(ctx);
@@ -164,7 +159,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('non-stop_message followup flow skips as generic followup hop', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       followup_flow_id: 'apply_patch_flow',
     };
     const decision = decideStopMessageActionWithNative(ctx);
@@ -174,7 +169,7 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('submit_tool_outputs resume remains eligible for stopless continuation', () => {
     const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true, finishReasons: ['stop'] }),
+      ...buildMinimalDecisionContext({ stopEligible: true }),
       has_responses_submit_tool_outputs_resume: true,
       persisted_snapshot: {
         text: '继续执行',
@@ -241,7 +236,6 @@ describe('stop-message native decision (blackbox)', () => {
   test('default stopless followup prompt starts with goal and evidence check', () => {
     const decision = decideStopMessageActionWithNative(buildMinimalDecisionContext({
       stopEligible: true,
-      finishReasons: ['stop'],
     }));
     expect(decision.action).toBe('trigger');
     expect(decision.followup_text).toContain('第一轮核对');
@@ -254,7 +248,6 @@ describe('stop-message native decision (blackbox)', () => {
     const decision = decideStopMessageActionWithNative({
       ...buildMinimalDecisionContext({
         stopEligible: true,
-        finishReasons: ['stop'],
       }),
       persisted_snapshot: {
         text: '继续执行',
@@ -275,7 +268,6 @@ describe('stop-message native decision (blackbox)', () => {
     const decision = decideStopMessageActionWithNative({
       ...buildMinimalDecisionContext({
         stopEligible: true,
-        finishReasons: ['stop'],
         defaultText: '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。'
       }),
       persisted_snapshot: {

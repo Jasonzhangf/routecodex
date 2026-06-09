@@ -222,6 +222,24 @@ function throwServertoolRuntimeErrorDescriptor(descriptor: ProviderResponseServe
   });
 }
 
+function attachRustStopGatewayContextToRuntimeMetadata(args: {
+  context: AdapterContext;
+  stopGateway?: Record<string, unknown> | null;
+}): void {
+  if (!args.stopGateway || typeof args.stopGateway !== 'object' || Array.isArray(args.stopGateway)) {
+    return;
+  }
+  const contextRecord = args.context as unknown as Record<string, unknown>;
+  const rt =
+    contextRecord.__rt && typeof contextRecord.__rt === 'object' && !Array.isArray(contextRecord.__rt)
+      ? (contextRecord.__rt as Record<string, unknown>)
+      : {};
+  contextRecord.__rt = {
+    ...rt,
+    stopGatewayContext: args.stopGateway
+  };
+}
+
 async function executeProviderResponseNativeServertoolEffects(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
   payload: JsonObject;
@@ -246,6 +264,10 @@ async function executeProviderResponseNativeServertoolEffects(args: {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
   }
   for (const executionPlan of actionPlan.executionPlans) {
+    attachRustStopGatewayContextToRuntimeMetadata({
+      context: args.context,
+      stopGateway: executionPlan.stopGateway
+    });
     const orchestration = await runServertoolResponseStageOrchestrationShell({
       payload: executionPlan.payload as JsonObject,
       adapterContext: args.context,

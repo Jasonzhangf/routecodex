@@ -10,8 +10,8 @@ const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 // Schema gate budget is unified to a strict 3-round progression. Whether the
 // model omitted schema entirely or provided an invalid/incomplete schema, the
 // loop should converge within three stop rounds instead of stretching into a
-// long invisible retry chain. Both branches reset the counter the moment a
-// non-stop finish_reason lands (handled at the snapshot level).
+// long invisible retry chain. Reset policy is owned by chat-process
+// stop-gateway state, not by this decision layer scanning finish_reason.
 const STOP_SCHEMA_PROVIDED_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_MISSING_MAX_REPEATS: u32 = 3;
 // Kept as a shared alias for callers/tests that intentionally do not
@@ -140,8 +140,8 @@ pub struct StopMessageDecisionContext {
     // Servertool followup context
     pub followup_flow_id: Option<String>,
     pub stop_eligible: bool,
-    /// finish_reason sequence from current response choices, in original order.
-    /// Decision must only consider the latest non-empty finish_reason.
+    /// Deprecated carrier kept for input compatibility. Finish reason truth is
+    /// owned by chat process stop-gateway classification.
     pub finish_reasons: Option<Vec<String>>,
 
     // Submit tool outputs resume
@@ -947,11 +947,6 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if !ctx.stop_eligible {
         return Some(SkipReason::NotStopFinishReason);
     }
-    if let Some(latest) = latest_finish_reason(ctx.finish_reasons.as_ref()) {
-        if latest != "stop" {
-            return Some(SkipReason::NotStopFinishReason);
-        }
-    }
     None
 }
 
@@ -998,18 +993,6 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
     }
 
     None
-}
-
-fn latest_finish_reason(finish_reasons: Option<&Vec<String>>) -> Option<String> {
-    let reasons = finish_reasons?;
-    reasons.iter().rev().find_map(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_ascii_lowercase())
-        }
-    })
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1071,17 +1054,16 @@ mod tests {
     }
 
     #[test]
-    fn only_latest_finish_reason_is_considered() {
+    fn stopless_decision_uses_chatprocess_stop_gateway_not_ts_finish_reason_scan() {
         let mut ctx = base_ctx();
         ctx.stop_eligible = true;
         ctx.finish_reasons = Some(vec!["stop".to_string(), "content_filter".to_string()]);
         let result = decide(&ctx);
-        assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_not_stop_finish_reason");
+        assert_eq!(result.action, Action::Trigger);
     }
 
     #[test]
-    fn latest_non_empty_finish_reason_is_considered() {
+    fn deprecated_finish_reason_carrier_does_not_override_stop_gateway() {
         let mut ctx = base_ctx();
         ctx.stop_eligible = true;
         ctx.finish_reasons = Some(vec!["stop".to_string(), "   ".to_string()]);

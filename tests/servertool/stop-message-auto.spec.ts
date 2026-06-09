@@ -240,13 +240,6 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
     return { action: 'skip', skip_reason: 'skip_goal_default_exhausted' };
   }
 
-  const finishReasons = Array.isArray(ctx.finish_reasons) ? ctx.finish_reasons : [];
-  const latestFinishReason = [...finishReasons].reverse().find((value) => typeof value === 'string' && value.trim());
-  const latestFinishReasonNormalized = typeof latestFinishReason === 'string' ? latestFinishReason.trim().toLowerCase() : '';
-  if (latestFinishReasonNormalized && latestFinishReasonNormalized !== 'stop') {
-    return { action: 'skip', skip_reason: 'skip_not_stop_finish_reason' };
-  }
-
   // No snapshot → try default.
   if (!snap) {
     if (!goalActive && ctx.default_enabled) {
@@ -285,7 +278,7 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
   }
 
   // Not stop eligible?
-  if (!ctx.stop_eligible && latestFinishReasonNormalized !== 'stop') {
+  if (!ctx.stop_eligible) {
     return { action: 'skip', skip_reason: 'skip_not_stop_finish_reason' };
   }
 

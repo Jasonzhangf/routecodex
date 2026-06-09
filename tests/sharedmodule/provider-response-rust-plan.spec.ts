@@ -492,10 +492,28 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               action: 'requireRuntimeExecutor',
               reason: 'stop_eligible_followup',
-              requestId: 'req_provider_response_servertool_stop_guard_1'
+              requestId: 'req_provider_response_servertool_stop_guard_1',
+              stopGateway: expect.objectContaining({
+                observed: true,
+                eligible: true,
+                source: 'chat',
+                reason: 'finish_reason_stop',
+                choice_index: 0,
+                has_tool_calls: false
+              })
             })
           })
         ])
+      })
+    }));
+    expect(context.__rt).toEqual(expect.objectContaining({
+      stopGatewayContext: expect.objectContaining({
+        observed: true,
+        eligible: true,
+        source: 'chat',
+        reason: 'finish_reason_stop',
+        choiceIndex: 0,
+        hasToolCalls: false
       })
     }));
   });

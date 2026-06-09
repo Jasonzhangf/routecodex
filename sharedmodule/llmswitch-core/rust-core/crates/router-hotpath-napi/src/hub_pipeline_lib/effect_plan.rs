@@ -88,6 +88,66 @@ fn normalize_stream_pipe_payload(payload: &Value) -> Result<Value, String> {
     }))
 }
 
+fn normalize_stop_gateway_payload(payload: &Value) -> Result<Value, String> {
+    let record = payload.as_object().ok_or_else(|| {
+        "Rust HubPipeline servertoolRuntimeAction stopGateway missing context".to_string()
+    })?;
+    let observed = record
+        .get("observed")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            "Rust HubPipeline servertoolRuntimeAction stopGateway missing observed".to_string()
+        })?;
+    let eligible = record
+        .get("eligible")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            "Rust HubPipeline servertoolRuntimeAction stopGateway missing eligible".to_string()
+        })?;
+    let source = record
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let reason = record
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let mut output = Map::new();
+    output.insert("observed".to_string(), Value::Bool(observed));
+    output.insert("eligible".to_string(), Value::Bool(eligible));
+    output.insert("source".to_string(), Value::String(source.to_string()));
+    output.insert("reason".to_string(), Value::String(reason.to_string()));
+    if let Some(choice_index) = record.get("choiceIndex").or_else(|| record.get("choice_index")) {
+        if choice_index.is_i64() || choice_index.is_u64() {
+            output.insert("choiceIndex".to_string(), choice_index.clone());
+        }
+    }
+    if let Some(has_tool_calls) = record.get("hasToolCalls").or_else(|| record.get("has_tool_calls")) {
+        if has_tool_calls.is_boolean() {
+            output.insert("hasToolCalls".to_string(), has_tool_calls.clone());
+        }
+    }
+    Ok(Value::Object(output))
+}
+
+fn normalize_servertool_runtime_action_payload(payload: &Value) -> Result<Value, String> {
+    let record = payload
+        .as_object()
+        .ok_or_else(|| "Rust HubPipeline servertoolRuntimeAction effect missing payload".to_string())?;
+    let mut output = record.clone();
+    if let Some(raw_stop_gateway) = record.get("stopGateway") {
+        output.insert(
+            "stopGateway".to_string(),
+            normalize_stop_gateway_payload(raw_stop_gateway)?,
+        );
+    }
+    Ok(Value::Object(output))
+}
+
 pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, String> {
     let record = plan
         .as_object()
@@ -130,8 +190,9 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
                     Some(read_effect_payload(effect_record, "runtimeStateWrite")?.clone());
             }
             "servertoolRuntimeAction" => {
-                servertool_runtime_actions
-                    .push(read_effect_payload(effect_record, "servertoolRuntimeAction")?.clone());
+                servertool_runtime_actions.push(normalize_servertool_runtime_action_payload(
+                    read_effect_payload(effect_record, "servertoolRuntimeAction")?,
+                )?);
             }
             _ => {
                 return Err(
@@ -239,6 +300,7 @@ pub fn plan_provider_response_servertool_runtime_actions(input: &Value) -> Resul
                     "payload": payload,
                     "projectionStage": "HubRespChatProcess03Governed",
                     "allowFollowup": true,
+                    "stopGateway": action_record.get("stopGateway").cloned().unwrap_or(Value::Null),
                 }));
             }
             Some("requireRuntimeExecutor") => {
@@ -257,6 +319,7 @@ pub fn plan_provider_response_servertool_runtime_actions(input: &Value) -> Resul
                     "payload": payload,
                     "projectionStage": "HubRespChatProcess03Governed",
                     "allowFollowup": false,
+                    "stopGateway": action_record.get("stopGateway").cloned().unwrap_or(Value::Null),
                 }));
             }
             _ => {
@@ -316,7 +379,18 @@ mod tests {
                 },
                 {
                     "kind": "servertoolRuntimeAction",
-                    "payload": { "action": "requireRuntimeExecutor", "requestId": "req-1" }
+                    "payload": {
+                        "action": "requireRuntimeExecutor",
+                        "requestId": "req-1",
+                        "stopGateway": {
+                            "observed": true,
+                            "eligible": true,
+                            "source": " responses ",
+                            "reason": " status_completed ",
+                            "choice_index": 2,
+                            "has_tool_calls": false
+                        }
+                    }
                 }
             ]
         }))
@@ -330,6 +404,33 @@ mod tests {
             output["servertoolRuntimeActions"][0]["action"],
             json!("requireRuntimeExecutor")
         );
+        assert_eq!(
+            output["servertoolRuntimeActions"][0]["stopGateway"],
+            json!({
+                "observed": true,
+                "eligible": true,
+                "source": "responses",
+                "reason": "status_completed",
+                "choiceIndex": 2,
+                "hasToolCalls": false
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_stop_gateway_context_in_servertool_runtime_action() {
+        let error = normalize_provider_response_effect_plan(&json!({
+            "effects": [{
+                "kind": "servertoolRuntimeAction",
+                "payload": {
+                    "action": "requireRuntimeExecutor",
+                    "requestId": "req-1",
+                    "stopGateway": { "eligible": true }
+                }
+            }]
+        }))
+        .unwrap_err();
+        assert!(error.contains("stopGateway missing observed"));
     }
 
     #[test]
@@ -360,6 +461,12 @@ mod tests {
                 "action": "requireRuntimeExecutor",
                 "requestId": "req-1",
                 "reason": "tool_call_dispatch",
+                "stopGateway": {
+                    "observed": true,
+                    "eligible": true,
+                    "source": "responses",
+                    "reason": "status_completed"
+                },
                 "payload": { "choices": [] }
             }],
             "providerInvoker": true,
@@ -373,6 +480,15 @@ mod tests {
             json!("HubRespChatProcess03Governed")
         );
         assert_eq!(output["executionPlans"][0]["allowFollowup"], json!(false));
+        assert_eq!(
+            output["executionPlans"][0]["stopGateway"],
+            json!({
+                "observed": true,
+                "eligible": true,
+                "source": "responses",
+                "reason": "status_completed"
+            })
+        );
     }
 
     #[test]

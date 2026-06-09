@@ -55,6 +55,7 @@ export type ProviderResponseServertoolRuntimeExecutionPlan = {
   payload: Record<string, unknown>;
   projectionStage: 'HubRespChatProcess03Governed';
   allowFollowup: boolean;
+  stopGateway?: Record<string, unknown> | null;
 };
 
 export type ProviderResponseServertoolRuntimeErrorDescriptor = {
@@ -346,7 +347,10 @@ function parseProviderResponseServertoolRuntimeActionPlan(
     executionPlans.push({
       payload: item.payload as Record<string, unknown>,
       projectionStage: item.projectionStage,
-      allowFollowup: item.allowFollowup
+      allowFollowup: item.allowFollowup,
+      ...(item.stopGateway && typeof item.stopGateway === 'object' && !Array.isArray(item.stopGateway)
+        ? { stopGateway: item.stopGateway as Record<string, unknown> }
+        : {})
     });
   }
   let error: ProviderResponseServertoolRuntimeErrorDescriptor | null | undefined;

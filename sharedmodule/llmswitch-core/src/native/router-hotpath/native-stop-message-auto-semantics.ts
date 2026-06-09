@@ -29,7 +29,6 @@ export interface StopMessageDecisionContext {
   port_stop_message_disabled: boolean;
   followup_flow_id?: string;
   stop_eligible: boolean;
-  finish_reasons?: string[];
   has_responses_submit_tool_outputs_resume: boolean;
   persisted_snapshot?: StopMessageSnapshot;
   runtime_snapshot?: StopMessageSnapshot;
