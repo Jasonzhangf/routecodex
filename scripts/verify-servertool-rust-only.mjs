@@ -2668,6 +2668,12 @@ function checkBackendRoutePolicyRustOwner() {
     '"web_search" | "vision_auto" => Some(ServertoolOutcome::BackendRouteReenter)'
   );
   assertContains(
+    'backend-route-outcome-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    outcomeContract,
+    '"memory_cache_auto" => Some(ServertoolOutcome::ServerIoInternal)'
+  );
+  assertContains(
     'backend-route-policy-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
@@ -2934,10 +2940,10 @@ function checkBackendRoutePolicyRustOwner() {
     ['memory_cache_auto', 'BackendRouteReenter'],
   ]) {
     const pattern = new RegExp(`"${toolName}"[^\\n]+${forbiddenProjection}`);
-    if (pattern.test(rustBackendRoute)) {
+    if (pattern.test(outcomeContract) || pattern.test(rustBackendRoute)) {
       fail(
         'backend-route-policy-rust-owner',
-        `${toolName} has forbidden ${forbiddenProjection} mapping in backend_route_contract.rs`
+        `${toolName} has forbidden ${forbiddenProjection} mapping in servertool Rust contracts`
       );
     }
   }

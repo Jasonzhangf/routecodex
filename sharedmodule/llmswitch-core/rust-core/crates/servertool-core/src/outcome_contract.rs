@@ -670,6 +670,29 @@ mod tests {
     }
 
     #[test]
+    fn memory_cache_auto_is_rejected_by_backend_route_builder() {
+        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "memory_cache_auto".to_string(),
+                flow_id: None,
+                input: json!({"key":"x"}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("memory_cache_auto must not be backend route");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "memory_cache_auto".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ServerIoInternal
+            }
+        );
+    }
+
+    #[test]
     fn fake_exec_is_denied_by_projection_builder() {
         let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
             ServertoolHubRespChatProcess03Input {
