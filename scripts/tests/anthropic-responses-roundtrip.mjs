@@ -123,14 +123,14 @@ async function loadConverters() {
   };
 }
 
-function assertToolCallsWithoutIds(toolCalls, label) {
+function assertHubAnthropicResponseToolCallShape(toolCalls, label) {
   if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
     throw new Error(`[anthropic-roundtrip] ${label} expected tool_calls`);
   }
   for (const call of toolCalls) {
     if (!call || typeof call !== 'object') continue;
-    if ('id' in call) {
-      throw new Error(`[anthropic-roundtrip] ${label} should not include id`);
+    if (typeof call.id !== 'string' || !call.id.trim()) {
+      throw new Error(`[anthropic-roundtrip] ${label} must include OpenAI chat tool_calls[].id`);
     }
     if ('call_id' in call) {
       throw new Error(`[anthropic-roundtrip] ${label} should not include call_id`);
@@ -141,7 +141,7 @@ function assertToolCallsWithoutIds(toolCalls, label) {
   }
 }
 
-function runIncludeToolCallIdsRegression(converters) {
+function runAnthropicResponseToolCallShapeRegression(converters) {
   const payload = {
     id: 'msg_tool_use_regression',
     type: 'message',
@@ -158,15 +158,15 @@ function runIncludeToolCallIdsRegression(converters) {
       }
     ]
   };
-  const chat = converters.buildOpenAIChatFromAnthropicMessage(payload, { includeToolCallIds: false });
+  const chat = converters.buildOpenAIChatFromAnthropicMessage(payload);
   const toolCalls = chat?.choices?.[0]?.message?.tool_calls;
-  assertToolCallsWithoutIds(toolCalls, 'includeToolCallIds=false');
-  console.log('[anthropic-roundtrip] includeToolCallIds=false regression passed');
+  assertHubAnthropicResponseToolCallShape(toolCalls, 'Hub Anthropic response tool_call shape');
+  console.log('[anthropic-roundtrip] Hub Anthropic response tool_call shape regression passed');
 }
 
 async function main() {
   const converters = await loadConverters();
-  runIncludeToolCallIdsRegression(converters);
+  runAnthropicResponseToolCallShapeRegression(converters);
   const sample = loadCodexSample();
   if (!sample) {
     console.log('[anthropic-roundtrip] codex samples 未找到，跳过验证（可运行 npm run replay:codex-sample 捕获样本）');
@@ -180,8 +180,7 @@ async function main() {
   } else {
     const chatFromAnthropic = converters.buildOpenAIChatFromAnthropicMessage(sample.payload);
     baseResponsesPayload = converters.buildResponsesPayloadFromChat(chatFromAnthropic);
-    const chatNoIds = converters.buildOpenAIChatFromAnthropicMessage(sample.payload, { includeToolCallIds: false });
-    assertToolCallsWithoutIds(chatNoIds?.choices?.[0]?.message?.tool_calls, 'sample includeToolCallIds=false');
+    assertHubAnthropicResponseToolCallShape(chatFromAnthropic?.choices?.[0]?.message?.tool_calls, 'sample Hub Anthropic response tool_call shape');
   }
 
   const chatFromResponses = converters.buildChatResponseFromResponses(baseResponsesPayload);

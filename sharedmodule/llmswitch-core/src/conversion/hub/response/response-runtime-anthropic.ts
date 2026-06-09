@@ -6,12 +6,11 @@ import {
 
 type ToolAliasMap = Record<string, string>;
 
-export interface AnthropicResponseOptions {
+export interface AnthropicResponseFromChatOptions {
   aliasMap?: ToolAliasMap;
-  includeToolCallIds?: boolean;
 }
 
-export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options?: AnthropicResponseOptions): JsonObject {
+export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject): JsonObject {
   const output = buildOpenAIChatFromAnthropicMessageFullWithNative({
     payload: JSON.stringify(payload)
   });
@@ -19,7 +18,7 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   return JSON.parse(parsed.result);
 }
 
-export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options?: AnthropicResponseOptions): JsonObject {
+export function buildAnthropicResponseFromChat(chatResponse: JsonObject, options?: AnthropicResponseFromChatOptions): JsonObject {
   const aliasMap = options?.aliasMap;
   const input = {
     chat_response: JSON.stringify(chatResponse),

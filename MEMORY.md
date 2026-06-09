@@ -2825,6 +2825,13 @@ Tags: servertool, stopless, routing-state, rust-owner, native-bridge, thin-shell
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `trimSnapshotHotpathPayloadForNative` and TS snapshot hotpath sanitize helper revival.
 Tags: hub-pipeline, snapshot-recorder, dead-code, thin-shell, rust-owner, residue-gate, 2026-06-09
 
+## 2026-06-09 HubPipeline Anthropic response ignored option removed
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts::buildOpenAIChatFromAnthropicMessage` must not expose `includeToolCallIds`; that option was ignored by the Hub full response native bridge and produced fake script coverage.
+- Hub Anthropic provider-message -> OpenAI chat projection shape is Rust-owned by `hub_resp_outbound_client_semantics_blocks/anthropic_chat_response.rs`. The TS runtime is native call + JSON parse glue only.
+- The old codec/shared conversion utilities may still use their own `includeToolCallIds` option for request/codec compatibility; do not reintroduce that option into the Hub response wrapper.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `includeToolCallIds` and the old `AnthropicResponseOptions` from returning to the Hub response runtime/scripts.
+Tags: hub-pipeline, anthropic-response, ignored-option, dead-code, rust-owner, residue-gate, 2026-06-09
+
 ## 2026-06-09 Servertool backend-route runtime action stop-message flow Rust owner
 - `servertool-core::backend_route_contract::plan_followup_runtime_action` owns `is_stop_message_flow`; TS must consume `resolveFollowupRuntimeActionPlan(...).isStopMessageFlow` and must not compare `args.execution.flowId === 'stop_message_flow'`.
 - `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts::resolveFollowupRuntimeActionPlan` is the only TS helper for this runtime action plan; mainline/runtime blocks remain native-plan consumers only.

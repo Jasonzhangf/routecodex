@@ -18637,6 +18637,12 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Added residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocking `trimSnapshotHotpathPayloadForNative` / TS snapshot hotpath sanitize helpers from returning.
 - Updated `snapshot.stage_contract` function/verification map entries to list `snapshot-recorder.ts` as TS observation glue only; selector/stage contract and payload normalization remain `src/utils` + Rust/native snapshot hooks.
 
+2026-06-09 HubPipeline Anthropic response ignored option removal:
+- Inventory found `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts` exposed `includeToolCallIds?: boolean`, but `buildOpenAIChatFromAnthropicMessage` never passed options into Rust `buildOpenAIChatFromAnthropicMessageFullWithNative`.
+- Rust `hub_resp_outbound_client_semantics_blocks/anthropic_chat_response.rs` full response projection currently owns tool_call id shape and emits normal OpenAI chat `tool_calls[].id` only for Anthropic provider messages.
+- Removed the ignored Hub wrapper option and renamed the remaining option type to `AnthropicResponseFromChatOptions` for the only live `aliasMap` use in chat->Anthropic projection.
+- Updated Hub response scripts to validate current tool_call shape directly instead of running fake `includeToolCallIds=false` regressions; added residue gate blocking the ignored option from returning to Hub response runtime/scripts.
+
 2026-06-09 servertool backend-route runtime action stop-message flow Rust closeout:
 - `servertool-core::backend_route_contract::plan_followup_runtime_action` now owns stop-message flow kind detection through `is_stop_message_flow`; TS receives `isStopMessageFlow` from native and does not compare `args.execution.flowId === 'stop_message_flow'`.
 - `backend-route-runtime-block.ts::resolveFollowupRuntimeActionPlan` is the only TS helper calling the native runtime action plan; mainline/runtime consumers read that plan instead of duplicating decision payload assembly.

@@ -20,10 +20,36 @@ function resolveDistPath(...segments) {
 function loadSample() {
   const raw = fs.readFileSync(SAMPLE_PATH, 'utf-8');
   const doc = JSON.parse(raw);
-  if (!doc || typeof doc !== 'object' || !doc.payload || !doc.expected) {
+  if (!doc || typeof doc !== 'object' || !doc.payload) {
     throw new Error('anthropic response regression sample malformed');
   }
   return doc;
+}
+
+function assertHubAnthropicToolCallShape(chat) {
+  assert.equal(chat?.id, 'msg_regression_tool');
+  assert.equal(chat?.object, 'chat.completion');
+  assert.equal(chat?.model, 'glm-4.6');
+  assert.equal(chat?.choices?.[0]?.finish_reason, 'tool_calls');
+  assert.equal(chat?.choices?.[0]?.message?.content, '');
+  const toolCalls = chat?.choices?.[0]?.message?.tool_calls;
+  if (!Array.isArray(toolCalls) || toolCalls.length !== 1) {
+    throw new Error(`expected exactly one Hub Anthropic response tool_call, got ${JSON.stringify(toolCalls)}`);
+  }
+  const [tc] = toolCalls;
+  assert.equal(tc.id, 'call_regression_shell');
+  assert.equal(tc.type, 'function');
+  assert.equal(tc.function?.name, 'Bash');
+  assert.equal(tc.function?.arguments, '{"command":"ls"}');
+  assert.equal(chat?.usage?.prompt_tokens, 10);
+  assert.equal(chat?.usage?.completion_tokens, 5);
+  assert.equal(chat?.usage?.total_tokens, 15);
+  if ('call_id' in tc) {
+    throw new Error(`Hub Anthropic response tool_calls must not contain call_id, got ${JSON.stringify(tc)}`);
+  }
+  if ('tool_call_id' in tc) {
+    throw new Error(`Hub Anthropic response tool_calls must not contain tool_call_id, got ${JSON.stringify(tc)}`);
+  }
 }
 
 async function main() {
@@ -35,32 +61,9 @@ async function main() {
   if (typeof buildOpenAIChatFromAnthropicMessage !== 'function') {
     throw new Error('buildOpenAIChatFromAnthropicMessage missing from dist build');
   }
-  const chat = buildOpenAIChatFromAnthropicMessage(structuredClone(sample.payload), {
-    aliasMap: structuredClone(sample.aliasMap),
-    includeToolCallIds: true
-  });
-  assert.deepStrictEqual(chat, sample.expected, 'Anthropic response → Chat mapping drift detected');
-  // Regression: includeToolCallIds: false should not include call_id/tool_call_id
-  const chatNoIds = buildOpenAIChatFromAnthropicMessage(structuredClone(sample.payload), {
-    aliasMap: structuredClone(sample.aliasMap),
-    includeToolCallIds: false
-  });
-  if (!chatNoIds || !chatNoIds.choices || !chatNoIds.choices[0] || !chatNoIds.choices[0].message) {
-    throw new Error('chatNoIds missing expected structure');
-  }
-  const tcNoIds = chatNoIds.choices[0].message.tool_calls;
-  if (!Array.isArray(tcNoIds) || tcNoIds.length === 0) {
-    throw new Error('chatNoIds missing tool_calls array');
-  }
-  for (const tc of tcNoIds) {
-    if ('call_id' in tc) {
-      throw new Error(`chatNoIds tool_calls should not contain call_id, got ${JSON.stringify(tc)}`);
-    }
-    if ('tool_call_id' in tc) {
-      throw new Error(`chatNoIds tool_calls should not contain tool_call_id, got ${JSON.stringify(tc)}`);
-    }
-  }
-  console.log('[anthropic-response-regression] Anthropic response mapping matches golden sample.');
+  const chat = buildOpenAIChatFromAnthropicMessage(structuredClone(sample.payload));
+  assertHubAnthropicToolCallShape(chat);
+  console.log('[anthropic-response-regression] Hub Anthropic response mapping matches Rust-owned shape.');
 }
 
 main().catch((err) => {

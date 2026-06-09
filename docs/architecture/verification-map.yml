@@ -381,6 +381,7 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export. The legacy TS helper shell must remain physically deleted.
+      - `includeToolCallIds` is not a Hub response wrapper contract; scripts and residue gates must not restore the ignored option.
 
   - feature_id: hub.response_responses_chat_projection
     change_risk: high

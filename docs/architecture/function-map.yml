@@ -707,6 +707,7 @@ owners:
     migration_target: rust
     notes:
       - TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust.
+      - Hub response wrapper must not expose ignored `includeToolCallIds`; tool_call id projection shape is Rust-owned.
 
   - feature_id: hub.response_responses_chat_projection
     status: active

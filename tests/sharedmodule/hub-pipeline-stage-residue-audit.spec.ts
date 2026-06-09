@@ -651,6 +651,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('buildOpenAIChatFromAnthropicMessageFullWithNative');
     expect(source).not.toContain('buildOpenAIChatResponseFromAnthropicMessageWithNative');
     expect(source).not.toContain('buildChatResponseFromResponsesWithNative');
+    expect(source).not.toContain('includeToolCallIds');
+    expect(source).not.toContain('AnthropicResponseOptions');
     expect(source).not.toContain('responses-reasoning-registry');
     expect(source).not.toContain('cloneJsonRecord');
     expect(source).not.toContain('stripInternalContinuationRequestId');
@@ -666,6 +668,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('__responses_output_text_meta');
     expect(source).not.toContain('__responses_payload_snapshot');
     expect(source).not.toContain('__responses_passthrough');
+  });
+
+  it('Hub Anthropic response scripts must not restore ignored includeToolCallIds option', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs',
+      'scripts/tests/anthropic-responses-roundtrip.mjs',
+    ];
+
+    const findings = files.flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+      return collectMatches(source, [
+        { label: `${relativePath} restores ignored includeToolCallIds option`, pattern: /includeToolCallIds/ },
+      ]);
+    });
+
+    expect(findings).toEqual([]);
   });
 
   it('responses response utils must not own response restore semantics in TS', () => {
