@@ -18722,3 +18722,9 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline provider-key native parser dead export removal:
 - Exact scan found `parseProviderKeyJson` only fed TS `analyzeProviderKey`, `parseProviderKeyPayload`, the required-export list, and `virtual_router_provider_key.rs`; no runtime consumer imported the wrapper.
 - Removed the Rust module, NAPI required export, TS wrapper/parser/type; added residue gate to block `parseProviderKeyJson` / `analyzeProviderKey` / parser/type/module revival.
+
+2026-06-09 HubPipeline stop-message state codec dead export removal:
+- Exact scan found `virtual_router_stop_message_state_codec.rs` only had Rust module/required-export wiring and no TS wrapper/runtime consumer.
+- Removed the Rust module plus `serializeStopMessageStateJson` / `deserializeStopMessageStateJson` required exports; shared helper tests now scan live files only.
+- Active architecture docs now point stopless state shape/lookup/transition to servertool-core contracts instead of the retired standalone VR codec.
+- Verified focused residue Jest, llmswitch-core tsc, function-map gate, Rust shared helper gates, and Rust Hub control/data contract tests.

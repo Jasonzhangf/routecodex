@@ -109,7 +109,6 @@ mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
-mod virtual_router_stop_message_state_codec;
 mod vr_route_04_selection_boundary;
 mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;

@@ -2922,3 +2922,9 @@ Tags: hub-pipeline, heavy-input-fastpath, dead-code, napi-export, rust-owned-sem
 - Removed `virtual_router_provider_key.rs`, its `lib.rs` module declaration, `parseProviderKeyJson` required export, TS `analyzeProviderKey` wrapper, parser type/function.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native wrapper/parser/export names from returning.
 Tags: hub-pipeline, provider-key, dead-code, napi-export, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline stop-message state codec dead export removed
+- Exact scan found `virtual_router_stop_message_state_codec.rs` was only wired through its Rust module declaration and required native exports `serializeStopMessageStateJson` / `deserializeStopMessageStateJson`; no TS wrapper or runtime consumer imported those exports.
+- Removed the Rust module and required-export entries. Shared helper deletion tests were narrowed to live files so they do not keep a deleted module as a scan root.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export names from returning. Stopless state persistence/lookup must stay in current servertool-core contracts, not a zero-consumer VR codec export.
+Tags: hub-pipeline, stop-message-state, dead-code, napi-export, residue-gate, 2026-06-09

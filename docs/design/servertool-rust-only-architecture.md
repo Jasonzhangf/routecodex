@@ -1273,19 +1273,27 @@ record/runtimeMetadata
 
 #### 1. state codec 真源
 
-已有：
+当前真源：
 
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`
 
 职责：
 
-- stop_message state 的字段 normalize / decode / encode；
-- `text/maxRepeats/used/stageMode/aiMode/updatedAt/lastUsedAt` 的唯一 codec 规则。
+- stop_message / stopless state 的字段 normalize / transition / persisted lookup；
+- `text/maxRepeats/used/stageMode/updatedAt/lastUsedAt` 等 state 语义必须进入当前 servertool-core 合同。
+
+已退休：
+
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs`
+- `serializeStopMessageStateJson`
+- `deserializeStopMessageStateJson`
 
 本次结论：
 
-- 该文件应继续作为 **stop_message state shape 真源**；
-- 但它还**不等于** persisted lookup policy 真源。
+- 独立 VR stop-message state codec export 是零 consumer 控制面，已物理删除；
+- stopless state shape / lookup / transition 不再通过 standalone VR codec 表达。
 
 #### 2. servertool orchestration / routing resolve 真源
 

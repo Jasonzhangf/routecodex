@@ -534,7 +534,6 @@ mod tests {
             "shared_responses_response_utils.rs",
             "hub_req_outbound_context_merge.rs",
             "hub_req_inbound_tool_output_snapshot.rs",
-            "virtual_router_stop_message_state_codec.rs",
             "virtual_router_engine/routing/metadata.rs",
             "hub_pipeline_target_utils.rs",
             "chat_governance_context.rs",
@@ -692,7 +691,6 @@ mod tests {
     fn shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones() {
         for relative in [
             "virtual_router_stop_message_actions.rs",
-            "virtual_router_stop_message_state_codec.rs",
         ] {
             let path = crate_src_path(relative);
             let source = fs::read_to_string(&path)
