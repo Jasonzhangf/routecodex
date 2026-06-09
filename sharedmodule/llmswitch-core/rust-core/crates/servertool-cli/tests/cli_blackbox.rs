@@ -58,6 +58,34 @@ fn stop_message_auto_outputs_rust_owned_schema() {
 }
 
 #[test]
+fn stop_message_auto_explicit_repeat_args_override_input_json() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "stop_message_auto",
+            "--repeat-count",
+            "2",
+            "--max-repeats",
+            "5",
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue from explicit args","repeatCount":1,"maxRepeats":3}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["repeatCount"], 2);
+    assert_eq!(value["maxRepeats"], 5);
+    assert_eq!(value["input"]["repeatCount"], 1);
+    assert_eq!(value["input"]["maxRepeats"], 3);
+    assert_no_internal_or_restoration_carrier(&value);
+}
+
+#[test]
 fn missing_continuation_prompt_fails_fast() {
     let output = Command::new(bin())
         .args([
