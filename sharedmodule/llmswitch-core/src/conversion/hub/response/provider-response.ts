@@ -273,7 +273,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     payload: hubRespOutbound04ClientSemantic
   });
   return {
-    __sse_responses: stream,
+    __sse_responses: stream as Readable,
     body: hubRespOutbound04ClientSemantic,
     format: streamEffect.codec
   };

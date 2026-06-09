@@ -3,6 +3,7 @@
  * 负责将Responses响应数据转换为有序的SSE事件流
  */
 
+// feature_id: sse.responses_encode_projection
 import type {
   ResponsesResponse,
   ResponsesOutputItem,

@@ -1,3 +1,4 @@
+// feature_id: sse.anthropic_gemini_stream_projection
 import { DEFAULT_ANTHROPIC_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   AnthropicMessageResponse,

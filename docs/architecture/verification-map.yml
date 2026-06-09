@@ -852,3 +852,112 @@ verification:
       - crs closeout focuses on temperature stripping only.
       - Shared tool normalization is verified under `responses.function_tool_normalization`.
       - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
+
+  - feature_id: sse.codec_registry_surface
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
+      - sharedmodule/llmswitch-core/src/sse/index.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+      - tests/sharedmodule/sse-stream-mode-native.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Registry is dispatch-only; no payload repair, hidden protocol fallback, provider policy, or metadata mutation.
+
+  - feature_id: sse.stream_parse_boundary
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    contract:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - TS parser wrapper may only call native parser helpers and maintain stream buffering.
+
+  - feature_id: sse.responses_decode_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
+    contract:
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/providers/core/runtime/http-transport-provider.sse-business-error-retry.red.spec.ts
+      - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Decode projection surfaces provider SSE decode failure; provider retry/reroute policy remains outside SSE.
+
+  - feature_id: sse.responses_encode_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
+    contract:
+      - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
+      - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts
+      - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden.
+
+  - feature_id: sse.chat_stream_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts
+    contract:
+      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE.
+
+  - feature_id: sse.anthropic_gemini_stream_projection
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+    contract:
+      - tests/servertool/followup-stream-compat.spec.ts
+      - tests/sharedmodule/provider-streaming-capability.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners.

@@ -72,6 +72,11 @@ function findForbiddenFieldInResponsePayload(
       if (isInternalMetadataCarrier(value)) {
         return key;
       }
+      const nestedMetadata = findForbiddenFieldInResponsePayload(value, seen, depth + 1);
+      if (nestedMetadata) {
+        return nestedMetadata === 'metadata' ? key : nestedMetadata;
+      }
+      continue;
     }
     if (CLIENT_RESPONSE_FORBIDDEN_FIELDS.has(key)) {
       return key;
@@ -197,6 +202,83 @@ function shouldDropClientSseFrame(frame: string, entryEndpoint?: string): boolea
     (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs') &&
     frame.trim() === 'data: [DONE]'
   );
+}
+
+function assertClientSseFrameHasNoInternalCarriers(frame: string, requestId: string): void {
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) {
+      continue;
+    }
+    const dataText = line.slice(5).trim();
+    if (!dataText || dataText === '[DONE]') {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(dataText);
+    } catch {
+      continue;
+    }
+    assertClientResponseHasNoInternalCarriers(parsed, requestId);
+  }
+}
+
+function assertDirectPassthroughSseFrameHasNoInternalMetadataControls(frame: string, requestId: string): void {
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) {
+      continue;
+    }
+    const dataText = line.slice(5).trim();
+    if (!dataText || dataText === '[DONE]') {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(dataText);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      continue;
+    }
+    const stack: unknown[] = [parsed];
+    const seen = new WeakSet<object>();
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        continue;
+      }
+      if (seen.has(current as object)) {
+        continue;
+      }
+      seen.add(current as object);
+      const record = current as Record<string, unknown>;
+      const metadata = record.metadata;
+      if (metadata !== undefined) {
+        if (isInternalMetadataCarrier(metadata)) {
+          throw new Error(
+            `[server.response_projection] direct passthrough SSE metadata contains internal control fields (requestId=${requestId})`
+          );
+        }
+        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+          stack.push(metadata);
+        }
+      }
+      for (const [key, value] of Object.entries(record)) {
+        if (key === 'metadata') {
+          continue;
+        }
+        if (CLIENT_RESPONSE_FORBIDDEN_FIELDS.has(key)) {
+          throw new Error(
+            `[server.response_projection] client response contains internal carrier field "${key}" (requestId=${requestId})`
+          );
+        }
+        if (value && typeof value === 'object') {
+          stack.push(value);
+        }
+      }
+    }
+  }
 }
 
 type ChatUsageNormalizationResult = {
@@ -875,6 +957,55 @@ function createClientVisibleSseRestoreStream(
     flush(callback) {
       try {
         if (pending) {
+          this.push(pending);
+          pending = '';
+        }
+        callback();
+      } catch (error) {
+        callback(error as Error);
+      }
+    }
+  });
+  return stream.pipe(transform);
+}
+
+function createDirectPassthroughSseGuardStream(
+  stream: Readable,
+  requestId: string
+): Readable {
+  let pending = '';
+  const pushReadyFrames = (target: Transform) => {
+    let boundary = /\r?\n\r?\n/.exec(pending);
+    while (boundary) {
+      const frameEnd = boundary.index + boundary[0].length;
+      const frame = pending.slice(0, frameEnd);
+      pending = pending.slice(frameEnd);
+      assertDirectPassthroughSseFrameHasNoInternalMetadataControls(frame, requestId);
+      target.push(frame);
+      boundary = /\r?\n\r?\n/.exec(pending);
+    }
+  };
+  const transform = new Transform({
+    transform(chunk, _encoding, callback) {
+      try {
+        pending +=
+          typeof chunk === 'string'
+            ? chunk
+            : Buffer.isBuffer(chunk)
+              ? chunk.toString('utf8')
+              : chunk instanceof Uint8Array
+                ? Buffer.from(chunk).toString('utf8')
+                : String(chunk ?? '');
+        pushReadyFrames(this);
+        callback();
+      } catch (error) {
+        callback(error as Error);
+      }
+    },
+    flush(callback) {
+      try {
+        if (pending) {
+          assertDirectPassthroughSseFrameHasNoInternalMetadataControls(pending, requestId);
           this.push(pending);
           pending = '';
         }
@@ -1723,6 +1854,7 @@ export async function sendPipelineResponse(
     const sseBody = body as SsePayloadShape & Record<string, unknown>;
     const streamSource = sseBody.__sse_responses;
     const stream = toNodeReadable(streamSource);
+    const isDirectPassthrough = result.metadata?.__routecodexDirectPassthrough === true;
     const restoreContext = buildClientVisibleResponseRestoreContext({ ...result.metadata, requestId: requestLabel })
       ?? { requestId: requestLabel };
     if (!stream) {
@@ -1749,7 +1881,9 @@ export async function sendPipelineResponse(
       sendSseBridgeError(res, requestLabel, 502);
       return;
     }
-    const restoredStream = createClientVisibleSseRestoreStream(stream, restoreContext);
+    const restoredStream = isDirectPassthrough
+      ? createDirectPassthroughSseGuardStream(stream, requestLabel)
+      : createClientVisibleSseRestoreStream(stream, restoreContext);
     const clientSseSnapshotRecorder = captureClientResponse
       ? createClientSseSnapshotRecorder(restoredStream, res, {
         requestId: requestLabel,
@@ -2078,6 +2212,7 @@ export async function sendPipelineResponse(
       emittedApplyPatchDoneCallIds: new Set(),
     };
     const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
+      assertClientSseFrameHasNoInternalCarriers(frame, requestLabel);
       if (!frame.includes('apply_patch') && !frame.includes('function_call') && !frame.includes('required_action')) {
         writeClientSseFrame(frame, errorLabel, { recordSnapshot: false });
         return;

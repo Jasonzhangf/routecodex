@@ -321,7 +321,8 @@ pub fn resolve_sse_stream_mode_json(
     wants_stream: bool,
     client_protocol: String,
 ) -> NapiResult<String> {
-    let output = resolve_sse_stream_mode(wants_stream, client_protocol.as_str());
+    let output = resolve_sse_stream_mode(wants_stream, client_protocol.as_str())
+        .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

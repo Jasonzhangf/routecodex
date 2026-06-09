@@ -2,6 +2,7 @@
  * Responses响应构建器
  * 负责状态机和事件聚合，从SSE事件构建完整的Responses响应对象
  */
+// feature_id: sse.responses_decode_projection
 import type {
   ResponsesSseEvent,
   ResponsesResponse,

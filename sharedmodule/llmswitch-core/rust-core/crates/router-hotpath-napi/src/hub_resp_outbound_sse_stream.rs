@@ -40,15 +40,33 @@ pub(crate) fn resolve_sse_stream_mode(
             Ok(wants_stream)
         }
         "" => Err("Rust HubPipeline SSE stream requires client protocol".to_string()),
-        protocol => Err(format!(
-            "Rust HubPipeline SSE stream unsupported client protocol: {}",
-            protocol
-        )),
+        _ => Ok(false),
     }
 }
 
+fn normalize_sse_stream_protocol(value: &str) -> Result<Option<String>, String> {
+    if value.trim().is_empty() {
+        return Err("Rust HubPipeline SSE stream requires client protocol".to_string());
+    }
+    let normalized = value.trim().to_lowercase();
+    Ok(match normalized.as_str() {
+        "openai-chat" | "openai" | "chat" => Some("openai-chat".to_string()),
+        "responses" | "openai-responses" => Some("openai-responses".to_string()),
+        "anthropic-messages" | "anthropic" | "messages" => {
+            Some("anthropic-messages".to_string())
+        }
+        "gemini-chat" | "gemini" | "google-gemini" => Some("gemini-chat".to_string()),
+        _ => None,
+    })
+}
+
 pub fn process_sse_stream(input: SseStreamInput) -> Result<SseStreamOutput, String> {
-    let client_protocol = resolve_provider_protocol(&input.client_protocol)?;
+    let Some(client_protocol) = normalize_sse_stream_protocol(&input.client_protocol)? else {
+        return Ok(SseStreamOutput {
+            should_stream: false,
+            payload: input.client_payload,
+        });
+    };
     let should_stream = resolve_sse_stream_mode(input.wants_stream, &client_protocol)?;
 
     Ok(SseStreamOutput {
@@ -148,8 +166,8 @@ mod tests {
 
     #[test]
     fn test_resolve_sse_stream_mode_unknown_protocol() {
-        assert!(resolve_sse_stream_mode(true, "unknown-protocol").is_err());
-        assert!(resolve_sse_stream_mode(false, "unknown-protocol").is_err());
+        assert!(!resolve_sse_stream_mode(true, "unknown-protocol").unwrap());
+        assert!(!resolve_sse_stream_mode(false, "unknown-protocol").unwrap());
     }
 
     #[test]
@@ -188,8 +206,9 @@ mod tests {
             wants_stream: true,
         };
 
-        let result = process_sse_stream(input);
-        assert!(result.is_err());
+        let result = process_sse_stream(input).unwrap();
+        assert!(!result.should_stream);
+        assert_eq!(result.payload["result"], "data");
     }
 
     #[test]

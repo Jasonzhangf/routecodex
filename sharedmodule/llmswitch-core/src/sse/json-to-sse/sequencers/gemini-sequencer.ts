@@ -1,3 +1,4 @@
+// feature_id: sse.anthropic_gemini_stream_projection
 import type {
   GeminiResponse,
   GeminiSseEvent,

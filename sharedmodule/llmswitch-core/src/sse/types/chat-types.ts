@@ -188,7 +188,7 @@ export interface ChatCompletionResponse {
 export interface ChatChoice {
   index: number;
   message: ChatMessage;
-  finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call';
+  finish_reason?: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call';
   logprobs?: ChatLogProbs;
 }
 

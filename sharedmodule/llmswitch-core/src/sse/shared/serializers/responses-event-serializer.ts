@@ -3,11 +3,12 @@
  * 将内部ResponsesSseEvent对象转换为真实的SSE wire格式
  */
 
+// feature_id: sse.responses_encode_projection
 import type { ResponsesSseEvent } from '../../types/responses-types.js';
 
 /**
  * Responses协议SSE事件序列化器
- * 负责将内部事件对象转换为符合LMStudio/官方SDK习惯的SSE格式
+ * 负责将内部事件对象转换为客户端协议SSE格式
  */
 export class ResponsesEventSerializer {
   /**

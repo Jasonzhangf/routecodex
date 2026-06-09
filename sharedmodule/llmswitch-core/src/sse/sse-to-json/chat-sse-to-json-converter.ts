@@ -3,6 +3,7 @@
  * 将SSE事件流聚合为ChatCompletion响应
  */
 
+// feature_id: sse.chat_stream_projection
 import { DEFAULT_CHAT_CONVERSION_CONFIG, CHAT_CONVERSION_ERROR_CODES } from '../types/index.js';
 import type {
   ChatCompletionResponse,
@@ -1092,7 +1093,6 @@ export class ChatSseToJsonConverter {
           role: 'assistant',
           content: ''
         },
-        finish_reason: null,
         logprobs: choice.logprobs
       });
     }
@@ -1321,10 +1321,11 @@ export class ChatSseToJsonConverter {
     this.normalizeReasoning(choiceBuilder, message, context);
 
     responseChoice.message = message;
-    responseChoice.finish_reason =
-      Array.isArray(message.tool_calls) && message.tool_calls.length > 0
-        ? 'tool_calls'
-        : (choiceBuilder.finishReason ?? responseChoice.finish_reason);
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      responseChoice.finish_reason = 'tool_calls';
+    } else if (choiceBuilder.finishReason) {
+      responseChoice.finish_reason = choiceBuilder.finishReason;
+    }
 
     context.eventStats.totalToolCalls += toolCalls.length;
   }

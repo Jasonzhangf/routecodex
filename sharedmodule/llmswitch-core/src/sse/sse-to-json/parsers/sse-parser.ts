@@ -1,3 +1,4 @@
+// feature_id: sse.stream_parse_boundary
 import type {
   BaseSseEvent
 } from '../../types/index.js';

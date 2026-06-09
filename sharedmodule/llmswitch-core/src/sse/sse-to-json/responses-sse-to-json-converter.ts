@@ -3,6 +3,7 @@
  * 使用函数化架构：解析 + 构建 + 验证分离
  */
 
+// feature_id: sse.responses_decode_projection
 import { Readable } from 'stream';
 import type {
   ResponsesResponse,
@@ -63,7 +64,7 @@ export class ResponsesSseToJsonConverterRefactored {
    * 将SSE流转换为Responses响应
    */
   async convertSseToJson(
-    sseStream: ResponsesSseEventStream,
+    sseStream: ResponsesSseEventStream | Readable | AsyncIterable<string | Buffer>,
     options: SseToResponsesJsonOptions
   ): Promise<ResponsesResponse> {
     // 1. 创建上下文
@@ -325,7 +326,7 @@ export class ResponsesSseToJsonConverterRefactored {
   /**
    * 创建可读流
    */
-  private createReadableStream(sseStream: ResponsesSseEventStream): Readable {
+  private createReadableStream(sseStream: ResponsesSseEventStream | Readable | AsyncIterable<string | Buffer>): Readable {
     if (sseStream instanceof Readable) {
       return sseStream;
     }

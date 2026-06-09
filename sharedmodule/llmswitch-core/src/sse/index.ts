@@ -3,6 +3,7 @@
  * 支持Chat和Responses协议的JSON↔SSE双向转换
  */
 
+// feature_id: sse.codec_registry_surface
 import type {
   ChatCompletionResponse,
   ChatJsonToSseOptions,

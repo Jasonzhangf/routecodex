@@ -1888,8 +1888,8 @@ fn resolve_sse_stream_mode_supports_gemini_chat() {
     assert!(resolve_sse_stream_mode(true, "gemini-chat").unwrap());
     assert!(resolve_sse_stream_mode(true, " gemini-chat ").unwrap());
     assert!(!resolve_sse_stream_mode(false, "gemini-chat").unwrap());
-    assert!(resolve_sse_stream_mode(true, " unknown-protocol ").is_err());
-    assert!(resolve_sse_stream_mode(true, "gemini-chat-preview").is_err());
+    assert!(!resolve_sse_stream_mode(true, " unknown-protocol ").unwrap());
+    assert!(!resolve_sse_stream_mode(true, "gemini-chat-preview").unwrap());
 }
 
 // P0: encrypted-only reasoning should emit reasoning item but NOT empty message

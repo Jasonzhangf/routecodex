@@ -1502,3 +1502,189 @@ owners:
     migration_target: ts
     notes:
       - CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules.
+
+  - feature_id: sse.codec_registry_surface
+    status: active
+    summary: SSE codec registry and public barrel dispatch surface; no payload repair or provider policy
+    owner_module: sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
+    canonical_types:
+      - SseProtocol
+      - SseCodec
+      - JsonToSseContext
+      - SseToJsonContext
+    canonical_builders:
+      - createChatCodec
+      - createResponsesCodec
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
+      - sharedmodule/llmswitch-core/src/sse/index.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+      - tests/sharedmodule/sse-stream-mode-native.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Registry dispatches explicit protocol codecs only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection.
+
+  - feature_id: sse.stream_parse_boundary
+    status: active
+    summary: SSE wire parser boundary backed by native line/event parsers
+    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
+    canonical_types:
+      - RawSseEvent
+      - SseParseResult
+      - SseParserConfig
+    canonical_builders:
+      - assembleSseEvent
+      - parseSseEvent
+      - createSseParser
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/src/conversion/hub/response
+    required_tests:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - TS parser wrapper may only call native parser helpers and maintain stream buffering; semantic recovery must be explicit contract, not silent success truth.
+
+  - feature_id: sse.responses_decode_projection
+    status: active
+    summary: OpenAI Responses SSE event stream to Responses JSON projection
+    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
+    canonical_types:
+      - ResponsesSseEvent
+      - ResponsesResponse
+      - SseToResponsesJsonOptions
+    canonical_builders:
+      - createResponseBuilder
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
+      - src/providers/core/runtime/responses-provider.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/src/conversion/hub/response
+    required_tests:
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/providers/core/runtime/http-transport-provider.sse-business-error-retry.red.spec.ts
+      - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Decode projection may aggregate provider SSE into Responses JSON and surface decode failures; it must not own provider retry/reroute policy, Hub tool governance, or client frame repair.
+
+  - feature_id: sse.responses_encode_projection
+    status: active
+    summary: Responses JSON to ordered client-visible Responses SSE event projection
+    owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
+    canonical_types:
+      - ResponsesSseEvent
+      - ResponsesJsonToSseOptions
+      - ResponsesEventSerializer
+    canonical_builders:
+      - ResponsesJsonToSseConverter
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
+      - src/server/handlers/handler-response-utils.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+    required_tests:
+      - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
+      - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts
+      - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Encode projection emits client protocol frames only. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden.
+
+  - feature_id: sse.chat_stream_projection
+    status: active
+    summary: OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas
+    owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
+    canonical_types:
+      - ChatCompletionResponse
+      - ChatSseEvent
+      - SseToChatJsonOptions
+    canonical_builders:
+      - ChatJsonToSseConverter
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts
+      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/process
+    required_tests:
+      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance.
+
+  - feature_id: sse.anthropic_gemini_stream_projection
+    status: active
+    summary: Anthropic Messages and Gemini Chat protocol-specific SSE projection owners
+    owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+    canonical_types:
+      - AnthropicSseEvent
+      - GeminiSseEvent
+      - AnthropicMessageResponse
+      - GeminiResponse
+    canonical_builders:
+      - createAnthropicSequencer
+      - createGeminiSequencer
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts
+      - sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/process
+    required_tests:
+      - tests/servertool/followup-stream-compat.spec.ts
+      - tests/sharedmodule/provider-streaming-capability.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches.

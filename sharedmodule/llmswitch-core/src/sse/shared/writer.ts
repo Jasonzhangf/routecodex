@@ -173,45 +173,11 @@ export class StreamWriter {
     });
   }
 
-  /**
-   * 序列化Responses事件（临时实现，需要 ResponsesSerializer）
-   * TODO: 等Responses协议修复后，实现完整的ResponsesSerializer
-   * 当前为临时实现，仅用于避免编译错误
-   */
   private serializeResponsesEvent(event: ResponsesSseEvent): string {
-    try {
-      if (typeof (event as any).type === 'string' && (event as any).type.startsWith('response.')) {
-        return defaultResponsesEventSerializer.serializeToWire(event as any);
-      }
-    } catch {
-      // ignore and fallback
+    if (typeof event.type !== 'string' || !event.type.startsWith('response.')) {
+      throw new Error(`Unsupported ResponsesSseEvent type: ${String((event as { type?: unknown }).type ?? 'missing')}`);
     }
-    const eventType = String((event as any).type ?? 'response.unknown');
-    const rawData = (event as any).data;
-    const timestamp = typeof (event as any).timestamp === 'number' ? (event as any).timestamp : undefined;
-    const sequenceNumber = typeof (event as any).sequenceNumber === 'number' ? (event as any).sequenceNumber : undefined;
-
-    let wire = `event: ${eventType}\n`;
-
-    if (rawData === '[DONE]') {
-      wire += 'data: [DONE]\n';
-    } else if (typeof rawData === 'string') {
-      wire += `data: ${rawData}\n`;
-    } else {
-      const payload: Record<string, unknown> = rawData && typeof rawData === 'object' ? { ...(rawData as any) } : {};
-      if (!Object.prototype.hasOwnProperty.call(payload, 'type')) payload.type = eventType;
-      if (sequenceNumber !== undefined && !Object.prototype.hasOwnProperty.call(payload, 'sequence_number')) {
-        payload.sequence_number = sequenceNumber;
-      }
-      wire += `data: ${JSON.stringify(payload)}\n`;
-    }
-
-    if (timestamp !== undefined) {
-      wire += `id: ${timestamp}\n`;
-    }
-
-    wire += '\n';
-    return wire;
+    return defaultResponsesEventSerializer.serializeToWire(event);
   }
 
   /**

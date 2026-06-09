@@ -1,3 +1,4 @@
+// feature_id: sse.anthropic_gemini_stream_projection
 import type { AnthropicMessageResponse, AnthropicSseEvent } from '../../types/index.js';
 import type { ChatReasoningMode } from '../../types/chat-types.js';
 import { dispatchReasoning } from '../../shared/reasoning-dispatcher.js';

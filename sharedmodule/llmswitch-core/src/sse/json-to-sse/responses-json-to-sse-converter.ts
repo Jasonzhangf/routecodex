@@ -3,6 +3,7 @@
  * 使用函数化架构：事件生成 + 序列化 + 写入分离
  */
 
+// feature_id: sse.responses_encode_projection
 import { PassThrough } from 'stream';
 import { DEFAULT_RESPONSES_CONVERSION_CONFIG } from '../types/index.js';
 import type {

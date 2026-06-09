@@ -1,4 +1,6 @@
+// feature_id: sse.codec_registry_surface
 import { chatConverters, responsesConverters, anthropicConverters, geminiConverters } from '../index.js';
+import type { Readable } from 'node:stream';
 import type {
   ChatCompletionResponse,
   ResponsesResponse,
@@ -6,11 +8,13 @@ import type {
   ResponsesFunctionCallOutputItem,
   GeminiResponse
 } from '../types/index.js';
+import type { ChatSseEventStream } from '../types/chat-types.js';
+import type { ResponsesSseEventStream } from '../types/responses-types.js';
 
 export type SseProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
-export type SseStreamLike = any;
-export type SseStreamInput = any;
+export type SseStreamLike = Readable | ChatSseEventStream | ResponsesSseEventStream;
+export type SseStreamInput = Readable | AsyncIterable<string | Buffer>;
 
 export interface JsonToSseContext {
   requestId: string;
@@ -95,11 +99,10 @@ function createChatCodec(): SseCodec {
     protocol: 'openai-chat',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return chatConverters.jsonToSse
-        .convertResponseToJsonToSse(payload as ChatCompletionResponse, {
-          requestId: context.requestId,
-          model
-        }) as SseStreamLike;
+      return await chatConverters.jsonToSse.convertResponseToJsonToSse(payload as ChatCompletionResponse, {
+        requestId: context.requestId,
+        model
+      });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return chatConverters.sseToJson.convertSseToJson(stream, {
@@ -123,12 +126,11 @@ function createResponsesCodec(): SseCodec {
     protocol: 'openai-responses',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return responsesConverters.jsonToSse
-        .convertResponseToJsonToSse(payload as ResponsesResponse, {
-          requestId: context.requestId,
-          model,
-          resumeToolOutputs: context.resumeToolOutputs
-        }) as SseStreamLike;
+      return await responsesConverters.jsonToSse.convertResponseToJsonToSse(payload as ResponsesResponse, {
+        requestId: context.requestId,
+        model,
+        resumeToolOutputs: context.resumeToolOutputs
+      });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return responsesConverters.sseToJson.convertSseToJson(stream, {
@@ -152,11 +154,10 @@ function createAnthropicCodec(): SseCodec {
     protocol: 'anthropic-messages',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return anthropicConverters.jsonToSse
-        .convertResponseToJsonToSse(payload as AnthropicMessageResponse, {
-          requestId: context.requestId,
-          model
-        }) as SseStreamLike;
+      return await anthropicConverters.jsonToSse.convertResponseToJsonToSse(payload as AnthropicMessageResponse, {
+        requestId: context.requestId,
+        model
+      });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return anthropicConverters.sseToJson.convertSseToJson(stream, {
@@ -180,11 +181,10 @@ function createGeminiCodec(): SseCodec {
     protocol: 'gemini-chat',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return geminiConverters.jsonToSse
-        .convertResponseToJsonToSse(payload as GeminiResponse, {
-          requestId: context.requestId,
-          model
-        }) as SseStreamLike;
+      return await geminiConverters.jsonToSse.convertResponseToJsonToSse(payload as GeminiResponse, {
+        requestId: context.requestId,
+        model
+      });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return geminiConverters.sseToJson.convertSseToJson(stream, {

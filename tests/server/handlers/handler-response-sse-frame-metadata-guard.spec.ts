@@ -10,9 +10,20 @@ function sseStreamFrame(data: Record<string, unknown>, event = 'message'): Reada
   return Readable.from([`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`]);
 }
 
-async function requestSse(body: Record<string, unknown>): Promise<{ status: number; text: string }> {
+function sseStreamChunks(chunks: string[]): Readable {
+  return Readable.from(chunks);
+}
+
+async function requestSse(
+  body: Record<string, unknown>,
+  options?: {
+    metadata?: Record<string, unknown>;
+    chunks?: string[];
+  }
+): Promise<{ status: number; text: string }> {
   const app = express();
   app.get('/sse', (_req, res) => {
+    const stream = options?.chunks ? sseStreamChunks(options.chunks) : sseStreamFrame(body);
     void sendPipelineResponse(
       res as any,
       {
@@ -20,11 +31,12 @@ async function requestSse(body: Record<string, unknown>): Promise<{ status: numb
         headers: {},
         body: {
           mode: 'sse',
-          __sse_responses: sseStreamFrame(body)
+          __sse_responses: stream
         },
         metadata: {
           outboundStream: true,
-          clientModelId: 'client-visible-model'
+          clientModelId: 'client-visible-model',
+          ...(options?.metadata ?? {})
         }
       } as any,
       'req_sse_metadata_guard',
@@ -46,8 +58,8 @@ async function requestSse(body: Record<string, unknown>): Promise<{ status: numb
 }
 
 describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
-  it('fails fast before emitting SSE data payload with top-level metadata', async () => {
-    const response = await requestSse({ id: 'evt-1', metadata: { internal: true } });
+  it('fails fast before emitting SSE data payload with top-level internal metadata controls', async () => {
+    const response = await requestSse({ id: 'evt-1', metadata: { routeHint: 'tools' } });
 
     expect(response.status).toBe(200);
     expect(response.text).toContain('event: error');
@@ -70,5 +82,55 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
     expect(response.status).toBe(200);
     expect(response.text).toContain('"content":"hi"');
     expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('keeps ordinary provider metadata on direct passthrough SSE', async () => {
+    const response = await requestSse(
+      { id: 'evt-direct-provider-metadata', metadata: { provider_event_id: 'evt-provider-1' } },
+      { metadata: { __routecodexDirectPassthrough: true } }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('"metadata":{"provider_event_id":"evt-provider-1"}');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('streams CRLF direct passthrough frames with ordinary provider metadata', async () => {
+    const response = await requestSse(
+      {},
+      {
+        metadata: { __routecodexDirectPassthrough: true },
+        chunks: [
+          `event: message\r\ndata: ${JSON.stringify({
+            id: 'evt-direct-crlf-provider-metadata',
+            metadata: { provider_event_id: 'evt-provider-crlf' }
+          })}\r\n\r\n`
+        ]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('\r\n\r\n');
+    expect(response.text).toContain('"metadata":{"provider_event_id":"evt-provider-crlf"}');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('fails direct passthrough split SSE frame before leaking internal metadata controls', async () => {
+    const frame = `event: message\ndata: ${JSON.stringify({
+      id: 'evt-direct-internal-metadata',
+      metadata: { routeHint: 'tools' }
+    })}\n\n`;
+    const response = await requestSse(
+      {},
+      {
+        metadata: { __routecodexDirectPassthrough: true },
+        chunks: [frame.slice(0, 18), frame.slice(18)]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('event: error');
+    expect(response.text).toContain('sse_stream_error');
+    expect(response.text).not.toContain('routeHint');
   });
 });
