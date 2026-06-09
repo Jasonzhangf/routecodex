@@ -333,6 +333,31 @@ pub(crate) fn build_servertool_req04_followup_payload(adapter_context: &Value) -
     Some(seed)
 }
 
+pub(crate) fn resolve_followup_origin_seed(input: &Value) -> Option<Value> {
+    let row = input.as_object()?;
+    let adapter_context = row.get("adapterContext").unwrap_or(&Value::Null);
+    let adapter_row = adapter_context.as_object();
+    for candidate in [
+        adapter_row.and_then(|entry| entry.get("capturedEntryRequest")),
+        adapter_row.and_then(|entry| entry.get("capturedChatRequest")),
+        row.get("snapshot")
+            .and_then(Value::as_object)
+            .and_then(|snapshot| snapshot.get("capturedEntryRequest")),
+        row.get("snapshot")
+            .and_then(Value::as_object)
+            .and_then(|snapshot| snapshot.get("capturedChatRequest")),
+        row.get("snapshot"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(seed) = extract_captured_chat_seed(candidate) {
+            return Some(seed);
+        }
+    }
+    None
+}
+
 fn extract_captured_tool_outputs(responses_context: Option<&Map<String, Value>>) -> Vec<Value> {
     let Some(rows) = responses_context
         .and_then(|ctx| ctx.get("__captured_tool_results"))
@@ -888,6 +913,14 @@ pub fn build_servertool_req04_followup_payload_json(
 }
 
 #[napi]
+pub fn resolve_followup_origin_seed_json(input_json: String) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    serde_json::to_string(&resolve_followup_origin_seed(&input).unwrap_or(Value::Null))
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi]
 pub fn resolve_followup_model_json(
     seed_model_json: String,
     adapter_context_json: String,
@@ -1004,6 +1037,79 @@ mod tests {
         assert_eq!(payload["messages"][0]["content"], "origin");
         assert_eq!(payload["messages"][1]["role"], "assistant");
         assert_eq!(payload["messages"][2]["content"], "continue");
+    }
+
+    #[test]
+    fn resolve_followup_origin_seed_prefers_adapter_then_snapshot_sources() {
+        let input = json!({
+            "adapterContext": {
+                "capturedEntryRequest": {
+                    "model": " direct-entry ",
+                    "messages": [{ "role": "user", "content": "direct entry" }]
+                },
+                "capturedChatRequest": {
+                    "model": "direct-chat",
+                    "messages": [{ "role": "user", "content": "direct chat" }]
+                }
+            },
+            "snapshot": {
+                "capturedEntryRequest": {
+                    "model": "snapshot-entry",
+                    "messages": [{ "role": "user", "content": "snapshot entry" }]
+                },
+                "capturedChatRequest": {
+                    "model": "snapshot-chat",
+                    "messages": [{ "role": "user", "content": "snapshot chat" }]
+                },
+                "messages": [{ "role": "user", "content": "snapshot root" }]
+            }
+        });
+        let seed = resolve_followup_origin_seed(&input).expect("seed");
+        assert_eq!(
+            seed.get("model").and_then(Value::as_str),
+            Some("direct-entry")
+        );
+        assert_eq!(
+            seed.pointer("/messages/0/content").and_then(Value::as_str),
+            Some("direct entry")
+        );
+
+        let input = json!({
+            "adapterContext": {},
+            "snapshot": {
+                "capturedEntryRequest": {
+                    "model": "   ",
+                    "messages": [{ "role": "user", "content": "snapshot entry" }]
+                },
+                "capturedChatRequest": {
+                    "model": "snapshot-chat",
+                    "messages": [{ "role": "user", "content": "snapshot chat" }]
+                }
+            }
+        });
+        let seed = resolve_followup_origin_seed(&input).expect("seed");
+        assert!(seed.get("model").is_none());
+        assert_eq!(
+            seed.pointer("/messages/0/content").and_then(Value::as_str),
+            Some("snapshot entry")
+        );
+
+        let input = json!({
+            "adapterContext": {},
+            "snapshot": {
+                "model": "snapshot-root",
+                "messages": [{ "role": "user", "content": "snapshot root" }]
+            }
+        });
+        let seed = resolve_followup_origin_seed(&input).expect("seed");
+        assert_eq!(
+            seed.get("model").and_then(Value::as_str),
+            Some("snapshot-root")
+        );
+        assert_eq!(
+            seed.pointer("/messages/0/content").and_then(Value::as_str),
+            Some("snapshot root")
+        );
     }
 
     #[test]

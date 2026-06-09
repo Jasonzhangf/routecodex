@@ -2393,6 +2393,7 @@ function checkBackendRoutePolicyRustOwner() {
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const chatProcessServertoolWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const flowPolicyShell = readRequired(TS_BACKEND_ROUTE_FLOW_POLICY);
   const runtimeShell = readRequired(TS_BACKEND_ROUTE_RUNTIME);
@@ -2686,14 +2687,35 @@ function checkBackendRoutePolicyRustOwner() {
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
+    RUST_SRC_DIR + '/servertool_followup_delta.rs',
+    readRequired(RUST_SRC_DIR + '/servertool_followup_delta.rs'),
+    'pub(crate) fn resolve_followup_origin_seed'
+  );
+  assertContains(
+    'backend-route-origin-delta-native-bridge',
+    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+    chatProcessServertoolWrapper,
+    'resolveFollowupOriginSeedWithNative'
+  );
+  assertContains(
+    'backend-route-origin-delta-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'resolveFollowupOriginSeedJson'
+  );
+  assertContains(
+    'backend-route-origin-delta-ts-thin-shell',
     TS_BACKEND_ROUTE_ORIGIN_DELTA,
     originDeltaShell,
-    'extractCapturedChatSeed'
+    'resolveFollowupOriginSeedWithNative'
   );
   for (const keyword of [
     'function cloneJson',
     'JSON.parse(JSON.stringify',
     'function normalizeSeed',
+    'extractCapturedChatSeed',
+    'capturedEntryRequest',
+    'capturedChatRequest',
     'seed.messages =',
     'delete seed.model',
   ]) {

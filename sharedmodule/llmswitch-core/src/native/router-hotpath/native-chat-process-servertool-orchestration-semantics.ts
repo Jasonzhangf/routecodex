@@ -815,6 +815,25 @@ export function buildServertoolReq04FollowupPayloadWithNative(adapterContext: un
   }
 }
 
+export function resolveFollowupOriginSeedWithNative(input: {
+  adapterContext: unknown;
+  snapshot?: unknown;
+}): Record<string, unknown> | null {
+  const capability = 'resolveFollowupOriginSeedJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
+    const parsed = parseJson('resolveFollowupOriginSeed', raw);
+    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
+    if (parsed === null) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function resolveFollowupModelWithNative(seedModel: unknown, adapterContext: unknown): string {
   const capability = 'resolveFollowupModelJson';
   const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
