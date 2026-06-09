@@ -332,6 +332,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeStopMessageStageModeValueJson",
   "hasArmedStopMessageStateJson",
   "planStopMessageRoutingSnapshotJson",
+  "planStopMessagePersistedStateSelectionJson",
   "planStopMessageRoutingStateApplyJson",
   "planStopMessageRoutingStateClearJson",
   "readServertoolFollowupFlowIdJson",

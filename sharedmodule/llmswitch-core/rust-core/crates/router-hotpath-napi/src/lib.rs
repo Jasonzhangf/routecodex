@@ -1399,6 +1399,12 @@ pub fn plan_stop_message_routing_snapshot_json(input_json: String) -> NapiResult
 }
 
 #[napi]
+pub fn plan_stop_message_persisted_state_selection_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_persisted_state_selection_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stop_message_routing_state_apply_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stop_message_routing_state_apply_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

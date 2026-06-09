@@ -38,6 +38,36 @@ pub struct StopMessagePersistedLookupPlanOutput {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct StopMessagePersistedStateSelectionInput {
+    pub states: Vec<StopMessagePersistedStateCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessagePersistedStateCandidate {
+    pub key: Option<String>,
+    pub state: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessagePersistedTombstoneState {
+    pub exhausted_default: bool,
+    pub cleared: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessagePersistedStateSelectionOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<RuntimeStopMessageStateSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_mode: Option<String>,
+    pub tombstone: StopMessagePersistedTombstoneState,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeStopMessageStateSnapshot {
     pub text: String,
     pub max_repeats: i64,
@@ -184,6 +214,79 @@ pub fn plan_stop_message_persisted_lookup(
         read_stop_message_tombstone: options
             .and_then(|options| options.include_tombstone_lookup)
             .unwrap_or(true),
+    }
+}
+
+pub fn plan_stop_message_persisted_state_selection(
+    input: &StopMessagePersistedStateSelectionInput,
+) -> StopMessagePersistedStateSelectionOutput {
+    let mut snapshot: Option<RuntimeStopMessageStateSnapshot> = None;
+    let mut stage_mode: Option<String> = None;
+    let mut tombstone = StopMessagePersistedTombstoneState {
+        exhausted_default: false,
+        cleared: false,
+    };
+
+    for candidate in &input.states {
+        if !is_persistent_stop_message_scope(candidate.key.as_deref()) {
+            continue;
+        }
+        let state = &candidate.state;
+
+        if snapshot.is_none() {
+            let candidate_snapshot = resolve_stop_message_snapshot(Some(state));
+            if candidate_snapshot
+                .as_ref()
+                .is_some_and(is_default_stop_message_exhausted)
+            {
+                if !tombstone.cleared {
+                    tombstone = StopMessagePersistedTombstoneState {
+                        exhausted_default: true,
+                        cleared: false,
+                    };
+                }
+            } else if let Some(candidate_snapshot) = candidate_snapshot {
+                snapshot = Some(candidate_snapshot);
+            }
+        }
+
+        if stage_mode.is_none() && !is_stop_message_cleared_tombstone(state) {
+            stage_mode = state.as_object().and_then(|record| {
+                normalize_stop_message_stage_mode(record.get("stopMessageStageMode"))
+            });
+        }
+
+        if !tombstone.exhausted_default && !tombstone.cleared {
+            if state
+                .as_object()
+                .and_then(|record| read_trimmed_string(record.get("stopMessageSource")))
+                .as_deref()
+                == Some("default_exhausted")
+            {
+                tombstone = StopMessagePersistedTombstoneState {
+                    exhausted_default: true,
+                    cleared: false,
+                };
+            } else if let Some(candidate_snapshot) = resolve_stop_message_snapshot(Some(state)) {
+                if is_default_stop_message_exhausted(&candidate_snapshot) {
+                    tombstone = StopMessagePersistedTombstoneState {
+                        exhausted_default: true,
+                        cleared: false,
+                    };
+                }
+            } else if is_stop_message_cleared_tombstone(state) {
+                tombstone = StopMessagePersistedTombstoneState {
+                    exhausted_default: false,
+                    cleared: true,
+                };
+            }
+        }
+    }
+
+    StopMessagePersistedStateSelectionOutput {
+        snapshot,
+        stage_mode,
+        tombstone,
     }
 }
 
@@ -574,6 +677,30 @@ fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessa
         stage_mode,
         ai_mode: Some(ai_mode),
     })
+}
+
+fn is_default_stop_message_exhausted(snapshot: &RuntimeStopMessageStateSnapshot) -> bool {
+    snapshot.source.as_deref() == Some("default")
+        && snapshot.max_repeats > 0
+        && snapshot.used >= snapshot.max_repeats
+}
+
+fn is_stop_message_cleared_tombstone(state: &Value) -> bool {
+    let Some(record) = state.as_object() else {
+        return false;
+    };
+    let has_text = read_trimmed_string(record.get("stopMessageText")).is_some();
+    let has_lifecycle_stamp = read_finite_number(record.get("stopMessageLastUsedAt")).is_some();
+    !has_text && has_lifecycle_stamp
+}
+
+fn is_persistent_stop_message_scope(value: Option<&str>) -> bool {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    value.starts_with("tmux:")
+        || value.starts_with("session:")
+        || value.starts_with("conversation:")
 }
 
 fn is_stop_eligible_for_servertool(base: &Value, adapter_context: Option<&Value>) -> bool {
@@ -1506,6 +1633,69 @@ mod tests {
         assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.stage_mode.as_deref(), Some("auto"));
         assert_eq!(snapshot.ai_mode.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn persisted_state_selection_is_rust_owned_for_snapshot_stage_and_tombstone() {
+        let selection =
+            plan_stop_message_persisted_state_selection(&StopMessagePersistedStateSelectionInput {
+                states: vec![
+                    StopMessagePersistedStateCandidate {
+                        key: Some("request:ignored".to_string()),
+                        state: json!({
+                            "stopMessageText": "ignored",
+                            "stopMessageMaxRepeats": 1
+                        }),
+                    },
+                    StopMessagePersistedStateCandidate {
+                        key: Some("tmux:default-exhausted".to_string()),
+                        state: json!({
+                            "stopMessageText": "default done",
+                            "stopMessageMaxRepeats": 1,
+                            "stopMessageUsed": 1,
+                            "stopMessageSource": "default",
+                            "stopMessageStageMode": "auto"
+                        }),
+                    },
+                    StopMessagePersistedStateCandidate {
+                        key: Some("session:active".to_string()),
+                        state: json!({
+                            "stopMessageText": " persisted continue ",
+                            "stopMessageMaxRepeats": 4,
+                            "stopMessageUsed": 2,
+                            "stopMessageSource": "explicit",
+                            "stopMessageStageMode": "on"
+                        }),
+                    },
+                ],
+            });
+
+        let snapshot = selection.snapshot.expect("persisted snapshot");
+        assert_eq!(snapshot.text, "persisted continue");
+        assert_eq!(snapshot.max_repeats, 4);
+        assert_eq!(snapshot.used, 2);
+        assert_eq!(selection.stage_mode.as_deref(), Some("auto"));
+        assert!(selection.tombstone.exhausted_default);
+        assert!(!selection.tombstone.cleared);
+    }
+
+    #[test]
+    fn persisted_state_selection_reports_cleared_tombstone_without_stage_mode() {
+        let selection =
+            plan_stop_message_persisted_state_selection(&StopMessagePersistedStateSelectionInput {
+                states: vec![StopMessagePersistedStateCandidate {
+                    key: Some("conversation:cleared".to_string()),
+                    state: json!({
+                        "stopMessageLastUsedAt": 1234,
+                        "stopMessageStageMode": "on"
+                    }),
+                }],
+            });
+
+        assert!(selection.snapshot.is_none());
+        assert!(selection.stage_mode.is_none());
+        assert!(!selection.tombstone.exhausted_default);
+        assert!(selection.tombstone.cleared);
     }
 
     #[test]

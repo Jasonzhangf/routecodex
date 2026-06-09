@@ -32,6 +32,7 @@ import {
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageStateFromAdapterContext,
   planStopMessagePersistedLookup,
+  planStopMessagePersistedStateSelection,
   readRuntimeStopMessageStageMode
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
@@ -47,9 +48,7 @@ import {
 } from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
 import {
   applyStopMessageSnapshotToState,
-  clearStopMessageState,
-  normalizeStopMessageStageMode,
-  resolveStopMessageSnapshot
+  clearStopMessageState
 } from './stop-message-auto/routing-state.js';
 import {
   resolveWorkingDirectoryFromAdapterContext,
@@ -249,83 +248,6 @@ function isPersistentStickyKey(value: unknown): value is string {
   );
 }
 
-function readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys: string[]): ReturnType<typeof resolveStopMessageSnapshot> {
-  for (const key of candidateKeys) {
-    if (!isPersistentStickyKey(key)) {
-      continue;
-    }
-    const snapshot = resolveStopMessageSnapshot(loadRoutingInstructionStateSync(key));
-    if (isDefaultStopMessageExhausted(snapshot)) {
-      continue;
-    }
-    if (snapshot) {
-      return snapshot;
-    }
-  }
-  return null;
-}
-
-function isDefaultStopMessageExhausted(snapshot: ReturnType<typeof resolveStopMessageSnapshot>): boolean {
-  return Boolean(
-    snapshot &&
-    snapshot.source === 'default' &&
-    snapshot.maxRepeats > 0 &&
-    snapshot.used >= snapshot.maxRepeats
-  );
-}
-
-function readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys: string[]): 'on' | 'off' | 'auto' | undefined {
-  for (const key of candidateKeys) {
-    if (!isPersistentStickyKey(key)) {
-      continue;
-    }
-    const state = loadRoutingInstructionStateSync(key);
-    if (isStopMessageClearedTombstone(state)) {
-      continue;
-    }
-    const stageMode = normalizeStopMessageStageMode(state?.stopMessageStageMode);
-    if (stageMode) {
-      return stageMode;
-    }
-  }
-  return undefined;
-}
-
-function readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys: string[]): {
-  exhaustedDefault: boolean;
-  cleared: boolean;
-} {
-  for (const key of candidateKeys) {
-    if (!isPersistentStickyKey(key)) {
-      continue;
-    }
-    const state = loadRoutingInstructionStateSync(key);
-    if (!state) {
-      continue;
-    }
-    if (state.stopMessageSource === 'default_exhausted') {
-      return { exhaustedDefault: true, cleared: false };
-    }
-    if (isDefaultStopMessageExhausted(resolveStopMessageSnapshot(state))) {
-      return { exhaustedDefault: true, cleared: false };
-    }
-    if (isStopMessageClearedTombstone(state)) {
-      return { exhaustedDefault: false, cleared: true };
-    }
-  }
-  return { exhaustedDefault: false, cleared: false };
-}
-
-function isStopMessageClearedTombstone(state: ReturnType<typeof loadRoutingInstructionStateSync>): boolean {
-  if (!state) {
-    return false;
-  }
-  const hasText = typeof state.stopMessageText === 'string' && state.stopMessageText.trim().length > 0;
-  const hasLifecycleStamp =
-    (typeof state.stopMessageLastUsedAt === 'number' && Number.isFinite(state.stopMessageLastUsedAt));
-  return !hasText && hasLifecycleStamp;
-}
-
 function resolveStopMessageDefaultEnabledLive(): boolean {
   return resolveStopMessageDefaultEnabled() ?? true;
 }
@@ -513,8 +435,9 @@ const handler: ServerToolHandler = async (
     includeTombstoneLookup: true
   });
   const candidateKeys = persistedLookupPlan.candidateKeys;
+  const persistedStateSelection = planStopMessagePersistedStateSelection(candidateKeys);
   const persistedSnap = persistedLookupPlan.readStopMessageSnapshot
-    ? readPersistedStopMessageSnapshotFromCandidateKeys(candidateKeys)
+    ? persistedStateSelection.snapshot ?? null
     : null;
   const runtimeSnap = resolveRuntimeStopMessageStateFromAdapterContext(ctx.adapterContext);
   const requestScopedGoal = readRequestScopedGoalState(ctx.adapterContext);
@@ -522,13 +445,13 @@ const handler: ServerToolHandler = async (
   const effectiveGoal = requestScopedGoal.state ?? persistedGoalRead.state;
   const hasExplicitGoalState = requestScopedGoal.explicit;
   const tombstone = persistedLookupPlan.readStopMessageTombstone
-    ? readPersistedStopMessageTombstoneFromCandidateKeys(candidateKeys)
+    ? persistedStateSelection.tombstone
     : { exhaustedDefault: false, cleared: false };
   const explicitMode = (
     tombstone.cleared
       ? undefined
       : (readRuntimeStopMessageStageMode(rt)
-        ?? readPersistedStopMessageStageModeFromCandidateKeys(candidateKeys))
+        ?? persistedStateSelection.stageMode)
   );
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);

@@ -695,6 +695,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn normalize_stop_message_stage_mode_value',
     'pub fn has_armed_stop_message_state',
     'pub fn plan_stop_message_routing_snapshot',
+    'pub fn plan_stop_message_persisted_state_selection',
     'pub fn plan_stop_message_routing_state_apply',
     'pub fn plan_stop_message_routing_state_clear',
     'pub fn read_servertool_followup_flow_id',
@@ -744,6 +745,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     'normalizeStopMessageStageModeValueWithNative',
     'hasArmedStopMessageStateWithNative',
     'planStopMessageRoutingSnapshotWithNative',
+    'planStopMessagePersistedStateSelectionWithNative',
     'planStopMessageRoutingStateApplyWithNative',
     'planStopMessageRoutingStateClearWithNative',
     'readServertoolFollowupFlowIdWithNative',
@@ -773,6 +775,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"normalizeStopMessageStageModeValueJson"',
     '"hasArmedStopMessageStateJson"',
     '"planStopMessageRoutingSnapshotJson"',
+    '"planStopMessagePersistedStateSelectionJson"',
     '"planStopMessageRoutingStateApplyJson"',
     '"planStopMessageRoutingStateClearJson"',
     '"readServertoolFollowupFlowIdJson"',
@@ -884,6 +887,29 @@ function checkStopMessagePersistedLookupRustOwner() {
       'stop-message-persisted-lookup-ts-consumes-native-plan',
       'stop-message-auto.ts must consume persistedLookupPlan.candidateKeys from native plan'
     );
+  }
+  if (!stopMessageAuto.includes('planStopMessagePersistedStateSelection(candidateKeys)')) {
+    fail(
+      'stop-message-persisted-state-selection-ts-thin-shell',
+      'stop-message-auto.ts must pass candidateKeys to Rust-owned persisted state selection'
+    );
+  }
+  for (const keyword of [
+    'readPersistedStopMessageSnapshotFromCandidateKeys',
+    'readPersistedStopMessageStageModeFromCandidateKeys',
+    'readPersistedStopMessageTombstoneFromCandidateKeys',
+    'isDefaultStopMessageExhausted',
+    'isStopMessageClearedTombstone',
+    'resolveStopMessageSnapshot(loadRoutingInstructionStateSync',
+    'normalizeStopMessageStageMode(state?.stopMessageStageMode',
+    'stopMessageSource ===',
+  ]) {
+    if (stopMessageAuto.includes(keyword)) {
+      fail(
+        'stop-message-persisted-state-selection-ts-thin-shell',
+        `stop-message-auto.ts must not restore TS persisted state selection semantic "${keyword}"`
+      );
+    }
   }
 
   const stateKeyBlock = extractFunctionBlock(runtimeUtils, 'resolveStateKey');

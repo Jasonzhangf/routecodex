@@ -1887,6 +1887,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - `verify:llmswitch-rustification-audit` 若只报 `topDir=native nonNativeLoc` 增长，先 diff baseline/current 的 `prodTsFiles` 分类，定位具体 native 文件；对真实 native binding manifest/wrapper 应补明确 `native-router-hotpath` / NAPI binding contract marker 或收缩 TS 逻辑，禁止直接放宽 baseline 掩盖新增 TS runtime。
 - VR TS 残留 closeout：旧 source/dist VR TS runtime path 和旧 wrapper path 不得在 source/script/test/doc/fixture 中以活路径文本残留；只允许 `verify-vr-no-ts-runtime` 内部分段构造旧路径作为复活 gate。`src/native/router-hotpath/native-virtual-router-*.ts` / `virtual-router-contracts.ts` 是 live native bridge/contracts，不按旧 VR runtime 残留删除；旧 classifier/features/report scripts/tests 应物理删除或迁到 Rust/blackbox owner。
 - Servertool bootstrap replay closeout：followup requestId builder 必须走 `buildFollowupRequestIdWithNative`，禁止在 `backend-route-bootstrap-replay-block.ts` 复活 TS trim/default/suffix 拼接；`verify:servertool-rust-only` 已有 gate 锁 `backend-route-bootstrap-replay-native-request-id-owner`。
+- Stopless persisted state selection closeout：candidate key 读取 routing-state 文件属于 TS IO，但“哪个 snapshot 生效、default exhausted 是否跳过、cleared tombstone 是否抑制默认、stageMode 从哪个持久状态读取”属于 Rust `servertool-core::persisted_lookup::plan_stop_message_persisted_state_selection`；`stop-message-auto.ts` 禁止恢复 `readPersistedStopMessage*FromCandidateKeys` 本地归约。
 
 ## 2026-06-08 provider auth reroute / 10000 loopback 精华
 

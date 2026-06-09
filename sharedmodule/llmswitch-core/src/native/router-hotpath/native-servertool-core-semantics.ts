@@ -420,6 +420,15 @@ export interface RuntimeStopMessageStateSnapshot {
   aiMode?: 'on' | 'off';
 }
 
+export interface StopMessagePersistedStateSelectionPlan {
+  snapshot?: RuntimeStopMessageStateSnapshot;
+  stageMode?: 'on' | 'off' | 'auto';
+  tombstone: {
+    exhaustedDefault: boolean;
+    cleared: boolean;
+  };
+}
+
 export interface StopMessageRoutingStateApplyPlan {
   source: string;
   text: string;
@@ -903,6 +912,24 @@ export function planStopMessageRoutingSnapshotWithNative(
   return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
 }
 
+export function planStopMessagePersistedStateSelectionWithNative(input: {
+  states: Array<{
+    key?: string | null;
+    state: unknown;
+  }>;
+}): StopMessagePersistedStateSelectionPlan {
+  const capability = 'planStopMessagePersistedStateSelectionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessagePersistedStateSelectionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessagePersistedStateSelectionJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseStopMessagePersistedStateSelectionPayload(resultJson, capability);
+}
+
 export function planStopMessageRoutingStateApplyWithNative(
   snapshot: unknown,
 ): StopMessageRoutingStateApplyPlan {
@@ -976,6 +1003,37 @@ function readStopMessageAiModeField(value: unknown, source: string): 'on' | 'off
     return value;
   }
   throw new Error(`${source} returned invalid stop-message ai mode`);
+}
+
+function parseStopMessagePersistedStateSelectionPayload(
+  resultJson: string,
+  capability: string,
+): StopMessagePersistedStateSelectionPlan {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  const snapshot = record.snapshot === undefined || record.snapshot === null
+    ? undefined
+    : parseRuntimeStopMessageStateSnapshotPayload(JSON.stringify(record.snapshot), `${capability} snapshot`) ?? undefined;
+  const stageMode = readStopMessageStageModeField(record.stageMode, `${capability} stageMode`);
+  const tombstone = record.tombstone;
+  if (!tombstone || typeof tombstone !== 'object' || Array.isArray(tombstone)) {
+    throw new Error(`${capability} native returned invalid tombstone`);
+  }
+  const tombstoneRecord = tombstone as Record<string, unknown>;
+  if (typeof tombstoneRecord.exhaustedDefault !== 'boolean' || typeof tombstoneRecord.cleared !== 'boolean') {
+    throw new Error(`${capability} native returned invalid tombstone fields`);
+  }
+  return {
+    ...(snapshot ? { snapshot } : {}),
+    ...(stageMode ? { stageMode } : {}),
+    tombstone: {
+      exhaustedDefault: tombstoneRecord.exhaustedDefault,
+      cleared: tombstoneRecord.cleared,
+    }
+  };
 }
 
 function parseStopMessageRoutingStateApplyPayload(

@@ -22,12 +22,12 @@ use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::pre_command_hook_contract;
 use servertool_core::stop_gateway_context;
-use servertool_core::stopless_goal_state_contract;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
-use servertool_core::stopless_orchestration_contract;
 use servertool_core::stop_visible_text;
+use servertool_core::stopless_goal_state_contract;
+use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
 
 /// Inspect a response payload and return the stop gateway context as JSON.
@@ -180,6 +180,17 @@ pub fn plan_stop_message_routing_snapshot_json(input_json: &str) -> Result<Strin
         &input,
     ))
     .map_err(|e| format!("serialize stop-message routing snapshot: {e}"))
+}
+
+pub fn plan_stop_message_persisted_state_selection_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: persisted_lookup::StopMessagePersistedStateSelectionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize persisted stop-message state selection input: {e}")
+        })?;
+    serde_json::to_string(&persisted_lookup::plan_stop_message_persisted_state_selection(&input))
+        .map_err(|e| format!("serialize persisted stop-message state selection: {e}"))
 }
 
 pub fn plan_stop_message_routing_state_apply_json(input_json: &str) -> Result<String, String> {
@@ -1913,6 +1924,64 @@ mod tests {
         let clear_plan: serde_json::Value =
             serde_json::from_str(&clear).expect("routing clear json");
         assert_eq!(clear_plan["timestamp"], 123);
+    }
+
+    #[test]
+    fn plans_persisted_stop_message_state_selection_via_servertool_core_bridge() {
+        let output = plan_stop_message_persisted_state_selection_json(
+            &json!({
+                "states": [
+                    {
+                        "key": "tmux:cleared",
+                        "state": {
+                            "stopMessageLastUsedAt": 123,
+                            "stopMessageStageMode": "on"
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("persisted state selection plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("persisted state selection json");
+        assert_eq!(plan["tombstone"]["cleared"], true);
+        assert!(plan.get("stageMode").is_none());
+        assert!(plan.get("snapshot").is_none());
+
+        let output = plan_stop_message_persisted_state_selection_json(
+            &json!({
+                "states": [
+                    {
+                        "key": "tmux:default-exhausted",
+                        "state": {
+                            "stopMessageText": "default",
+                            "stopMessageMaxRepeats": 1,
+                            "stopMessageUsed": 1,
+                            "stopMessageSource": "default",
+                            "stopMessageStageMode": "auto"
+                        }
+                    },
+                    {
+                        "key": "session:active",
+                        "state": {
+                            "stopMessageText": "continue",
+                            "stopMessageMaxRepeats": 3,
+                            "stopMessageUsed": 2,
+                            "stopMessageSource": "explicit",
+                            "stopMessageStageMode": "on"
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("persisted state selection plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("persisted state selection json");
+        assert_eq!(plan["snapshot"]["text"], "continue");
+        assert_eq!(plan["stageMode"], "auto");
+        assert_eq!(plan["tombstone"]["exhaustedDefault"], true);
     }
 
     #[test]

@@ -5,6 +5,7 @@ import {
   hasCompactionFlagWithNative,
   planPersistStopMessageStateWithNative,
   planStopMessagePersistedLookupWithNative,
+  planStopMessagePersistedStateSelectionWithNative,
   readRuntimeStopMessageStageModeWithNative,
   readServertoolFollowupFlowIdWithNative,
   resolveBdWorkingDirectoryForRecordWithNative,
@@ -22,6 +23,7 @@ import {
 } from '../../../native/router-hotpath/native-servertool-core-semantics.js';
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
+  loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 
@@ -83,6 +85,31 @@ export function planStopMessagePersistedLookup(
     record: buildServertoolRoutingMetadata(record, runtimeMetadata),
     runtimeMetadata: asRecord(runtimeMetadata) ?? undefined,
     options
+  });
+}
+
+export function planStopMessagePersistedStateSelection(candidateKeys: string[]): {
+  snapshot?: {
+    text: string;
+    maxRepeats: number;
+    used: number;
+    source?: string;
+    updatedAt?: number;
+    lastUsedAt?: number;
+    stageMode?: 'on' | 'off' | 'auto';
+    aiMode?: 'on' | 'off';
+  };
+  stageMode?: 'on' | 'off' | 'auto';
+  tombstone: {
+    exhaustedDefault: boolean;
+    cleared: boolean;
+  };
+} {
+  return planStopMessagePersistedStateSelectionWithNative({
+    states: candidateKeys.map((key) => ({
+      key,
+      state: loadRoutingInstructionStateSync(key) ?? null
+    }))
   });
 }
 
