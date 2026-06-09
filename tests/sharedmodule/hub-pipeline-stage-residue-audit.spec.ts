@@ -1826,6 +1826,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const retiredFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_unified_fastpath.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_post_governed_normalization_semantics.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_target_utils.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_provider_key.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs',
@@ -1855,6 +1856,7 @@ describe('hub pipeline stage residue audit', () => {
     for (const source of [nativeWrapper, nativeAnalysis, requiredExports]) {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
       expect(source).not.toMatch(/applyTargetMetadataJson|applyTargetToSubjectJson|extractTargetModelIdJson/);
+      expect(source).not.toMatch(/buildImageAttachmentMetadataJson/);
       expect(source).not.toMatch(/inferSseEventTypeFromDataJson|detectSseProtocolKindJson|validateSseEventTypeJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);

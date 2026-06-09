@@ -76,13 +76,13 @@
   - `chat_governance_context.rs`
   - `chat_governance_finalize.rs`
   - `chat_governed_filter_payload.rs`
-  - `chat_post_governed_normalization_semantics.rs`
   - `chat_node_result_semantics.rs`
 - 测试矩阵：
   - TS/Jest contract：governed request shape、sanitize shape、metadata merge、node-result metadata
   - Rust：payload filter、finalize、post-governed normalize、node-result
   - Flow：`execute-chat-process-entry` 与 `chat-process-roundtrip` 主链
   - 删除门禁：删除 TS 语义 helper 后 contract/flow 全绿
+  - 2026-06-09 update: `chat_post_governed_normalization_semantics.rs` later proved zero-consumer native control surface and was physically deleted; do not restore `buildImageAttachmentMetadataJson`.
 
 - 目标：
 - 当前 TS residue：

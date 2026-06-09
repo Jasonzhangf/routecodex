@@ -2940,3 +2940,9 @@ Tags: hub-pipeline, target-utils, dead-code, napi-export, residue-gate, 2026-06-
 - Removed the standalone NAPI wrappers and required-export entries. The underlying Rust helper functions remain internal to `hub_resp_inbound_sse_stream_sniffer.rs` and are still exercised through `parseSseEventWithConfigJson` / stream parser exports.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those standalone helper export names from returning.
 Tags: hub-pipeline, sse-sniffer, dead-code, napi-export, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline image attachment metadata dead export removed
+- Exact scan found `chat_post_governed_normalization_semantics.rs` only fed required native export `buildImageAttachmentMetadataJson`; no TS wrapper/runtime consumer imported it.
+- Removed the Rust module and required-export entry. Older closeout plan references now mark it as retired instead of a live Rust owner.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export name from returning.
+Tags: hub-pipeline, image-attachment-metadata, dead-code, napi-export, residue-gate, 2026-06-09

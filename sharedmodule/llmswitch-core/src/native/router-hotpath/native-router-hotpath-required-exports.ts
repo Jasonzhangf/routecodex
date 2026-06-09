@@ -120,7 +120,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeReasoningInOpenAIPayloadJson",
   "buildContinueExecutionOperationsJson",
   "buildGovernedFilterPayloadJson",
-  "buildImageAttachmentMetadataJson",
   "buildWebSearchToolAppendOperationsJson",
   "clampResponsesInputItemIdJson",
   "collectToolOutputsJson",

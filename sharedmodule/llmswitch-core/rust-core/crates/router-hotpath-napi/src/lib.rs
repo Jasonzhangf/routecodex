@@ -16,7 +16,6 @@ mod chat_governance_context;
 mod chat_governance_finalize;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
-mod chat_post_governed_normalization_semantics;
 mod chat_process_media_semantics;
 mod chat_servertool_orchestration;
 mod chat_web_search_tool_schema;

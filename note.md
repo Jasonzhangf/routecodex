@@ -18744,3 +18744,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, and `validateSseEventTypeJson` had no TS wrapper/runtime consumer outside required exports.
 - Removed standalone NAPI wrappers and required exports; internal Rust helper functions remain used by `parseSseEventWithConfigJson` / stream parser exports.
 - Verified focused residue/native-required Jest, llmswitch-core tsc, function-map gate, Rust SSE sniffer tests, Rust Hub control/data contract tests, and diff check.
+
+2026-06-09 HubPipeline image attachment metadata dead export deletion:
+- Exact scan: `chat_post_governed_normalization_semantics.rs` only fed required native export `buildImageAttachmentMetadataJson`; no TS wrapper/runtime consumer.
+- Change: removed the Rust module, module declaration, required native export, and added residue gate/docs/function-map/verification-map/MEMORY entries.
+- Verification: residue scan only docs/gate/memory refs; hub-pipeline residue Jest + SSE required-export Jest, llmswitch-core tsc, function-map compile gate, Rust hub_pipeline_contracts, and `git diff --check` passed before staging.
