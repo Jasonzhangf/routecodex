@@ -1,4 +1,5 @@
 import {
+  beforeAll,
   jest
 } from '@jest/globals';
 
@@ -66,10 +67,19 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
   }),
 }));
 
-const {
-  buildServertoolCliProjectionForAutoFlow,
-  buildServertoolCliProjectionForToolCall
-} = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js');
+let buildServertoolCliProjectionForAutoFlow: typeof import(
+  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js'
+).buildServertoolCliProjectionForAutoFlow;
+let buildServertoolCliProjectionForToolCall: typeof import(
+  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js'
+).buildServertoolCliProjectionForToolCall;
+
+beforeAll(async () => {
+  ({
+    buildServertoolCliProjectionForAutoFlow,
+    buildServertoolCliProjectionForToolCall
+  } = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js'));
+});
 
 describe('servertool CLI projection', () => {
   it('projects stopless auto flow to exec_command with reasoning and direct CLI input', () => {
@@ -98,7 +108,14 @@ describe('servertool CLI projection', () => {
     expect(message.reasoning.summary[0].text).toBe('full stop summary');
     expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toBe("routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3}'");
+    expect(command).toMatch(/^routecodex servertool run stop_message_auto --input-json '/);
+    const inputJson = command.match(/--input-json '(.+)'$/)?.[1];
+    expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
+      flowId: 'stop_message_flow',
+      continuationPrompt: '继续执行原任务',
+      repeatCount: 2,
+      maxRepeats: 3
+    });
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));

@@ -14,6 +14,7 @@ use servertool_core::backend_route_contract::{
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
+use servertool_core::engine_selection_contract;
 use servertool_core::loop_state_contract;
 use servertool_core::orchestration_policy_contract;
 use servertool_core::pending_session_contract;
@@ -294,6 +295,26 @@ pub fn plan_runtime_pre_command_rule_json(input_json: &str) -> Result<String, St
     .map_err(|e| format!("serialize runtime pre-command rule plan: {e}"))
 }
 
+pub fn plan_engine_selection_start_json(input_json: &str) -> Result<String, String> {
+    let input: engine_selection_contract::EngineSelectionStartInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize engine selection start input: {e}"))?;
+    serde_json::to_string(&engine_selection_contract::plan_engine_selection_start(
+        input,
+    ))
+    .map_err(|e| format!("serialize engine selection start plan: {e}"))
+}
+
+pub fn plan_engine_selection_after_run_json(input_json: &str) -> Result<String, String> {
+    let input: engine_selection_contract::EngineSelectionAfterRunInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize engine selection after-run input: {e}"))?;
+    serde_json::to_string(&engine_selection_contract::plan_engine_selection_after_run(
+        input,
+    ))
+    .map_err(|e| format!("serialize engine selection after-run plan: {e}"))
+}
+
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::StopMessageDefaultSnapshotInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize default stop-message snapshot input: {e}"))?;
@@ -467,6 +488,16 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     )
     .map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
+}
+
+pub fn plan_stop_message_cli_projection_seed_json(input_json: &str) -> Result<String, String> {
+    let input: cli_contract::StopMessageCliProjectionSeedInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message cli projection seed input: {e}"))?;
+    let output =
+        cli_contract::plan_stop_message_cli_projection_seed(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize stop-message cli projection seed: {e}"))
 }
 
 pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {
@@ -1579,5 +1610,76 @@ mod tests {
         assert_eq!(runtime_plan["id"], "runtime_precommand:rewrite.sh");
         assert_eq!(runtime_plan["timeoutMs"], 1500);
         assert_eq!(runtime_plan["runtimeScriptPath"], "/tmp/rewrite.sh");
+    }
+
+    #[test]
+    fn plans_engine_selection_via_servertool_core_bridge() {
+        let start = plan_engine_selection_start_json(
+            &json!({
+                "primaryAutoHookIds": [" stop_message_auto ", "stop_message_auto", "vision_auto"]
+            })
+            .to_string(),
+        )
+        .expect("engine selection start plan");
+        let start_plan: serde_json::Value =
+            serde_json::from_str(&start).expect("engine selection start json");
+        assert_eq!(start_plan["action"], "run_primary_hooks");
+        assert_eq!(
+            start_plan["overrides"]["includeAutoHookIds"],
+            json!(["stop_message_auto", "vision_auto"])
+        );
+        assert_eq!(start_plan["overrides"]["disableToolCallHandlers"], true);
+
+        let after = plan_engine_selection_after_run_json(
+            &json!({
+                "primaryAutoHookIds": ["stop_message_auto"],
+                "engineResult": { "mode": "passthrough" }
+            })
+            .to_string(),
+        )
+        .expect("engine selection after-run plan");
+        let after_plan: serde_json::Value =
+            serde_json::from_str(&after).expect("engine selection after-run json");
+        assert_eq!(after_plan["action"], "rerun_excluding_primary_hooks");
+        assert_eq!(
+            after_plan["overrides"]["excludeAutoHookIds"],
+            json!(["stop_message_auto"])
+        );
+    }
+
+    #[test]
+    fn plans_stop_message_cli_projection_seed_via_servertool_core_bridge() {
+        let seed = plan_stop_message_cli_projection_seed_json(
+            &json!({
+                "execution": {
+                    "flowId": "stop_message_flow",
+                    "context": {
+                        "assistantStopText": "停止原因：remove me\nvisible",
+                        "decision": { "followup_text": "continue with tools" }
+                    },
+                    "followup": {
+                        "metadata": {
+                            "__rt": {
+                                "serverToolLoopState": {
+                                    "repeatCount": 1,
+                                    "maxRepeats": 3
+                                }
+                            }
+                        }
+                    }
+                },
+                "finalChatResponse": {}
+            })
+            .to_string(),
+        )
+        .expect("stop-message cli projection seed");
+        let plan: serde_json::Value =
+            serde_json::from_str(&seed).expect("stop-message cli projection seed json");
+        assert_eq!(plan["flowId"], "stop_message_flow");
+        assert_eq!(plan["continuationPrompt"], "continue with tools");
+        assert_eq!(plan["reasoningText"], "visible");
+        assert_eq!(plan["repeatCount"], 1);
+        assert_eq!(plan["maxRepeats"], 3);
+        assert_eq!(plan["input"]["continuationPrompt"], "continue with tools");
     }
 }

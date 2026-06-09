@@ -64,6 +64,25 @@ verification:
     notes:
       - servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO.
 
+  - feature_id: hub.servertool_engine_selection
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/engine-selection-block.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns primary auto-hook first-pass and rerun selection; TS may only execute runEngine calls from native plans.
+
   - feature_id: hub.servertool_cli_projection
     change_risk: high
     unit:
@@ -85,6 +104,27 @@ verification:
       - Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs.
       - stop_message_auto lifecycle must prove CLI input/output carries continuationPrompt, repeatCount, maxRepeats, and does not re-project after CLI output returns.
       - `servertool_fixture` must be dispatched by Rust CLI projection without restoring the deleted TS fixture handler.
+
+  - feature_id: hub.servertool_stopless_cli_projection_seed
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/servertool-cli-projection.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns stopless CLI projection seed planning; TS engine may only pass execution/finalChatResponse into native and consume the planned seed.
+      - Focused Rust gates: `cargo test -p servertool-core stop_message_cli_projection_seed --lib -- --nocapture` and `cargo test -p router-hotpath-napi plans_stop_message_cli_projection_seed_via_servertool_core_bridge --lib -- --nocapture`.
 
   - feature_id: hub.servertool_flow_presentation
     change_risk: medium

@@ -179,6 +179,23 @@ export interface PreCommandHooksConfigPlan {
   hooks: PreCommandHookRulePlan[];
 }
 
+export interface EngineSelectionOverridesPlan {
+  disableToolCallHandlers?: boolean;
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+}
+
+export interface EngineSelectionStartPlan {
+  action: 'run_default' | 'run_primary_hooks';
+  overrides: EngineSelectionOverridesPlan;
+  primaryAutoHookIds: string[];
+}
+
+export interface EngineSelectionAfterRunPlan {
+  action: 'rerun_excluding_primary_hooks' | 'return_current';
+  overrides?: EngineSelectionOverridesPlan;
+}
+
 export interface ClientExecCliProjectionInput {
   toolName: string;
   flowId?: string;
@@ -203,6 +220,20 @@ export interface ClientVisibleProjectionShellInput {
   nativeProjection: ClientExecCliProjectionOutput;
   reasoningText: string;
   additionalToolCalls?: unknown[];
+}
+
+export interface StopMessageCliProjectionSeedInput {
+  execution: unknown;
+  finalChatResponse: unknown;
+}
+
+export interface StopMessageCliProjectionSeed {
+  flowId: string;
+  reasoningText: string;
+  continuationPrompt: string;
+  repeatCount: number;
+  maxRepeats: number;
+  input: Record<string, unknown>;
 }
 
 export interface ServertoolBackendRoutePolicyInput {
@@ -842,6 +873,38 @@ export function buildClientExecCliProjectionOutputWithNative(
   return JSON.parse(resultJson);
 }
 
+export function planStopMessageCliProjectionSeedWithNative(
+  input: StopMessageCliProjectionSeedInput,
+): StopMessageCliProjectionSeed {
+  const capability = 'planStopMessageCliProjectionSeedJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageCliProjectionSeedJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageCliProjectionSeedJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planStopMessageCliProjectionSeedJson native returned invalid seed');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.flowId !== 'string' ||
+    typeof record.reasoningText !== 'string' ||
+    typeof record.continuationPrompt !== 'string' ||
+    typeof record.repeatCount !== 'number' ||
+    typeof record.maxRepeats !== 'number' ||
+    !record.input ||
+    typeof record.input !== 'object' ||
+    Array.isArray(record.input)
+  ) {
+    throw new Error('planStopMessageCliProjectionSeedJson native returned invalid seed fields');
+  }
+  return record as unknown as StopMessageCliProjectionSeed;
+}
+
 export function buildClientVisibleProjectionShellWithNative(
   input: ClientVisibleProjectionShellInput,
 ): Record<string, unknown> {
@@ -1239,6 +1302,105 @@ export function planRuntimePreCommandRuleWithNative(input: {
     return null;
   }
   return parsePreCommandHookRulePlan(parsed, capability);
+}
+
+export function planEngineSelectionStartWithNative(input: {
+  primaryAutoHookIds: string[];
+}): EngineSelectionStartPlan {
+  const capability = 'planEngineSelectionStartJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planEngineSelectionStartJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planEngineSelectionStartJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planEngineSelectionStartJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'run_default' && record.action !== 'run_primary_hooks') {
+    throw new Error('planEngineSelectionStartJson native returned invalid action');
+  }
+  if (!Array.isArray(record.primaryAutoHookIds)) {
+    throw new Error('planEngineSelectionStartJson native returned invalid primaryAutoHookIds');
+  }
+  return {
+    action: record.action,
+    overrides: parseEngineSelectionOverridesPlan(record.overrides, capability),
+    primaryAutoHookIds: record.primaryAutoHookIds.map((item) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new Error('planEngineSelectionStartJson native returned invalid primaryAutoHookIds item');
+      }
+      return item.trim();
+    })
+  };
+}
+
+export function planEngineSelectionAfterRunWithNative(input: {
+  primaryAutoHookIds: string[];
+  engineResult: unknown;
+}): EngineSelectionAfterRunPlan {
+  const capability = 'planEngineSelectionAfterRunJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planEngineSelectionAfterRunJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planEngineSelectionAfterRunJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planEngineSelectionAfterRunJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'rerun_excluding_primary_hooks' && record.action !== 'return_current') {
+    throw new Error('planEngineSelectionAfterRunJson native returned invalid action');
+  }
+  return {
+    action: record.action,
+    ...(record.overrides === undefined || record.overrides === null
+      ? {}
+      : { overrides: parseEngineSelectionOverridesPlan(record.overrides, capability) })
+  };
+}
+
+function parseEngineSelectionOverridesPlan(value: unknown, capability: string): EngineSelectionOverridesPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid overrides`);
+  }
+  const record = value as Record<string, unknown>;
+  const includeAutoHookIds = parseOptionalStringArray(record.includeAutoHookIds, capability, 'includeAutoHookIds');
+  const excludeAutoHookIds = parseOptionalStringArray(record.excludeAutoHookIds, capability, 'excludeAutoHookIds');
+  if (record.disableToolCallHandlers !== undefined && typeof record.disableToolCallHandlers !== 'boolean') {
+    throw new Error(`${capability} native returned invalid disableToolCallHandlers`);
+  }
+  return {
+    ...(typeof record.disableToolCallHandlers === 'boolean'
+      ? { disableToolCallHandlers: record.disableToolCallHandlers }
+      : {}),
+    ...(includeAutoHookIds ? { includeAutoHookIds } : {}),
+    ...(excludeAutoHookIds ? { excludeAutoHookIds } : {})
+  };
+}
+
+function parseOptionalStringArray(value: unknown, capability: string, field: string): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid ${field}`);
+  }
+  const output = value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error(`${capability} native returned invalid ${field} item`);
+    }
+    return item.trim();
+  });
+  return output.length > 0 ? output : undefined;
 }
 
 function parsePreCommandHooksConfigPlan(value: unknown, capability: string): PreCommandHooksConfigPlan {

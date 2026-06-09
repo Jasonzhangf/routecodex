@@ -1485,6 +1485,18 @@ pub fn plan_runtime_pre_command_rule_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_engine_selection_start_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_engine_selection_start_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_engine_selection_after_run_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_engine_selection_after_run_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn resolve_default_stop_message_snapshot_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::resolve_default_stop_message_snapshot_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1579,6 +1591,12 @@ pub fn resolve_adapter_context_provider_key_json(input_json: String) -> NapiResu
 #[napi]
 pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_client_exec_cli_projection_output_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stop_message_cli_projection_seed_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_cli_projection_seed_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

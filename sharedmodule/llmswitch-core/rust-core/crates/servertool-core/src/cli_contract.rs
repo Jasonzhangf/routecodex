@@ -61,6 +61,24 @@ pub struct ServertoolClientVisibleProjectionShellInput {
     pub additional_tool_calls: Vec<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageCliProjectionSeedInput {
+    pub execution: Value,
+    pub final_chat_response: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageCliProjectionSeed {
+    pub flow_id: String,
+    pub reasoning_text: String,
+    pub continuation_prompt: String,
+    pub repeat_count: u32,
+    pub max_repeats: u32,
+    pub input: Value,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServertoolCliError {
     UnsupportedTool(String),
@@ -470,6 +488,53 @@ pub fn build_client_visible_projection_shell(
     }))
 }
 
+/// feature_id: hub.servertool_stopless_cli_projection_seed
+pub fn plan_stop_message_cli_projection_seed(
+    input: StopMessageCliProjectionSeedInput,
+) -> Result<StopMessageCliProjectionSeed, ServertoolCliError> {
+    let execution = input
+        .execution
+        .as_object()
+        .ok_or(ServertoolCliError::InvalidField("execution"))?;
+    let flow_id = read_optional_string_from_object(execution, "flowId")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "stop_message_flow".to_string());
+    if flow_id != "stop_message_flow" {
+        return Err(ServertoolCliError::InvalidField("flowId"));
+    }
+    let continuation_prompt = read_stop_message_followup_text(&input.execution);
+    let assistant_stop_text = read_stop_message_assistant_stop_text(&input.execution)
+        .or_else(|| read_assistant_stop_text_from_chat(&input.final_chat_response))
+        .unwrap_or_else(|| {
+            "模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。".to_string()
+        });
+    let stripped_reasoning =
+        crate::stop_visible_text::strip_stop_schema_control_text(&assistant_stop_text);
+    let reasoning_text = if stripped_reasoning.trim().is_empty() {
+        "模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。".to_string()
+    } else {
+        stripped_reasoning
+    };
+    let repeat_count = read_stop_message_loop_number(&input.execution, "repeatCount").unwrap_or(0);
+    let max_repeats = read_stop_message_loop_number(&input.execution, "maxRepeats").unwrap_or(1);
+    if max_repeats == 0 || repeat_count > max_repeats {
+        return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
+    }
+    Ok(StopMessageCliProjectionSeed {
+        flow_id: flow_id.clone(),
+        reasoning_text,
+        continuation_prompt: continuation_prompt.clone(),
+        repeat_count,
+        max_repeats,
+        input: serde_json::json!({
+            "flowId": flow_id,
+            "continuationPrompt": continuation_prompt,
+            "repeatCount": repeat_count,
+            "maxRepeats": max_repeats
+        }),
+    })
+}
+
 pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, ServertoolCliError> {
     validate_no_denied_cli_marker(raw_output)?;
     let value: Value = serde_json::from_str(raw_output)
@@ -496,6 +561,162 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
     Ok(value)
+}
+
+fn read_stop_message_followup_text(execution: &Value) -> String {
+    let decision_text = execution
+        .get("context")
+        .and_then(Value::as_object)
+        .and_then(|context| context.get("decision"))
+        .and_then(Value::as_object)
+        .and_then(|decision| {
+            read_optional_string_from_object(decision, "followupText")
+                .or_else(|| read_optional_string_from_object(decision, "followup_text"))
+        });
+    if let Some(text) = decision_text {
+        return text;
+    }
+    let ops = execution
+        .get("followup")
+        .and_then(Value::as_object)
+        .and_then(|followup| followup.get("injection"))
+        .and_then(Value::as_object)
+        .and_then(|injection| injection.get("ops"))
+        .and_then(Value::as_array);
+    if let Some(ops) = ops {
+        for op in ops.iter().rev() {
+            let Some(record) = op.as_object() else {
+                continue;
+            };
+            let Some("append_user_text") = record.get("op").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(text) = read_optional_string_from_object(record, "text") {
+                return text;
+            }
+        }
+    }
+    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。".to_string()
+}
+
+fn read_stop_message_assistant_stop_text(execution: &Value) -> Option<String> {
+    execution
+        .get("context")
+        .and_then(Value::as_object)
+        .and_then(|context| read_optional_string_from_object(context, "assistantStopText"))
+}
+
+fn read_stop_message_loop_number(execution: &Value, key: &'static str) -> Option<u32> {
+    let context = execution.get("context").and_then(Value::as_object);
+    read_runtime_metadata_from_execution(execution, context)
+        .and_then(|runtime| runtime.get("serverToolLoopState"))
+        .and_then(Value::as_object)
+        .and_then(|loop_state| loop_state.get(key))
+        .and_then(read_js_nonnegative_u32)
+}
+
+fn read_js_nonnegative_u32(value: &Value) -> Option<u32> {
+    let number = value.as_f64()?;
+    if !number.is_finite() {
+        return None;
+    }
+    let floored = number.floor().max(0.0);
+    if floored > u32::MAX as f64 {
+        Some(u32::MAX)
+    } else {
+        Some(floored as u32)
+    }
+}
+
+fn read_runtime_metadata_from_execution<'a>(
+    execution: &'a Value,
+    context: Option<&'a Map<String, Value>>,
+) -> Option<&'a Map<String, Value>> {
+    if let Some(context) = context.filter(|context| {
+        context
+            .get("serverToolLoopState")
+            .and_then(Value::as_object)
+            .is_some()
+    }) {
+        return Some(context);
+    }
+    if let Some(rt) = execution
+        .get("followup")
+        .and_then(Value::as_object)
+        .and_then(|followup| followup.get("metadata"))
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("__rt"))
+        .and_then(Value::as_object)
+    {
+        return Some(rt);
+    }
+    context
+}
+
+fn read_assistant_stop_text_from_chat(chat: &Value) -> Option<String> {
+    let mut out = Vec::new();
+    if let Some(choices) = chat.get("choices").and_then(Value::as_array) {
+        for choice in choices {
+            if let Some(content) = choice
+                .get("message")
+                .and_then(Value::as_object)
+                .and_then(|message| message.get("content"))
+            {
+                collect_text_from_content_parts(content, &mut out);
+            }
+        }
+    }
+    if let Some(output) = chat.get("output").and_then(Value::as_array) {
+        for item in output {
+            if let Some(content) = item.as_object().and_then(|record| record.get("content")) {
+                collect_text_from_content_parts(content, &mut out);
+            }
+        }
+    }
+    let joined = out.join("\n").trim().to_string();
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+fn collect_text_from_content_parts(value: &Value, out: &mut Vec<String>) {
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        out.push(text.to_string());
+        return;
+    }
+    let Some(parts) = value.as_array() else {
+        return;
+    };
+    for part in parts {
+        if let Some(text) = part.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+            out.push(text.to_string());
+            continue;
+        }
+        let Some(record) = part.as_object() else {
+            continue;
+        };
+        let text = read_optional_string_from_object(record, "text")
+            .or_else(|| read_optional_string_from_object(record, "output_text"))
+            .or_else(|| read_optional_string_from_object(record, "content"));
+        if let Some(text) = text {
+            out.push(text);
+        }
+    }
+}
+
+fn read_optional_string_from_object(object: &Map<String, Value>, field: &str) -> Option<String> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
@@ -994,5 +1215,115 @@ mod tests {
         let raw = json!({"toolName": "servertool_fixture", "flowId": "servertool_cli_projection"});
         let parsed = validate_client_exec_command_result(&raw.to_string()).expect("valid result");
         assert_eq!(parsed["toolName"], "servertool_fixture");
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_uses_decision_and_context_loop_state() {
+        let seed = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "assistantStopText": "停止原因：会被剥离\nvisible stop summary",
+                    "decision": { "followupText": "decision followup" },
+                    "serverToolLoopState": {
+                        "repeatCount": 2,
+                        "maxRepeats": 4
+                    }
+                }
+            }),
+            final_chat_response: json!({}),
+        })
+        .expect("seed");
+        assert_eq!(seed.flow_id, "stop_message_flow");
+        assert_eq!(seed.continuation_prompt, "decision followup");
+        assert_eq!(seed.reasoning_text, "visible stop summary");
+        assert_eq!(seed.repeat_count, 2);
+        assert_eq!(seed.max_repeats, 4);
+        assert_eq!(seed.input["continuationPrompt"], "decision followup");
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_uses_last_injection_and_runtime_metadata_loop_state() {
+        let seed = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "followup": {
+                    "injection": {
+                        "ops": [
+                            { "op": "append_user_text", "text": "old followup" },
+                            { "op": "append_user_text", "text": "new followup" }
+                        ]
+                    },
+                    "metadata": {
+                        "__rt": {
+                            "serverToolLoopState": {
+                                "repeatCount": 1,
+                                "maxRepeats": 3
+                            }
+                        }
+                    }
+                }
+            }),
+            final_chat_response: json!({
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                { "type": "text", "text": "assistant from chat" }
+                            ]
+                        }
+                    }
+                ]
+            }),
+        })
+        .expect("seed");
+        assert_eq!(seed.continuation_prompt, "new followup");
+        assert_eq!(seed.reasoning_text, "assistant from chat");
+        assert_eq!(seed.repeat_count, 1);
+        assert_eq!(seed.max_repeats, 3);
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_floors_js_loop_numbers() {
+        let seed = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "decision": { "followupText": "continue" },
+                    "serverToolLoopState": {
+                        "repeatCount": 1.9,
+                        "maxRepeats": 3.8
+                    }
+                }
+            }),
+            final_chat_response: json!({ "choices": [{ "message": { "content": "summary" } }] }),
+        })
+        .expect("seed");
+        assert_eq!(seed.repeat_count, 1);
+        assert_eq!(seed.max_repeats, 3);
+        assert_eq!(seed.input["repeatCount"], 1);
+        assert_eq!(seed.input["maxRepeats"], 3);
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_fails_fast_for_invalid_budget() {
+        let err = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "decision": { "followupText": "continue" },
+                    "serverToolLoopState": {
+                        "repeatCount": 4,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            final_chat_response: json!({ "choices": [{ "message": { "content": "summary" } }] }),
+        })
+        .expect_err("invalid budget must fail");
+        assert_eq!(
+            err,
+            ServertoolCliError::InvalidField("repeatCount/maxRepeats")
+        );
     }
 }

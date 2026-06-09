@@ -120,6 +120,44 @@ owners:
       - TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO.
       - Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS.
 
+  - feature_id: hub.servertool_engine_selection
+    status: active
+    summary: servertool primary auto-hook first pass and rerun selection planning
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
+    canonical_types:
+      - EngineSelectionStartInput
+      - EngineSelectionStartPlan
+      - EngineSelectionAfterRunInput
+      - EngineSelectionAfterRunPlan
+      - EngineSelectionAction
+    canonical_builders:
+      - plan_engine_selection_start
+      - plan_engine_selection_after_run
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts
+      - tests/servertool/engine-selection-block.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/engine-selection-block.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - servertool-core owns whether to run default engine, run primary auto hooks first, return current result, or rerun excluding primary hooks.
+      - TS engine-selection-block may only read skeleton queue config, call native plans, and execute the planned runEngine calls.
+      - Do not restore local `primaryAutoHookIds.length`, `engineResult.mode`, or `!engineResult.execution` selection policy in TS.
+
   - feature_id: hub.servertool_cli_projection
     status: active
     summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input
@@ -156,6 +194,41 @@ owners:
       - CLI execution path must not call server-side followup/reenter for migrated flows.
       - `apply_patch` is excluded; it remains native/freeform client tooling.
       - `servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted.
+
+  - feature_id: hub.servertool_stopless_cli_projection_seed
+    status: active
+    summary: stop_message_auto stopless CLI projection seed planning
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+    canonical_types:
+      - StopMessageCliProjectionSeedInput
+      - StopMessageCliProjectionSeed
+    canonical_builders:
+      - plan_stop_message_cli_projection_seed
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/servertool-cli-projection.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/servertool-cli-projection.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - servertool-core owns stopless CLI projection seed planning for continuationPrompt, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction.
+      - TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell.
+      - Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS.
 
   - feature_id: hub.servertool_flow_presentation
     status: active

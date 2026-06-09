@@ -47,6 +47,7 @@ const RUST_SERVERTOOL_LOOP_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-cor
 const RUST_SERVERTOOL_ORCHESTRATION_POLICY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`;
 const RUST_SERVERTOOL_PENDING_SESSION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs`;
 const RUST_SERVERTOOL_PRE_COMMAND = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`;
+const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs`;
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
@@ -54,6 +55,7 @@ const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
 const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
 const TS_PRE_COMMAND_HOOKS = `${SERVERTOOL_TS_DIR}/pre-command-hooks.ts`;
+const TS_ENGINE_SELECTION = `${SERVERTOOL_TS_DIR}/engine-selection-block.ts`;
 const TS_FLOW_PRESENTATION = `${SERVERTOOL_TS_DIR}/flow-presentation-block.ts`;
 const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
@@ -2161,6 +2163,110 @@ function checkPreCommandHooksRustOwner() {
   );
 }
 
+function checkEngineSelectionRustOwner() {
+  const rustEngineSelection = readRequired(RUST_SERVERTOOL_ENGINE_SELECTION);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const engineSelectionShell = readRequired(TS_ENGINE_SELECTION);
+
+  for (const needle of [
+    'feature_id: hub.servertool_engine_selection',
+    'pub struct EngineSelectionStartInput',
+    'pub struct EngineSelectionStartPlan',
+    'pub struct EngineSelectionAfterRunInput',
+    'pub struct EngineSelectionAfterRunPlan',
+    'pub enum EngineSelectionAction',
+    'pub fn plan_engine_selection_start',
+    'pub fn plan_engine_selection_after_run',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-rust-owner',
+      RUST_SERVERTOOL_ENGINE_SELECTION,
+      rustEngineSelection,
+      needle
+    );
+  }
+  assertContains(
+    'servertool-engine-selection-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod engine_selection_contract'
+  );
+  for (const needle of [
+    'plan_engine_selection_start_json',
+    'plan_engine_selection_after_run_json',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-native-export',
+      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+      napiBlocks,
+      needle
+    );
+  }
+  for (const needle of [
+    'pub fn plan_engine_selection_start_json',
+    'pub fn plan_engine_selection_after_run_json',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-native-export',
+      RUST_ROUTER_HOTPATH_NAPI_LIB,
+      napiLib,
+      needle
+    );
+  }
+  for (const needle of [
+    'planEngineSelectionStartJson',
+    'planEngineSelectionAfterRunJson',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-required-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      needle
+    );
+  }
+  for (const needle of [
+    'planEngineSelectionStartWithNative',
+    'planEngineSelectionAfterRunWithNative',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-native-bridge',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+    assertContains(
+      'servertool-engine-selection-ts-thin-shell',
+      TS_ENGINE_SELECTION,
+      engineSelectionShell,
+      needle
+    );
+  }
+  for (const keyword of [
+    'primaryAutoHookIds.length',
+    'engineResult.mode',
+    '!engineResult.execution',
+    "mode === 'passthrough'",
+    'disableToolCallHandlers: true',
+    'includeAutoHookIds: primaryAutoHookIds',
+    'excludeAutoHookIds: primaryAutoHookIds',
+  ]) {
+    if (engineSelectionShell.includes(keyword)) {
+      fail(
+        'servertool-engine-selection-no-ts-owner',
+        `Forbidden TS engine selection semantic "${keyword}" found in engine-selection-block.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-engine-selection-no-ts-owner',
+    'engine-selection-block.ts is native-plan shell for primary hook first-pass and rerun decisions'
+  );
+}
+
 function checkServertoolFlowPresentationRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   const flowPresentationShell = readRequired(TS_FLOW_PRESENTATION);
@@ -2962,7 +3068,7 @@ function checkStopVisibleTextRustOwner() {
     'stop-visible-text-thin-shell',
     `${SERVERTOOL_TS_DIR}/engine.ts`,
     servertoolEngine,
-    'stripStopSchemaControlTextWithNative'
+    'planStopMessageCliProjectionSeedWithNative'
   );
 
   for (const [file, content] of [
@@ -2985,6 +3091,49 @@ function checkStopVisibleTextRustOwner() {
     }
   }
   pass('stop-visible-text-rust-owner', 'servertool-core owns stop_schema visible text cleanup');
+}
+
+// ── Check 15c: stopless CLI projection seed has Rust owner ────
+function checkStopMessageCliProjectionSeedRustOwner() {
+  const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const servertoolEngine = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+
+  for (const [check, file, content, needle] of [
+    ['stop-message-cli-projection-seed-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn plan_stop_message_cli_projection_seed'],
+    ['stop-message-cli-projection-seed-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stop_message_cli_projection_seed_json'],
+    ['stop-message-cli-projection-seed-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stop_message_cli_projection_seed_json'],
+    ['stop-message-cli-projection-seed-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStopMessageCliProjectionSeedJson'],
+    ['stop-message-cli-projection-seed-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStopMessageCliProjectionSeedWithNative'],
+    ['stop-message-cli-projection-seed-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine, 'planStopMessageCliProjectionSeedWithNative'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
+
+  for (const keyword of [
+    'function readStopMessageFollowupText',
+    'function readStopMessageAssistantStopText',
+    'function readAssistantStopTextFromChat',
+    'function collectTextFromContentParts',
+    'function readStopMessageRuntimeMetadata',
+    'function readStopMessageLoopNumber',
+    'stripStopSchemaControlTextWithNative',
+    'Number.isFinite(value)',
+    'Math.floor(value)',
+    '继续完成当前用户目标。若仍需操作',
+    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。',
+  ]) {
+    if (servertoolEngine.includes(keyword)) {
+      fail(
+        'stop-message-cli-projection-seed-no-ts-owner',
+        `Forbidden TS stopless projection seed semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/engine.ts`
+      );
+    }
+  }
+  pass('stop-message-cli-projection-seed-rust-owner', 'servertool-core owns stopless CLI projection seed planning');
 }
 
 // ── Check 16: servertool CLI result guard has Rust owner ──────
@@ -3134,10 +3283,12 @@ checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
 checkPendingSessionRustOwner();
 checkPreCommandHooksRustOwner();
+checkEngineSelectionRustOwner();
 checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();
+checkStopMessageCliProjectionSeedRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
 

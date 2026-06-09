@@ -21,7 +21,7 @@ import {
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
 import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
-import { stripStopSchemaControlTextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { planStopMessageCliProjectionSeedWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -82,129 +82,6 @@ type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
 
-function readStopMessageFollowupText(execution: NonNullable<ServerToolEngineResult['execution']>): string {
-  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? execution.context as Record<string, unknown>
-    : undefined;
-  const decision = context?.decision && typeof context.decision === 'object' && !Array.isArray(context.decision)
-    ? context.decision as Record<string, unknown>
-    : undefined;
-  const decisionText = typeof decision?.followupText === 'string'
-    ? decision.followupText.trim()
-    : typeof decision?.followup_text === 'string'
-      ? decision.followup_text.trim()
-      : '';
-  if (decisionText) {
-    return decisionText;
-  }
-  const followup = execution.followup && typeof execution.followup === 'object' && !Array.isArray(execution.followup)
-    ? execution.followup as Record<string, unknown>
-    : undefined;
-  const injection = followup?.injection && typeof followup.injection === 'object' && !Array.isArray(followup.injection)
-    ? followup.injection as Record<string, unknown>
-    : undefined;
-  const ops = Array.isArray(injection?.ops) ? injection.ops : [];
-  for (let index = ops.length - 1; index >= 0; index -= 1) {
-    const op = ops[index];
-    if (!op || typeof op !== 'object' || Array.isArray(op)) continue;
-    const record = op as Record<string, unknown>;
-    if (record.op !== 'append_user_text') continue;
-    const text = typeof record.text === 'string' ? record.text.trim() : '';
-    if (text) return text;
-  }
-  return '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。';
-}
-
-function readStopMessageAssistantStopText(execution: NonNullable<ServerToolEngineResult['execution']>): string {
-  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? execution.context as Record<string, unknown>
-    : undefined;
-  const text = typeof context?.assistantStopText === 'string' ? context.assistantStopText.trim() : '';
-  return text;
-}
-
-function collectTextFromContentParts(value: unknown, out: string[]): void {
-  if (typeof value === 'string') {
-    const text = value.trim();
-    if (text) out.push(text);
-    return;
-  }
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (typeof part === 'string') {
-      const text = part.trim();
-      if (text) out.push(text);
-      continue;
-    }
-    const record = part && typeof part === 'object' && !Array.isArray(part)
-      ? part as Record<string, unknown>
-      : undefined;
-    const text = typeof record?.text === 'string'
-      ? record.text
-      : typeof record?.output_text === 'string'
-        ? record.output_text
-        : typeof record?.content === 'string'
-          ? record.content
-          : '';
-    const trimmed = text.trim();
-    if (trimmed) out.push(trimmed);
-  }
-}
-
-function readAssistantStopTextFromChat(chat: unknown): string {
-  const row = chat && typeof chat === 'object' && !Array.isArray(chat)
-    ? chat as Record<string, unknown>
-    : undefined;
-  if (!row) return '';
-  const texts: string[] = [];
-  const choices = Array.isArray(row.choices) ? row.choices : [];
-  for (const choice of choices) {
-    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice)
-      ? choice as Record<string, unknown>
-      : undefined;
-    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
-      ? choiceRow.message as Record<string, unknown>
-      : undefined;
-    collectTextFromContentParts(message?.content, texts);
-  }
-  const output = Array.isArray(row.output) ? row.output : [];
-  for (const item of output) {
-    const itemRow = item && typeof item === 'object' && !Array.isArray(item)
-      ? item as Record<string, unknown>
-      : undefined;
-    collectTextFromContentParts(itemRow?.content, texts);
-  }
-  return texts.join('\n').trim();
-}
-
-function readStopMessageRuntimeMetadata(execution: NonNullable<ServerToolEngineResult['execution']>): Record<string, unknown> | undefined {
-  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? execution.context as Record<string, unknown>
-    : undefined;
-  if (context?.serverToolLoopState && typeof context.serverToolLoopState === 'object' && !Array.isArray(context.serverToolLoopState)) {
-    return context;
-  }
-  const followup = execution.followup && typeof execution.followup === 'object' && !Array.isArray(execution.followup)
-    ? execution.followup as Record<string, unknown>
-    : undefined;
-  const metadata = followup?.metadata && typeof followup.metadata === 'object' && !Array.isArray(followup.metadata)
-    ? followup.metadata as Record<string, unknown>
-    : undefined;
-  const rt = metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? metadata.__rt as Record<string, unknown>
-    : undefined;
-  return rt ?? context;
-}
-
-function readStopMessageLoopNumber(execution: NonNullable<ServerToolEngineResult['execution']>, key: 'repeatCount' | 'maxRepeats'): number | undefined {
-  const runtime = readStopMessageRuntimeMetadata(execution);
-  const loopState = runtime?.serverToolLoopState && typeof runtime.serverToolLoopState === 'object' && !Array.isArray(runtime.serverToolLoopState)
-    ? runtime.serverToolLoopState as Record<string, unknown>
-    : undefined;
-  const value = loopState?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
-}
-
 function isStopMessageTerminalFinal(execution: NonNullable<ServerToolEngineResult['execution']>): boolean {
   const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
     ? execution.context as Record<string, unknown>
@@ -220,34 +97,24 @@ function buildStopMessageCliProjectionResult(args: {
   totalSteps: number;
   logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
 }): ServerToolOrchestrationResult {
-  const continuationPrompt = readStopMessageFollowupText(args.execution);
-  const assistantStopTextRaw =
-    readStopMessageAssistantStopText(args.execution) ||
-    readAssistantStopTextFromChat(args.finalChatResponse) ||
-    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
-  const assistantStopText =
-    stripStopSchemaControlTextWithNative(assistantStopTextRaw) ||
-    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。';
-  const repeatCount = readStopMessageLoopNumber(args.execution, 'repeatCount') ?? 0;
-  const maxRepeats = readStopMessageLoopNumber(args.execution, 'maxRepeats') ?? 1;
+  const seed = planStopMessageCliProjectionSeedWithNative({
+    execution: args.execution,
+    finalChatResponse: args.finalChatResponse
+  });
   const projection = buildServertoolCliProjectionForAutoFlow({
     options: args.options,
-    flowId: args.flowId,
-    reasoningText: assistantStopText,
-    stdoutPreview: continuationPrompt,
-    input: {
-      continuationPrompt,
-      repeatCount,
-      maxRepeats
-    }
+    flowId: seed.flowId,
+    reasoningText: seed.reasoningText,
+    stdoutPreview: seed.continuationPrompt,
+    input: seed.input as JsonObject
   });
   args.logProgress(5, args.totalSteps, 'completed (stop_message_auto cli projection; no reenter)', {
-    flowId: args.flowId
+    flowId: seed.flowId
   });
   return {
     chat: projection.chatResponse,
     executed: true,
-    flowId: args.flowId
+    flowId: seed.flowId
   };
 }
 
