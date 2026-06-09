@@ -39,6 +39,28 @@ function makeToolCallResponse(): JsonObject {
 }
 
 describe('server-side-tools tool-error closed loop', () => {
+  test('fails fast through native client-disconnect policy before servertool execution', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-servertool-disconnected-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      clientDisconnected: ' true '
+    } as any;
+
+    await expect(
+      runServerSideToolEngine({
+        chatResponse: makeToolCallResponse(),
+        adapterContext,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-servertool-disconnected-1',
+        providerProtocol: 'openai-responses'
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      details: { requestId: 'req-servertool-disconnected-1' }
+    });
+  });
+
   test('returns retryable tool error output on servertool handler failure instead of aborting the whole request', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-servertool-failfast-1',

@@ -18518,3 +18518,11 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Strengthened `verify:servertool-rust-only` so `skeleton-config.ts` fails if `buildServertoolProgressConfig`, `progressConfig:`, `toolNameByFlowId:`, or `goldHighlightFlowIds:` returns.
 - Verification PASS: `npm run verify:servertool-rust-only`; focused Jest `server-side-tools.auto-hook-config`, `servertool-skeleton-reasoning-stop-flows`, `servertool-progress-logging` = 7 passed + 3 skipped; root `npx tsc --noEmit --pretty false`; `git diff --check`.
 - Boundary: unrelated dirty `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs` was not staged or modified by this slice.
+2026-06-09 5555 perf probe: /v1/responses 5555=10.865596s, 5520=10.694407s; both mapped to default route -> 1token.key1.gpt-5.5; issue not 5555-only, likely shared upstream/provider latency.
+
+2026-06-09 servertool server-side-tools client-disconnect residue cleanup:
+- Dirty slice review found `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` still carried local adapter client-disconnect scanning (`clientConnectionState.disconnected`, `clientDisconnected`, string truth parsing) even after timeout/disconnect policy moved to `servertool-core::orchestration_policy_contract`.
+- Removed the local `isClientDisconnected` function and changed the engine preflight to call `isAdapterClientDisconnected` from `timeout-error-block.ts`, which is the native wrapper over Rust `is_adapter_client_disconnected`.
+- Added `tests/servertool/server-side-tools.failfast.spec.ts` coverage for fail-fast before handler execution when Rust/native policy detects adapter disconnect.
+- Strengthened `scripts/verify-servertool-rust-only.mjs` so `server-side-tools.ts` must import the native timeout-error shell and must not restore `isClientDisconnected`, local client connection fields, or local string truth parsing.
+- Updated function/verification maps for `hub.servertool_orchestration_policy` to include `server-side-tools.ts` as a consumer shell and `server-side-tools.failfast.spec.ts` as an integration gate.

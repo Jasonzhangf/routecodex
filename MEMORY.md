@@ -2714,3 +2714,10 @@ Tags: virtual-router, native-wrapper, dead-code, zero-consumer, rust-owner, resi
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` keeps the deleted files absent and rejects restored package scripts referencing `verify:shadow-gate`, `check-shadow-coverage-gate`, `verify-shadow-gate-all`, `promote-shadow-module`, `rust-migration-modules.json`, or `run-ci-coverage`.
 - Verified on 2026-06-09: focused residue Jest 111/111, llmswitch-core tsc/build, root tsc, bridge protocol blackbox 10/10, and `git diff --check` all passed.
 Tags: rust-migration, shadow-gate, dead-code, manifest-governance, residue-gate, 2026-06-09
+
+## 2026-06-09 Servertool server-side engine client-disconnect Rust owner
+- `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` no longer owns adapter client-disconnect scanning. Its engine preflight calls `isAdapterClientDisconnected` from `timeout-error-block.ts`, which delegates to Rust `servertool-core::orchestration_policy_contract::is_adapter_client_disconnected`.
+- Do not restore local `isClientDisconnected`, `clientConnectionState.disconnected` scanning, `clientDisconnected` scanning, or string truth parsing in `server-side-tools.ts`; `scripts/verify-servertool-rust-only.mjs` blocks those residues.
+- Function/verification map entry `hub.servertool_orchestration_policy` includes `server-side-tools.ts` as a TS consumer shell and `tests/servertool/server-side-tools.failfast.spec.ts` as the integration gate.
+- Verified on 2026-06-09: Rust fmt check, `cargo test -p servertool-core orchestration_policy --lib -- --nocapture` 7/7, `npm run verify:servertool-rust-only`, `npm run verify:function-map-compile-gate`, focused Jest `server-side-tools.failfast` + `timeout-error-block` 7/7, root `npx tsc --noEmit --pretty false`, and `git diff --check`.
+Tags: servertool, client-disconnect, orchestration-policy, rust-owner, thin-shell, residue-gate, 2026-06-09

@@ -1652,6 +1652,31 @@ function checkOrchestrationPolicyRustOwner() {
       needle
     );
   }
+  assertContains(
+    'server-side-tools-client-disconnect-native-shell',
+    TS_SERVER_SIDE_TOOLS,
+    readRequired(TS_SERVER_SIDE_TOOLS),
+    "from './timeout-error-block.js'"
+  );
+  const serverSideToolsClientDisconnectBlock = extractFunctionBlock(readRequired(TS_SERVER_SIDE_TOOLS), 'isClientDisconnected');
+  if (serverSideToolsClientDisconnectBlock) {
+    fail(
+      'server-side-tools-client-disconnect-native-shell',
+      'server-side-tools.ts must not restore local isClientDisconnected; use timeout-error native wrapper'
+    );
+  }
+  for (const keyword of [
+    'clientConnectionState',
+    'clientDisconnected',
+    "trim().toLowerCase() === 'true'",
+  ]) {
+    if (readRequired(TS_SERVER_SIDE_TOOLS).includes(keyword)) {
+      fail(
+        'server-side-tools-client-disconnect-native-shell',
+        `Forbidden server-side-tools TS client disconnect semantic "${keyword}" found`
+      );
+    }
+  }
   pass('servertool-timeout-error-ts-thin-shell', 'timeout-error-block.ts consumes Rust timeout/disconnect/error plans only');
   pass('servertool-orchestration-policy-rust-owner', 'servertool-core owns orchestration policy parsing and compaction');
 }

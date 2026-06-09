@@ -173,8 +173,10 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
       - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/server-side-tools.failfast.spec.ts
       - tests/servertool/timeout-error-block.spec.ts
       - docs
     forbidden_paths:
@@ -192,6 +194,7 @@ owners:
     notes:
       - servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution.
       - TS orchestration-policy-block may only read env/arguments and call native wrappers.
+      - TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning.
       - TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.
       - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.
 

@@ -38,6 +38,7 @@ import {
 } from './orchestration-blocks.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import { isStopEligibleForServerTool } from './stop-gateway-context.js';
+import { isAdapterClientDisconnected } from './timeout-error-block.js';
 
 type AutoHookQueueName = 'A_optional' | 'B_mandatory';
 type AutoHookDescriptor = ReturnType<typeof listAutoServerToolHooks>[number];
@@ -68,7 +69,7 @@ export async function runServerSideToolEngine(
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
 
-  if (isClientDisconnected(options.adapterContext)) {
+  if (isAdapterClientDisconnected(options.adapterContext)) {
     throw Object.assign(new Error('[servertool] client disconnected before servertool execution'), {
       code: 'SERVERTOOL_CLIENT_DISCONNECTED',
       details: { requestId: options.requestId }
@@ -285,30 +286,6 @@ function getArray(value: unknown): JsonValue[] {
 
 export function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function isClientDisconnected(adapterContext: AdapterContext): boolean {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return false;
-  }
-  const state = (adapterContext as { clientConnectionState?: unknown }).clientConnectionState;
-  if (state && typeof state === 'object' && !Array.isArray(state)) {
-    const disconnected = (state as { disconnected?: unknown }).disconnected;
-    if (disconnected === true) {
-      return true;
-    }
-    if (typeof disconnected === 'string' && disconnected.trim().toLowerCase() === 'true') {
-      return true;
-    }
-  }
-  const raw = (adapterContext as { clientDisconnected?: unknown }).clientDisconnected;
-  if (raw === true) {
-    return true;
-  }
-  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'true') {
-    return true;
-  }
-  return false;
 }
 
 export function extractTextFromChatLike(payload: JsonObject): string {
