@@ -8,6 +8,7 @@
 //! - `backend_route_contract`: backend-route outcome policy contract
 
 pub mod backend_route_contract;
+pub mod blocked_report_contract;
 pub mod cli_contract;
 pub mod cli_result_guard;
 pub mod engine_selection_contract;

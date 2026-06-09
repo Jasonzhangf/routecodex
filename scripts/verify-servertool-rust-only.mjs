@@ -57,6 +57,7 @@ const RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN = `${ROOT}/sharedmodule/llmswitc
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
+const RUST_SERVERTOOL_BLOCKED_REPORT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/blocked_report_contract.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
 const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
@@ -85,6 +86,7 @@ const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-au
 const STOPLESS_GOAL_STATE_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stopless-goal-state.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
+const STOP_MESSAGE_BLOCKED_REPORT = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/blocked-report.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
 const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
 const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
@@ -3656,6 +3658,57 @@ function checkStoplessGoalStateSyncRustOwner() {
   pass('stopless-goal-state-sync-rust-owner', 'servertool-core owns stopless goal directive sync and rewrite planning');
 }
 
+// ── Check 15f: stop blocked-report parser has Rust owner ──────
+function checkStopMessageBlockedReportRustOwner() {
+  const rustBlockedReport = readRequired(RUST_SERVERTOOL_BLOCKED_REPORT);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const tsBlockedReport = readRequired(STOP_MESSAGE_BLOCKED_REPORT);
+
+  assertContains(
+    'stop-message-blocked-report-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod blocked_report_contract'
+  );
+  for (const needle of [
+    'pub fn extract_blocked_report_from_messages',
+    'pub fn extract_captured_message_text',
+    'pub fn extract_text_from_message_content',
+    'StopMessageBlockedReport',
+  ]) {
+    assertContains(
+      'stop-message-blocked-report-rust-owner',
+      RUST_SERVERTOOL_BLOCKED_REPORT,
+      rustBlockedReport,
+      needle
+    );
+  }
+  if (!tsBlockedReport.includes('extractBlockedReportFromMessages')) {
+    fail(
+      'stop-message-blocked-report-ts-migration-pending',
+      'blocked-report.ts must either stay as a callable native thin wrapper or be physically deleted after native wiring'
+    );
+  }
+  for (const keyword of [
+    'function extractUnknownText',
+    'function extractBlockedReportFromText',
+    'function normalizeBlockedReport',
+    'function extractJsonCodeBlocks',
+    'function extractBalancedJsonObjectStrings',
+  ]) {
+    if (tsBlockedReport.includes(keyword)) {
+      warn(
+        'stop-message-blocked-report-ts-migration-pending',
+        `TS blocked-report semantic remains pending native bridge deletion: ${keyword}`
+      );
+    }
+  }
+  pass(
+    'stop-message-blocked-report-rust-owner',
+    'servertool-core owns blocked-report parser contract; TS semantic deletion is tracked'
+  );
+}
+
 // ── Check 16: servertool CLI result guard has Rust owner ──────
 function checkServertoolCliResultGuardRustOwner() {
   const rustCliResultGuard = readRequired(RUST_SERVERTOOL_CLI_RESULT_GUARD);
@@ -3867,6 +3920,7 @@ checkStopVisibleTextRustOwner();
 checkStopMessageCliProjectionSeedRustOwner();
 checkStoplessOrchestrationActionRustOwner();
 checkStoplessGoalStateSyncRustOwner();
+checkStopMessageBlockedReportRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();
