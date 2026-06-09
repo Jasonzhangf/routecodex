@@ -18718,3 +18718,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline heavy-input fastpath dead export removal:
 - Exact scan found `hub_req_inbound_unified_fastpath.rs` was only referenced by `lib.rs` module declaration for `decideHeavyInputFastpathJson`; TS had only `decideHeavyInputFastpath` wrapper/parser and a wrapper-only test, with no runtime consumer.
 - Removed the Rust module, NAPI required export, TS wrapper/parser, and wrapper-only Jest test; added residue gate to block `decideHeavyInputFastpathJson` / wrapper/parser/test/module revival.
+
+2026-06-09 HubPipeline provider-key native parser dead export removal:
+- Exact scan found `parseProviderKeyJson` only fed TS `analyzeProviderKey`, `parseProviderKeyPayload`, the required-export list, and `virtual_router_provider_key.rs`; no runtime consumer imported the wrapper.
+- Removed the Rust module, NAPI required export, TS wrapper/parser/type; added residue gate to block `parseProviderKeyJson` / `analyzeProviderKey` / parser/type/module revival.

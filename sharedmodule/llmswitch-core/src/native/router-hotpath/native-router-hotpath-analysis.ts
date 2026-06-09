@@ -38,12 +38,6 @@ export type ClockClearDirectivePayload = {
   next: string;
 };
 
-export type ProviderKeyParsePayload = {
-  providerId: string | null;
-  alias: string | null;
-  keyIndex?: number;
-};
-
 export type ServertoolResponseStageToolCallPayload = {
   id: string;
   name: string;
@@ -280,38 +274,6 @@ export function parseStopMessagePersistedLookupPlanPayload(raw: string): StopMes
     lookupPolicy: parsed.lookupPolicy,
     readStopMessageSnapshot: parsed.readStopMessageSnapshot,
     readStopMessageTombstone: parsed.readStopMessageTombstone
-  };
-}
-
-export function parseProviderKeyPayload(raw: string): ProviderKeyParsePayload | null {
-  const parsed = parseJson('parseProviderKeyPayload', raw) as {
-    providerId?: unknown;
-    alias?: unknown;
-    keyIndex?: unknown;
-  } | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object') {
-    return null;
-  }
-  const providerId =
-    typeof parsed.providerId === 'string'
-      ? parsed.providerId
-      : parsed.providerId === null
-        ? null
-        : null;
-  const alias =
-    typeof parsed.alias === 'string'
-      ? parsed.alias
-      : parsed.alias === null
-        ? null
-        : null;
-  const keyIndex =
-    typeof parsed.keyIndex === 'number' && Number.isFinite(parsed.keyIndex)
-      ? Math.floor(parsed.keyIndex)
-      : undefined;
-  return {
-    providerId,
-    alias,
-    ...(keyIndex !== undefined ? { keyIndex } : {})
   };
 }
 

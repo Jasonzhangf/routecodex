@@ -107,7 +107,6 @@ mod streaming_tool_extractor;
 mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
-mod virtual_router_provider_key;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod virtual_router_stop_message_state_codec;

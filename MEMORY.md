@@ -2916,3 +2916,9 @@ Tags: hub-pipeline, provider-response, sse-materialization, public-surface, dead
 - Removed the Rust module, `decideHeavyInputFastpathJson` required export, TS `decideHeavyInputFastpath` wrapper, parser type/function, and `tests/sharedmodule/native-router-heavy-input-fastpath.spec.ts`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the native export/wrapper/parser/test and Rust module from returning.
 Tags: hub-pipeline, heavy-input-fastpath, dead-code, napi-export, rust-owned-semantics, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline provider-key native parser dead export removed
+- Exact scan found `parseProviderKeyJson` only fed TS `analyzeProviderKey`, `parseProviderKeyPayload`, the required-export list, and `virtual_router_provider_key.rs`; no runtime consumer imported the wrapper.
+- Removed `virtual_router_provider_key.rs`, its `lib.rs` module declaration, `parseProviderKeyJson` required export, TS `analyzeProviderKey` wrapper, parser type/function.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native wrapper/parser/export names from returning.
+Tags: hub-pipeline, provider-key, dead-code, napi-export, residue-gate, 2026-06-09

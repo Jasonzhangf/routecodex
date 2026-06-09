@@ -272,7 +272,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeToolCallIdStyleCandidateJson",
   "parseLenientJsonishJson",
   "parseJsonObjectCandidateJson",
-  "parseProviderKeyJson",
   "parseRccFenceDocumentJson",
   "parseResolvedStopMessageInstructionJson",
   "parseRoutingInstructionKindsJson",

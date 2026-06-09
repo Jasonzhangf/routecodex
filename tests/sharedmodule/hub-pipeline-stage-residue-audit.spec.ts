@@ -1826,6 +1826,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const retiredFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_unified_fastpath.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_provider_key.rs',
     ];
 
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
@@ -1851,6 +1852,7 @@ describe('hub pipeline stage residue audit', () => {
     });
     for (const source of [nativeWrapper, nativeAnalysis, requiredExports]) {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
+      expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
     }
   });
 

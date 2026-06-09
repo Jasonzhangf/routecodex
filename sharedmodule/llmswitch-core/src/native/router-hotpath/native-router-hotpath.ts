@@ -3,8 +3,7 @@ import {
   parseChatProcessMediaStripPayload,
   parseChatWebSearchIntentPayload,
   parseContinueExecutionInjectionPayload,
-  parsePendingToolSyncPayload,
-  parseProviderKeyPayload
+  parsePendingToolSyncPayload
 } from './native-router-hotpath-analysis.js';
 import {
   isNativeDisabledByEnv,
@@ -125,19 +124,6 @@ export function analyzeChatWebSearchIntent(messages: unknown[]): {
   );
   return { ...parsed, source: 'native' };
 }
-
-export function analyzeProviderKey(providerKey: string): {
-  providerId: string | null; alias: string | null; keyIndex?: number; source: 'native'
-} {
-  const parsed = callNativeJson(
-    'parseProviderKeyJson',
-    'parseProviderKeyJson',
-    [String(providerKey || '')],
-    parseProviderKeyPayload
-  );
-  return { ...parsed, source: 'native' };
-}
-
 
 export function sanitizeChatProcessMessagesWithNative(request: Record<string, unknown>): {
     messages: Record<string, unknown>[];
