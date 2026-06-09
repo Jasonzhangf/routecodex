@@ -1217,6 +1217,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 固定顺序：**先 build，再 install，再 restart，再验活**；不要现场猜是 `SIGUSR2`、`start` 还是别的路径。
 - 默认动作补充（2026-05-17）：除非 Jason 明确要求“不全局安装”，凡执行 build/dev/restart 流程都默认包含 `npm run install:global`（rcc/routecodex 全局可执行刷新）再做重启验活。
 - Jason 原地重启纠正规则（2026-04-30）：**优先直接用 `restart`，禁止把 `stop + start` 当成等价替代**；某些端口/child 链路只有 `restart` 才能正确原地重启并吃到本地新代码，`stop` 后再 `start` 会破坏原地续接语义。
+- Runtime 闭环纠偏（2026-06-09）：完成 build/install/restart 后，`/health` 和 `/v1/models` 只算基础验活；必须再做一次真实入口 E2E（优先 `/v1/responses`，`curl --max-time 600`，断言 `status=completed` 与可见输出），否则不能汇报“E2E 已验证”。
 - Release snapshot 精华（2026-04-27）：**release 运行时绝不能直接吃 repo `dist/` 或 npm 全局 symlink**；必须先 `npm run install:release` 生成 `~/.rcc/install/current` 不可变快照，再让端口进程切到该 snapshot。若现网进程仍是 repo 路径，优先 `rcc start --config <cfg> --port <port>` 让 CLI 接管端口并重启到 snapshot，不要继续信任旧进程自重启。
 - Launcher auto-start 生命周期精华（2026-04-27）：`rcc codex/claude` 自动拉起 server 时，必须使用**config-scoped lock + lease**，并在 **ready 超时/启动失败** 时对**本次 spawn 的明确 PID**做主动回收；不能只靠 parent guard 被动善后，否则会留下短时孤儿与启动竞争风暴。
 - 当前项目已验证可复用命令：
