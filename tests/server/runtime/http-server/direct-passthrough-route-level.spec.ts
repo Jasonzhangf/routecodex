@@ -425,7 +425,7 @@ describe('direct passthrough route-level', () => {
     }
   });
 
-  it('router same-protocol direct keeps stop_followup on direct path', async () => {
+  it('router same-protocol direct relays stop_message followup through Hub before direct send', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -437,11 +437,10 @@ describe('direct passthrough route-level', () => {
       providers: {},
     } as any);
 
-    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, data: { object: 'response', id: 'resp_stop_followup_direct' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort');
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_stop_followup_relay' },
     } as any);
     (server as any).userConfig = {
       httpserver: {
@@ -470,11 +469,12 @@ describe('direct passthrough route-level', () => {
         instructions: 'continue',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
       },
-      metadata: { __rt: { serverToolFollowup: true } },
+      metadata: { __rt: { serverToolFollowup: true, followupSource: 'stop_message_auto' } },
     });
 
-    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_stop_followup_direct' });
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_stop_followup_relay' });
   });
 
   it('provider direct keeps stop_followup on direct path', async () => {

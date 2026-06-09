@@ -1,5 +1,13 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-09 stopless router-direct one-shot root cause
+
+- Live symptom reviewed: stopless looked like it ran once then stopped while request usage/log showed `router-direct:*`. Direct/router-direct by contract does not enter Hub response chatprocess/servertool, so stopless continuation cannot trigger after direct send.
+- Fix boundary: do not add a second finish_reason/stop judgment. Rust direct decision now detects stop_message continuation before router-direct send and returns `requiresHubRelay=true`, `reason=stopless_servertool_requires_hub_relay` for `/v1/responses` when payload/metadata contains `stop_message_auto` CLI result, stop_message followup source, or active stopless goal. Generic `serverToolFollowup=true` and non-stop_message followups remain direct.
+- TS changes are bridge/IO only: native direct decision receives metadata; router-mode entry precheck relays to Hub before `executeRouterDirectPipelineForPort`; provider-direct remains direct.
+- Verification PASS: `cargo fmt --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi --check`; `cargo test -p router-hotpath-napi responses_direct_route_decision_tests --lib` 7/7; `npm run verify:responses-direct-tool-shape-contract`; direct payload Jest 14/14; route-level focused Jest 3/3; `npm run verify:servertool-rust-only`; root `npx tsc --noEmit --pretty false`; scoped `git diff --check`.
+- Deployment blocked by unrelated dirty-worktree gates: `npm run install:global` fails at `verify:architecture-feature-map-growth-discipline` because config `feature_id` anchors lack function/verification-map entries; `node scripts/build-core.mjs` / llmswitch-core `tsc` fail because HubPipeline orchestration re-exports reference removed NAPI builder/metadata-policy exports. No restart/live smoke was performed after this fix.
+
 ## 2026-06-09 servertool skeleton-config Rust slice
 
 - 完成 servertool skeleton-config Rust owner 切片：`router-hotpath-napi/src/servertool_skeleton_config.rs` 现在拥有 derived skeleton config、registration spec normalize、tool name alias、auto-hook phase normalize、priority integer parse、tool spec lookup、auto hook queue、pending injection kinds、progress config、followup flow profiles、state config。

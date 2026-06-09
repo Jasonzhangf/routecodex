@@ -53,11 +53,22 @@ fn find_responses_function_call_output_content_violation(payload: &Value) -> Opt
 
 fn evaluate_responses_direct_route_decision(
     payload: &Value,
+    metadata: &Value,
     inbound_protocol: &str,
     apply_patch_mode: &str,
 ) -> Result<Value, String> {
     let _ = apply_patch_mode;
     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
+    if inbound_protocol == "openai-responses"
+        && requires_hub_relay_for_stopless_servertool(payload, metadata)
+    {
+        return Ok(serde_json::json!({
+            "providerWireValid": true,
+            "requiresHubRelay": true,
+            "reason": "stopless_servertool_requires_hub_relay",
+            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+        }));
+    }
     if inbound_protocol == "openai-responses" {
         if let Some(reason) = find_responses_function_call_output_content_violation(payload) {
             return Ok(serde_json::json!({
@@ -74,6 +85,139 @@ fn evaluate_responses_direct_route_decision(
         "reason": null,
         "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
     }))
+}
+
+fn requires_hub_relay_for_stopless_servertool(payload: &Value, metadata: &Value) -> bool {
+    if has_stop_message_cli_result(payload) {
+        return true;
+    }
+    if has_stop_message_cli_result(metadata) {
+        return true;
+    }
+    has_stop_message_followup_marker(metadata)
+}
+
+fn has_stop_message_cli_result(value: &Value) -> bool {
+    let mut seen = 0usize;
+    scan_stop_message_cli_result(value, 0, &mut seen)
+}
+
+fn scan_stop_message_cli_result(value: &Value, depth: usize, seen: &mut usize) -> bool {
+    if depth > 10 {
+        return false;
+    }
+    *seen += 1;
+    if *seen > 2000 {
+        return false;
+    }
+    if is_stop_message_cli_result_object(value) {
+        return true;
+    }
+    if let Some(items) = value.as_array() {
+        return items
+            .iter()
+            .any(|item| scan_stop_message_cli_result(item, depth + 1, seen));
+    }
+    let Some(record) = value.as_object() else {
+        return false;
+    };
+    record
+        .values()
+        .any(|item| scan_stop_message_cli_result(item, depth + 1, seen))
+}
+
+fn is_stop_message_cli_result_object(value: &Value) -> bool {
+    let Some(record) = value.as_object() else {
+        return false;
+    };
+    let type_value = record
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let role = record
+        .get("role")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let tool_result_like = type_value == "function_call_output"
+        || type_value == "tool_result"
+        || type_value == "tool_message"
+        || role == "tool"
+        || record.contains_key("call_id")
+        || record.contains_key("tool_call_id");
+    if !tool_result_like {
+        return false;
+    }
+    let mut parts = Vec::<String>::new();
+    for key in ["output", "content", "text", "arguments"] {
+        collect_direct_stop_message_text(record.get(key), &mut parts);
+    }
+    parts.iter().any(|text| {
+        text.contains("routecodex servertool run stop_message_auto")
+            || (text.contains("\"toolName\"")
+                && text.contains("\"stop_message_auto\"")
+                && text.contains("\"flowId\"")
+                && text.contains("\"stop_message_flow\""))
+    })
+}
+
+fn collect_direct_stop_message_text(value: Option<&Value>, out: &mut Vec<String>) {
+    match value {
+        Some(Value::String(text)) => out.push(text.clone()),
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_direct_stop_message_text(Some(item), out);
+            }
+        }
+        Some(Value::Object(record)) => {
+            collect_direct_stop_message_text(record.get("text"), out);
+            collect_direct_stop_message_text(record.get("output_text"), out);
+            collect_direct_stop_message_text(record.get("content"), out);
+        }
+        _ => {}
+    }
+}
+
+fn has_stop_message_followup_marker(metadata: &Value) -> bool {
+    let Some(root) = metadata.as_object() else {
+        return false;
+    };
+    let rt = root.get("__rt").and_then(Value::as_object);
+    let followup_source = read_trimmed_lower(root.get("followupSource"))
+        .or_else(|| read_trimmed_lower(root.get("serverToolFollowupSource")))
+        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("followupSource"))))
+        .or_else(|| {
+            rt.and_then(|record| read_trimmed_lower(record.get("serverToolFollowupSource")))
+        });
+    if followup_source
+        .as_deref()
+        .is_some_and(|value| value.contains("stop_message") || value.contains("stop-message"))
+    {
+        return true;
+    }
+    let stopless_goal_status = read_trimmed_lower(root.get("stoplessGoalStatus"))
+        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("stoplessGoalStatus"))))
+        .or_else(|| {
+            root.get("stoplessGoalState")
+                .and_then(Value::as_object)
+                .and_then(|record| read_trimmed_lower(record.get("status")))
+        })
+        .or_else(|| {
+            rt.and_then(|record| record.get("stoplessGoalState"))
+                .and_then(Value::as_object)
+                .and_then(|record| read_trimmed_lower(record.get("status")))
+        });
+    stopless_goal_status.as_deref() == Some("active")
+}
+
+fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
+    let text = value?.as_str()?.trim().to_ascii_lowercase();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 #[cfg(test)]
@@ -97,6 +241,7 @@ mod responses_direct_route_decision_tests {
                     }
                 ]
             }),
+            &Value::Null,
             "openai-responses",
             "client",
         )
@@ -121,6 +266,7 @@ mod responses_direct_route_decision_tests {
                     }
                 ]
             }),
+            &Value::Null,
             "openai-responses",
             "client",
         )
@@ -147,6 +293,7 @@ mod responses_direct_route_decision_tests {
                     { "type": "function", "name": "exec_command", "parameters": { "type": "object" } }
                 ]
             }),
+            &Value::Null,
             "openai-responses",
             "client",
         )
@@ -172,6 +319,7 @@ mod responses_direct_route_decision_tests {
                     }
                 ]
             }),
+            &Value::Null,
             "openai-responses",
             "client",
         )
@@ -183,6 +331,76 @@ mod responses_direct_route_decision_tests {
             .as_str()
             .unwrap_or_default()
             .contains("function_call_output must not include content"));
+    }
+
+    #[test]
+    fn stop_message_cli_result_requires_hub_relay_on_responses_direct() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_servertool_cli_1",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+                    }
+                ]
+            }),
+            &Value::Null,
+            "openai-responses",
+            "client",
+        )
+        .expect("stopless CLI result should be a direct decision");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
+    }
+
+    #[test]
+    fn stop_message_followup_metadata_requires_hub_relay_on_responses_direct() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "continue" }] }]
+            }),
+            &serde_json::json!({
+                "__rt": {
+                    "serverToolFollowup": true,
+                    "followupSource": "stop_message_auto"
+                }
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("stopless followup metadata should be a direct decision");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
+    }
+
+    #[test]
+    fn generic_servertool_followup_metadata_does_not_require_hub_relay_on_responses_direct() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "continue" }] }]
+            }),
+            &serde_json::json!({
+                "__rt": {
+                    "serverToolFollowup": true,
+                    "followupSource": "servertool.apply_patch_flow"
+                }
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("generic servertool followup metadata should be a direct decision");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 }
 
@@ -385,11 +603,14 @@ pub fn has_declared_apply_patch_tool_json(payload_json: String) -> napi::Result<
 #[napi_derive::napi]
 pub fn evaluate_responses_direct_route_decision_json(
     payload_json: String,
+    metadata_json: String,
     inbound_protocol_json: String,
     apply_patch_mode_json: String,
 ) -> napi::Result<String> {
     let payload: Value = serde_json::from_str(&payload_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
     let inbound_protocol: Value = serde_json::from_str(&inbound_protocol_json).map_err(|e| {
         napi::Error::from_reason(format!("Failed to parse inbound protocol JSON: {}", e))
     })?;
@@ -398,6 +619,7 @@ pub fn evaluate_responses_direct_route_decision_json(
     })?;
     let output = evaluate_responses_direct_route_decision(
         &payload,
+        &metadata,
         inbound_protocol.as_str().unwrap_or(""),
         apply_patch_mode.as_str().unwrap_or(""),
     )

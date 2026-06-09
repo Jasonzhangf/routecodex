@@ -38,6 +38,7 @@ export function applyMinimalDirectOverrides(
 
 export function evaluateDirectRouteDecision(args: {
   payload: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   inboundProtocol: string;
   applyPatchMode?: string;
 }): {

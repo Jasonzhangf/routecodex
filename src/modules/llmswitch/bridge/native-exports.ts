@@ -89,6 +89,7 @@ type NativeHubBridgePolicySemantics = {
   ) => boolean;
   evaluateResponsesDirectRouteDecisionWithNative?: (input: {
     payload: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
     inboundProtocol: string;
     applyPatchMode?: string;
   }) => {
@@ -103,6 +104,7 @@ type NativeRouterHotpathJsonBinding = {
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
   evaluateResponsesDirectRouteDecisionJson?: (
     payloadJson: string,
+    metadataJson: string,
     inboundProtocolJson: string,
     applyPatchModeJson: string
   ) => string;
@@ -508,6 +510,7 @@ export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
 
 export function evaluateResponsesDirectRouteDecisionNative(input: {
   payload: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   inboundProtocol: string;
   applyPatchMode?: string;
 }): {
@@ -518,6 +521,7 @@ export function evaluateResponsesDirectRouteDecisionNative(input: {
 } {
   const parsed = invokeRouterHotpathJsonCapability('evaluateResponsesDirectRouteDecisionJson', [
     input.payload ?? {},
+    input.metadata ?? {},
     input.inboundProtocol ?? '',
     input.applyPatchMode ?? '',
   ]);

@@ -3,6 +3,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   evaluateResponsesDirectRouteDecisionNative: (input: {
     payload: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
     inboundProtocol: string;
     applyPatchMode?: string;
   }) => {
@@ -16,10 +17,16 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       const directName = typeof row.name === 'string' ? row.name.trim() : '';
       return functionName === 'apply_patch' || directName === 'apply_patch';
     });
+    const requiresHubRelay = Boolean(input.metadata?.__rt
+      && typeof input.metadata.__rt === 'object'
+      && !Array.isArray(input.metadata.__rt)
+      && (input.metadata.__rt as Record<string, unknown>).followupSource === 'stop_message_auto');
     return {
       providerWireValid: true,
-      requiresHubRelay: false,
-      reason: undefined,
+      requiresHubRelay,
+      reason: requiresHubRelay
+          ? 'stopless_servertool_requires_hub_relay'
+          : undefined,
       hasDeclaredApplyPatchTool,
     };
   },
@@ -253,6 +260,40 @@ describe('direct-passthrough-payload', () => {
       providerWireValid: true,
       requiresHubRelay: false,
       hasDeclaredApplyPatchTool: true,
+    });
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('requires Hub relay for stopless servertool metadata on responses direct', () => {
+    const result = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      metadata: { __rt: { followupSource: 'stop_message_auto' } },
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerWireValid: true,
+      requiresHubRelay: true,
+      reason: 'stopless_servertool_requires_hub_relay',
+    });
+  });
+
+  it('keeps generic servertool followup metadata on responses direct', () => {
+    const result = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      metadata: { __rt: { serverToolFollowup: true, followupSource: 'servertool.apply_patch_flow' } },
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerWireValid: true,
+      requiresHubRelay: false,
     });
     expect(result.reason).toBeUndefined();
   });

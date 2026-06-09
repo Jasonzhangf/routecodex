@@ -240,7 +240,9 @@ function buildRouterDirectFailureError(reason: unknown): Error {
 
 function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
-  return message.startsWith('protocol mismatch:');
+  return message.startsWith('protocol mismatch:')
+    || message === 'direct_payload_requires_hub_relay'
+    || message === 'stopless_servertool_requires_hub_relay';
 }
 
 function shouldRecordRouterDirectStorm(error: unknown, readableMessage?: string): boolean {
@@ -1193,6 +1195,7 @@ export class RouteCodexHttpServer {
             nextInput.body && typeof nextInput.body === 'object' && !Array.isArray(nextInput.body)
               ? nextInput.body as Record<string, unknown>
               : {},
+          metadata: nextInput.metadata,
           inboundProtocol: detectInboundProtocolFromRequest({
             path: nextInput.entryEndpoint,
             headers: nextInput.headers as Record<string, string | string[] | undefined>,
@@ -1206,6 +1209,12 @@ export class RouteCodexHttpServer {
             detail,
             mode: 'client',
           });
+          if (directEntryDecision.requiresHubRelay) {
+            this.logStage('router-direct.relay', input.requestId, {
+              reason: directEntryDecision.reason ?? 'direct_payload_requires_hub_relay',
+            });
+            return await this.executePipeline(nextInput);
+          }
           const contractError = buildDirectPayloadContractError(
             `router-direct requires provider-wire payload: ${detail}`,
             {
@@ -1359,6 +1368,7 @@ export class RouteCodexHttpServer {
     metadataForHub.routerDirectInboundProtocol = inboundProtocol;
     const directPayloadDecision = evaluateDirectRouteDecision({
       payload: rawDirectPayload,
+      metadata: metadataForHub,
       inboundProtocol,
     });
     if (!directPayloadDecision.providerWireValid || directPayloadDecision.requiresHubRelay) {
@@ -1367,6 +1377,9 @@ export class RouteCodexHttpServer {
         reason: directPayloadDecision.requiresHubRelay ? 'direct_payload_requires_hub_relay' : 'direct_payload_not_provider_wire',
         detail,
       });
+      if (directPayloadDecision.requiresHubRelay) {
+        return { used: false, reason: directPayloadDecision.reason ?? 'direct_payload_requires_hub_relay' };
+      }
       throw buildDirectPayloadContractError(
         `router-direct requires provider-wire payload: ${detail}`,
         {
@@ -1459,6 +1472,7 @@ export class RouteCodexHttpServer {
     try {
       const finalDirectPayloadDecision = evaluateDirectRouteDecision({
         payload: requestPayload,
+        metadata: metadataForHub,
         inboundProtocol,
       });
       if (finalDirectPayloadDecision.requiresHubRelay) {
