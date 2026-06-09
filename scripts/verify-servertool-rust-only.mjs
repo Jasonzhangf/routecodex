@@ -209,6 +209,11 @@ function findJestUnstableMockModuleBlock(content, modulePath) {
   return content.slice(moduleIndex, nextMockIndex);
 }
 
+function extractConstArrayBlock(content, constName) {
+  const pattern = new RegExp(`const\\s+${constName}\\s*:[^=]+=[\\s\\S]*?\\];`);
+  return content.match(pattern)?.[0] ?? '';
+}
+
 function extractFunctionBlock(content, functionName) {
   const signature = `function ${functionName}`;
   const start = content.indexOf(signature);
@@ -534,6 +539,7 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     'validate_no_internal_carrier(&value)'
   );
+  const cliDeniedCarrierBlock = extractConstArrayBlock(rustCliContract, 'DENIED_INTERNAL_CARRIER_KEYS');
   for (const privateCarrier of [
     'reenterPipeline',
     'providerInvoker',
@@ -549,7 +555,7 @@ function checkServertoolCliProjectionMap() {
     assertContains(
       'cli-projection-private-carrier-contract',
       `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
-      rustCliContract,
+      cliDeniedCarrierBlock,
       privateCarrier
     );
   }

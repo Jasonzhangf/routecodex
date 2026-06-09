@@ -883,6 +883,10 @@ const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
     "ticket",
     "restorationHandle",
     "restorationStore",
+    "reenterPipeline",
+    "providerInvoker",
+    "serverToolFollowup",
+    "serverToolFollowupSource",
 ];
 
 const DENIED_INTERNAL_CARRIER_TEXT: &[&str] = &[
