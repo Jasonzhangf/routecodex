@@ -199,21 +199,14 @@ use crate::hub_pipeline_blocks::metadata::{
     resolve_stop_message_router_metadata,
 };
 use crate::hub_pipeline_blocks::nodes::{
-    build_captured_chat_request_snapshot, build_passthrough_governance_skipped_node,
-    build_req_inbound_node_result, build_req_inbound_skipped_node, build_req_outbound_node_result,
+    build_captured_chat_request_snapshot, build_req_inbound_node_result,
+    build_req_inbound_skipped_node, build_req_outbound_node_result,
     build_tool_governance_node_result,
-};
-use crate::hub_pipeline_blocks::passthrough::{
-    annotate_passthrough_governance_skip, attach_passthrough_provider_input_audit,
-    build_passthrough_audit,
 };
 use crate::hub_pipeline_blocks::policy::{
     resolve_hub_policy_override, resolve_hub_shadow_compare_config,
 };
-use crate::hub_pipeline_blocks::process_mode::{
-    find_mappable_semantics_keys, resolve_active_process_mode,
-    resolve_has_instruction_requested_passthrough,
-};
+use crate::hub_pipeline_blocks::process_mode::find_mappable_semantics_keys;
 use crate::hub_pipeline_blocks::protocol::{
     apply_outbound_stream_preference, extract_model_hint_from_metadata, normalize_endpoint,
     resolve_hub_client_protocol, resolve_outbound_stream_intent, resolve_provider_protocol,
@@ -630,17 +623,6 @@ pub fn build_tool_governance_node_result_json(input_json: String) -> napi::Resul
 }
 
 #[napi_derive::napi]
-pub fn build_passthrough_governance_skipped_node_json() -> napi::Result<String> {
-    let output = build_passthrough_governance_skipped_node();
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize passthrough governance skipped node: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
 pub fn extract_adapter_context_metadata_fields_json(
     metadata_json: String,
     keys_json: String,
@@ -824,34 +806,6 @@ pub fn read_responses_resume_from_request_semantics_json(
 }
 
 #[napi_derive::napi]
-pub fn resolve_has_instruction_requested_passthrough_json(
-    messages_json: String,
-) -> napi::Result<String> {
-    let messages: Value = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse messages JSON: {}", e)))?;
-    let output = resolve_has_instruction_requested_passthrough(&messages);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize passthrough detection: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_active_process_mode_json(
-    base_mode_json: String,
-    messages_json: String,
-) -> napi::Result<String> {
-    let base_mode_value: Value = serde_json::from_str(&base_mode_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse base mode JSON: {}", e)))?;
-    let messages: Value = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse messages JSON: {}", e)))?;
-    let base_mode = base_mode_value.as_str().unwrap_or("chat");
-    let output = resolve_active_process_mode(base_mode, &messages);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize active process mode: {}", e))
-    })
-}
-
-#[napi_derive::napi]
 pub fn find_mappable_semantics_keys_json(metadata_json: String) -> napi::Result<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
@@ -859,57 +813,6 @@ pub fn find_mappable_semantics_keys_json(metadata_json: String) -> napi::Result<
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize mappable semantics keys: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_passthrough_audit_json(
-    raw_inbound_json: String,
-    provider_protocol: String,
-) -> napi::Result<String> {
-    let raw_inbound: Value = serde_json::from_str(&raw_inbound_json).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to parse raw inbound JSON: {}", e))
-    })?;
-    let output = build_passthrough_audit(&raw_inbound, provider_protocol.trim());
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize passthrough audit: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn annotate_passthrough_governance_skip_json(audit_json: String) -> napi::Result<String> {
-    let audit: Value = serde_json::from_str(&audit_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse audit JSON: {}", e)))?;
-    let output = annotate_passthrough_governance_skip(&audit);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize passthrough governance skip annotation: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn attach_passthrough_provider_input_audit_json(
-    audit_json: String,
-    provider_payload_json: String,
-    provider_protocol: String,
-) -> napi::Result<String> {
-    let audit: Value = serde_json::from_str(&audit_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse audit JSON: {}", e)))?;
-    let provider_payload: Value = serde_json::from_str(&provider_payload_json).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to parse provider payload JSON: {}", e))
-    })?;
-    let output = attach_passthrough_provider_input_audit(
-        &audit,
-        &provider_payload,
-        provider_protocol.trim(),
-    );
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize passthrough provider input audit: {}",
             e
         ))
     })

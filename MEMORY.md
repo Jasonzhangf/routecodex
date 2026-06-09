@@ -2970,3 +2970,9 @@ Tags: hub-pipeline, resp-process, tool-governance, dead-code, napi-export, rust-
 - Removed only the public NAPI wrappers. Kept the internal Rust helpers because malformed routing marker cleanup is still used by Virtual Router route cleanup, and hashline native edit is still used by response apply_patch governance.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the public wrapper names and Rust export function names from returning.
 Tags: hub-pipeline, virtual-router, hashline, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline passthrough-mode NAPI wrappers removed
+- Exact scan found `buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, and `attachPassthroughProviderInputAuditJson` had no TS/runtime consumer; remaining active references were Rust NAPI wrappers/re-exports plus internal helper tests.
+- Removed only the zero-consumer public NAPI wrappers/re-exports. Kept internal Rust helpers because they are still used by the current Rust Hub mainline/tests; retiring passthrough-mode semantics is a separate larger slice.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the public wrapper/re-export names from returning in active Rust/native export surfaces.
+Tags: hub-pipeline, passthrough, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

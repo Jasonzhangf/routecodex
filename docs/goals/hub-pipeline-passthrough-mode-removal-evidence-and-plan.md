@@ -8,12 +8,13 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/` 不再存在以 `activeProcessMode === 'passthrough'` 分叉的执行路径。
 - Hub Pipeline request stage 不再跳过 semantic gate、tool governance、request hooks、outbound semantic map。
 - `processMode` 类型收敛为 `chat`，或仅保留输入兼容校验后强制归一为 `chat`。
-- 原 passthrough 专用 audit/build/skip 函数被物理删除，相关 native required exports 一并清理。
+- 原 passthrough 专用 audit/build/skip 函数被物理删除；2026-06-09 已清理零消费者 public NAPI exports，剩余 internal helper 随 passthrough-mode 语义退休一并删除。
 - server/router direct 仍由 `src/server/runtime/http-server/router-direct-pipeline.ts` 管理，不搬进 Hub Pipeline。
 
 ## 2. 当前存活证据
 
 审计时间：2026-05-30。
+更新：2026-06-09 已物理删除零消费者 public NAPI wrappers / re-exports（`buildPassthroughGovernanceSkippedNodeJson`、`resolveHasInstructionRequestedPassthroughJson`、`resolveActiveProcessModeJson`、`buildPassthroughAuditJson`、`annotatePassthroughGovernanceSkipJson`、`attachPassthroughProviderInputAuditJson`）；当前计划剩余目标是 Hub Pipeline 内部 passthrough-mode 语义和 internal helper 的后续退休。
 
 搜索证据：
 - 命令：`rg -n "passthrough" sharedmodule/llmswitch-core/src/conversion/hub/pipeline/ --g "*.ts" | grep -v "\.d\.ts\|__tests__\|\.test\." | grep -v "responses_passthrough\|passthrough_remote_direct\|metadata-passthrough\|passthrough: false" | wc -l`
@@ -31,7 +32,7 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage-provider-payload.ts:164` 当 `activeProcessMode === "passthrough"` 时直接 `jsonClone(rawRequest)` 生成 `providerPayload`，跳过 outbound hooks/semantic mapper 主链。
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-route-and-outbound.ts:102` 当 passthrough 且 entry/outbound 协议不一致时抛错，说明 passthrough 是实际路由执行分支。
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-passthrough.ts:115` 定义 `resolveActiveProcessModeWithNative()`。
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts:302` 仍要求 `resolveActiveProcessModeJson` native export。
+- `resolveActiveProcessModeJson` public NAPI export 已在 2026-06-09 删除；内部 `resolve_active_process_mode` helper 仍由 Rust Hub mainline/tests 使用，必须等 passthrough-mode 语义退休时再删。
 
 边界证据：
 - `src/server/runtime/http-server/router-direct-pipeline.ts` 是 server/router 层 same-protocol direct bypass；它不是 Hub Pipeline passthrough。
@@ -79,9 +80,9 @@ Out of scope：
 - 删除 route/outbound 的 passthrough protocol-matching branch。
 - 删除 passthrough audit 在 provider payload/result metadata 中的传递。
 
-### Phase 4：删除死代码与 native exports
+### Phase 4：删除死代码与 internal helpers
 - 删除 `native-hub-pipeline-orchestration-semantics-passthrough.ts` 中仅服务 processMode passthrough 的函数。
-- 删除 `resolveActiveProcessModeJson`、`buildPassthroughAuditJson`、`annotatePassthroughGovernanceSkipJson`、`attachPassthroughProviderInputAuditJson` 等 native required exports。
+- public NAPI exports 已删；继续删除仍服务 processMode passthrough 的 internal Rust helpers / TS wrapper 残留。
 - 删除 `hub-pipeline-provider-payload-passthrough-blocks.ts` 等只服务该模式的文件。
 - 更新 TS/Rust/NAPI binding 相关 tests 与 snapshots。
 

@@ -18779,3 +18779,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `cleanMalformedRoutingInstructionMarkersJson` and `runHashlineNativeEditJson` had no TS/runtime consumer and only existed as standalone NAPI wrappers in `router-hotpath-napi/src/lib.rs`.
 - Change: removed only public NAPI wrappers; kept internal Rust helpers because malformed routing marker cleanup is used by Virtual Router route cleanup and hashline native edit is used by response apply_patch governance.
 - Verification PASS: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust VR instructions 11/11; Rust hashline apply_patch directed test 1/1; `git diff --check` PASS.
+
+2026-06-09 HubPipeline passthrough-mode NAPI wrapper deletion:
+- Exact scan: passthrough-mode public NAPI wrappers (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) had no TS/runtime consumer; active hits were Rust wrappers/re-exports and internal helper tests.
+- Change: removed only zero-consumer public NAPI wrappers/re-exports, kept internal Rust helper functions because current Rust Hub mainline/tests still use them; full passthrough-mode semantic retirement remains a separate slice.
+- Verification PASS: residue scan only historical/docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust passthrough tests 20/20; `git diff --check` PASS.

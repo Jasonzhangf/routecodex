@@ -1856,6 +1856,14 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs'),
       'utf8',
     );
+    const hubPipelineBindings = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs'),
+      'utf8',
+    );
+    const hubPipelineReexports = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs'),
+      'utf8',
+    );
 
     expect({ existingFiles, existingTests, existingRetiredFiles }).toEqual({
       existingFiles: [],
@@ -1876,6 +1884,11 @@ describe('hub pipeline stage residue audit', () => {
     }
     for (const source of [respToolGovernanceBindings, respToolGovernanceReexports, requiredExports]) {
       expect(source).not.toMatch(/collectToolNamesFromCandidateJson|collect_tool_names_from_candidate_json/);
+    }
+    for (const source of [hubPipelineBindings, hubPipelineReexports, requiredExports]) {
+      expect(source).not.toMatch(
+        /buildPassthroughGovernanceSkippedNodeJson|resolveHasInstructionRequestedPassthroughJson|resolveActiveProcessModeJson|buildPassthroughAuditJson|annotatePassthroughGovernanceSkipJson|attachPassthroughProviderInputAuditJson|build_passthrough_governance_skipped_node_json|resolve_has_instruction_requested_passthrough_json|resolve_active_process_mode_json|build_passthrough_audit_json|annotate_passthrough_governance_skip_json|attach_passthrough_provider_input_audit_json/,
+      );
     }
     const rustLib = fs.readFileSync(
       path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs'),
