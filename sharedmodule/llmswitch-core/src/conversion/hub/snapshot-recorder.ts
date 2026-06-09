@@ -3,14 +3,11 @@ import type { AdapterContext } from './types/chat-envelope.js';
 import { createSnapshotWriter, type SnapshotWriter } from '../snapshot-utils.js';
 import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';
 
+// feature_id: snapshot.stage_contract
+
 export interface SnapshotStageRecorderOptions {
   context: AdapterContext;
   endpoint: string;
-}
-
-export function trimSnapshotHotpathPayloadForNative(stage: string, payload: unknown): unknown {
-  void stage;
-  return payload;
 }
 
 export class SnapshotStageRecorder implements StageRecorder {
@@ -37,8 +34,7 @@ export class SnapshotStageRecorder implements StageRecorder {
     if (!this.writer) {
       return;
     }
-    const trimmed = trimSnapshotHotpathPayloadForNative(stage, payload as unknown);
-    const normalized = normalizeSnapshotStagePayloadWithNative(stage, trimmed);
+    const normalized = normalizeSnapshotStagePayloadWithNative(stage, payload);
     if (!normalized) {
       return;
     }

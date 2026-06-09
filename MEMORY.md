@@ -2817,3 +2817,10 @@ Tags: hub-pipeline, session-usage, fail-fast, routing-state, no-silent-compensat
 - Do not restore TS defaults/normalization/clamping/stage policy in `routing-state.ts` (`DEFAULT_STOP_MESSAGE_MAX_REPEATS`, local stage normalize, `Number.isFinite`, `Math.floor`, `Math.max`, `.trim()`, `.toLowerCase()`, stage off policy). `npm run verify:servertool-rust-only` locks the owner/native export/thin-shell boundary.
 - Verified on 2026-06-09: Rust/NAPI focused tests, native hotpath build/export probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool-core and servertool-cli Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` completed with exact output `routecodex-e2e-3034`.
 Tags: servertool, stopless, routing-state, rust-owner, native-bridge, thin-shell, 2026-06-09
+
+## 2026-06-09 HubPipeline snapshot recorder trim shell removed
+- `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` is only Hub stage observation glue. It must pass stage payloads into native `normalizeSnapshotStagePayloadWithNative`; do not restore TS hotpath trim/sanitize/prune helpers there.
+- The removed `trimSnapshotHotpathPayloadForNative` function was a zero-consumer identity wrapper that returned `payload` unchanged, so keeping it only preserved a misleading TS semantic hook.
+- Function/verification map truth: `snapshot.stage_contract` includes `snapshot-recorder.ts` as TS observation bridge, while selector/stage contract and payload normalization remain `src/utils` + Rust/native snapshot hooks.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `trimSnapshotHotpathPayloadForNative` and TS snapshot hotpath sanitize helper revival.
+Tags: hub-pipeline, snapshot-recorder, dead-code, thin-shell, rust-owner, residue-gate, 2026-06-09

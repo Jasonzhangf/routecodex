@@ -888,6 +888,7 @@ owners:
     allowed_paths:
       - src/utils
       - src/providers/core/utils
+      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - docs/architecture
     forbidden_paths:
@@ -906,6 +907,7 @@ owners:
     notes:
       - Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch.
       - Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written.
+      - Hub `SnapshotStageRecorder` is TS observation glue only; payload normalization/trimming semantics must remain native-owned.
 
   - feature_id: responses.direct_tool_shape_contract
     status: active

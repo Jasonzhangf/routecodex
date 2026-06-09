@@ -485,10 +485,12 @@ verification:
     change_risk: high
     unit:
       - src/utils/snapshot-stage-policy.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
     contract:
       - tests/utils/snapshot-stage-policy.spec.ts
       - tests/debug/snapshot-store-port-isolation.red.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
       - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
@@ -500,6 +502,7 @@ verification:
       - npm run build:min
     notes:
       - Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests.
+      - Hub `SnapshotStageRecorder` may only bridge stage payloads into native snapshot normalization/writer IO; TS hotpath trim/sanitize helpers are dead code residue.
 
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high

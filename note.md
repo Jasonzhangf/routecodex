@@ -18630,3 +18630,9 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Moved stop-message routing snapshot/apply/clear planning into `servertool-core::persisted_lookup`; TS `stop-message-auto/routing-state.ts` now only calls native wrappers and mutates the JS `RoutingInstructionState` shell.
 - Native bridge/required exports cover stage-mode normalization, armed-state detection, snapshot plan, state apply plan, and clear plan; `verify:servertool-rust-only` blocks TS semantic revival for routing-state.
 - Verification PASS: focused Rust/NAPI tests, native hotpath build/export probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3034`.
+
+2026-06-09 HubPipeline snapshot recorder identity trim deletion:
+- Dead-code inventory found `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts::trimSnapshotHotpathPayloadForNative` had no external consumer and only returned `payload` unchanged before native `normalizeSnapshotStagePayloadWithNative`.
+- Deleted the identity TS hotpath trim helper and passed `payload` directly into native snapshot normalization. This avoids preserving a fake TS trim/sanitize semantic owner in the Hub observation bridge.
+- Added residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocking `trimSnapshotHotpathPayloadForNative` / TS snapshot hotpath sanitize helpers from returning.
+- Updated `snapshot.stage_contract` function/verification map entries to list `snapshot-recorder.ts` as TS observation glue only; selector/stage contract and payload normalization remain `src/utils` + Rust/native snapshot hooks.

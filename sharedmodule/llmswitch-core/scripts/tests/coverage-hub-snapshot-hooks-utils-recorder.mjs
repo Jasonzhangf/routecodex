@@ -59,6 +59,8 @@ async function loadModules(tag) {
 async function flushMicrotasks() {
   await Promise.resolve();
   await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 async function main() {
@@ -80,77 +82,88 @@ async function main() {
       `noopSnapshotProbe() { return JSON.stringify({ ok: true }); }`
     ]),
     async () => {
+      const prevSnapshotStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      process.env.ROUTECODEX_SNAPSHOT_STAGES = 'all';
       globalThis.__snapshot_calls = [];
-      const { nativeHooks, snapshotUtils, snapshotRecorder } = await loadModules('a');
-      const { SnapshotStageRecorder, createSnapshotRecorder } = snapshotRecorder;
+      try {
+        const { nativeHooks, snapshotUtils, snapshotRecorder } = await loadModules('a');
+        const { SnapshotStageRecorder, createSnapshotRecorder } = snapshotRecorder;
 
-      assert.equal(nativeHooks.shouldRecordSnapshotsWithNative(), true);
-      assert.equal(snapshotUtils.shouldRecordSnapshots(), true);
+        assert.equal(nativeHooks.shouldRecordSnapshotsWithNative(), true);
+        assert.equal(snapshotUtils.shouldRecordSnapshots(), true);
 
-      await snapshotUtils.writeSnapshotViaHooks({
-        endpoint: '/v1/chat/completions',
-        stage: 'direct-write',
-        requestId: 'req-direct',
-        data: { ok: true },
-        channel: 'compat',
-        providerKey: 'provider-1',
-        groupRequestId: 'group-1'
-      });
+        await snapshotUtils.writeSnapshotViaHooks({
+          endpoint: '/v1/chat/completions',
+          stage: 'direct-write',
+          requestId: 'req-direct',
+          data: { ok: true },
+          channel: 'compat',
+          providerKey: 'provider-1',
+          groupRequestId: 'group-1'
+        });
 
-      const writer = snapshotUtils.createSnapshotWriter({
-        requestId: 'req-writer',
-        endpoint: '/v1/messages',
-        providerKey: 'provider-2',
-        groupRequestId: 'group-2'
-      });
-      assert.equal(typeof writer, 'function');
-      writer('writer-stage', { nested: { value: 1 } });
-      await flushMicrotasks();
+        const writer = snapshotUtils.createSnapshotWriter({
+          requestId: 'req-writer',
+          endpoint: '/v1/messages',
+          providerKey: 'provider-2',
+          groupRequestId: 'group-2'
+        });
+        assert.equal(typeof writer, 'function');
+        writer('writer-stage', { nested: { value: 1 } });
+        await flushMicrotasks();
 
-      await snapshotUtils.recordSnapshot({
-        stage: 'record-stage',
-        requestId: 'req-record',
-        data: { hello: 'world' }
-      });
+        await snapshotUtils.recordSnapshot({
+          stage: 'record-stage',
+          requestId: 'req-record',
+          data: { hello: 'world' }
+        });
 
-      const recorderWithClientRequest = new SnapshotStageRecorder({
-        context: { requestId: 'req-rec-1', providerId: 'provider-a', clientRequestId: 'client-001' },
-        endpoint: '/v1/chat/completions'
-      });
-      recorderWithClientRequest.record('annotated', { alpha: 1 });
+        const recorderWithClientRequest = new SnapshotStageRecorder({
+          context: { requestId: 'req-rec-1', providerId: 'provider-a', clientRequestId: 'client-001' },
+          endpoint: '/v1/chat/completions'
+        });
+        recorderWithClientRequest.record('annotated', { alpha: 1 });
 
-      const recorderWithGroupRequest = new SnapshotStageRecorder({
-        context: { requestId: 'req-rec-2', providerId: 'provider-b', groupRequestId: 'group-raw-002' },
-        endpoint: '/v1/responses'
-      });
-      recorderWithGroupRequest.record('annotated', { beta: 2 });
-      recorderWithGroupRequest.record('drop-stage', { ignored: true });
+        const recorderWithGroupRequest = new SnapshotStageRecorder({
+          context: { requestId: 'req-rec-2', providerId: 'provider-b', groupRequestId: 'group-raw-002' },
+          endpoint: '/v1/responses'
+        });
+        recorderWithGroupRequest.record('annotated', { beta: 2 });
+        recorderWithGroupRequest.record('drop-stage', { ignored: true });
 
-      // Force "writer throws" catch branch.
-      recorderWithGroupRequest.writer = () => {
-        throw new Error('writer failed');
-      };
-      recorderWithGroupRequest.record('annotated', { shouldBeIgnored: true });
+        // Force "writer throws" catch branch.
+        recorderWithGroupRequest.writer = () => {
+          throw new Error('writer failed');
+        };
+        recorderWithGroupRequest.record('annotated', { shouldBeIgnored: true });
 
-      const recorderWithoutStringProvider = new SnapshotStageRecorder({
-        context: { requestId: 'req-rec-3', providerId: 12345 },
-        endpoint: '/v1/chat/completions'
-      });
-      recorderWithoutStringProvider.record('annotated', { gamma: 3 });
+        const recorderWithoutStringProvider = new SnapshotStageRecorder({
+          context: { requestId: 'req-rec-3', providerId: 12345 },
+          endpoint: '/v1/chat/completions'
+        });
+        recorderWithoutStringProvider.record('annotated', { gamma: 3 });
 
-      const recorderApi = createSnapshotRecorder(
-        { requestId: 'req-rec-api', providerId: 'provider-c' },
-        '/v1/chat/completions'
-      );
-      assert.equal(typeof recorderApi.record, 'function');
+        const recorderApi = createSnapshotRecorder(
+          { requestId: 'req-rec-api', providerId: 'provider-c' },
+          '/v1/chat/completions'
+        );
+        assert.equal(typeof recorderApi.record, 'function');
+        await flushMicrotasks();
 
-      const calls = globalThis.__snapshot_calls;
-      assert.ok(Array.isArray(calls));
-      assert.ok(calls.length >= 5);
-      const hasClientGroup = calls.some((row) => row?.groupRequestId === 'client-001');
-      const hasRawGroup = calls.some((row) => row?.groupRequestId === 'group-raw-002');
-      assert.equal(hasClientGroup, true);
-      assert.equal(hasRawGroup, true);
+        const calls = globalThis.__snapshot_calls;
+        assert.ok(Array.isArray(calls));
+        assert.ok(calls.length >= 5);
+        const hasClientGroup = calls.some((row) => row?.groupRequestId === 'client-001');
+        const hasRawGroup = calls.some((row) => row?.groupRequestId === 'group-raw-002');
+        assert.equal(hasClientGroup, true);
+        assert.equal(hasRawGroup, true);
+      } finally {
+        if (prevSnapshotStages === undefined) {
+          delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+        } else {
+          process.env.ROUTECODEX_SNAPSHOT_STAGES = prevSnapshotStages;
+        }
+      }
     }
   );
 

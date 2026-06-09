@@ -1007,6 +1007,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface StageRecorder');
   });
 
+  it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      { label: 'restores TS snapshot hotpath trim helper', pattern: /trimSnapshotHotpathPayloadForNative/ },
+      { label: 'restores TS snapshot sanitize helper', pattern: /sanitizeSnapshotHotpathPayload|pruneSnapshotHotpathPayload/ },
+      { label: 'restores identity snapshot hotpath wrapper', pattern: /return\s+payload\s*;/ },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('normalizeSnapshotStagePayloadWithNative(stage, payload)');
+  });
+
   it('legacy concrete TS format adapter implementations must be physically removed', () => {
     const adapterRoot = path.join(
       process.cwd(),
