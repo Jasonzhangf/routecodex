@@ -13,8 +13,6 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseEventWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamChunkWithConfigJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('extractDecodeStatsJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('resolveSseTimeoutOptionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('buildRespInboundSseErrorDescriptorJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('planProviderResponseServertoolRuntimeActionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runReqOutboundStage3CompatJson');
@@ -38,6 +36,11 @@ describe('native required exports for sse stream helpers', () => {
 
   test('does not require removed apply_patch legacy export', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentApplyPatchErrorContentJson');
+  });
+
+  test('does not require retired standalone SSE stats/timeout helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('extractDecodeStatsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveSseTimeoutOptionsJson');
   });
 
   test('native resume helper returns protocol error envelope instead of napi generic failure', () => {

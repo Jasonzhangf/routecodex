@@ -369,6 +369,7 @@ verification:
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
+      - Retired SSE stats/timeout public wrappers must stay deleted; `extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` must not be kept alive by required-export gates without a live runtime consumer.
       - Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers.
       - Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts.
       - Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge.

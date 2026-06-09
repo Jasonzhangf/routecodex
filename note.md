@@ -18865,3 +18865,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Shared conversion thought/normalizeTools public wrapper deletion:
 - Inventory: `hasValidThoughtSignatureWithNative`, `sanitizeThinkingBlockWithNative`, `filterInvalidThinkingBlocksWithNative`, `removeTrailingUnsignedThinkingBlocksWithNative`, and `normalizeToolsWithNative` had no live runtime consumers; hits were only TS public bridge/required-export/Rust root NAPI/module-local tests/historical notes.
 - Change: removed these TS wrappers, required-export entries, Rust root NAPI exports, deleted `thought_signature_validator.rs` plus tests, and removed standalone `normalize_tools_json` with its shell-schema helpers from `shared_args_mapping.rs`; kept live `normalizeArgsBySchemaJson` and `hub_standardized_bridge` private `normalize_tools`.
+
+2026-06-09 SSE stats/timeout public wrapper deletion:
+- Inventory: `extractDecodeStatsWithNative` / `resolveSseTimeoutOptionsWithNative` and matching `*Json` exports had no live runtime consumer; remaining hits were historical note/audit docs and required-export tests.
+- Change: removed the TS wrappers, required-export entries, Rust public NAPI functions/tests/helper chain; kept live SSE parser/stream/error descriptor/context diagnostics exports.
