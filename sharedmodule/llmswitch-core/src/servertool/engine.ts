@@ -21,7 +21,10 @@ import {
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
 import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
-import { planStopMessageCliProjectionSeedWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planStopMessageCliProjectionSeedWithNative,
+  planStoplessOrchestrationActionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -81,13 +84,6 @@ type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>
 type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
-
-function isStopMessageTerminalFinal(execution: NonNullable<ServerToolEngineResult['execution']>): boolean {
-  const context = execution.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? execution.context as Record<string, unknown>
-    : undefined;
-  return context?.stopMessageTerminalFinal === true;
-}
 
 function buildStopMessageCliProjectionResult(args: {
   options: ServerToolOrchestrationOptions;
@@ -323,8 +319,12 @@ export async function runServerToolOrchestration(
     stageRecorder: options.stageRecorder,
     logNonBlocking: logServerToolNonBlocking
   });
+  const stoplessPlan = planStoplessOrchestrationActionWithNative({
+    flowId,
+    execution: engineResult.execution
+  });
   if (stopSignal.observed) {
-    logStopEntry('trigger', flowId === 'stop_message_flow' ? 'activated' : 'non_stop_flow', {
+    logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
       flowId,
       reason: stopSignal.reason,
       source: stopSignal.source,
@@ -367,15 +367,18 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  if (flowId === 'stop_message_flow' && isStopMessageTerminalFinal(engineResult.execution)) {
-    logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', { flowId });
+  if (stoplessPlan.action === 'terminal_final') {
+    logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', {
+      flowId,
+      reason: stoplessPlan.reason
+    });
     return {
       chat: engineResult.finalChatResponse,
       executed: true,
       flowId: engineResult.execution.flowId
     };
   }
-  if (flowId === 'stop_message_flow') {
+  if (stoplessPlan.action === 'cli_projection') {
     return buildStopMessageCliProjectionResult({
       options,
       execution: engineResult.execution,

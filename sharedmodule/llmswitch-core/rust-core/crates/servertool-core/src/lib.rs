@@ -21,6 +21,7 @@ pub mod stop_gateway_context;
 pub mod stop_message_compare_context;
 pub mod stop_message_counter;
 pub mod stop_message_loop_guard;
+pub mod stopless_orchestration_contract;
 pub mod stop_visible_text;
 pub mod text_extraction;
 pub mod tool_name_projection;

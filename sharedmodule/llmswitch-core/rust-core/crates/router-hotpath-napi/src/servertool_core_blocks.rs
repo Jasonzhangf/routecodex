@@ -25,6 +25,7 @@ use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
+use servertool_core::stopless_orchestration_contract;
 use servertool_core::stop_visible_text;
 use servertool_core::text_extraction;
 
@@ -520,6 +521,16 @@ pub fn plan_stop_message_cli_projection_seed_json(input_json: &str) -> Result<St
         cli_contract::plan_stop_message_cli_projection_seed(input).map_err(|e| e.to_string())?;
     serde_json::to_string(&output)
         .map_err(|e| format!("serialize stop-message cli projection seed: {e}"))
+}
+
+pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_orchestration_contract::StoplessOrchestrationPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless orchestration input: {e}"))?;
+    serde_json::to_string(
+        &stopless_orchestration_contract::plan_stopless_orchestration_action(input),
+    )
+    .map_err(|e| format!("serialize stopless orchestration plan: {e}"))
 }
 
 pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {
@@ -1785,6 +1796,50 @@ mod tests {
         assert_eq!(plan["repeatCount"], 1);
         assert_eq!(plan["maxRepeats"], 3);
         assert_eq!(plan["input"]["continuationPrompt"], "continue with tools");
+    }
+
+    #[test]
+    fn plans_stopless_orchestration_action_via_servertool_core_bridge() {
+        let cli = plan_stopless_orchestration_action_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "execution": { "flowId": "stop_message_flow" }
+            })
+            .to_string(),
+        )
+        .expect("stopless cli action");
+        let cli_plan: serde_json::Value =
+            serde_json::from_str(&cli).expect("stopless cli action json");
+        assert_eq!(cli_plan["action"], "cli_projection");
+        assert_eq!(cli_plan["isStopMessageFlow"], true);
+
+        let terminal = plan_stopless_orchestration_action_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "execution": {
+                    "flowId": "stop_message_flow",
+                    "context": { "stopMessageTerminalFinal": true }
+                }
+            })
+            .to_string(),
+        )
+        .expect("stopless terminal action");
+        let terminal_plan: serde_json::Value =
+            serde_json::from_str(&terminal).expect("stopless terminal action json");
+        assert_eq!(terminal_plan["action"], "terminal_final");
+
+        let followup = plan_stopless_orchestration_action_json(
+            &json!({
+                "flowId": "vision_flow",
+                "execution": { "flowId": "vision_flow" }
+            })
+            .to_string(),
+        )
+        .expect("stopless followup action");
+        let followup_plan: serde_json::Value =
+            serde_json::from_str(&followup).expect("stopless followup action json");
+        assert_eq!(followup_plan["action"], "followup_mainline");
+        assert_eq!(followup_plan["isStopMessageFlow"], false);
     }
 
     #[test]

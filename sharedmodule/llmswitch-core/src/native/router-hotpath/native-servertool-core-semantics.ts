@@ -237,6 +237,17 @@ export interface StopMessageCliProjectionSeed {
   input: Record<string, unknown>;
 }
 
+export interface StoplessOrchestrationActionInput {
+  flowId?: string;
+  execution: unknown;
+}
+
+export interface StoplessOrchestrationActionPlan {
+  action: 'cli_projection' | 'terminal_final' | 'followup_mainline';
+  isStopMessageFlow: boolean;
+  reason: string;
+}
+
 export interface ServertoolBackendRoutePolicyInput {
   toolName: string;
   flowId?: string;
@@ -1067,6 +1078,38 @@ export function planStopMessageCliProjectionSeedWithNative(
     throw new Error('planStopMessageCliProjectionSeedJson native returned invalid seed fields');
   }
   return record as unknown as StopMessageCliProjectionSeed;
+}
+
+export function planStoplessOrchestrationActionWithNative(
+  input: StoplessOrchestrationActionInput,
+): StoplessOrchestrationActionPlan {
+  const capability = 'planStoplessOrchestrationActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessOrchestrationActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStoplessOrchestrationActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planStoplessOrchestrationActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  const action = record.action;
+  if (action !== 'cli_projection' && action !== 'terminal_final' && action !== 'followup_mainline') {
+    throw new Error('planStoplessOrchestrationActionJson native returned invalid action');
+  }
+  const isStopMessageFlow = record.isStopMessageFlow ?? record.is_stop_message_flow;
+  if (typeof isStopMessageFlow !== 'boolean' || typeof record.reason !== 'string' || !record.reason.trim()) {
+    throw new Error('planStoplessOrchestrationActionJson native returned invalid fields');
+  }
+  return {
+    action,
+    isStopMessageFlow,
+    reason: record.reason.trim()
+  };
 }
 
 export function buildClientVisibleProjectionShellWithNative(

@@ -50,6 +50,7 @@ const RUST_SERVERTOOL_PRE_COMMAND = `${ROOT}/sharedmodule/llmswitch-core/rust-co
 const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs`;
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
+const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
@@ -3412,6 +3413,42 @@ function checkStopMessageCliProjectionSeedRustOwner() {
   pass('stop-message-cli-projection-seed-rust-owner', 'servertool-core owns stopless CLI projection seed planning');
 }
 
+// ── Check 15d: stopless orchestration action has Rust owner ───
+function checkStoplessOrchestrationActionRustOwner() {
+  const rustStoplessOrchestration = readRequired(RUST_SERVERTOOL_STOPLESS_ORCHESTRATION);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const servertoolEngine = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+
+  for (const [check, file, content, needle] of [
+    ['stopless-orchestration-action-rust-owner', RUST_SERVERTOOL_STOPLESS_ORCHESTRATION, rustStoplessOrchestration, 'pub fn plan_stopless_orchestration_action'],
+    ['stopless-orchestration-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_orchestration_action_json'],
+    ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_orchestration_action_json'],
+    ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessOrchestrationActionJson'],
+    ['stopless-orchestration-action-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStoplessOrchestrationActionWithNative'],
+    ['stopless-orchestration-action-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine, 'planStoplessOrchestrationActionWithNative'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
+
+  for (const keyword of [
+    "flowId === 'stop_message_flow'",
+    'flowId !== \'stop_message_flow\'',
+    'function isStopMessageTerminalFinal',
+    'stopMessageTerminalFinal === true',
+  ]) {
+    if (servertoolEngine.includes(keyword)) {
+      fail(
+        'stopless-orchestration-action-no-ts-owner',
+        `Forbidden TS stopless orchestration semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/engine.ts`
+      );
+    }
+  }
+  pass('stopless-orchestration-action-rust-owner', 'servertool-core owns stopless CLI/terminal/followup action planning');
+}
+
 // ── Check 16: servertool CLI result guard has Rust owner ──────
 function checkServertoolCliResultGuardRustOwner() {
   const rustCliResultGuard = readRequired(RUST_SERVERTOOL_CLI_RESULT_GUARD);
@@ -3620,6 +3657,7 @@ checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();
 checkStopMessageCliProjectionSeedRustOwner();
+checkStoplessOrchestrationActionRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();

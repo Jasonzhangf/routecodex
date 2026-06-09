@@ -370,6 +370,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveAdapterContextProviderKeyJson",
   "buildClientExecCliProjectionOutputJson",
   "planStopMessageCliProjectionSeedJson",
+  "planStoplessOrchestrationActionJson",
   "planBudgetStateUpdateJson",
   "planStopMessagePersistedLookupJson",
   "buildClientVisibleProjectionShellJson",
