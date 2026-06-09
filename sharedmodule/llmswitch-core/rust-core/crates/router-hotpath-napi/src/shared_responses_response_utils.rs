@@ -852,9 +852,6 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
             .map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     for block in text.split("\n\n") {
-        if block.contains("data: [DONE]") {
-            probe.insert("__seen_done_chunk".to_string(), Value::Bool(true));
-        }
         let Some((event_name, parsed)) = parse_sse_block(block) else {
             continue;
         };
@@ -1063,7 +1060,6 @@ mod tests {
         assert!(wire.contains("event: response.required_action"));
         assert!(wire.contains("event: response.completed"));
         assert!(wire.contains("event: response.done"));
-        assert!(wire.contains("data: [DONE]"));
         assert!(
             wire.find("event: response.required_action").unwrap()
                 < wire.find("event: response.completed").unwrap()

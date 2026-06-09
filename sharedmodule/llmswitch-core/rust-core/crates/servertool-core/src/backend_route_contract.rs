@@ -223,6 +223,43 @@ pub struct ServertoolFollowupMaterializationPlan {
     pub injection: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupErrorPlanInput {
+    pub error: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupErrorEnvelopePlan {
+    pub upstream_status: Option<i64>,
+    pub upstream_code: Option<String>,
+    pub reason: Option<String>,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolBootstrapReplayPlanInput {
+    pub preflight_body: Option<Value>,
+    pub replay_seed: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolBootstrapPreflightFailurePlan {
+    pub status: Option<i64>,
+    pub code: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolBootstrapReplayPlan {
+    pub preflight_failure: Option<ServertoolBootstrapPreflightFailurePlan>,
+    pub replay_payload: Option<Value>,
+}
+
 pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
     input: ServertoolBackendRoutePolicyInput,
 ) -> Result<ServertoolBackendRoutePolicy01Planned, ServertoolOutcomeError> {
@@ -620,6 +657,44 @@ pub fn plan_followup_materialization(
     }
 }
 
+pub fn plan_followup_error_envelope(
+    input: ServertoolFollowupErrorPlanInput,
+) -> ServertoolFollowupErrorEnvelopePlan {
+    let upstream_code = read_followup_error_code(&input.error);
+    let upstream_status = read_followup_error_status(&input.error);
+    let reason = read_followup_error_reason(&input.error);
+    let terminal =
+        is_terminal_followup_error(upstream_status, upstream_code.as_deref(), reason.as_deref());
+    ServertoolFollowupErrorEnvelopePlan {
+        upstream_status,
+        upstream_code,
+        reason,
+        terminal,
+    }
+}
+
+pub fn plan_bootstrap_replay(
+    input: ServertoolBootstrapReplayPlanInput,
+) -> ServertoolBootstrapReplayPlan {
+    let preflight_failure = input
+        .preflight_body
+        .as_ref()
+        .and_then(|body| body.get("error"))
+        .and_then(plan_bootstrap_preflight_failure);
+    let replay_payload = if preflight_failure.is_some() {
+        None
+    } else {
+        input
+            .replay_seed
+            .as_ref()
+            .and_then(build_bootstrap_replay_payload)
+    };
+    ServertoolBootstrapReplayPlan {
+        preflight_failure,
+        replay_payload,
+    }
+}
+
 fn normalize_backend_route_input(
     tool_name: &str,
     input: Value,
@@ -695,6 +770,158 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     } else {
         Some(raw.to_string())
     }
+}
+
+fn read_followup_error_code(error: &Value) -> Option<String> {
+    read_trimmed_string(error.get("upstreamCode"))
+        .or_else(|| {
+            error
+                .get("details")
+                .and_then(|details| read_trimmed_string(details.get("upstreamCode")))
+        })
+        .or_else(|| read_trimmed_string(error.get("code")))
+        .or_else(|| {
+            error
+                .get("details")
+                .and_then(|details| read_trimmed_string(details.get("code")))
+        })
+}
+
+fn read_followup_error_status(error: &Value) -> Option<i64> {
+    read_number_floor(error.get("status"))
+        .or_else(|| read_number_floor(error.get("statusCode")))
+        .or_else(|| {
+            error
+                .get("details")
+                .and_then(|details| read_number_floor(details.get("status")))
+        })
+        .or_else(|| {
+            error
+                .get("details")
+                .and_then(|details| read_number_floor(details.get("statusCode")))
+        })
+}
+
+fn read_followup_error_reason(error: &Value) -> Option<String> {
+    error
+        .get("details")
+        .and_then(|details| read_trimmed_string(details.get("reason")))
+        .or_else(|| read_trimmed_string(error.get("reason")))
+        .or_else(|| read_trimmed_string(error.get("message")))
+}
+
+fn read_number_floor(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    if let Some(number) = value.as_u64() {
+        return i64::try_from(number).ok();
+    }
+    value.as_f64().and_then(|number| {
+        if number.is_finite() {
+            Some(number.floor() as i64)
+        } else {
+            None
+        }
+    })
+}
+
+fn is_terminal_followup_error(
+    upstream_status: Option<i64>,
+    upstream_code: Option<&str>,
+    reason: Option<&str>,
+) -> bool {
+    if upstream_status
+        .map(|status| (400..500).contains(&status))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let code = upstream_code
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        code.as_str(),
+        "bad_request"
+            | "provider_not_available"
+            | "client_disconnected"
+            | "client_response_closed"
+            | "client_request_aborted"
+            | "client_timeout_hint_expired"
+            | "client_tool_args_invalid"
+    ) {
+        return true;
+    }
+    let text = reason
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    text.contains("no available providers after applying routing instructions")
+        || (text.contains("tool_choice") && text.contains("必须提供 tools"))
+        || text.contains("client disconnected")
+        || text.contains("client_response_closed")
+        || text.contains("client_request_aborted")
+        || text.contains("client_timeout_hint_expired")
+}
+
+fn plan_bootstrap_preflight_failure(
+    preflight_error: &Value,
+) -> Option<ServertoolBootstrapPreflightFailurePlan> {
+    let status = read_preflight_status(preflight_error);
+    if !matches!(status, Some(400 | 429)) {
+        return None;
+    }
+    let code = read_trimmed_string(preflight_error.get("code"))
+        .or_else(|| status.map(|value| format!("HTTP_{value}")))
+        .unwrap_or_else(|| "SERVERTOOL_FOLLOWUP_FAILED".to_string());
+    let reason = read_trimmed_string(preflight_error.get("message"));
+    Some(ServertoolBootstrapPreflightFailurePlan {
+        status,
+        code,
+        reason,
+    })
+}
+
+fn read_preflight_status(preflight_error: &Value) -> Option<i64> {
+    read_number_floor(preflight_error.get("status"))
+        .or_else(|| read_number_floor(preflight_error.get("statusCode")))
+        .or_else(|| {
+            let code = read_trimmed_string(preflight_error.get("code"))?;
+            parse_http_status_code(&code)
+        })
+}
+
+fn parse_http_status_code(code: &str) -> Option<i64> {
+    let trimmed = code.trim();
+    let numeric = trimmed
+        .strip_prefix("HTTP_")
+        .or_else(|| trimmed.strip_prefix("http_"))
+        .unwrap_or(trimmed);
+    if numeric.len() == 3 && numeric.bytes().all(|item| item.is_ascii_digit()) {
+        numeric.parse::<i64>().ok()
+    } else {
+        None
+    }
+}
+
+fn build_bootstrap_replay_payload(seed: &Value) -> Option<Value> {
+    let seed = seed.as_object()?;
+    let messages = seed.get("messages").and_then(Value::as_array)?;
+    if messages.is_empty() {
+        return None;
+    }
+    let mut payload = serde_json::Map::new();
+    if let Some(model) = read_trimmed_string(seed.get("model")) {
+        payload.insert("model".to_string(), Value::String(model));
+    }
+    payload.insert("messages".to_string(), Value::Array(messages.clone()));
+    if let Some(tools) = seed.get("tools").and_then(Value::as_array) {
+        payload.insert("tools".to_string(), Value::Array(tools.clone()));
+    }
+    if let Some(parameters) = seed.get("parameters").and_then(Value::as_object) {
+        payload.insert("parameters".to_string(), Value::Object(parameters.clone()));
+    }
+    Some(Value::Object(payload))
 }
 
 fn normalize_context_decoration_mode(value: Option<String>) -> Option<String> {
@@ -1472,5 +1699,87 @@ mod tests {
         );
         assert!(plan.payload.is_none());
         assert!(plan.injection.is_none());
+    }
+
+    #[test]
+    fn followup_error_envelope_marks_client_and_provider_unavailable_terminal() {
+        let status_plan = plan_followup_error_envelope(ServertoolFollowupErrorPlanInput {
+            error: json!({
+                "details": {
+                    "statusCode": 429.8,
+                    "upstreamCode": "rate_limit"
+                },
+                "message": "too many"
+            }),
+        });
+        assert_eq!(status_plan.upstream_status, Some(429));
+        assert_eq!(status_plan.upstream_code.as_deref(), Some("rate_limit"));
+        assert!(status_plan.terminal);
+
+        let code_plan = plan_followup_error_envelope(ServertoolFollowupErrorPlanInput {
+            error: json!({
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "reason": "pool empty"
+            }),
+        });
+        assert_eq!(
+            code_plan.upstream_code.as_deref(),
+            Some("PROVIDER_NOT_AVAILABLE")
+        );
+        assert!(code_plan.terminal);
+    }
+
+    #[test]
+    fn followup_error_envelope_preserves_recoverable_non_terminal_error() {
+        let plan = plan_followup_error_envelope(ServertoolFollowupErrorPlanInput {
+            error: json!({
+                "status": 502,
+                "code": "HTTP_502",
+                "message": "temporary upstream failure"
+            }),
+        });
+        assert_eq!(plan.upstream_status, Some(502));
+        assert_eq!(plan.reason.as_deref(), Some("temporary upstream failure"));
+        assert!(!plan.terminal);
+    }
+
+    #[test]
+    fn bootstrap_replay_plan_fails_preflight_for_400_or_429() {
+        let plan = plan_bootstrap_replay(ServertoolBootstrapReplayPlanInput {
+            preflight_body: Some(json!({
+                "error": {
+                    "code": "HTTP_400",
+                    "message": "bad tool choice"
+                }
+            })),
+            replay_seed: Some(json!({
+                "model": "gpt-test",
+                "messages": [{ "role": "user", "content": "hello" }]
+            })),
+        });
+        let failure = plan.preflight_failure.expect("preflight failure");
+        assert_eq!(failure.status, Some(400));
+        assert_eq!(failure.code, "HTTP_400");
+        assert_eq!(failure.reason.as_deref(), Some("bad tool choice"));
+        assert!(plan.replay_payload.is_none());
+    }
+
+    #[test]
+    fn bootstrap_replay_plan_builds_payload_from_seed_without_preflight_failure() {
+        let plan = plan_bootstrap_replay(ServertoolBootstrapReplayPlanInput {
+            preflight_body: Some(json!({ "status": "ok" })),
+            replay_seed: Some(json!({
+                "model": " gpt-test ",
+                "messages": [{ "role": "user", "content": "hello" }],
+                "tools": [{ "type": "function", "function": { "name": "search" } }],
+                "parameters": { "temperature": 0.2 }
+            })),
+        });
+        assert!(plan.preflight_failure.is_none());
+        let payload = plan.replay_payload.expect("replay payload");
+        assert_eq!(payload["model"], "gpt-test");
+        assert_eq!(payload["messages"][0]["role"], "user");
+        assert_eq!(payload["tools"][0]["type"], "function");
+        assert_eq!(payload["parameters"]["temperature"], 0.2);
     }
 }

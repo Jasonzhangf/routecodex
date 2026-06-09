@@ -2,6 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import {
+  planPendingSessionLoadWithNative,
+  planPendingSessionSaveWithNative,
+  resolvePendingSessionFileNameWithNative,
+  resolvePendingSessionMaxAgeMsWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 export interface PendingServerToolInjection {
@@ -19,8 +25,6 @@ export interface PendingServerToolInjection {
   messages: JsonObject[];
   sourceRequestId?: string;
 }
-
-const DEFAULT_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
 async function readJsonFile(file: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(file, 'utf8'));
@@ -55,22 +59,7 @@ function resolvePendingMaxAgeMs(): number {
     ?? process.env.RCC_SERVERTOOL_PENDING_MAX_AGE_MS
     ?? ''
   ).trim();
-  if (!raw) {
-    return DEFAULT_PENDING_MAX_AGE_MS;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_PENDING_MAX_AGE_MS;
-  }
-  return parsed;
-}
-
-function sanitizeSegment(value: string): string {
-  return String(value || '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_.-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  return resolvePendingSessionMaxAgeMsWithNative(raw || undefined);
 }
 
 function resolvePendingDir(sessionDir: string): string {
@@ -78,39 +67,8 @@ function resolvePendingDir(sessionDir: string): string {
 }
 
 function resolvePendingFile(sessionDir: string, sessionId: string): string | null {
-  const safe = sanitizeSegment(sessionId);
-  if (!safe) return null;
-  return path.join(resolvePendingDir(sessionDir), `${safe}.json`);
-}
-
-function coercePending(value: unknown): PendingServerToolInjection | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const rec = value as Record<string, unknown>;
-  const sessionId = typeof rec.sessionId === 'string' ? rec.sessionId.trim() : '';
-  const createdAtMs =
-    typeof rec.createdAtMs === 'number' && Number.isFinite(rec.createdAtMs) ? Math.floor(rec.createdAtMs) : 0;
-  const afterToolCallIds = Array.isArray(rec.afterToolCallIds)
-    ? (rec.afterToolCallIds as unknown[]).filter((x) => typeof x === 'string' && x.trim().length).map((x) => String(x).trim())
-    : [];
-  const messages = Array.isArray(rec.messages)
-    ? (rec.messages as unknown[]).filter((m) => m && typeof m === 'object' && !Array.isArray(m)) as JsonObject[]
-    : [];
-  if (!sessionId || !createdAtMs || !afterToolCallIds.length || !messages.length) {
-    return null;
-  }
-  const sourceRequestId = typeof rec.sourceRequestId === 'string' && rec.sourceRequestId.trim().length
-    ? rec.sourceRequestId.trim()
-    : undefined;
-  return {
-    version: 1,
-    sessionId,
-    createdAtMs,
-    afterToolCallIds,
-    messages,
-    ...(sourceRequestId ? { sourceRequestId } : {})
-  };
+  const fileName = resolvePendingSessionFileNameWithNative(sessionId);
+  return fileName ? path.join(resolvePendingDir(sessionDir), fileName) : null;
 }
 
 async function dropPendingFile(file: string, message: string): Promise<void> {
@@ -132,18 +90,14 @@ export async function savePendingServerToolInjection(
 ): Promise<void> {
   const base = readSessionDirEnv();
   if (!base) return;
-  const file = resolvePendingFile(base, sessionId);
-  if (!file) return;
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const payload: PendingServerToolInjection = {
-    version: 1,
+  const savePlan = planPendingSessionSaveWithNative({
     sessionId,
-    createdAtMs: pending.createdAtMs,
-    afterToolCallIds: pending.afterToolCallIds,
-    messages: pending.messages,
-    ...(pending.sourceRequestId ? { sourceRequestId: pending.sourceRequestId } : {})
-  };
-  await writeJsonFileAtomic(file, payload);
+    pending: pending as Record<string, unknown>
+  });
+  if (!savePlan) return;
+  const file = path.join(resolvePendingDir(base), savePlan.fileName);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await writeJsonFileAtomic(file, savePlan.payload);
 }
 
 export async function loadPendingServerToolInjection(sessionId: string): Promise<PendingServerToolInjection | null> {
@@ -153,20 +107,17 @@ export async function loadPendingServerToolInjection(sessionId: string): Promise
   if (!file) return null;
   try {
     const raw = await readJsonFile(file);
-    const pending = coercePending(raw);
-    if (!pending) {
-      await dropPendingFile(file, '[servertool-pending] invalid pending injection dropped: malformed payload');
-      return null;
-    }
     const maxAgeMs = resolvePendingMaxAgeMs();
-    if (Date.now() - pending.createdAtMs > maxAgeMs) {
-      await dropPendingFile(
-        file,
-        `[servertool-pending] stale pending injection dropped session=${pending.sessionId} ageMs=${Date.now() - pending.createdAtMs} maxAgeMs=${maxAgeMs}`
-      );
+    const plan = planPendingSessionLoadWithNative({
+      raw,
+      nowMs: Date.now(),
+      maxAgeMs
+    });
+    if (plan.action === 'drop') {
+      await dropPendingFile(file, plan.message);
       return null;
     }
-    return pending;
+    return plan.pending as PendingServerToolInjection;
   } catch (error) {
     const code = typeof (error as { code?: unknown } | null)?.code === 'string'
       ? String((error as { code: string }).code)

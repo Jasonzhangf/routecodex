@@ -306,6 +306,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
 
     const res = new MockResponse();
+    res.on('error', () => {});
     const stream = new PassThrough();
 
     const closed = new Promise<void>((resolve) => {
@@ -329,11 +330,73 @@ describe('sendPipelineResponse SSE completion logging', () => {
     res.destroy();
 
     await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse][req-stream-client-close] client_close'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"closeBeforeStreamEnd":true'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
-    expect(clearResponsesConversationByRequestId).toHaveBeenCalledWith('req-stream-client-close');
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[request.usage_log.start][req-stream-client-close]'));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[request.usage_log.completed][req-stream-client-close]'));
+  });
+
+  it('destroys the original upstream SSE stream when client closes before terminal event', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => ({}),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    res.on('error', () => {});
+    const upstream = new PassThrough();
+    let destroyReason: unknown;
+    const originalDestroy = upstream.destroy.bind(upstream);
+    const destroySpy = jest.spyOn(upstream, 'destroy').mockImplementation((error?: Error) => {
+      destroyReason = error;
+      return originalDestroy(error);
+    });
+
+    const closed = new Promise<void>((resolve) => {
+      res.on('close', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: upstream
+        }
+      } as any,
+      'req-stream-client-close-upstream-abort',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    upstream.write('event: response.output_text.delta\n');
+    upstream.write('data: {"type":"response.output_text.delta","delta":"hi"}\n\n');
+    res.destroy();
+
+    await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    expect(destroySpy).toHaveBeenCalled();
+    expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
+    expect((destroyReason as Error | undefined)?.message).toBe('CLIENT_RESPONSE_CLOSED');
   });
 
   it('persists required_action continuation instead of clearing store when client closes before response.done', async () => {
@@ -383,6 +446,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
 
     const res = new MockResponse();
+    res.on('error', () => {});
     const stream = new PassThrough();
     const closed = new Promise<void>((resolve) => {
       res.on('close', () => setTimeout(resolve, 25));
@@ -433,6 +497,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     res.destroy();
 
     await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 75));
 
     expect(recordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
       requestId: 'resp_direct_required_action_close',
@@ -793,7 +858,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
-    expect(output).toContain('data: [DONE]');
+    expect(output).not.toContain('data: [DONE]');
   });
 
   it('RED: does not silently swallow trailing frames after tool_calls terminal event before upstream end', async () => {
@@ -876,7 +941,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).toContain(': trailing-tail-after-terminal');
-    expect(output).toContain('data: [DONE]');
+    expect(output).not.toContain('data: [DONE]');
     expect(responseErrors).toEqual([]);
   });
 
@@ -979,7 +1044,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain('event: response.completed');
     expect(output).toContain('"status":"completed"');
     expect(output).toContain('"output_text":"ok"');
-    expect(output).toContain('data: [DONE]');
+    expect(output).not.toContain('data: [DONE]');
     expect(output).not.toContain('upstream_stream_incomplete');
     expect(output).not.toContain('event: error');
   });
@@ -1087,12 +1152,12 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
-    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(output).not.toContain('data: [DONE]');
     expect(output).not.toContain('upstream_stream_incomplete');
     expect(output).not.toContain('event: error');
   });
 
-  it('RED: appends DONE when upstream emits response.completed and response.done without DONE sentinel', async () => {
+  it('does not append DONE when upstream emits response.completed and response.done without DONE sentinel', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1146,7 +1211,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
-    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(output).not.toContain('data: [DONE]');
     expect(output).not.toContain('event: error');
   });
 
@@ -1439,6 +1504,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain('event: response.done');
     expect(output.indexOf('event: response.required_action')).toBeLessThan(output.indexOf('event: response.completed'));
     expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('event: response.done'));
-    expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(output).not.toContain('data: [DONE]');
   });
 });

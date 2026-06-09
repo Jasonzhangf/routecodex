@@ -62,6 +62,9 @@ export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServert
   : never;
 
 export type NativeServertoolSkeletonDocument = Record<string, unknown>;
+export type NativeServertoolSkeletonDerivedConfig = Record<string, unknown>;
+export type NativeServertoolRegistrationSpec = Record<string, unknown>;
+export type NativeServertoolToolSpec = Record<string, unknown>;
 
 export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
@@ -245,6 +248,36 @@ function parseServertoolSkeletonDocument(raw: string): NativeServertoolSkeletonD
     return null;
   }
   return parsed as NativeServertoolSkeletonDocument;
+}
+
+function parseServertoolSkeletonDerivedConfig(raw: string): NativeServertoolSkeletonDerivedConfig | null {
+  const parsed = parseJson('parseServertoolSkeletonDerivedConfig', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as NativeServertoolSkeletonDerivedConfig;
+}
+
+function parseServertoolRegistrationSpec(raw: string): NativeServertoolRegistrationSpec | null {
+  const parsed = parseJson('parseServertoolRegistrationSpec', raw);
+  if (parsed === JSON_PARSE_FAILED || parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as NativeServertoolRegistrationSpec;
+}
+
+function parseServertoolToolSpec(raw: string): NativeServertoolToolSpec | null {
+  const parsed = parseJson('parseServertoolToolSpec', raw);
+  if (parsed === JSON_PARSE_FAILED || parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as NativeServertoolToolSpec;
 }
 
 function parseProviderResponseShape(raw: string):
@@ -499,6 +532,56 @@ export function getDefaultServertoolSkeletonDocumentWithNative(): NativeServerto
     const raw = invokeNativeStringCapability(capability, []);
     const parsed = parseServertoolSkeletonDocument(raw);
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolSkeletonDerivedConfigWithNative(input: {
+  document?: unknown;
+} = {}): NativeServertoolSkeletonDerivedConfig {
+  const capability = 'planServertoolSkeletonDerivedConfigJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolSkeletonDerivedConfig>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolSkeletonDerivedConfig(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeServertoolRegistrationSpecWithNative(input: {
+  name: string;
+  options?: Record<string, unknown>;
+  document?: unknown;
+}): NativeServertoolRegistrationSpec | null {
+  const capability = 'normalizeServertoolRegistrationSpecJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolRegistrationSpec | null>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolRegistrationSpec(raw);
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function resolveServertoolToolSpecWithNative(input: {
+  name: string;
+  document?: unknown;
+}): NativeServertoolToolSpec | null {
+  const capability = 'resolveServertoolToolSpecJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolToolSpec | null>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    return parseServertoolToolSpec(raw);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

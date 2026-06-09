@@ -48,8 +48,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () =>
     return [
       `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
       `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-      'data: [DONE]\n\n'
+      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
     ];
   }),
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
@@ -228,7 +227,6 @@ describe('handler-response-utils required_action split frame regression', () => 
     expect(text).toContain('event: response.done');
     expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
     expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
-    expect(text).toContain('data: [DONE]');
     const clientSnapshot = await waitForClientSnapshot(snapshotRoot, 500);
     expect(clientSnapshot?.data?.bodyText).toContain('event: response.required_action');
     expect(clientSnapshot?.data?.bodyText).toContain(callId);

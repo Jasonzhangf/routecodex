@@ -1,5 +1,24 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-09 servertool skeleton-config Rust slice
+
+- 完成 servertool skeleton-config Rust owner 切片：`router-hotpath-napi/src/servertool_skeleton_config.rs` 现在拥有 derived skeleton config、registration spec normalize、tool name alias、auto-hook phase normalize、priority integer parse、tool spec lookup、auto hook queue、pending injection kinds、progress config、followup flow profiles、state config。
+- 新增 native export `resolveServertoolToolSpecJson`，与 `planServertoolSkeletonDerivedConfigJson` / `normalizeServertoolRegistrationSpecJson` 一起形成 skeleton-config native owner；直接 `.node` probe 已确认三者存在，并验证 `web-search -> web_search`、`WEB-SEARCH` registration -> `backend`、derived optional hook order 包含 `stop_message_auto`。
+- `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts` 已收缩为 native-only thin shell；本地 `normalizeServerToolName`、`normalizeAutoHookPhase`、`normalizeInteger`、`Number.isFinite`、`Math.floor`、`Object.fromEntries`、followup profile normalize、trigger->executionMode policy 均已删除。
+- `native-chat-process-servertool-orchestration-semantics.ts` 新增 `resolveServertoolToolSpecWithNative`；`native-router-hotpath-required-exports.ts` 新增 required export `resolveServertoolToolSpecJson`。
+- `verify:servertool-rust-only` 新增 skeleton-config gate，锁 Rust owner/native bridge/required exports，并阻止 TS semantic owner 复活。
+- Jest mock 已更新：`server-side-tools.auto-hook-config.spec.ts` 与 `servertool-skeleton-reasoning-stop-flows.spec.ts` 均显式 mock native skeleton owner，避免测试绕过 fail-fast native requirement。
+- 验证 PASS：`cargo fmt --package router-hotpath-napi --check`；`cargo test -p router-hotpath-napi derived_config --lib -- --nocapture`；`cargo test -p router-hotpath-napi registration_spec --lib -- --nocapture`；`cargo test -p router-hotpath-napi resolves_tool_spec --lib -- --nocapture`；native build；direct `.node` export probe；`npm run verify:servertool-rust-only`；llmswitch-core/root tsc；focused Jest 4/4；`git diff --check`。
+- 不可标记整个 servertool Rustification goal complete；后续仍有 engine/server-side-tools/stop-message-auto shell cleanup、pending/session/state/config shell cleanup、backend-route edge shells、协调后的 live runtime smoke。
+
+## 2026-06-09 servertool backend-route reenter/bootstrap Rust slice
+
+- 发现 `sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts` 仍有 followup error envelope / terminal classification TS 语义：本地读取 `status/statusCode/details.*`、`upstreamCode/code`、`reason/message`，并用 4xx、client disconnect、provider unavailable、message substring 判定 terminal。
+- 发现 `sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts` 仍有 bootstrap preflight/replay TS 语义：本地 `readPreflightStatus` 解析 400/429、本地生成 `HTTP_<status>` code、本地 `buildReplayPayload` 从 captured seed 组装 `model/messages/tools/parameters`。
+- 已迁到 Rust owner `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs::{plan_followup_error_envelope,plan_bootstrap_replay}`；TS `backend-route-reenter-block.ts` 和 `backend-route-bootstrap-replay-block.ts` 只调用 native plan、保留 IO/diagnostic/error projection shell。
+- Native bridge/export 链已接入 `servertool_core_blocks.rs`、`router-hotpath-napi/src/lib.rs`、`native-servertool-core-semantics.ts`、`native-router-hotpath-required-exports.ts`，新增 required exports `planFollowupErrorEnvelopeJson` / `planBootstrapReplayJson`；直接 `.node` probe 已确认两个 export。
+- `verify:servertool-rust-only` 新增 backend-route followup error envelope 和 bootstrap replay gate，阻止 TS 恢复 `extractFollowupErrorEnvelope`、`isTerminalFollowupError`、`readPreflightStatus`、`buildReplayPayload`、本地状态码 floor/400/429/message substring 判定。
+
 ## 2026-06-09 servertool backend-route materialization Rust slice
 
 - 发现 `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts` 仍有 followup materialization TS 语义：本地读取 `followupPlan.entryEndpoint` 并默认 `/v1/chat/completions`，本地判断 `payload` / `injection` source，并用对象检查决定 raw payload / injection plan。
@@ -18444,3 +18463,11 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - 当前定位：client close before Responses terminal 时，handler-response-utils 旧 cleanup 会记录 response.sse.client_close 后继续 logResponseCompleted/request.usage_log；restore Transform destroy 未稳定携带 CLIENT_RESPONSE_CLOSED 到原始 upstream，导致 provider 可能继续跑完并 usage 记 fail=0 finish_reason=unknown。
 - 已加红测：client_close before terminal 不应进入 request.usage_log；原始 upstream 必须以 code=CLIENT_DISCONNECTED/message=CLIENT_RESPONSE_CLOSED destroy。
 - 待收口：当前实现仍导致 required_action close persistence / client-response snapshot / DONE terminal 单测回归，需保持正常 terminal 流程不被 close-abort 修改影响。
+
+2026-06-09 servertool backend-route/skeleton + Responses SSE 收口提交前验证：
+- Backend-route Rust owner 扩展完成：`servertool-core::backend_route_contract::{plan_followup_error_envelope,plan_bootstrap_replay}` owns followup terminal classification and bootstrap preflight/replay payload planning. TS `backend-route-reenter-block.ts` / `backend-route-bootstrap-replay-block.ts` only call native and perform reenter/projection glue.
+- Skeleton config Rust owner 完成：`router-hotpath-napi/src/servertool_skeleton_config.rs` now owns derived config, registration normalization, tool spec alias lookup, auto hook order, followup/state config. TS `skeleton-config.ts` is native-only bridge.
+- Responses SSE terminal contract corrected: `/v1/responses` client frames drop chat-style `data: [DONE]`; terminal repair writes `response.completed` / `response.done`; `ResponsesEventSerializer` rejects `[DONE]` for Responses.
+- Provider-direct Responses retention aligned with router-direct: canonical JSON body records/finalizes conversation retention; 4xx/5xx or SSE wrapper clears by requestId.
+- Review fix: client-close abort cleanup no longer throws from async stream `error` listener; non-client-disconnect cleanup errors are logged through `logResponseNonBlockingError`.
+- Verification PASS this pass: `npm run verify:function-map-compile-gate`; `npm run verify:servertool-rust-only`; `cargo fmt --package servertool-core --package router-hotpath-napi --check`; `cargo test -p servertool-core backend_route --lib -- --nocapture` 34/34; `cargo test -p router-hotpath-napi backend_route --lib -- --nocapture` 2/2; `cargo test -p router-hotpath-napi followup_error_envelope --lib -- --nocapture` 1/1; `cargo test -p router-hotpath-napi bootstrap_replay --lib -- --nocapture` 1/1; `cargo test -p router-hotpath-napi servertool_skeleton --lib -- --nocapture` 9/9; focused Jest 7 suites 35/35 plus `handler-response-utils.sse-finish-reason` 18/18 and skeleton/auto-hook 4/4; root `npx tsc --noEmit --pretty false`; `git diff --check`.

@@ -1817,6 +1817,30 @@ export class RouteCodexHttpServer {
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
       : {};
+    if (input.requestId && directResult.providerProtocol === 'openai-responses') {
+      const responseBody = normalized.body;
+      if (
+        normalized.status && normalized.status >= 400
+        || !responseBody
+        || typeof responseBody !== 'object'
+        || Array.isArray(responseBody)
+        || '__sse_responses' in (responseBody as Record<string, unknown>)
+      ) {
+        await clearResponsesConversationByRequestId(input.requestId);
+      } else {
+        await recordResponsesResponseForRequest({
+          requestId: input.requestId,
+          response: responseBody as Record<string, unknown>,
+          providerKey: providerBinding,
+          sessionId: readSessionIdForUsageLog(inputMetadata),
+          conversationId: typeof inputMetadata.conversationId === 'string' ? inputMetadata.conversationId : undefined,
+          allowScopeContinuation: true,
+        });
+        await finalizeResponsesConversationRequestRetention(input.requestId, {
+          keepForSubmitToolOutputs: finishReason === 'tool_calls',
+        });
+      }
+    }
     return {
       ...normalized,
       metadata:

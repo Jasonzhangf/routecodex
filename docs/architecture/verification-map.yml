@@ -88,18 +88,21 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/servertool/server-side-web-search.spec.ts
       - tests/servertool/vision-flow.spec.ts
+      - tests/servertool/followup-bootstrap-replay.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:min
     notes:
-      - servertool-core owns followup materialization and runtime metadata/action plans; TS may only execute IO builders and native plans.
+      - servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans.
 
   - feature_id: error.provider_failure_policy
     change_risk: high

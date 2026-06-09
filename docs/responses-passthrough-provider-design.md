@@ -110,7 +110,7 @@
 
 - 黑盒客户端测试：
   - 直接打 `POST /v1/responses`，观察是否稳定收到：
-    - `response.created` → `response.in_progress` → `response.output_text.delta`* → `response.output_text.done` → `response.completed` → `response.done` → `[DONE]`。
+    - `response.created` → `response.in_progress` → `response.output_text.delta`* → `response.output_text.done` → `response.completed` → `response.done`。
   - 工具回路：收到 `required_action` 后，黑盒 `submit_tool_outputs`，再验证下一轮直到 `done`。
 
 - 服务端可观测：

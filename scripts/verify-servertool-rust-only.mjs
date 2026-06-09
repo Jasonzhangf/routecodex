@@ -45,16 +45,19 @@ const RUST_SERVERTOOL_COUNTER = `${ROOT}/sharedmodule/llmswitch-core/rust-core/c
 const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
 const RUST_SERVERTOOL_LOOP_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`;
 const RUST_SERVERTOOL_ORCHESTRATION_POLICY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`;
+const RUST_SERVERTOOL_PENDING_SESSION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs`;
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
+const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
 const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
 const TS_BACKEND_ROUTE_FLOW_POLICY = `${SERVERTOOL_TS_DIR}/backend-route-flow-policy.ts`;
 const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin-delta.ts`;
 const TS_BACKEND_ROUTE_RUNTIME = `${SERVERTOOL_TS_DIR}/backend-route-runtime-block.ts`;
+const TS_BACKEND_ROUTE_REENTER = `${SERVERTOOL_TS_DIR}/backend-route-reenter-block.ts`;
 const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
 const TS_LOOP_STATE_BLOCK = `${SERVERTOOL_TS_DIR}/loop-state-block.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
@@ -68,6 +71,7 @@ const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-au
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
 const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
+const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
 const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
 const NATIVE_BUILD_SCRIPT = `${ROOT}/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`;
 const ACTIVE_RUNTIME_SCAN_PATHS = [
@@ -1704,6 +1708,85 @@ function checkFollowupMainlineNativeBridgeRustOwner() {
   pass('followup-mainline-no-ts-fallback', 'native followup mainline bridge is fail-fast and Rust-owned');
 }
 
+// ── Check 14: skeleton config has Rust owner ──────────────────
+function checkServertoolSkeletonConfigRustOwner() {
+  const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
+  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
+  const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const needle of [
+    'pub fn plan_servertool_skeleton_derived_config_json',
+    'pub fn normalize_servertool_registration_spec_json',
+    'pub fn resolve_servertool_tool_spec_json',
+  ]) {
+    assertContains(
+      'servertool-skeleton-config-rust-owner',
+      `${RUST_SRC_DIR}/servertool_skeleton_config.rs`,
+      rustSkeletonConfig,
+      needle
+    );
+  }
+  for (const needle of [
+    'planServertoolSkeletonDerivedConfigWithNative',
+    'normalizeServertoolRegistrationSpecWithNative',
+    'resolveServertoolToolSpecWithNative',
+  ]) {
+    assertContains(
+      'servertool-skeleton-config-native-bridge',
+      NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+  }
+  for (const needle of [
+    'planServertoolSkeletonDerivedConfigJson',
+    'normalizeServertoolRegistrationSpecJson',
+    'resolveServertoolToolSpecJson',
+  ]) {
+    assertContains(
+      'servertool-skeleton-config-native-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      needle
+    );
+  }
+  for (const keyword of [
+    'function normalizeServerToolName',
+    'function normalizeAutoHookPhase',
+    'function normalizeInteger',
+    'Number.isFinite',
+    'Math.floor',
+    "key === 'websearch'",
+    "key === 'web-search'",
+    "trigger === 'auto' ? 'auto_hook' : 'guarded'",
+    'profile.noFollowup === true',
+    'profile.autoLimit === true',
+    'profile.contextDecorationMode ===',
+    'Object.fromEntries(',
+  ]) {
+    if (skeletonConfigShell.includes(keyword)) {
+      fail(
+        'servertool-skeleton-config-no-ts-owner',
+        `Forbidden TS skeleton semantic "${keyword}" found in skeleton-config.ts`
+      );
+    }
+  }
+  for (const needle of [
+    'planServertoolSkeletonDerivedConfigWithNative',
+    'normalizeServertoolRegistrationSpecWithNative',
+    'resolveServertoolToolSpecWithNative',
+  ]) {
+    assertContains(
+      'servertool-skeleton-config-ts-thin-shell',
+      TS_SERVERTOOL_SKELETON_CONFIG,
+      skeletonConfigShell,
+      needle
+    );
+  }
+  pass('servertool-skeleton-config-no-ts-owner', 'skeleton-config.ts is native-only shell for derived config and registration semantics');
+}
+
 // ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
@@ -2001,6 +2084,7 @@ function checkBackendRoutePolicyRustOwner() {
   }
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
+  const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
@@ -2028,6 +2112,65 @@ function checkBackendRoutePolicyRustOwner() {
     bootstrapReplayShell,
     'buildFollowupRequestIdWithNative'
   );
+  assertContains(
+    'backend-route-followup-error-envelope-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_error_envelope'
+  );
+  assertContains(
+    'backend-route-followup-error-envelope-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planFollowupErrorEnvelopeWithNative'
+  );
+  assertContains(
+    'backend-route-followup-error-envelope-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planFollowupErrorEnvelopeJson'
+  );
+  assertContains(
+    'backend-route-bootstrap-replay-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_bootstrap_replay'
+  );
+  assertContains(
+    'backend-route-bootstrap-replay-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planBootstrapReplayWithNative'
+  );
+  assertContains(
+    'backend-route-bootstrap-replay-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planBootstrapReplayJson'
+  );
+  for (const keyword of [
+    'function readTrimmedString',
+    'function extractFollowupErrorEnvelope',
+    'function isTerminalFollowupError',
+    'upstreamStatus >= 400',
+    'upstreamStatus < 500',
+    'provider_not_available',
+    'client_timeout_hint_expired',
+    'no available providers after applying routing instructions',
+    "text.includes(\"tool_choice\")",
+    "text.includes('tool_choice')",
+  ]) {
+    if (reenterShell.includes(keyword)) {
+      fail(
+        'backend-route-followup-error-envelope-no-ts-owner',
+        `Forbidden TS followup error semantic "${keyword}" found in backend-route-reenter-block.ts`
+      );
+    }
+  }
+  pass(
+    'backend-route-followup-error-envelope-no-ts-owner',
+    'backend-route-reenter-block.ts consumes native error envelope plan without local terminal classification'
+  );
   for (const keyword of [
     "baseRequestId.trim() ? baseRequestId.trim() : 'servertool'",
     "suffix.trim() ? suffix.trim() : ':followup'",
@@ -2040,6 +2183,28 @@ function checkBackendRoutePolicyRustOwner() {
       );
     }
   }
+  for (const keyword of [
+    'function readPreflightStatus',
+    'function buildReplayPayload',
+    'Number.isFinite',
+    'Math.floor',
+    '/^HTTP_\\d{3}$/i',
+    'preflightStatus === 429',
+    'preflightStatus === 400',
+    'preflightError as any',
+    'seed.messages as JsonObject[]',
+  ]) {
+    if (bootstrapReplayShell.includes(keyword)) {
+      fail(
+        'backend-route-bootstrap-replay-no-ts-owner',
+        `Forbidden TS bootstrap replay semantic "${keyword}" found in backend-route-bootstrap-replay-block.ts`
+      );
+    }
+  }
+  pass(
+    'backend-route-bootstrap-replay-no-ts-owner',
+    'backend-route-bootstrap-replay-block.ts consumes native bootstrap replay plan without local preflight/replay policy'
+  );
   for (const keyword of [
     'isNoFollowupFlowId',
     'isAutoLimitFlowId',
@@ -2508,6 +2673,7 @@ checkStopMessageCompareContextRustOwner();
 checkOrchestrationPolicyRustOwner();
 checkStopMessageCounterRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
+checkServertoolSkeletonConfigRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();

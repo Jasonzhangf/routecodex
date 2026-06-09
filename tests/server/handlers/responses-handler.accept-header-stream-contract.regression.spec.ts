@@ -30,8 +30,7 @@ describe('responses-handler accept header vs client stream contract', () => {
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
           'event: response.completed\n',
-          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`,
-          'data: [DONE]\n\n'
+          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
         ]),
         id: 'resp_accept_only',
         object: 'response',

@@ -51,6 +51,66 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
+    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
+      document: skeletonDocument,
+      toolSpecs: skeletonDocument.servertool.internalTools,
+      toolSpecList: Object.values(skeletonDocument.servertool.internalTools),
+      autoHookQueueConfig: {
+        optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
+        mandatoryOrder: []
+      },
+      pendingInjectionConfig: {
+        messageKinds: ['assistant_tool_calls', 'tool_outputs']
+      },
+      progressConfig: {
+        toolNameByFlowId: {},
+        goldHighlightFlowIds: []
+      },
+      followupConfig: {
+        genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
+        nativeSupportedOps: [],
+        flowPolicy: {
+          profilesByFlowId: {
+            stop_message_flow: {
+              seedLoopPayload: true
+            }
+          },
+          noFollowupFlowIds: [],
+          autoLimitFlowIds: [],
+          flowOnlyLoopLimitFlowIds: [],
+          clientInjectOnlyFlowIds: [],
+          seedLoopPayloadFlowIds: [],
+          clientInjectSourceByFlowId: {},
+          transparentReplayRequestSuffixByFlowId: {},
+          ignoreRequiresActionFollowupFlowIds: [],
+          contextDecorationModeByFlowId: {}
+        }
+      },
+      stateConfig: {
+        scopePriority: [],
+        pendingInjection: { enabled: true, strictContract: true }
+      }
+    })),
+    normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      if (!name) {
+        return null;
+      }
+      const toolSpec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
+      const trigger = toolSpec?.trigger?.type ?? input.options?.trigger ?? 'tool_call';
+      const executionMode = toolSpec?.execution?.mode ?? input.options?.executionMode ?? 'guarded';
+      return {
+        name,
+        enabled: toolSpec?.enabled ?? true,
+        trigger,
+        executionMode,
+        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true
+      };
+    }),
+    resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
+    }),
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
       optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
       mandatoryQueue: []

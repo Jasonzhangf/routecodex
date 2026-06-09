@@ -84,7 +84,6 @@ describe('responses-handler stream closed before completed regression', () => {
       expect(text).toContain('event: response.output_item.done');
       expect(text).toContain('event: response.completed');
       expect(text).toContain('event: response.done');
-      expect(text).toContain('data: [DONE]');
       expect(completedEvent?.response).toEqual(expect.objectContaining({ id: expect.any(String) }));
       expect(doneEvent?.response).toEqual(expect.objectContaining({ id: expect.any(String) }));
     });

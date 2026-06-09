@@ -106,6 +106,31 @@ export interface PersistStopMessageStatePlanOutput {
   action: 'save' | 'clear';
 }
 
+export interface PendingServerToolInjectionPlan {
+  version: 1;
+  sessionId: string;
+  createdAtMs: number;
+  afterToolCallIds: string[];
+  messages: Record<string, unknown>[];
+  sourceRequestId?: string;
+}
+
+export interface PendingSessionSavePlan {
+  fileName: string;
+  payload: PendingServerToolInjectionPlan;
+}
+
+export type PendingSessionLoadPlan =
+  | {
+      action: 'use';
+      pending: PendingServerToolInjectionPlan;
+    }
+  | {
+      action: 'drop';
+      reason: string;
+      message: string;
+    };
+
 export interface ClientExecCliProjectionInput {
   toolName: string;
   flowId?: string;
@@ -246,6 +271,22 @@ export interface ServertoolFollowupMaterializationPlan {
   payloadSource: 'payload' | 'injection' | 'none';
   payload?: Record<string, unknown> | null;
   injection?: Record<string, unknown> | null;
+}
+
+export interface ServertoolFollowupErrorEnvelopePlan {
+  upstreamStatus?: number;
+  upstreamCode?: string;
+  reason?: string;
+  terminal: boolean;
+}
+
+export interface ServertoolBootstrapReplayPlan {
+  preflightFailure?: {
+    status?: number;
+    code: string;
+    reason?: string;
+  } | null;
+  replayPayload?: Record<string, unknown> | null;
 }
 
 export interface ServertoolBackendRouteFinalizeExecution {
@@ -917,6 +958,149 @@ export function planPersistStopMessageStateWithNative(
   return { action };
 }
 
+export function resolvePendingSessionFileNameWithNative(sessionId: string): string | undefined {
+  const capability = 'resolvePendingSessionFileNameJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolvePendingSessionFileNameJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ sessionId }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolvePendingSessionFileNameJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
+}
+
+export function resolvePendingSessionMaxAgeMsWithNative(raw: unknown): number {
+  const capability = 'resolvePendingSessionMaxAgeMsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolvePendingSessionMaxAgeMsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ raw }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolvePendingSessionMaxAgeMsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!Number.isInteger(parsed) || (parsed as number) <= 0) {
+    throw new Error('resolvePendingSessionMaxAgeMsJson native returned invalid max age');
+  }
+  return parsed as number;
+}
+
+export function planPendingSessionSaveWithNative(input: {
+  sessionId: string;
+  pending: Record<string, unknown>;
+}): PendingSessionSavePlan | null {
+  const capability = 'planPendingSessionSaveJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPendingSessionSaveJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPendingSessionSaveJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPendingSessionSaveJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.fileName !== 'string' || !record.fileName.trim()) {
+    throw new Error('planPendingSessionSaveJson native returned invalid fileName');
+  }
+  return {
+    fileName: record.fileName.trim(),
+    payload: parsePendingServerToolInjectionPlan(record.payload, capability)
+  };
+}
+
+export function planPendingSessionLoadWithNative(input: {
+  raw: unknown;
+  nowMs: number;
+  maxAgeMs: number;
+}): PendingSessionLoadPlan {
+  const capability = 'planPendingSessionLoadJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPendingSessionLoadJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPendingSessionLoadJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPendingSessionLoadJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action === 'use') {
+    return {
+      action: 'use',
+      pending: parsePendingServerToolInjectionPlan(record.pending, capability)
+    };
+  }
+  if (record.action === 'drop') {
+    if (
+      typeof record.reason !== 'string' ||
+      !record.reason.trim() ||
+      typeof record.message !== 'string' ||
+      !record.message.trim()
+    ) {
+      throw new Error('planPendingSessionLoadJson native returned invalid drop plan');
+    }
+    return {
+      action: 'drop',
+      reason: record.reason.trim(),
+      message: record.message.trim()
+    };
+  }
+  throw new Error('planPendingSessionLoadJson native returned invalid action');
+}
+
+function parsePendingServerToolInjectionPlan(value: unknown, capability: string): PendingServerToolInjectionPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid pending payload`);
+  }
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) {
+    throw new Error(`${capability} native returned invalid pending version`);
+  }
+  if (typeof record.sessionId !== 'string' || !record.sessionId.trim()) {
+    throw new Error(`${capability} native returned invalid pending sessionId`);
+  }
+  if (!Number.isInteger(record.createdAtMs) || (record.createdAtMs as number) <= 0) {
+    throw new Error(`${capability} native returned invalid pending createdAtMs`);
+  }
+  if (
+    !Array.isArray(record.afterToolCallIds) ||
+    !record.afterToolCallIds.every((item) => typeof item === 'string' && item.trim())
+  ) {
+    throw new Error(`${capability} native returned invalid pending afterToolCallIds`);
+  }
+  if (
+    !Array.isArray(record.messages) ||
+    !record.messages.every((item) => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+  ) {
+    throw new Error(`${capability} native returned invalid pending messages`);
+  }
+  const sourceRequestId = record.sourceRequestId;
+  return {
+    version: 1,
+    sessionId: record.sessionId.trim(),
+    createdAtMs: record.createdAtMs as number,
+    afterToolCallIds: record.afterToolCallIds.map((item) => String(item).trim()),
+    messages: record.messages as Record<string, unknown>[],
+    ...(typeof sourceRequestId === 'string' && sourceRequestId.trim()
+      ? { sourceRequestId: sourceRequestId.trim() }
+      : {})
+  };
+}
+
 export function resolveDefaultStopMessageSnapshotWithNative(
   input: StopMessageDefaultSnapshotInput,
 ): RuntimeStopMessageStateSnapshot | null {
@@ -1355,6 +1539,103 @@ export function planFollowupMaterializationWithNative(
     payloadSource: record.payloadSource,
     payload: (payload ?? null) as Record<string, unknown> | null,
     injection: (injection ?? null) as Record<string, unknown> | null
+  };
+}
+
+function serializeUnknownErrorForNative(error: unknown): unknown {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return error;
+  }
+  const record: Record<string, unknown> = { ...(error as Record<string, unknown>) };
+  if (error instanceof Error && typeof record.message !== 'string') {
+    record.message = error.message;
+  }
+  return record;
+}
+
+export function planFollowupErrorEnvelopeWithNative(error: unknown): ServertoolFollowupErrorEnvelopePlan {
+  const capability = 'planFollowupErrorEnvelopeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupErrorEnvelopeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ error: serializeUnknownErrorForNative(error) }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupErrorEnvelopeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupErrorEnvelopeJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.terminal !== 'boolean') {
+    throw new Error('planFollowupErrorEnvelopeJson native returned invalid terminal');
+  }
+  const upstreamStatus = record.upstreamStatus;
+  const upstreamCode = record.upstreamCode;
+  const reason = record.reason;
+  return {
+    ...(Number.isInteger(upstreamStatus) ? { upstreamStatus: upstreamStatus as number } : {}),
+    ...(typeof upstreamCode === 'string' && upstreamCode.trim() ? { upstreamCode: upstreamCode.trim() } : {}),
+    ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
+    terminal: record.terminal
+  };
+}
+
+export function planBootstrapReplayWithNative(input: {
+  preflightBody?: unknown;
+  replaySeed?: unknown;
+}): ServertoolBootstrapReplayPlan {
+  const capability = 'planBootstrapReplayJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planBootstrapReplayJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({
+    preflightBody: input.preflightBody ?? null,
+    replaySeed: input.replaySeed ?? null
+  }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planBootstrapReplayJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planBootstrapReplayJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  const preflightFailure = record.preflightFailure;
+  const replayPayload = record.replayPayload;
+  if (
+    preflightFailure !== null &&
+    preflightFailure !== undefined &&
+    (typeof preflightFailure !== 'object' || Array.isArray(preflightFailure))
+  ) {
+    throw new Error('planBootstrapReplayJson native returned invalid preflightFailure');
+  }
+  if (
+    replayPayload !== null &&
+    replayPayload !== undefined &&
+    (typeof replayPayload !== 'object' || Array.isArray(replayPayload))
+  ) {
+    throw new Error('planBootstrapReplayJson native returned invalid replayPayload');
+  }
+  let normalizedFailure: ServertoolBootstrapReplayPlan['preflightFailure'] = null;
+  if (preflightFailure && typeof preflightFailure === 'object' && !Array.isArray(preflightFailure)) {
+    const failureRecord = preflightFailure as Record<string, unknown>;
+    if (typeof failureRecord.code !== 'string' || !failureRecord.code.trim()) {
+      throw new Error('planBootstrapReplayJson native returned invalid preflight code');
+    }
+    normalizedFailure = {
+      ...(Number.isInteger(failureRecord.status) ? { status: failureRecord.status as number } : {}),
+      code: failureRecord.code.trim(),
+      ...(typeof failureRecord.reason === 'string' && failureRecord.reason.trim()
+        ? { reason: failureRecord.reason.trim() }
+        : {})
+    };
+  }
+  return {
+    preflightFailure: normalizedFailure,
+    replayPayload: (replayPayload ?? null) as Record<string, unknown> | null
   };
 }
 

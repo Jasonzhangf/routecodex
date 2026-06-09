@@ -7,6 +7,76 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/backend-route-seed.js',
+  () => ({
+    extractCapturedChatSeed: jest.fn((source: any) => source ?? null)
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
+  () => ({
+    readRuntimeMetadata: jest.fn((carrier?: Record<string, unknown> | null) => {
+      const candidate = carrier?.__rt;
+      return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? (candidate as Record<string, unknown>)
+        : undefined;
+    }),
+    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
+      const candidate = carrier.__rt;
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        carrier.__rt = {};
+      }
+      return carrier.__rt as Record<string, unknown>;
+    }),
+    cloneRuntimeMetadata: jest.fn((carrier?: Record<string, unknown> | null) => {
+      const candidate = carrier?.__rt;
+      return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? { ...(candidate as Record<string, unknown>) }
+        : undefined;
+    })
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planFollowupExecutionModeWithNative: jest.fn(() => ({
+      executionMode: 'reenter'
+    })),
+    planFollowupMaterializationWithNative: jest.fn(() => ({
+      entryEndpoint: '/v1/responses',
+      payloadSource: 'none'
+    })),
+    planFollowupRuntimeActionWithNative: jest.fn(() => ({
+      loopPayloadSource: 'none',
+      autoLimit: { exceeded: false },
+      clientInjectMetadata: { force: false }
+    })),
+    planFollowupRuntimeMetadataWithNative: jest.fn((input: any) => ({
+      rootSet: {},
+      rootDelete: [],
+      runtimeSet: {
+        originalEntryEndpoint: input.originalEntryEndpoint,
+        followupEntryEndpoint: input.followupEntryEndpoint,
+        ...(input.loopState ? { serverToolLoopState: input.loopState } : {})
+      }
+    })),
+    planBootstrapReplayWithNative: jest.fn((input: any) => ({
+      preflightFailure: null,
+      replayPayload: input.replaySeed
+        ? {
+            ...(input.replaySeed.model ? { model: input.replaySeed.model } : {}),
+            messages: Array.isArray(input.replaySeed.messages) ? input.replaySeed.messages : [],
+            ...(Array.isArray(input.replaySeed.tools) ? { tools: input.replaySeed.tools } : {}),
+            ...(input.replaySeed.parameters ? { parameters: input.replaySeed.parameters } : {}),
+          }
+        : null,
+    })),
+  })
+);
+
 const { maybeRunTransparentBootstrapReplay } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.js'
 );

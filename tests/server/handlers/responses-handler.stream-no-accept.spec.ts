@@ -27,8 +27,7 @@ describe('responses-handler stream compatibility without SSE accept header', () 
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'stream-no-accept-ok' })}\n\n`,
           'event: response.completed\n',
-          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_stream_no_accept', object: 'response', status: 'completed' } })}\n\n`,
-          'data: [DONE]\n\n'
+          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_stream_no_accept', object: 'response', status: 'completed' } })}\n\n`
         ])
       }
     }));
@@ -61,7 +60,7 @@ describe('responses-handler stream compatibility without SSE accept header', () 
       expect(text).toContain('event: response.output_text.delta');
       expect(text).toContain('stream-no-accept-ok');
       expect(text).toContain('event: response.completed');
-      expect(text).toContain('[DONE]');
+      expect(text).not.toContain('[DONE]');
 
       expect(executePipeline).toHaveBeenCalledTimes(1);
       const pipelineInput = executePipeline.mock.calls[0]?.[0] as Record<string, any>;

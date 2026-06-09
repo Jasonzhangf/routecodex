@@ -112,6 +112,7 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
+import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
 import { buildResponsesTerminalSseFramesFromProbeNative, captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, isToolCallContinuationResponseNative, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist, updateResponsesContractProbeFromSseChunkNative } from '../../modules/llmswitch/bridge.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
@@ -189,6 +190,13 @@ function buildResponsesTerminalSseFramesFromProbe(
   requestLabel: string,
 ): string[] {
   return buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel);
+}
+
+function shouldDropClientSseFrame(frame: string, entryEndpoint?: string): boolean {
+  return (
+    (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs') &&
+    frame.trim() === 'data: [DONE]'
+  );
 }
 
 type ChatUsageNormalizationResult = {
@@ -512,6 +520,14 @@ function logSseClientCloseDiagnosis(
   } catch {
     console.warn(`[handler-response] response.sse.client_close request=${requestLabel}`);
   }
+}
+
+function createSseClientResponseClosedError(): Error & { code: string; name: string; retryable: boolean } {
+  return Object.assign(new Error('CLIENT_RESPONSE_CLOSED'), {
+    code: 'CLIENT_DISCONNECTED',
+    name: 'AbortError',
+    retryable: false
+  });
 }
 
 function cleanupAbandonedResponsesConversation(
@@ -1767,6 +1783,9 @@ export async function sendPipelineResponse(
       errorLabel: string,
       options?: { recordSnapshot?: boolean }
     ) => {
+      if (shouldDropClientSseFrame(frame, entryEndpoint)) {
+        return;
+      }
       if (options?.recordSnapshot !== false) {
         clientSseSnapshotRecorder?.record(frame);
       }
@@ -1899,6 +1918,56 @@ export async function sendPipelineResponse(
         logResponseNonBlockingError(`response.sse.unpipe:${requestLabel}`, error);
       }
     };
+    const destroySourceStream = (error?: Error) => {
+      try {
+        if (error && isClientDisconnectAbortError(error)) {
+          stream.once('error', (streamError) => {
+            if (!isClientDisconnectAbortError(streamError)) {
+              logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, streamError);
+            }
+          });
+        }
+        stream.destroy?.(error);
+      } catch (destroyError) {
+        logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, destroyError);
+      }
+    };
+    const scheduleClientCloseAbort = () => {
+      const abortError = createSseClientResponseClosedError();
+      setImmediate(() => {
+        destroySourceStream(abortError);
+      });
+    };
+    const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
+      void (async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        try {
+          await clientWriteQueue;
+        } catch (error) {
+          logResponseNonBlockingError(`response.sse.client_close.flush_queue:${requestLabel}`, error);
+        }
+        if (
+          entryEndpoint === '/v1/responses'
+          && contractProbe.probe
+          && isToolCallContinuationResponse(contractProbe.probe)
+        ) {
+          preservedConversationOnClientClose = true;
+          await persistNativeSseConversationState().catch((error) => {
+            logResponseNonBlockingError(`responses-conversation-native-sse-client-close:${requestLabel}`, error);
+          });
+        } else {
+          cleanupAbandonedResponsesConversation(requestLabel, {
+            entryEndpoint,
+            closeBeforeStreamEnd,
+            timingRequestIds: result.usageLogInfo?.timingRequestIds
+          });
+        }
+        scheduleClientCloseAbort();
+      })().catch((error) => {
+        logResponseNonBlockingError(`response.sse.client_close.cleanup:${requestLabel}`, error);
+        scheduleClientCloseAbort();
+      });
+    };
 
     const clearTimers = () => {
       if (totalTimer) {
@@ -1972,11 +2041,6 @@ export async function sendPipelineResponse(
       cleanupLogged = true;
       clearTimers();
       detachOutboundStream();
-      try {
-        stream.destroy?.();
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, error);
-      }
       const closeBeforeStreamEnd = trigger === 'close' && !streamEnded && !finishTracker.seenTerminalEvent;
       const details = {
         status,
@@ -1990,26 +2054,12 @@ export async function sendPipelineResponse(
           ...details,
           closeBeforeStreamEnd
         });
-        if (
-          entryEndpoint === '/v1/responses'
-          && contractProbe.probe
-          && isToolCallContinuationResponse(contractProbe.probe)
-        ) {
-          preservedConversationOnClientClose = true;
-          void persistNativeSseConversationState().catch((error) => {
-            logResponseNonBlockingError(`responses-conversation-native-sse-client-close:${requestLabel}`, error);
-          });
-        } else {
-          cleanupAbandonedResponsesConversation(requestLabel, {
-            entryEndpoint,
-            closeBeforeStreamEnd,
-            timingRequestIds: result.usageLogInfo?.timingRequestIds
-          });
-        }
         logPipelineStage('response.sse.client_close', requestLabel, {
           ...details,
           closeBeforeStreamEnd
         });
+        runClientCloseBeforeTerminalCleanup(closeBeforeStreamEnd);
+        return;
       }
       logPipelineStage('response.sse.stream.end', requestLabel, details);
       logResponseCompleted({
@@ -2086,40 +2136,36 @@ export async function sendPipelineResponse(
             }
             void (async () => {
               const framesToWrite = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
-              if (framesToWrite.length > 0) {
-                try {
-                  for (const frame of framesToWrite) {
-                    const normalizedFrame = await normalizeResponsesSseFrameForClient(
-                      frame,
-                      entryEndpoint,
-                      effectiveResponsesRequestContext,
-                      responsesSseProjectionState
-                    );
-                    if (normalizedFrame) {
-                      writeClientSseFrame(normalizedFrame, 'response.sse.terminal.auto_close.write_terminal');
-                    }
+              if (framesToWrite.length === 0) {
+                return;
+              }
+              try {
+                for (const frame of framesToWrite) {
+                  const normalizedFrame = await normalizeResponsesSseFrameForClient(
+                    frame,
+                    entryEndpoint,
+                    effectiveResponsesRequestContext,
+                    responsesSseProjectionState
+                  );
+                  if (normalizedFrame) {
+                    writeClientSseFrame(normalizedFrame, 'response.sse.terminal.auto_close.write_terminal');
                   }
+                }
                 finishTracker.seenTerminalEvent = true;
                 terminalWatch.sawTerminalChunk = true;
                 terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame) => frame.includes('event: response.completed'));
                 terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
                 contractProbe.emitted = true;
-                } catch (repairWriteError) {
-                  logResponseNonBlockingError(`response.sse.terminal.auto_close.write_terminal:${requestLabel}`, repairWriteError);
-                }
+              } catch (repairWriteError) {
+                logResponseNonBlockingError(`response.sse.terminal.auto_close.write_terminal:${requestLabel}`, repairWriteError);
+              }
+              if (!res.writableEnded && !res.destroyed) {
                 try {
-                  stream.destroy?.();
-                } catch (destroyError) {
-                  logResponseNonBlockingError(`response.sse.terminal.auto_close.destroy_stream:${requestLabel}`, destroyError);
+                  res.end();
+                } catch (endError) {
+                  logResponseNonBlockingError(`response.sse.terminal.auto_close.end:${requestLabel}`, endError);
                 }
-                if (!res.writableEnded && !res.destroyed) {
-                  try {
-                    res.end();
-                  } catch (endError) {
-                    logResponseNonBlockingError(`response.sse.terminal.auto_close.end:${requestLabel}`, endError);
-                  }
-                  clientSseSnapshotRecorder?.flush();
-                }
+                clientSseSnapshotRecorder?.flush();
               }
             })().catch((error) => {
               logResponseNonBlockingError(`response.sse.terminal.auto_close:${requestLabel}`, error);
@@ -2131,6 +2177,10 @@ export async function sendPipelineResponse(
       terminalFlushTimer.unref?.();
     });
     outboundStream.on('error', (error: Error) => {
+      if (isClientDisconnectAbortError(error)) {
+        logPipelineStage('response.sse.stream.client_abort', requestLabel, { message: error.message });
+        return;
+      }
       ended = true;
       clearTimers();
       detachOutboundStream();

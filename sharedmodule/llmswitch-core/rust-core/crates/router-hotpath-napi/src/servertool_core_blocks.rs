@@ -1,11 +1,13 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use servertool_core::backend_route_contract::{
-    decorate_servertool_final_chat_with_context, plan_followup_execution_mode,
-    plan_followup_materialization, plan_followup_runtime_action, plan_followup_runtime_metadata,
+    decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
+    plan_followup_error_envelope, plan_followup_execution_mode, plan_followup_materialization,
+    plan_followup_runtime_action, plan_followup_runtime_metadata,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
+    ServertoolBootstrapReplayPlanInput, ServertoolFollowupErrorPlanInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
     ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
 };
@@ -14,6 +16,7 @@ use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
 use servertool_core::loop_state_contract;
 use servertool_core::orchestration_policy_contract;
+use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
@@ -223,6 +226,37 @@ pub fn plan_persist_stop_message_state_json(input_json: &str) -> Result<String, 
         .map_err(|e| format!("serialize persist stop-message state plan: {e}"))
 }
 
+pub fn resolve_pending_session_file_name_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingSessionFileInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize pending session file input: {e}"))?;
+    serde_json::to_string(&pending_session_contract::resolve_pending_file_name(&input))
+        .map_err(|e| format!("serialize pending session file name: {e}"))
+}
+
+pub fn resolve_pending_session_max_age_ms_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingSessionMaxAgeInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pending session max-age input: {e}"))?;
+    serde_json::to_string(&pending_session_contract::resolve_pending_max_age_ms(
+        &input,
+    ))
+    .map_err(|e| format!("serialize pending session max-age: {e}"))
+}
+
+pub fn plan_pending_session_save_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingSessionSaveInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize pending session save input: {e}"))?;
+    serde_json::to_string(&pending_session_contract::plan_pending_session_save(input))
+        .map_err(|e| format!("serialize pending session save plan: {e}"))
+}
+
+pub fn plan_pending_session_load_json(input_json: &str) -> Result<String, String> {
+    let input: pending_session_contract::PendingSessionLoadInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize pending session load input: {e}"))?;
+    serde_json::to_string(&pending_session_contract::plan_pending_session_load(input))
+        .map_err(|e| format!("serialize pending session load plan: {e}"))
+}
+
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::StopMessageDefaultSnapshotInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize default stop-message snapshot input: {e}"))?;
@@ -425,6 +459,20 @@ pub fn plan_followup_materialization_json(input_json: &str) -> Result<String, St
         .map_err(|e| format!("deserialize followup materialization input: {e}"))?;
     let output = plan_followup_materialization(input);
     serde_json::to_string(&output).map_err(|e| format!("serialize materialization plan: {e}"))
+}
+
+pub fn plan_followup_error_envelope_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupErrorPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup error envelope input: {e}"))?;
+    let output = plan_followup_error_envelope(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize followup error envelope: {e}"))
+}
+
+pub fn plan_bootstrap_replay_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolBootstrapReplayPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize bootstrap replay input: {e}"))?;
+    let output = plan_bootstrap_replay(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize bootstrap replay plan: {e}"))
 }
 
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
@@ -740,6 +788,49 @@ mod tests {
         assert_eq!(parsed["payloadSource"], "injection");
         assert!(parsed["payload"].is_null());
         assert!(parsed["injection"]["ops"].is_array());
+    }
+
+    #[test]
+    fn plans_followup_error_envelope_via_servertool_core_bridge() {
+        let raw = plan_followup_error_envelope_json(
+            &json!({
+                "error": {
+                    "details": {
+                        "statusCode": 429.9,
+                        "upstreamCode": "HTTP_429",
+                        "reason": "rate limit"
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("followup error envelope bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["upstreamStatus"], 429);
+        assert_eq!(parsed["upstreamCode"], "HTTP_429");
+        assert_eq!(parsed["reason"], "rate limit");
+        assert_eq!(parsed["terminal"], true);
+    }
+
+    #[test]
+    fn plans_bootstrap_replay_via_servertool_core_bridge() {
+        let raw = plan_bootstrap_replay_json(
+            &json!({
+                "preflightBody": { "ok": true },
+                "replaySeed": {
+                    "model": "gpt-test",
+                    "messages": [{ "role": "user", "content": "hello" }],
+                    "parameters": { "temperature": 0.1 }
+                }
+            })
+            .to_string(),
+        )
+        .expect("bootstrap replay bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert!(parsed["preflightFailure"].is_null());
+        assert_eq!(parsed["replayPayload"]["model"], "gpt-test");
+        assert_eq!(parsed["replayPayload"]["messages"][0]["role"], "user");
+        assert_eq!(parsed["replayPayload"]["parameters"]["temperature"], 0.1);
     }
 
     #[test]
@@ -1195,5 +1286,54 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&save).expect("json"),
             json!({ "action": "save" })
         );
+    }
+
+    #[test]
+    fn plans_pending_session_via_servertool_core_bridge() {
+        let file_name = resolve_pending_session_file_name_json(
+            &json!({ "sessionId": " bad/session id " }).to_string(),
+        )
+        .expect("file name");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&file_name).expect("json"),
+            json!("bad_session_id.json")
+        );
+
+        let max_age =
+            resolve_pending_session_max_age_ms_json(&json!({ "raw": "1500" }).to_string())
+                .expect("max age");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&max_age).expect("json"),
+            json!(1500)
+        );
+
+        let save = plan_pending_session_save_json(
+            &json!({
+                "sessionId": "sess-1",
+                "pending": {
+                    "createdAtMs": 1000,
+                    "afterToolCallIds": [" call-1 "],
+                    "messages": [{ "role": "assistant" }]
+                }
+            })
+            .to_string(),
+        )
+        .expect("save plan");
+        let save_plan: serde_json::Value = serde_json::from_str(&save).expect("save json");
+        assert_eq!(save_plan["fileName"], "sess-1.json");
+        assert_eq!(save_plan["payload"]["sessionId"], "sess-1");
+
+        let load = plan_pending_session_load_json(
+            &json!({
+                "raw": save_plan["payload"],
+                "nowMs": 1100,
+                "maxAgeMs": 1000
+            })
+            .to_string(),
+        )
+        .expect("load plan");
+        let load_plan: serde_json::Value = serde_json::from_str(&load).expect("load json");
+        assert_eq!(load_plan["action"], "use");
+        assert_eq!(load_plan["pending"]["afterToolCallIds"], json!(["call-1"]));
     }
 }

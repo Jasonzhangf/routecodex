@@ -147,17 +147,21 @@ owners:
 
   - feature_id: hub.servertool_backend_route_runtime
     status: active
-    summary: servertool backend-route followup endpoint, payload, injection, and runtime metadata planning
+    summary: servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
     canonical_types:
       - ServertoolFollowupMaterializationInput
       - ServertoolFollowupMaterializationPlan
       - ServertoolFollowupRuntimeActionPlan
       - ServertoolFollowupRuntimeMetadataPlan
+      - ServertoolFollowupErrorEnvelopePlan
+      - ServertoolBootstrapReplayPlan
     canonical_builders:
       - plan_followup_materialization
       - plan_followup_runtime_action
       - plan_followup_runtime_metadata
+      - plan_followup_error_envelope
+      - plan_bootstrap_replay
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
@@ -166,6 +170,8 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -174,14 +180,16 @@ owners:
     required_tests:
       - tests/servertool/server-side-web-search.spec.ts
       - tests/servertool/vision-flow.spec.ts
+      - tests/servertool/followup-bootstrap-replay.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
       - Rust owns followupPlan `entryEndpoint` precedence and payload/injection source recognition.
+      - Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning.
       - TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors.
-      - Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning or chat endpoint defaults in TS.
+      - Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS.
 
   - feature_id: error.provider_failure_policy
     status: active

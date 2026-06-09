@@ -249,14 +249,12 @@ export class ResponsesEventSerializer {
    * 构建标准SSE事件格式
    */
   private buildSSEEvent(eventType: string, data: any, timestamp?: number, sequenceNumber?: number): string {
-    let wireEvent = `event: ${eventType}\n`;
-
     if (data === '[DONE]') {
-      wireEvent += 'data: [DONE]\n';
-    } else {
-      const finalData = this.buildEventPayload(eventType, data, sequenceNumber);
-      wireEvent += `data: ${JSON.stringify(finalData)}\n`;
+      throw new Error('Responses SSE must terminate with response.done, not [DONE]');
     }
+    let wireEvent = `event: ${eventType}\n`;
+    const finalData = this.buildEventPayload(eventType, data, sequenceNumber);
+    wireEvent += `data: ${JSON.stringify(finalData)}\n`;
 
     if (timestamp) {
       wireEvent += `id: ${timestamp}\n`;
@@ -332,14 +330,13 @@ export class ResponsesEventSerializer {
   /**
    * 创建标准response.done事件
    */
-  static createResponseDoneEvent(requestId: string, totalEvents: number, timestamp?: number): ResponsesSseEvent {
+  static createResponseDoneEvent(response: Record<string, unknown>, timestamp?: number): ResponsesSseEvent {
     return {
       type: 'response.done',
       timestamp: timestamp ?? Date.now(),
       data: {
-        type: 'done',
-        requestId,
-        totalEvents
+        type: 'response.done',
+        response
       },
       protocol: 'responses',
       direction: 'json_to_sse'

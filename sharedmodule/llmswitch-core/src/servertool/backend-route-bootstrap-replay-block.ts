@@ -6,6 +6,10 @@ import { applyFollowupRuntimeMetadata } from './backend-route-runtime-block.js';
 import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
 import { extractCapturedChatSeed } from './backend-route-seed.js';
 import { buildFollowupRequestIdWithNative } from '../native/router-hotpath/native-followup-mainline-semantics.js';
+import {
+  planBootstrapReplayWithNative,
+  type ServertoolBootstrapReplayPlan
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 function buildFollowupRequestId(baseRequestId: string, suffix?: string): string {
   return buildFollowupRequestIdWithNative(baseRequestId, suffix ?? null);
@@ -14,66 +18,29 @@ function buildFollowupRequestId(baseRequestId: string, suffix?: string): string 
 export function createBootstrapPreflightFailedError(args: {
   requestId: string;
   flowId?: string;
-  status?: number;
-  code?: string;
-  reason?: string;
+  failure: NonNullable<ServertoolBootstrapReplayPlan['preflightFailure']>;
   compactFollowupErrorReason: (value: unknown) => string | undefined;
 }): ProviderProtocolError & { status?: number; statusCode?: number; upstreamCode?: string } {
-  const compactReason = args.compactFollowupErrorReason(args.reason);
-  const code =
-    typeof args.code === 'string' && args.code.trim()
-      ? args.code.trim()
-      : (typeof args.status === 'number' ? `HTTP_${args.status}` : 'SERVERTOOL_FOLLOWUP_FAILED');
+  const compactReason = args.compactFollowupErrorReason(args.failure.reason);
   const wrapped = new ProviderProtocolError('[servertool] bootstrap preflight failed', {
     code: 'SERVERTOOL_FOLLOWUP_FAILED',
     category: 'EXTERNAL_ERROR',
     details: {
       requestId: args.requestId,
       flowId: args.flowId,
-      upstreamCode: code,
-      ...(typeof args.status === 'number' ? { status: args.status, statusCode: args.status } : {}),
+      upstreamCode: args.failure.code,
+      ...(typeof args.failure.status === 'number'
+        ? { status: args.failure.status, statusCode: args.failure.status }
+        : {}),
       ...(compactReason ? { reason: compactReason } : {})
     }
   }) as ProviderProtocolError & { status?: number; statusCode?: number; upstreamCode?: string };
-  if (typeof args.status === 'number') {
-    wrapped.status = args.status;
-    wrapped.statusCode = args.status;
+  if (typeof args.failure.status === 'number') {
+    wrapped.status = args.failure.status;
+    wrapped.statusCode = args.failure.status;
   }
-  wrapped.upstreamCode = code;
+  wrapped.upstreamCode = args.failure.code;
   return wrapped;
-}
-
-function readPreflightStatus(preflightError: unknown): number | undefined {
-  if (!preflightError || typeof preflightError !== 'object' || Array.isArray(preflightError)) {
-    return undefined;
-  }
-  const statusRaw = (preflightError as any).status ?? (preflightError as any).statusCode;
-  if (typeof statusRaw === 'number' && Number.isFinite(statusRaw)) {
-    return Math.floor(statusRaw);
-  }
-  const codeRaw = (preflightError as any).code;
-  const code = typeof codeRaw === 'string' ? codeRaw.trim() : typeof codeRaw === 'number' ? String(codeRaw) : '';
-  if (code && /^HTTP_\d{3}$/i.test(code)) {
-    return Number(code.split('_')[1]);
-  }
-  if (code && /^\d{3}$/.test(code)) {
-    return Number(code);
-  }
-  return undefined;
-}
-
-function buildReplayPayload(seed: ReturnType<typeof extractCapturedChatSeed>): JsonObject | null {
-  if (!seed) {
-    return null;
-  }
-  return {
-    ...(seed.model ? { model: seed.model } : {}),
-    messages: Array.isArray(seed.messages) ? (seed.messages as JsonObject[]) : [],
-    ...(Array.isArray(seed.tools) ? { tools: seed.tools as JsonObject[] } : {}),
-    ...(seed.parameters && typeof seed.parameters === 'object' && !Array.isArray(seed.parameters)
-      ? { parameters: seed.parameters as JsonObject }
-      : {})
-  };
 }
 
 export async function maybeRunTransparentBootstrapReplay(args: {
@@ -144,31 +111,21 @@ export async function maybeRunTransparentBootstrapReplay(args: {
   }
 
   const preflight = args.followupBody;
-  const preflightError = preflight && typeof (preflight as any).error === 'object' ? (preflight as any).error : null;
-  const preflightStatus = readPreflightStatus(preflightError);
-  if (preflightError && (preflightStatus === 429 || preflightStatus === 400)) {
-    const preflightCodeRaw = (preflightError as any).code;
-    const preflightCode =
-      typeof preflightCodeRaw === 'string' && preflightCodeRaw.trim()
-        ? preflightCodeRaw.trim()
-        : (typeof preflightStatus === 'number' ? `HTTP_${preflightStatus}` : undefined);
-    const preflightReasonRaw = (preflightError as any).message;
-    const preflightReason =
-      typeof preflightReasonRaw === 'string' && preflightReasonRaw.trim()
-        ? preflightReasonRaw.trim()
-        : undefined;
+  const replaySeed = extractCapturedChatSeed((args.adapterContext as any)?.capturedChatRequest);
+  const replayPlan = planBootstrapReplayWithNative({
+    preflightBody: preflight ?? null,
+    replaySeed: replaySeed ?? null
+  });
+  if (replayPlan.preflightFailure) {
     throw createBootstrapPreflightFailedError({
       requestId: args.requestId,
       flowId: args.execution.flowId,
-      status: preflightStatus,
-      code: preflightCode,
-      reason: preflightReason,
+      failure: replayPlan.preflightFailure,
       compactFollowupErrorReason: args.compactFollowupErrorReason
     });
   }
 
-  const replaySeed = extractCapturedChatSeed((args.adapterContext as any)?.capturedChatRequest);
-  const replayPayload = buildReplayPayload(replaySeed);
+  const replayPayload = replayPlan.replayPayload as JsonObject | null | undefined;
   if (!replayPayload) {
     return null;
   }

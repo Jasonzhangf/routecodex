@@ -13,6 +13,7 @@ pub mod cli_result_guard;
 pub mod loop_state_contract;
 pub mod orchestration_policy_contract;
 pub mod outcome_contract;
+pub mod pending_session_contract;
 pub mod persisted_lookup;
 pub mod stop_gateway_context;
 pub mod stop_message_compare_context;

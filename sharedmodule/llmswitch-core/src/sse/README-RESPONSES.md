@@ -61,6 +61,12 @@ SSE Events (15 types)
 ResponsesSseToJsonConverter
     ↓
 JSON Response
+
+## 终止契约
+
+- OpenAI Responses 使用命名终止事件，如 `response.completed` 与 `response.done`。
+- `[DONE]` 属于 chat-style sentinel，不属于 `/v1/responses` 客户端输出契约。
+- repair 路径如果补终止帧，只能补 `response.completed` / `response.done`，不能追加 `[DONE]`。
 ```
 
 ## 核心接口

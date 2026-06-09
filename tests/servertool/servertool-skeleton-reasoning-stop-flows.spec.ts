@@ -1,4 +1,74 @@
-import { getDefaultServertoolSkeletonDocument } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
+import { beforeAll, describe, expect, jest, test } from '@jest/globals';
+
+const skeletonDocument = {
+  version: 1,
+  servertool: {
+    enabled: true,
+    internalTools: {},
+    skeleton: {
+      finalizeStrip: { enabled: true, requireFinalizedMarker: true },
+      autoHooks: { optionalPrimaryOrder: [], mandatoryOrder: [] },
+      pendingInjection: { messageKinds: [] },
+      progress: { toolNameByFlowId: {}, goldHighlightFlowIds: [] },
+      followup: {
+        genericInjectionOps: [],
+        nativeSupportedOps: [],
+        flowPolicy: {
+          profilesByFlowId: {
+            reasoning_stop_guard_flow: {},
+            reasoning_stop_finalize_flow: {},
+            reasoning_stop_continue_flow: {}
+          }
+        }
+      }
+    },
+    state: {
+      scopePriority: [],
+      pendingInjection: { enabled: true, strictContract: true }
+    }
+  }
+};
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  () => ({
+    getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
+    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
+      document: skeletonDocument,
+      toolSpecs: {},
+      toolSpecList: [],
+      autoHookQueueConfig: { optionalPrimaryOrder: [], mandatoryOrder: [] },
+      pendingInjectionConfig: { messageKinds: [] },
+      progressConfig: { toolNameByFlowId: {}, goldHighlightFlowIds: [] },
+      followupConfig: {
+        genericInjectionOps: [],
+        nativeSupportedOps: [],
+        flowPolicy: {
+          profilesByFlowId: skeletonDocument.servertool.skeleton.followup.flowPolicy.profilesByFlowId,
+          noFollowupFlowIds: [],
+          autoLimitFlowIds: [],
+          flowOnlyLoopLimitFlowIds: [],
+          clientInjectOnlyFlowIds: [],
+          seedLoopPayloadFlowIds: [],
+          clientInjectSourceByFlowId: {},
+          transparentReplayRequestSuffixByFlowId: {},
+          ignoreRequiresActionFollowupFlowIds: [],
+          contextDecorationModeByFlowId: {}
+        }
+      },
+      stateConfig: skeletonDocument.servertool.state
+    })),
+    normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null),
+    resolveServertoolToolSpecWithNative: jest.fn(() => null)
+  })
+);
+
+let getDefaultServertoolSkeletonDocument: any;
+
+beforeAll(async () => {
+  const skeletonConfig = await import('../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js');
+  getDefaultServertoolSkeletonDocument = skeletonConfig.getDefaultServertoolSkeletonDocument;
+});
 
 describe('servertool skeleton reasoning-stop flow profiles', () => {
   test('exposes reasoning stop flows as native followup policy truth', () => {

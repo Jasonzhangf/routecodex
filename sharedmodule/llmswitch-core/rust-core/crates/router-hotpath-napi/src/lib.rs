@@ -1437,6 +1437,30 @@ pub fn plan_persist_stop_message_state_json(input_json: String) -> NapiResult<St
 }
 
 #[napi]
+pub fn resolve_pending_session_file_name_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_pending_session_file_name_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn resolve_pending_session_max_age_ms_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_pending_session_max_age_ms_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_pending_session_save_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pending_session_save_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_pending_session_load_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pending_session_load_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn resolve_default_stop_message_snapshot_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::resolve_default_stop_message_snapshot_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1557,6 +1581,18 @@ pub fn plan_followup_runtime_metadata_json(input_json: String) -> NapiResult<Str
 #[napi]
 pub fn plan_followup_materialization_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_materialization_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_followup_error_envelope_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_error_envelope_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_bootstrap_replay_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_bootstrap_replay_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

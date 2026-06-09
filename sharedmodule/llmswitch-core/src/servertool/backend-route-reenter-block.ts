@@ -5,83 +5,7 @@ import { ProviderProtocolError } from '../conversion/provider-protocol-error.js'
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeServertoolFollowupPayloadShapeWithNative } from '../native/router-hotpath/native-hub-pipeline-semantic-mappers.js';
-
-function readTrimmedString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function extractFollowupErrorEnvelope(error: unknown): {
-  upstreamStatus?: number;
-  upstreamCode?: string;
-  reason?: string;
-} {
-  const errorRecord =
-    error && typeof error === 'object' && !Array.isArray(error)
-      ? (error as Record<string, unknown>)
-      : undefined;
-  const errorDetails =
-    errorRecord?.details && typeof errorRecord.details === 'object' && !Array.isArray(errorRecord.details)
-      ? (errorRecord.details as Record<string, unknown>)
-      : undefined;
-  const upstreamCode =
-    readTrimmedString(errorRecord?.upstreamCode)
-    ?? readTrimmedString(errorDetails?.upstreamCode)
-    ?? readTrimmedString(errorRecord?.code)
-    ?? readTrimmedString(errorDetails?.code);
-  const upstreamStatus =
-    (typeof errorRecord?.status === 'number' && Number.isFinite(errorRecord.status)
-      ? Math.floor(errorRecord.status)
-      : undefined)
-    ?? (typeof errorRecord?.statusCode === 'number' && Number.isFinite(errorRecord.statusCode)
-      ? Math.floor(errorRecord.statusCode)
-      : undefined)
-    ?? (typeof errorDetails?.status === 'number' && Number.isFinite(errorDetails.status)
-      ? Math.floor(errorDetails.status)
-      : undefined)
-    ?? (typeof errorDetails?.statusCode === 'number' && Number.isFinite(errorDetails.statusCode)
-      ? Math.floor(errorDetails.statusCode)
-      : undefined);
-  const reason =
-    readTrimmedString(errorDetails?.reason)
-    ?? readTrimmedString(errorRecord?.reason)
-    ?? (error instanceof Error ? readTrimmedString(error.message) : undefined);
-  return { upstreamStatus, upstreamCode, reason };
-}
-
-function isTerminalFollowupError(error: unknown): boolean {
-  const { upstreamStatus, upstreamCode, reason } = extractFollowupErrorEnvelope(error);
-  if (typeof upstreamStatus === 'number' && upstreamStatus >= 400 && upstreamStatus < 500) {
-    return true;
-  }
-  const code = (upstreamCode || '').toLowerCase();
-  if (
-    code === 'bad_request'
-    || code === 'provider_not_available'
-    || code === 'client_disconnected'
-    || code === 'client_response_closed'
-    || code === 'client_request_aborted'
-    || code === 'client_timeout_hint_expired'
-    || code === 'client_tool_args_invalid'
-  ) {
-    return true;
-  }
-  const text = (reason || '').toLowerCase();
-  if (
-    text.includes('no available providers after applying routing instructions')
-    || text.includes("tool_choice") && text.includes('必须提供 tools')
-    || text.includes('client disconnected')
-    || text.includes('client_response_closed')
-    || text.includes('client_request_aborted')
-    || text.includes('client_timeout_hint_expired')
-  ) {
-    return true;
-  }
-  return false;
-}
+import { planFollowupErrorEnvelopeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 function createClientDisconnectedFollowupError(args: { requestId: string; flowId?: string }): Error {
   return Object.assign(
@@ -465,7 +389,8 @@ export async function runReenterFollowup(args: {
     if (args.isServerToolClientDisconnectedError(error) || args.isAdapterClientDisconnected(args.adapterContext)) {
       throw error;
     }
-    if (isTerminalFollowupError(error) || (
+    const followupErrorPlan = planFollowupErrorEnvelopeWithNative(error);
+    if (followupErrorPlan.terminal || (
       error &&
       typeof error === 'object' &&
       !Array.isArray(error) &&
@@ -482,8 +407,7 @@ export async function runReenterFollowup(args: {
       });
       throw error;
     }
-    const { upstreamCode, upstreamStatus, reason } = extractFollowupErrorEnvelope(error);
-    const compactReason = args.compactFollowupErrorReason(reason);
+    const compactReason = args.compactFollowupErrorReason(followupErrorPlan.reason);
     const compactErrorMessage = args.compactFollowupErrorReason(
       error instanceof Error ? error.message : String(error ?? 'unknown')
     );
@@ -498,25 +422,25 @@ export async function runReenterFollowup(args: {
           maxAttempts: 1,
           error: compactErrorMessage ?? 'unknown',
           ...(compactReason ? { reason: compactReason } : {}),
-          ...(upstreamCode ? { upstreamCode } : {})
+          ...(followupErrorPlan.upstreamCode ? { upstreamCode: followupErrorPlan.upstreamCode } : {})
         }
       }
     );
     if (compactReason) {
       (wrapped as ProviderProtocolError & { reason?: string }).reason = compactReason;
     }
-    if (upstreamCode) {
-      (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = upstreamCode;
+    if (followupErrorPlan.upstreamCode) {
+      (wrapped as ProviderProtocolError & { upstreamCode?: string }).upstreamCode = followupErrorPlan.upstreamCode;
     }
-    if (typeof upstreamStatus === 'number' && upstreamStatus > 0) {
-      (wrapped as ProviderProtocolError & { status?: number }).status = upstreamStatus;
+    if (typeof followupErrorPlan.upstreamStatus === 'number' && followupErrorPlan.upstreamStatus > 0) {
+      (wrapped as ProviderProtocolError & { status?: number }).status = followupErrorPlan.upstreamStatus;
     }
     (wrapped as { cause?: unknown }).cause = error;
     throw wrapped;
   }
 
   const followupBody = resolveFollowupBodyCandidate(followup);
-  const terminalLastError = lastError && isTerminalFollowupError(lastError) ? lastError : undefined;
+  const terminalLastError = lastError && planFollowupErrorEnvelopeWithNative(lastError).terminal ? lastError : undefined;
   if (terminalLastError && !followupBody) {
     if (args.clearStateOnFollowupFailure) {
       args.disableStopMessageAfterFailedFollowup(args.adapterContext, args.stopMessageReservation);

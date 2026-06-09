@@ -1,18 +1,69 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { RouteCodexHttpServer } from '../../../../src/server/runtime/http-server/index.js';
-import {
+jest.unstable_mockModule(
+  '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.js',
+  () => ({
+    assertResponsesConversationStoreNativeAvailable: jest.fn(() => undefined),
+    pickPersistedFields: jest.fn((payload: Record<string, unknown>) => ({ ...payload })),
+    prepareConversationEntry: jest.fn((payload: Record<string, unknown>, context: Record<string, unknown>) => ({
+      basePayload: { ...payload },
+      input: Array.isArray(context.input) ? context.input : (Array.isArray(payload.input) ? payload.input : []),
+      tools: Array.isArray(payload.tools) ? payload.tools : undefined,
+    })),
+    convertOutputToInputItems: jest.fn((response: Record<string, unknown>) => {
+      const output = Array.isArray(response.output) ? response.output : [];
+      return output.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
+    }),
+    restoreContinuationPayload: jest.fn((entry: any, payload: Record<string, unknown>) => ({
+      payload: {
+        ...payload,
+        previous_response_id: entry.lastResponseId,
+      },
+      meta: {
+        providerKey: entry.providerKey,
+      },
+    })),
+    materializeContinuationPayload: jest.fn((entry: any, payload: Record<string, unknown>) => ({
+      payload: {
+        ...payload,
+        previous_response_id: entry.lastResponseId,
+      },
+      meta: {
+        providerKey: entry.providerKey,
+      },
+    })),
+    resumeConversationPayload: jest.fn((entry: any, responseId: string, submitPayload: Record<string, unknown>) => ({
+      payload: {
+        ...entry.basePayload,
+        previous_response_id: responseId,
+        input: [
+          ...(Array.isArray(entry.input) ? entry.input : []),
+          ...(Array.isArray(submitPayload.tool_outputs) ? submitPayload.tool_outputs : []),
+        ],
+      },
+      meta: {
+        providerKey: entry.providerKey,
+      },
+    })),
+  })
+);
+
+const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+const {
   captureResponsesRequestContext,
   clearResponsesConversationByRequestId,
   clearAllResponsesConversationState,
   responsesConversationStore,
   resumeLatestResponsesContinuationByScope,
-} from '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
+} = await import('../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
 
 const RESPONSES_REQUEST_IDS = [
   'req-router-direct-retention-success',
   'req-router-direct-retention-http-502',
   'req-router-direct-retention-sse-wrapper',
+  'req-provider-direct-retention-success',
+  'req-provider-direct-retention-http-502',
+  'req-provider-direct-retention-sse-wrapper',
 ];
 
 beforeEach(() => {
@@ -69,7 +120,7 @@ describe('http-server direct result metadata propagation', () => {
         status: 200,
         data: { id: 'resp_router_direct_tmux_session', model: 'gpt-5.4' }
       },
-      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      providerHandle: { providerProtocol: 'openai-chat', providerType: 'openai' },
       auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'tools' } }
     }, {
       requestId: 'req-router-direct-tmux-session',
@@ -326,6 +377,190 @@ describe('http-server direct result metadata propagation', () => {
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
     });
+    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+  });
+
+  it('provider-direct responses result records retention state for continuation', async () => {
+    captureResponsesRequestContext({
+      requestId: 'req-provider-direct-retention-success',
+      sessionId: 'sess-provider-direct-success',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    await server.buildProviderDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-provider-direct-success',
+          status: 'requires_action',
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'call_provider_direct_1',
+              name: 'exec_command',
+              arguments: '{"cmd":"pwd"}',
+            },
+          ],
+        },
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerType: 'openai' }
+    }, {
+      requestId: 'req-provider-direct-retention-success',
+      body: { model: 'gpt-5.3-codex', stream: true },
+      metadata: {
+        sessionId: 'sess-provider-direct-success',
+        clientModelId: 'gpt-5.3-codex',
+        originalModelId: 'gpt-5.3-codex',
+      }
+    }, {}, 'test.key1');
+
+    const stats = responsesConversationStore.getDebugStats();
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+    expect(stats.responseIndexSize).toBe(1);
+    expect(stats.scopeIndexSize).toBe(1);
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      requestId: 'req-provider-direct-retention-success-next',
+      sessionId: 'sess-provider-direct-success',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_provider_direct_1',
+            output: '/tmp',
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }],
+          },
+        ],
+      },
+    });
+
+    expect(restored?.payload.previous_response_id).toBe('resp-provider-direct-success');
+  });
+
+  it('provider-direct result clears captured responses request on upstream 502', async () => {
+    captureResponsesRequestContext({
+      requestId: 'req-provider-direct-retention-http-502',
+      sessionId: 'sess-provider-direct-http-502',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    const result = await server.buildProviderDirectResult({
+      response: {
+        status: 502,
+        data: { error: { code: 'HTTP_502' } }
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerType: 'openai' }
+    }, {
+      requestId: 'req-provider-direct-retention-http-502',
+      body: { model: 'gpt-5.3-codex', stream: true },
+      metadata: {
+        sessionId: 'sess-provider-direct-http-502',
+      }
+    }, {}, 'test.key1');
+
+    expect(result.status).toBe(502);
+    expect((result.body as any)?.error?.code).toBe('HTTP_502');
+    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+  });
+
+  it('provider-direct streaming wrapper clears captured responses request when no canonical response body is available to retain', async () => {
+    captureResponsesRequestContext({
+      requestId: 'req-provider-direct-retention-sse-wrapper',
+      sessionId: 'sess-provider-direct-sse-wrapper',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    await server.buildProviderDirectResult({
+      response: {
+        status: 200,
+        data: { __sse_responses: { pipe: () => undefined }, model: 'gpt-5.4' }
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerType: 'openai' }
+    }, {
+      requestId: 'req-provider-direct-retention-sse-wrapper',
+      body: { model: 'gpt-5.3-codex', stream: true },
+      metadata: {
+        sessionId: 'sess-provider-direct-sse-wrapper',
+      }
+    }, {}, 'test.key1');
+
     expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
     expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
