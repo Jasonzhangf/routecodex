@@ -18710,3 +18710,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline provider response conversion type surface pruning:
 - Exact scan found `ProviderResponseConversionOptions` and `ProviderResponseConversionResult` have no external source import; they only name `convertProviderResponse` parameter/return/callback shapes in `provider-response.ts`.
 - Made both module-internal while keeping `convertProviderResponse` exported; added residue gate to block re-export revival.
+
+2026-06-09 HubPipeline provider response hubStageTop dead-code pruning:
+- Internal dead-code scan found `attachHubStageTopToContext` was defined but never called; its local `HubStageTopEntry` normalize/merge helpers and `peekHubStageTopSummary` import existed only for that dead helper.
+- Removed the dead provider-response-local helpers; hub stage top context attachment remains owned by `hub-stage-timing.ts`; added residue gate to block revival.

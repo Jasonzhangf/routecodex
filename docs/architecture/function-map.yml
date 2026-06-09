@@ -890,6 +890,7 @@ owners:
     notes:
       - TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust.
       - `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are zero-consumer callback signature detail aliases and must stay module-internal; public TS response entry remains `convertProviderResponse`.
+      - Dead provider-response-local `attachHubStageTopToContext` / `HubStageTopEntry` normalize/merge helpers were removed; hub stage top context attachment is owned by `hub-stage-timing.ts`.
 
   - feature_id: hub.response_provider_context_helpers
     status: active

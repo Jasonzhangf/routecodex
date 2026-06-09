@@ -2907,5 +2907,6 @@ Tags: hub-pipeline, standardized-request, public-surface, dead-code, type-shell,
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` keeps `materializeProviderResponseSsePayload` as an internal IO/native invocation helper only; external public response entry remains `convertProviderResponse`.
 - Rust owner remains `hub.response_provider_sse_materialization`; TS may read Node streams and call native, but must not export a standalone materializer API or restore marker/bodyText classification.
 - Follow-up exact scan confirmed `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` have no external source imports; they are `convertProviderResponse` signature detail aliases and must remain module-internal.
+- Follow-up dead-code inventory confirmed provider-response-local `attachHubStageTopToContext`, `HubStageTopEntry`, `normalizeHubStageTopEntries`, and `mergeHubStageTopEntries` were uncalled residue; hub stage top context attachment remains owned by `hub-stage-timing.ts`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `export async function materializeProviderResponseSsePayload` revival.
 Tags: hub-pipeline, provider-response, sse-materialization, public-surface, dead-code, residue-gate, rust-owned-semantics, 2026-06-09

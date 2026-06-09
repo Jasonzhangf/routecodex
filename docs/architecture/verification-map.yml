@@ -492,6 +492,7 @@ verification:
     notes:
       - Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native.
       - `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are not public imports; keep them module-internal while preserving `convertProviderResponse`.
+      - Provider-response-local hub stage top attach/normalize/merge helpers are dead residue and must stay deleted; `hub-stage-timing.ts` owns context attachment.
 
   - feature_id: hub.response_provider_context_helpers
     change_risk: medium
