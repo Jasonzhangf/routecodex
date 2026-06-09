@@ -1206,16 +1206,10 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_thought_signature_validator_local_clone() {
         let validator_path = crate_src_path("thought_signature_validator.rs");
-        let validator_source = fs::read_to_string(&validator_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {}", validator_path.display(), error)
-        });
         assert!(
-            !validator_source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {\n    match value {"),
-            "thought_signature_validator.rs still owns local coerce_thought_signature clone"
-        );
-        assert!(
-            validator_source.contains("read_trimmed_string(value)"),
-            "thought_signature_validator.rs must route thought-signature trimming through shared read_trimmed_string truth"
+            !validator_path.exists(),
+            "retired thought_signature_validator.rs must not be restored: {}",
+            validator_path.display()
         );
     }
 
@@ -1367,16 +1361,10 @@ mod tests {
     #[test]
     fn shared_json_utils_deletion_gate_removed_thought_signature_validator_wrapper() {
         let path = crate_src_path("thought_signature_validator.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source
-                .contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
-            "thought_signature_validator.rs still owns local coerce_thought_signature wrapper"
-        );
-        assert!(
-            source.contains("read_trimmed_string(value)"),
-            "thought_signature_validator.rs must call shared read_trimmed_string truth directly"
+            !path.exists(),
+            "retired thought_signature_validator.rs must not be restored: {}",
+            path.display()
         );
     }
 

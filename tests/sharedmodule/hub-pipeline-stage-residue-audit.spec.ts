@@ -3432,9 +3432,14 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_args_mapping.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs',
     ];
     const findings: string[] = [];
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator/tests.rs',
+    ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     for (const relativePath of files) {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -3479,12 +3484,31 @@ describe('hub pipeline stage residue audit', () => {
         { label: 'keeps unused shell args packing rust napi export', pattern: /\bpack_shell_args_json\b/ },
         { label: 'keeps unused comma flattening rust napi export', pattern: /\bflatten_by_comma_json\b/ },
         { label: 'keeps unused chunk string rust napi export', pattern: /\bchunk_string_json\b/ },
+        { label: 'exports unused thought signature validator bridge', pattern: /hasValidThoughtSignatureWithNative\b/ },
+        { label: 'exports unused thinking block sanitizer bridge', pattern: /sanitizeThinkingBlockWithNative\b/ },
+        { label: 'exports unused thinking block filter bridge', pattern: /filterInvalidThinkingBlocksWithNative\b/ },
+        { label: 'exports unused trailing thinking block bridge', pattern: /removeTrailingUnsignedThinkingBlocksWithNative\b/ },
+        { label: 'keeps unused thought signature capability', pattern: /hasValidThoughtSignatureJson\b/ },
+        { label: 'keeps unused thinking block sanitizer capability', pattern: /sanitizeThinkingBlockJson\b/ },
+        { label: 'keeps unused thinking block filter capability', pattern: /filterInvalidThinkingBlocksJson\b/ },
+        { label: 'keeps unused trailing thinking block capability', pattern: /removeTrailingUnsignedThinkingBlocksJson\b/ },
+        { label: 'keeps unused thought signature rust napi export', pattern: /\bhas_valid_thought_signature_json\b/ },
+        { label: 'keeps unused thinking block sanitizer rust napi export', pattern: /\bsanitize_thinking_block_json\b/ },
+        { label: 'keeps unused thinking block filter rust napi export', pattern: /\bfilter_invalid_thinking_blocks_json\b/ },
+        { label: 'keeps unused trailing thinking block rust napi export', pattern: /\bremove_trailing_unsigned_thinking_blocks_json\b/ },
+        { label: 'exports unused normalizeTools bridge', pattern: /normalizeToolsWithNative\b/ },
+        { label: 'keeps unused normalizeTools capability', pattern: /normalizeToolsJson\b/ },
+        { label: 'keeps unused normalizeTools rust napi export', pattern: /\bnormalize_tools_json\b/ },
+        { label: 'keeps unused standalone normalize_tools helper', pattern: /\bfn\s+normalize_tools\s*\(/ },
+        { label: 'keeps unused standalone shell schema helper', pattern: /\bfn\s+ensure_shell_schema\s*\(/ },
+        { label: 'keeps unused standalone shell description helper', pattern: /\bfn\s+build_shell_description\s*\(/ },
       ]);
       for (const match of matches) {
         findings.push(`${relativePath}:${match}`);
       }
     }
 
+    expect(retiredFiles).toEqual([]);
     expect(findings).toEqual([]);
   });
 

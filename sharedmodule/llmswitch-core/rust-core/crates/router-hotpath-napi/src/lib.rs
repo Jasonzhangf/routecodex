@@ -99,7 +99,6 @@ mod shared_tooling;
 mod snapshot_tool_failures;
 mod stop_message_auto_blocks;
 mod streaming_tool_extractor;
-mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_stop_message_actions;
@@ -533,11 +532,6 @@ pub fn flatten_chat_tools_for_function_calling_with_options_json(
 }
 
 #[napi]
-pub fn normalize_tools_json(tools_json: String) -> NapiResult<String> {
-    shared_args_mapping::normalize_tools_json(tools_json)
-}
-
-#[napi]
 pub fn normalize_bridge_tool_call_ids_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_bridge_tool_call_ids_json(input_json)
 }
@@ -686,26 +680,6 @@ pub fn serialize_tool_arguments_json(input_json: String) -> NapiResult<String> {
 #[napi]
 pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
     tool_harvester::harvest_tools_json(input_json)
-}
-
-#[napi]
-pub fn has_valid_thought_signature_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::has_valid_thought_signature_json(input_json)
-}
-
-#[napi]
-pub fn sanitize_thinking_block_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::sanitize_thinking_block_json(input_json)
-}
-
-#[napi]
-pub fn filter_invalid_thinking_blocks_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::filter_invalid_thinking_blocks_json(input_json)
-}
-
-#[napi]
-pub fn remove_trailing_unsigned_thinking_blocks_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::remove_trailing_unsigned_thinking_blocks_json(input_json)
 }
 
 #[napi]

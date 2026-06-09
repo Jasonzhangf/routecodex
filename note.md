@@ -18861,3 +18861,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Req outbound context helper public wrapper deletion:
 - Inventory: `mergeContextToolOutputsWithNative`, `normalizeContextToolsWithNative`, `selectToolCallIdStyleWithNative` had no consumers outside defining TS bridge/required-export/Rust public NAPI bridge surfaces.
 - Change: removed the three TS wrappers, wrapper-only local parsers, required-export entries, Rust public `*_json` NAPI bridge functions, and the now-unused Rust internal `select_tool_call_id_style`. Kept Rust internal `merge_context_tool_outputs` and `normalize_context_tools` because active `apply_req_outbound_context_snapshot` still calls them.
+
+2026-06-09 Shared conversion thought/normalizeTools public wrapper deletion:
+- Inventory: `hasValidThoughtSignatureWithNative`, `sanitizeThinkingBlockWithNative`, `filterInvalidThinkingBlocksWithNative`, `removeTrailingUnsignedThinkingBlocksWithNative`, and `normalizeToolsWithNative` had no live runtime consumers; hits were only TS public bridge/required-export/Rust root NAPI/module-local tests/historical notes.
+- Change: removed these TS wrappers, required-export entries, Rust root NAPI exports, deleted `thought_signature_validator.rs` plus tests, and removed standalone `normalize_tools_json` with its shell-schema helpers from `shared_args_mapping.rs`; kept live `normalizeArgsBySchemaJson` and `hub_standardized_bridge` private `normalize_tools`.
