@@ -73,26 +73,6 @@ function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAIL
   }
 }
 
-function parseAliasMapPayload(raw: string): Record<string, unknown> | undefined | null {
-  const parsed = parseJson('parseAliasMapPayload', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!key || typeof value !== 'string') {
-      return null;
-    }
-    out[key] = value;
-  }
-  return out;
-}
 function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayload | null {
   const parsed = parseJson('parseGovernanceContextPayload', raw);
   if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -281,20 +261,6 @@ function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unkn
     capability,
     args.map((arg) => encodeJsonArg(capability, arg))
   );
-}
-export function buildAnthropicToolAliasMapWithNative(
-  sourceTools: unknown
-): Record<string, unknown> | undefined {
-  const capability = 'buildAnthropicToolAliasMapJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | undefined>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [sourceTools ?? null]);
-    const parsed = parseAliasMapPayload(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
 }
 export function resolveGovernanceContextWithNative(
   request: unknown,

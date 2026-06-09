@@ -2717,6 +2717,40 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired anthropic alias public bridge must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_anthropic_tool_alias.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-anthropic-alias.mjs',
+    ];
+    const retiredSymbols = [
+      'buildAnthropicToolAliasMapWithNative',
+      'buildAnthropicToolAliasMapJson',
+      'mod chat_anthropic_tool_alias',
+      'build_anthropic_tool_alias_map_json',
+      'function parseAliasMapPayload',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [

@@ -85,14 +85,28 @@ describe('native semantics parser observability', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mod = await importWithNativeParseFailureMock<{
-      buildAnthropicToolAliasMapWithNative: (tools: unknown) => Record<string, unknown> | undefined;
+      applyRespProcessToolGovernanceWithNative: (input: {
+        payload: Record<string, unknown>;
+        clientProtocol: string;
+        entryEndpoint: string;
+        requestId: string;
+      }) => unknown;
     }>(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.js',
-      'buildAnthropicToolAliasMapJson'
+      'governResponseJson'
     );
 
-    expect(() => mod.buildAnthropicToolAliasMapWithNative([])).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseAliasMapPayload failed (non-blocking)');
+    expect(() =>
+      mod.applyRespProcessToolGovernanceWithNative({
+        payload: {},
+        clientProtocol: 'openai-chat',
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req_parser_observability'
+      })
+    ).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain(
+      'parseRespProcessToolGovernancePayload failed (non-blocking)'
+    );
 
     warnSpy.mockRestore();
   });

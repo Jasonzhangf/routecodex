@@ -371,6 +371,7 @@ verification:
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
       - Retired SSE stats/timeout public wrappers must stay deleted; `extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` must not be kept alive by required-export gates without a live runtime consumer.
       - Retired chat node-result public builder/descriptor/restore wrappers must stay deleted; request-executor/finish-reason live bridges must not be used to justify restoring standalone node-result builder exports or the stale coverage script.
+      - Retired Anthropic alias public bridge must stay deleted; live alias mapping may remain Rust-internal to shared tool mapping / Hub mainline, but required-export gates must not preserve `buildAnthropicToolAliasMapJson` without a live runtime consumer.
       - Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers.
       - Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts.
       - Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge.

@@ -10,7 +10,6 @@ use chat_process_media_semantics::{
 use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
 mod anthropic_response_helper;
-mod chat_anthropic_tool_alias;
 mod chat_continue_execution_directive_injection;
 mod chat_governance_context;
 mod chat_governance_finalize;
@@ -2244,7 +2243,6 @@ pub fn filter_out_executed_server_tool_calls_json(
     );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-
 
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,

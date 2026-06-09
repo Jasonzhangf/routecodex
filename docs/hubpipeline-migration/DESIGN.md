@@ -721,7 +721,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 | `normalizeRequestToolCalls` | `tool-governor-request.ts` | 纯 TS，耦合 validator/regression/guards | **暂不迁移**：超出 req_inbound stage 范围，需大改架构 |
 | `normalizeReqInboundShellLikeToolCallsWithNative` | `semantic_map` 调用 | ✅ 已接入 Rust | 无需操作 |
 | `applyAnthropicToolAliasSemantics` | `semantic_map` 调用 | 纯 TS，Anthropic 特定 | **暂不迁移**：Anthropic 特定逻辑，非 HubPipeline 主线 |
-| `buildAnthropicToolAliasMapWithNative` | `semantic_map` 调用 | ✅ 已接入 Rust | 无需操作 |
+| Anthropic alias map | Rust shared tool mapping internal | ✅ 已收口 | 旧 `buildAnthropicToolAliasMapWithNative` 公共桥接已退休 |
 
 ### 下一步建议
 - **Slice 3.7**：`req_inbound_stage2_semantic_map` 主体 orchestrator 评估（296 行 await/toChat/bridge/operation-table）

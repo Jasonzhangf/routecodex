@@ -3083,3 +3083,9 @@ Tags: hub-pipeline, sse, resp-inbound, dead-code, napi-export, rust-only, residu
 - Removed the zero-consumer TS wrappers, required-export entries, Rust public wrapper functions, the now-dead private Rust helper chain, and stale `coverage-hub-chat-process-node-result.mjs`. Kept live request-executor and finish/empty-response classification bridges.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these retired node-result builder/descriptor/restore wrappers, JSON exports, Rust helper names, and stale coverage script path from returning.
 Tags: hub-pipeline, chat-node-result, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Anthropic alias public bridge removed
+- Exact scan found `buildAnthropicToolAliasMapWithNative` / `buildAnthropicToolAliasMapJson` had no live runtime consumer; active Anthropic alias semantics are Rust-internal through shared tool mapping and Hub req/resp mainline owners.
+- Removed the zero-consumer TS wrapper, required-export entry, NAPI-only Rust module, and stale `coverage-hub-chat-process-anthropic-alias.mjs`; parser observability now targets live response-governance native parsing.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired alias wrapper/export/module/script from returning.
+Tags: hub-pipeline, anthropic-alias, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

@@ -11,7 +11,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "applyStoplessGoalDirectiveJson",
   "applyStopMessageInstructionJson",
   "augmentContextSnapshotJson",
-  "buildAnthropicToolAliasMapJson",
   "buildOpenaiChatFromAnthropicJson",
   "buildOpenaiChatResponseFromAnthropicMessageJson",
   "buildAnthropicFromOpenaiChatJson",

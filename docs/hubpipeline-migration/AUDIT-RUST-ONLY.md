@@ -23,7 +23,7 @@
 | P0-1 VirtualRouterEngine | ❌ 纯 TS 阻塞 | ✅ 已有 nativeProxy | engine.ts:118 `nativeProxy.route()` |
 | P0-2 servertool engine | ❌ 纯 TS 阻塞 | ⚠️ 混合 | engine.ts:119 有 Rust 调用，但主体仍是 TS |
 | P0-3 tool-governor-request | ❌ 纯 TS 阻塞 | ⚠️ 混合 | 部分逻辑调用 Rust，部分纯 TS |
-| P0-4 anthropic-alias | ❌ 纯 TS 阻塞 | ✅ 已有 Rust | buildAnthropicToolAliasMapWithNative |
+| P0-4 anthropic-alias | ❌ 纯 TS 阻塞 | ✅ 已收口 | Rust shared tool mapping internal；旧公共 NAPI wrapper 已退休 |
 
 ---
 
@@ -67,7 +67,7 @@
 | VirtualRouterEngine | engine.ts | 408 | ✅ | nativeProxy 委托 Rust |
 | servertool engine | servertool/engine.ts | 262 | ⚠️ | 部分 Rust，主体 TS 编排 |
 | tool-governor-request | tool-governor-request.ts | 196 | ⚠️ | 部分 Rust，治理逻辑 TS |
-| anthropic-alias | chat-process-anthropic-alias.ts | 80 | ✅ | buildAnthropicToolAliasMapWithNative |
+| anthropic-alias | chat-process-anthropic-alias.ts | 80 | ✅ | Rust shared tool mapping internal；旧公共 NAPI wrapper 已退休 |
 | operation-table | operation-table-runner.ts | ~150 | ⚠️ | TS，有 pre/post hook 机制 |
 | marker-lifecycle | marker-lifecycle.ts | ~80 | ⚠️ | cleanMarkerSyntaxInPlace TS |
 
