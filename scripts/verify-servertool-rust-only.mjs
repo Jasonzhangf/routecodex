@@ -3800,15 +3800,29 @@ function checkStoplessLearnedNoteRustOwner() {
     'function persistStoplessLearnedNoteOnAllowStop',
   ]) {
     if (stopMessageAuto.includes(keyword)) {
-      warn(
-        'stopless-learned-note-ts-migration-pending',
-        `TS learned-note semantic remains pending native bridge deletion: ${keyword}`
+      fail(
+        'stopless-learned-note-no-ts-owner',
+        `${STOP_MESSAGE_AUTO_HANDLER} must not retain TS learned-note semantic: ${keyword}`
       );
     }
   }
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  assertContains(
+    'stopless-learned-note-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'planStoplessLearnedNoteWriteWithNative'
+  );
+  assertContains(
+    'stopless-learned-note-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planStoplessLearnedNoteWriteJson'
+  );
   pass(
     'stopless-learned-note-rust-owner',
-    'servertool-core owns stopless learned-note write planning; TS IO bridge deletion is tracked'
+    'servertool-core owns stopless learned-note write planning; TS only executes note IO'
   );
 }
 

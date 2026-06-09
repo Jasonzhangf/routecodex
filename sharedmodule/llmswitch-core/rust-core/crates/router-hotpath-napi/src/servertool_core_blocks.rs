@@ -31,6 +31,7 @@ use servertool_core::stop_visible_text;
 use servertool_core::stopless_decision_context_goal;
 use servertool_core::stopless_decision_context_signals;
 use servertool_core::stopless_goal_state_contract;
+use servertool_core::stopless_learned_note_contract;
 use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
 
@@ -591,6 +592,14 @@ pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<Strin
         &stopless_orchestration_contract::plan_stopless_orchestration_action(input),
     )
     .map_err(|e| format!("serialize stopless orchestration plan: {e}"))
+}
+
+pub fn plan_stopless_learned_note_write_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_learned_note_contract::StoplessLearnedNotePlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless learned-note input: {e}"))?;
+    serde_json::to_string(&stopless_learned_note_contract::plan_stopless_learned_note_write(input))
+        .map_err(|e| format!("serialize stopless learned-note plan: {e}"))
 }
 
 pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {

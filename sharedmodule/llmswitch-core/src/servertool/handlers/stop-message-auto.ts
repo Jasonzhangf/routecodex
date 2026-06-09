@@ -54,13 +54,11 @@ import {
   applyStopMessageSnapshotToState,
   clearStopMessageState
 } from './stop-message-auto/routing-state.js';
-import {
-  resolveWorkingDirectoryFromAdapterContext,
-  writeStoplessLearnedNoteEntry
-} from './memory/cache-writer.js';
+import { writeStoplessLearnedNoteEntry } from './memory/cache-writer.js';
 import {
   buildStopMessageTerminalVisiblePayloadWithNative,
-  extractCurrentAssistantStopTextWithNative
+  extractCurrentAssistantStopTextWithNative,
+  planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
@@ -138,31 +136,28 @@ function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPl
   };
 }
 
-function readNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function persistStoplessLearnedNoteOnAllowStop(args: {
+function writeStoplessLearnedNoteFromRustPlan(args: {
   adapterContext: Record<string, unknown>;
   requestId: string;
   parsed?: Record<string, unknown>;
 }): void {
-  const learned = readNonEmptyString(args.parsed?.learned);
-  if (!learned) {
+  const plan = planStoplessLearnedNoteWriteWithNative({
+    adapterContext: args.adapterContext,
+    requestId: args.requestId,
+    parsed: args.parsed,
+    timestampMs: Date.now()
+  });
+  if (!plan.shouldWrite) {
     return;
   }
   writeStoplessLearnedNoteEntry({
-    workingDirectory: resolveWorkingDirectoryFromAdapterContext(args.adapterContext),
-    requestId: args.requestId,
-    sessionId: readNonEmptyString(args.adapterContext.sessionId),
-    timestampMs: Date.now(),
-    learned,
-    reason: readNonEmptyString(args.parsed?.reason),
-    evidence: readNonEmptyString(args.parsed?.evidence)
+    workingDirectory: plan.workingDirectory,
+    requestId: plan.requestId,
+    sessionId: plan.sessionId,
+    timestampMs: plan.timestampMs,
+    learned: plan.learned,
+    reason: plan.reason,
+    evidence: plan.evidence
   });
 }
 
@@ -458,7 +453,7 @@ const handler: ServerToolHandler = async (
       const prefixed = schemaGate.reason_code === 'stop_schema_needs_user_input'
         ? replaceStopSummaryContent(ctx.base, schemaGate.summary_prefix)
         : applyStopSummaryPrefix(ctx.base, schemaGate.summary_prefix);
-      persistStoplessLearnedNoteOnAllowStop({
+      writeStoplessLearnedNoteFromRustPlan({
         adapterContext: ctx.adapterContext as unknown as Record<string, unknown>,
         requestId: ctx.requestId,
         parsed: schemaGate.parsed

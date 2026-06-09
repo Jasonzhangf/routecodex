@@ -363,6 +363,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planStopMessageCliProjectionSeedJson",
   "planStoplessOrchestrationActionJson",
   "planStoplessGoalStateSyncJson",
+  "planStoplessLearnedNoteWriteJson",
   "planBudgetStateUpdateJson",
   "planStopMessagePersistedLookupJson",
   "buildClientVisibleProjectionShellJson",

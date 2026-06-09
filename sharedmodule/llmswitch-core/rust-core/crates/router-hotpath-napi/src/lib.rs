@@ -1654,6 +1654,12 @@ pub fn plan_stopless_orchestration_action_json(input_json: String) -> NapiResult
 }
 
 #[napi]
+pub fn plan_stopless_learned_note_write_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_learned_note_write_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn build_client_visible_projection_shell_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_client_visible_projection_shell_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

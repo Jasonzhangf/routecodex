@@ -250,6 +250,24 @@ export interface StoplessGoalStateSyncPlan {
   nextState?: Record<string, unknown> | null;
 }
 
+export interface StoplessLearnedNoteWritePlanInput {
+  adapterContext: Record<string, unknown>;
+  requestId: string;
+  parsed?: Record<string, unknown>;
+  timestampMs?: number;
+}
+
+export interface StoplessLearnedNoteWritePlan {
+  shouldWrite: boolean;
+  workingDirectory?: string;
+  requestId: string;
+  sessionId?: string;
+  timestampMs: number;
+  learned?: string;
+  reason?: string;
+  evidence?: string;
+}
+
 export interface StoplessOrchestrationActionInput {
   flowId?: string;
   execution: unknown;
@@ -1398,6 +1416,39 @@ export function planStoplessGoalStateSyncWithNative(
     throw new Error(`planStoplessGoalStateSyncJson native returned invalid fields: ${JSON.stringify(record)}`);
   }
   return record as unknown as StoplessGoalStateSyncPlan;
+}
+
+export function planStoplessLearnedNoteWriteWithNative(
+  input: StoplessLearnedNoteWritePlanInput,
+): StoplessLearnedNoteWritePlan {
+  const capability = 'planStoplessLearnedNoteWriteJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessLearnedNoteWriteJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    if (nativeError instanceof Error || typeof nativeError.message === 'string' || typeof nativeError.code === 'string') {
+      const message = typeof nativeError.message === 'string' && nativeError.message.trim()
+        ? nativeError.message.trim()
+        : String(resultJson);
+      throw new Error(`planStoplessLearnedNoteWriteJson native error: ${message}`);
+    }
+  }
+  const parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) as unknown : resultJson;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planStoplessLearnedNoteWriteJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.shouldWrite !== 'boolean' ||
+    typeof record.requestId !== 'string' ||
+    typeof record.timestampMs !== 'number'
+  ) {
+    throw new Error(`planStoplessLearnedNoteWriteJson native returned invalid fields: ${JSON.stringify(record)}`);
+  }
+  return record as unknown as StoplessLearnedNoteWritePlan;
 }
 
 export function buildClientVisibleProjectionShellWithNative(
