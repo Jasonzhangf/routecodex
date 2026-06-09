@@ -1787,6 +1787,116 @@ function checkServertoolSkeletonConfigRustOwner() {
   pass('servertool-skeleton-config-no-ts-owner', 'skeleton-config.ts is native-only shell for derived config and registration semantics');
 }
 
+function checkPendingSessionRustOwner() {
+  const rustPendingSession = readRequired(RUST_SERVERTOOL_PENDING_SESSION);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const pendingSessionShell = readRequired(TS_PENDING_SESSION);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const needle of [
+    'pub fn resolve_pending_file_name',
+    'pub fn resolve_pending_max_age_ms',
+    'pub fn plan_pending_session_save',
+    'pub fn plan_pending_session_load',
+  ]) {
+    assertContains(
+      'servertool-pending-session-rust-owner',
+      RUST_SERVERTOOL_PENDING_SESSION,
+      rustPendingSession,
+      needle
+    );
+  }
+  assertContains(
+    'servertool-pending-session-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod pending_session_contract'
+  );
+  for (const needle of [
+    'resolve_pending_session_file_name_json',
+    'resolve_pending_session_max_age_ms_json',
+    'plan_pending_session_save_json',
+    'plan_pending_session_load_json',
+  ]) {
+    assertContains(
+      'servertool-pending-session-native-export',
+      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+      napiBlocks,
+      needle
+    );
+  }
+  for (const needle of [
+    'pub fn resolve_pending_session_file_name_json',
+    'pub fn resolve_pending_session_max_age_ms_json',
+    'pub fn plan_pending_session_save_json',
+    'pub fn plan_pending_session_load_json',
+  ]) {
+    assertContains(
+      'servertool-pending-session-native-export',
+      RUST_ROUTER_HOTPATH_NAPI_LIB,
+      napiLib,
+      needle
+    );
+  }
+  for (const needle of [
+    'resolvePendingSessionFileNameJson',
+    'resolvePendingSessionMaxAgeMsJson',
+    'planPendingSessionSaveJson',
+    'planPendingSessionLoadJson',
+  ]) {
+    assertContains(
+      'servertool-pending-session-required-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      needle
+    );
+  }
+  for (const needle of [
+    'resolvePendingSessionFileNameWithNative',
+    'resolvePendingSessionMaxAgeMsWithNative',
+    'planPendingSessionSaveWithNative',
+    'planPendingSessionLoadWithNative',
+  ]) {
+    assertContains(
+      'servertool-pending-session-native-bridge',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+    assertContains(
+      'servertool-pending-session-ts-thin-shell',
+      TS_PENDING_SESSION,
+      pendingSessionShell,
+      needle
+    );
+  }
+  for (const keyword of [
+    'DEFAULT_PENDING_MAX_AGE_MS',
+    'function sanitizeSegment',
+    'function coercePending',
+    'Number.parseInt',
+    'Number.isFinite',
+    'Math.floor',
+    '.replace(/[^a-zA-Z0-9_.-]/g',
+    'stale pending injection dropped session=${',
+    'invalid pending injection dropped: malformed payload',
+  ]) {
+    if (pendingSessionShell.includes(keyword)) {
+      fail(
+        'servertool-pending-session-no-ts-owner',
+        `Forbidden TS pending-session semantic "${keyword}" found in pending-session.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-pending-session-no-ts-owner',
+    'pending-session.ts is native-only shell for max-age, session file, payload coercion, and stale/malformed load decisions'
+  );
+}
+
 // ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
@@ -2674,6 +2784,7 @@ checkOrchestrationPolicyRustOwner();
 checkStopMessageCounterRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
+checkPendingSessionRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();
