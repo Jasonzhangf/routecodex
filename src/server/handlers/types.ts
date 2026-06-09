@@ -46,6 +46,7 @@ export interface PipelineExecutionResult {
     }>;
     requestStartedAtMs: number;
     timingRequestIds?: string[];
+    logSessionColorKey?: unknown;
     sessionId?: unknown;
     conversationId?: unknown;
     projectPath?: unknown;

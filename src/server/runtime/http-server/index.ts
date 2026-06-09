@@ -72,6 +72,7 @@ import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
@@ -1771,6 +1772,7 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
+        logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
         sessionId: readSessionIdForUsageLog(inputMetadata),
         conversationId: inputMetadata.conversationId,
         projectPath:
@@ -1855,6 +1857,7 @@ export class RouteCodexHttpServer {
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
         requestStartedAtMs: Date.now(),
+        logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
         sessionId: readSessionIdForUsageLog(inputMetadata),
         conversationId: inputMetadata.conversationId,
         projectPath:

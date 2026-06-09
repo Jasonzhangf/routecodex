@@ -1493,6 +1493,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - `/v1/responses` 请求生命周期日志必须在 handler 早期打印：至少在 runtime ready、resume、capture/store、provider resolve 之前；否则这些前置步骤早退/阻塞时会表现为“请求没进 provider/没打印”。
 - 端口日志路由 `port-log-context.ts` 只能 tee 到 port log，不能吞 console；`[virtual-router-hit]`、`[provider-switch]`、`▶/✅/❌ [/v1/responses]` 默认必须进当前 console。
 - 默认噪音只允许源头 gate：`[port-resolve]` 需 `ROUTECODEX_PORT_RESOLVE_LOGS=1`；`[mem-observer]` 是 pending/retained 泄漏哨兵，默认必须可见，只能显式 `ROUTECODEX_MEM_OBSERVER_DISABLE=1`/`RCC_MEM_OBSERVER_DISABLE=1` 关闭；请求生命周期关闭只能显式设置 `ROUTECODEX_HTTP_LOG_DISABLE=1`/`RCC_HTTP_LOG_DISABLE=1`。
+- session 日志颜色 owner 是 `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`；app `src/utils/session-log-color.ts` 只能做薄壳。排查“同一 session 每次请求变色”时，先确认颜色 key 优先级是 `clientTmuxSessionId/tmuxSessionId` 早于 request-shaped `sessionId`，且 `[virtual-router-hit]` host recolor 不得从 `req=` 查 request registry 补色。
 - 回归必须覆盖：HTTP/handler 早退前仍打印 start、port context 不抑制 console、virtual-router-hit 彩色输出不被 minimal filter 吞掉。
 
 

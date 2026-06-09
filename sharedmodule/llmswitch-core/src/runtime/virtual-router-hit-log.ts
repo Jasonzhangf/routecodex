@@ -241,38 +241,35 @@ export function resolveRouteColor(routeName: string): string {
   return map[routeName] ?? '\x1b[36m';
 }
 
-export function resolveSessionColor(sessionId?: string): string {
-  const palette = [
-    '\x1b[32m',
-    '\x1b[33m',
-    '\x1b[34m',
-    '\x1b[35m',
-    '\x1b[36m',
-    '\x1b[92m',
-    '\x1b[93m',
-    '\x1b[94m',
-    '\x1b[95m',
-    '\x1b[96m',
-    '\x1b[38;5;202m',
-    '\x1b[38;5;208m',
-    '\x1b[38;5;214m',
-    '\x1b[38;5;220m',
-    '\x1b[38;5;45m',
-    '\x1b[38;5;51m',
-    '\x1b[38;5;39m',
-    '\x1b[38;5;75m',
-    '\x1b[38;5;141m',
-    '\x1b[38;5;177m',
-    '\x1b[38;5;171m',
-    '\x1b[38;5;207m'
-  ];
-  const normalized = typeof sessionId === 'string' ? sessionId.trim() : '';
-  if (!normalized) {
-    return '\x1b[36m';
-  }
+export const SESSION_LOG_COLOR_PALETTE = [
+  '\x1b[32m',
+  '\x1b[33m',
+  '\x1b[34m',
+  '\x1b[35m',
+  '\x1b[36m',
+  '\x1b[92m',
+  '\x1b[93m',
+  '\x1b[94m',
+  '\x1b[95m',
+  '\x1b[96m',
+  '\x1b[38;5;202m',
+  '\x1b[38;5;208m',
+  '\x1b[38;5;214m',
+  '\x1b[38;5;220m',
+  '\x1b[38;5;45m',
+  '\x1b[38;5;51m',
+  '\x1b[38;5;39m',
+  '\x1b[38;5;75m',
+  '\x1b[38;5;141m',
+  '\x1b[38;5;177m',
+  '\x1b[38;5;171m',
+  '\x1b[38;5;207m'
+] as const;
+
+export function hashSessionLogColorToken(value: string): number {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < normalized.length; i += 1) {
-    hash ^= normalized.charCodeAt(i);
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   hash ^= hash >>> 16;
@@ -280,8 +277,41 @@ export function resolveSessionColor(sessionId?: string): string {
   hash ^= hash >>> 15;
   hash = Math.imul(hash, 0x846ca68b) >>> 0;
   hash ^= hash >>> 16;
-  const normalizedHash = hash >>> 0;
-  return palette[normalizedHash % palette.length];
+  return hash >>> 0;
+}
+
+export function resolveSessionLogColorKey(input?: Record<string, unknown> | null): string | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const candidates = [
+    input.logSessionColorKey,
+    input.clientTmuxSessionId,
+    input.client_tmux_session_id,
+    input.tmuxSessionId,
+    input.tmux_session_id,
+    input.rccSessionClientTmuxSessionId,
+    input.rcc_session_client_tmux_session_id,
+    input.sessionId,
+    input.session_id,
+    input.conversationId,
+    input.conversation_id
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+export function resolveSessionColor(sessionId?: string): string | undefined {
+  const normalized = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalized) {
+    return undefined;
+  }
+  const hash = hashSessionLogColorToken(normalized);
+  return SESSION_LOG_COLOR_PALETTE[hash % SESSION_LOG_COLOR_PALETTE.length];
 }
 
 function describeContextUsage(
@@ -377,12 +407,10 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const seconds = String(now.getSeconds()).padStart(2, '0');
     const timestamp = `${hours}:${minutes}:${seconds}`;
 
-    const prefixColor = '\x1b[38;5;208m';
     const reset = '\x1b[0m';
     const timeColor = '\x1b[90m';
     const continuationColor = '\x1b[33m';
     const stopColor = '\x1b[38;5;214m';
-    const prefix = `${prefixColor}[virtual-router-hit]${reset}`;
     const timeLabel = `${timeColor}${timestamp}${reset}`;
     const { providerLabel, resolvedModel } = describeTargetProvider(record.providerKey, record.modelId);
     const routeLabel = record.poolId ? `${record.routeName}/${record.poolId}` : record.routeName;
@@ -391,7 +419,8 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
     const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
-    const routeColor = (sessionId ? resolveSessionColor(sessionId) : undefined) || resolveRouteColor(record.routeName);
+    const routeColor = resolveSessionColor(sessionId) || resolveRouteColor(record.routeName);
+    const prefix = `${routeColor}[virtual-router-hit]${reset}`;
     const continuationText = formatContinuationScope(record.continuationScope);
     const continuationLabel = continuationText ? ` ${continuationColor}[continuation:${continuationText}]${reset}` : '';
     const reasonLabel = record.hitReason ? ` reason=${record.hitReason}` : '';

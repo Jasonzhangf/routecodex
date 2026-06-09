@@ -8,6 +8,7 @@ import {
 } from '../../../src/server/utils/request-log-color.js';
 import { resolveSessionAnsiColor } from '../../../src/utils/session-log-color.js';
 import { ColoredLogger } from '../../../src/modules/pipeline/utils/colored-logger.js';
+import { resolveSessionColor } from '../../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
 
 describe('request log color registry', () => {
   const originalForceColor = process.env.FORCE_COLOR;
@@ -90,19 +91,47 @@ describe('request log color registry', () => {
     expect(String(logSpy.mock.calls[0]?.[0] ?? '').startsWith(String(expectedColor))).toBe(true);
   });
 
-  it('colors virtual-router-hit lines from registered request context when sid is absent', () => {
+  it('does not color virtual-router-hit lines from request context when sid is absent', () => {
     const sessionId = 'session-vr-hit-context';
     const requestId = 'req-vr-hit-context';
-    const expectedColor = resolveSessionAnsiColor(sessionId);
 
     registerRequestLogContext(requestId, { sessionId });
     const line = colorizeVirtualRouterHitLogLine(
       `\x1b[38;5;208m[virtual-router-hit]\x1b[0m \x1b[90m19:42:25\x1b[0m req=${requestId} \x1b[36mtools/pool -> provider.model reason=tools\x1b[0m`
     );
 
-    expect(expectedColor).toBeDefined();
-    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
-    expect(line).toContain(`req=${requestId} ${expectedColor}tools/pool -> provider.model`);
+    expect(line).toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
+    expect(line).toContain(`req=${requestId} \x1b[36mtools/pool -> provider.model`);
+  });
+
+  it('does not recolor virtual-router-hit lines without an explicit session key', () => {
+    const line = colorizeVirtualRouterHitLogLine(
+      `\x1b[38;5;208m[virtual-router-hit]\x1b[0m \x1b[90m19:42:25\x1b[0m req=req-vr-hit-no-session \x1b[36mtools/pool -> provider.model reason=tools\x1b[0m`
+    );
+
+    expect(line).toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
+    expect(line).not.toContain('\x1b[90m[virtual-router-hit]\x1b[0m');
+  });
+
+  it('uses stable tmux session color across different request/session ids', () => {
+    const tmuxSessionId = 'tmux-stable-color-1';
+    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+
+    registerRequestLogContext('req-stable-color-a', {
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: 'request-session-a'
+    });
+    registerRequestLogContext('req-stable-color-b', {
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: 'request-session-b'
+    });
+
+    expect(resolveRequestLogColorToken('req-stable-color-a')).toBe(expectedColor);
+    expect(resolveRequestLogColorToken('req-stable-color-b')).toBe(expectedColor);
+    expect(resolveRequestLogColorToken('req-stable-color-c', {
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: 'request-session-c'
+    })).toBe(expectedColor);
   });
 
   it('colors virtual-router-hit lines from sid without request context', () => {
@@ -157,6 +186,18 @@ describe('request log color registry', () => {
     expect(colorB).toBeDefined();
     expect(colorC).toBeDefined();
     expect(new Set([colorA, colorB, colorC]).size).toBeGreaterThan(1);
+  });
+
+  it('uses the shared virtual-router session color owner', () => {
+    const sessionIds = [
+      '019cdb2b-c9f2-7d51-aa85-a62fd2a8fed0',
+      '019cae75-2560-78b3-bfe0-c39c4fa77a0e',
+      '019cd00b-eee3-77e1-b04f-716ebc1dcbb3'
+    ];
+
+    for (const sessionId of sessionIds) {
+      expect(resolveSessionAnsiColor(sessionId)).toBe(resolveSessionColor(sessionId));
+    }
   });
 
   it('does not assign red, white, black, or gray ansi colors to session logs', () => {

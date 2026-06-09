@@ -29,8 +29,15 @@ export async function initializeRequestExecutorRequestState(args: {
 
   bindSessionConversationSession(initialMetadata);
   registerRequestLogContext(args.input.requestId, {
+    logSessionColorKey: initialMetadata.logSessionColorKey,
+    clientTmuxSessionId: initialMetadata.clientTmuxSessionId,
+    client_tmux_session_id: initialMetadata.client_tmux_session_id,
+    tmuxSessionId: initialMetadata.tmuxSessionId,
+    tmux_session_id: initialMetadata.tmux_session_id,
     sessionId: initialMetadata.sessionId,
-    conversationId: initialMetadata.conversationId
+    session_id: initialMetadata.session_id,
+    conversationId: initialMetadata.conversationId,
+    conversation_id: initialMetadata.conversation_id
   });
 
   const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);

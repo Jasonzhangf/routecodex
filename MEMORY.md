@@ -876,6 +876,7 @@ Tags: rust, silent-failure, error-handling, routing-state, snapshot
 - `src/server/utils/request-log-color.ts` 现在只在显式或已注册的 `sessionId` / `conversationId` 可用时才给 host 请求日志上色；没有 session 映射时宁可保持默认色，也不要按 requestId 乱染色。
 - RouteCodex 运行时日志颜色不再被继承的全局 `NO_COLOR=1` 静默关闭；只有 `ROUTECODEX_FORCE_LOG_COLOR=0` / `RCC_FORCE_LOG_COLOR=0` 才应作为显式关闭开关。
 - 调试边界：如果 `virtual-router-hit` 有颜色而 host `usage/completed` 仍是白色，问题已经收缩到 host runtime 没有拿到/保留同一 session 标识，而不是颜色算法分叉。
+- 2026-06-09 修正：当前 session 日志颜色 owner 是 `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`，host `src/utils/session-log-color.ts` 只是薄壳。颜色 key 必须优先稳定客户端 session scope：`logSessionColorKey -> clientTmuxSessionId/tmuxSessionId -> sessionId -> conversationId`；业务 `sessionId` 如果是每轮 request-shaped ID，不能放在 tmux 前面，否则同一会话会每次请求变色。`[virtual-router-hit]` host recolor 只能读显式 `sid=` / bracket session，不得从 `req=` 查 request registry 补色。
 
 Tags: session-color, virtual-router-hit, usage-log, http-log, single-source-of-truth, host, sharedmodule, no-color
 

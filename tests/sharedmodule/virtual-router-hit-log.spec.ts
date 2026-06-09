@@ -1,6 +1,9 @@
 import {
   createVirtualRouterHitRecord,
   formatVirtualRouterHit,
+  resolveRouteColor,
+  resolveSessionColor,
+  resolveSessionLogColorKey,
   toVirtualRouterHitEvent
 } from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
 
@@ -104,5 +107,47 @@ describe('virtual-router hit log', () => {
     expect(colorPrefixC).toBeTruthy();
     expect(colorPrefixA).toBe(colorPrefixB);
     expect(colorPrefixA).not.toBe(colorPrefixC);
+  });
+
+  it('uses one session color for virtual-router-hit prefix and target label', () => {
+    const sessionId = '019cdb2b-c9f2-7d51-aa85-a62fd2a8fed0';
+    const sessionColor = resolveSessionColor(sessionId);
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'glm.key1.kimi-k2.5',
+      modelId: 'kimi-k2.5',
+      hitReason: 'thinking:user-input',
+      sessionId
+    }));
+
+    expect(sessionColor).toBeDefined();
+    expect(line).toContain(`${sessionColor}[virtual-router-hit]\x1b[0m`);
+    expect(line).toContain(`sid=${sessionId} ${sessionColor}thinking/thinking-primary`);
+  });
+
+  it('uses route color only when no session id is present', () => {
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'glm.key1.kimi-k2.5',
+      modelId: 'kimi-k2.5',
+      hitReason: 'thinking:user-input'
+    }));
+
+    expect(resolveSessionColor()).toBeUndefined();
+    expect(line).toContain(`${resolveRouteColor('thinking')}[virtual-router-hit]\x1b[0m`);
+    expect(line).not.toContain(' sid=');
+  });
+
+  it('prefers stable tmux scope over per-request session id for log color key', () => {
+    expect(resolveSessionLogColorKey({
+      sessionId: 'request-session-a',
+      clientTmuxSessionId: 'tmux-session-stable'
+    })).toBe('tmux-session-stable');
+    expect(resolveSessionLogColorKey({
+      sessionId: 'request-session-b',
+      tmux_session_id: 'tmux-session-stable'
+    })).toBe('tmux-session-stable');
   });
 });

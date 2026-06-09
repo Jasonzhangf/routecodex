@@ -169,6 +169,7 @@ export function logUsageSummary(
     hubStageTop?: HubStageTopEntry[];
     latencyMs: number;
     timingRequestIds?: string[];
+    logSessionColorKey?: unknown;
     sessionId?: unknown;
     conversationId?: unknown;
     projectPath?: unknown;
@@ -191,6 +192,7 @@ export function logUsageSummary(
   const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
   const latency = info.latencyMs.toFixed(1);
   registerRequestLogContext(requestId, {
+    logSessionColorKey: info.logSessionColorKey,
     sessionId: info.sessionId,
     conversationId: info.conversationId
   });
@@ -289,6 +291,7 @@ export function logUsageSummary(
     ? ` ${ANSI_WHITE}tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}${ANSI_RESET}`
     : '';
   const requestColor = resolveRequestLogColorToken(requestId, {
+    logSessionColorKey: info.logSessionColorKey,
     sessionId: info.sessionId,
     conversationId: info.conversationId
   }) ?? '';

@@ -561,7 +561,7 @@ function logStreamRequestComplete(
   requestLabel: string,
   status: number,
   finishReason?: string,
-  context?: { sessionId?: unknown; conversationId?: unknown }
+  context?: Record<string, unknown>
 ): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
@@ -579,7 +579,7 @@ function logStreamRequestCompleteOnce(
   requestLabel: string,
   status: number,
   finishReason?: string,
-  context?: { sessionId?: unknown; conversationId?: unknown }
+  context?: Record<string, unknown>
 ): void {
   if (state.logged) {
     return;
@@ -1605,6 +1605,7 @@ export async function sendPipelineResponse(
     ? options.entryEndpoint.trim()
     : undefined;
   const requestLogContext = {
+    logSessionColorKey: result.usageLogInfo?.logSessionColorKey,
     sessionId: result.usageLogInfo?.sessionId,
     conversationId: result.usageLogInfo?.conversationId
   };
@@ -1651,6 +1652,7 @@ export async function sendPipelineResponse(
         hubStageTop: usageLogInfo.hubStageTop as any,
         latencyMs: Date.now() - usageLogInfo.requestStartedAtMs,
         timingRequestIds: usageLogInfo.timingRequestIds,
+        logSessionColorKey: usageLogInfo.logSessionColorKey,
         sessionId: usageLogInfo.sessionId,
         conversationId: usageLogInfo.conversationId,
         projectPath: usageLogInfo.projectPath,

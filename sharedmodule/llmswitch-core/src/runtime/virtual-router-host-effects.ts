@@ -11,7 +11,7 @@ import { parseResolvedStopMessageInstructionWithNative } from '../native/router-
 import {
   resolveStopMessageScope,
 } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import { resolveRouteColor, resolveSessionColor } from './virtual-router-hit-log.js';
+import { resolveRouteColor, resolveSessionColor, resolveSessionLogColorKey } from './virtual-router-hit-log.js';
 import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import type { RoutingInstruction, RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { mergeStopMessageFromPersisted } from '../native/router-hotpath/native-virtual-router-routing-state.js';
@@ -337,7 +337,6 @@ function emitVirtualRouterHitLog(result: {
   forceStopStatusLabel?: boolean;
 }): void {
   const reset = '\x1b[0m';
-  const prefixColor = '\x1b[38;5;208m';
   const timeColor = '\x1b[90m';
   const stopColor = '\x1b[38;5;214m';
   const now = new Date();
@@ -346,6 +345,7 @@ function emitVirtualRouterHitLog(result: {
     ? `${result.decision.routeName}/${result.decision.poolId}`
     : result.decision.routeName;
   const routeColor = resolveSessionColor(options?.sessionId) || resolveRouteColor(result.decision.routeName);
+  const prefix = `${routeColor}[virtual-router-hit]${reset}`;
   const providerKey = result.decision.providerKey || result.target.providerKey;
   const modelSuffix = result.target.modelId ? `.${result.target.modelId}` : '';
   const reason = result.decision.reasoning ? ` reason=${result.decision.reasoning}` : '';
@@ -359,7 +359,7 @@ function emitVirtualRouterHitLog(result: {
   const sessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : '';
   const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
   console.log(
-    `${prefixColor}[virtual-router-hit]${reset} ${timeColor}${timestamp}${reset}${requestLabel}${sessionLabel} ${routeColor}${routeLabel} -> ${providerKey}${modelSuffix}${reason}${reset}${stopStatusLabel ? ` ${stopColor}${stopStatusLabel}${reset}` : ''}`
+    `${prefix} ${timeColor}${timestamp}${reset}${requestLabel}${sessionLabel} ${routeColor}${routeLabel} -> ${providerKey}${modelSuffix}${reason}${reset}${stopStatusLabel ? ` ${stopColor}${stopStatusLabel}${reset}` : ''}`
   );
 }
 
@@ -380,18 +380,5 @@ function resolveVirtualRouterLogRequestId(metadata: RouterMetadataInput): string
 }
 
 function resolveVirtualRouterLogSessionId(metadata: RouterMetadataInput): string | undefined {
-  const candidates = [
-    metadata.sessionId,
-    metadata.clientTmuxSessionId,
-    metadata.client_tmux_session_id,
-    metadata.tmuxSessionId,
-    metadata.tmux_session_id,
-    metadata.conversationId
-  ];
-  for (const value of candidates) {
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return undefined;
+  return resolveSessionLogColorKey(metadata as unknown as Record<string, unknown>);
 }

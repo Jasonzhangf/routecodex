@@ -9,6 +9,7 @@ import {
 } from './request-executor-response-contract.js';
 import { extractUsageFromResult, mergeUsageMetrics } from './usage-aggregator.js';
 import { extractStatusCodeFromError } from './utils.js';
+import { resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
 
 export type HubStageTopEntry = {
   stage: string;
@@ -108,6 +109,7 @@ export function buildProviderExecutionSuccessResult(args: {
       timingRequestIds: Array.from(
         new Set([args.providerRequestId, args.inputRequestId].filter((value): value is string => Boolean(value)))
       ),
+      logSessionColorKey: resolveSessionLogColorKey(args.mergedMetadata),
       sessionId: args.mergedMetadata.sessionId,
       conversationId: args.mergedMetadata.conversationId,
       projectPath:

@@ -92,8 +92,15 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
   const pipelineMetadata = args.pipelineResult.metadata ?? {};
   const mergedMetadata = mergeMetadataPreservingDefined(args.metadataForAttempt, pipelineMetadata);
   registerRequestLogContext(args.requestId, {
+    logSessionColorKey: mergedMetadata.logSessionColorKey,
+    clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
+    client_tmux_session_id: mergedMetadata.client_tmux_session_id,
+    tmuxSessionId: mergedMetadata.tmuxSessionId,
+    tmux_session_id: mergedMetadata.tmux_session_id,
     sessionId: mergedMetadata.sessionId,
-    conversationId: mergedMetadata.conversationId
+    session_id: mergedMetadata.session_id,
+    conversationId: mergedMetadata.conversationId,
+    conversation_id: mergedMetadata.conversation_id
   });
   const mergedClientHeaders =
     cloneClientHeaders(mergedMetadata?.clientHeaders) || args.clientHeadersForAttempt;

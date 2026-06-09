@@ -1,5 +1,5 @@
 import { resolveEffectiveRequestId } from './request-id-manager.js';
-import { resolveSessionAnsiColor } from '../../utils/session-log-color.js';
+import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
 const ANSI_WHITE = '\x1b[97m';
@@ -12,6 +12,8 @@ type RequestLogContextRecord = {
   sessionKey: string;
   expiresAtMs: number;
 };
+
+type RequestLogColorContext = Record<string, unknown>;
 
 const REQUEST_LOG_CONTEXT = new Map<string, RequestLogContextRecord>();
 
@@ -54,11 +56,8 @@ function normalizeRequestKey(requestId?: string): string | undefined {
   return delimiterIndex >= 0 ? resolved.slice(0, delimiterIndex) : resolved;
 }
 
-function resolveSessionKey(context?: {
-  sessionId?: unknown;
-  conversationId?: unknown;
-}): string | undefined {
-  return normalizeToken(context?.sessionId) || normalizeToken(context?.conversationId);
+function resolveSessionKey(context?: RequestLogColorContext | null): string | undefined {
+  return resolveSessionLogColorKey(context);
 }
 
 function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
@@ -91,7 +90,7 @@ export function resolveSessionLogColor(sessionId?: string): string {
 
 export function registerRequestLogContext(
   requestId: string | undefined,
-  context?: { sessionId?: unknown; conversationId?: unknown }
+  context?: RequestLogColorContext | null
 ): void {
   const requestKey = normalizeRequestKey(requestId);
   const sessionKey = resolveSessionKey(context);
@@ -108,7 +107,7 @@ export function registerRequestLogContext(
 
 export function resolveRequestLogColorToken(
   requestId?: string,
-  context?: { sessionId?: unknown; conversationId?: unknown }
+  context?: RequestLogColorContext | null
 ): string | undefined {
   const explicitSessionKey = resolveSessionKey(context);
   if (explicitSessionKey) {
@@ -131,7 +130,7 @@ export function resolveRequestLogColorToken(
 export function colorizeRequestLog(
   text: string,
   requestId?: string,
-  context?: { sessionId?: unknown; conversationId?: unknown }
+  context?: RequestLogColorContext | null
 ): string {
   if (!text || !isConsoleColorEnabled()) {
     return text;
@@ -150,10 +149,9 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   if (!text || !text.includes('[virtual-router-hit]') || !isConsoleColorEnabled()) {
     return text;
   }
-  const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
   const sessionKey = resolveVirtualRouterHitSessionKey(text);
-  const color = sessionKey ? resolveSessionAnsiColor(sessionKey) : resolveRequestLogColorToken(requestId);
-  if (!color || color === ANSI_FALLBACK_LOG_COLOR) {
+  const color = sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
+  if (!color) {
     return text;
   }
   let line = text.replace(/\x1b\[[0-9;]*m\[virtual-router-hit\]\x1b\[0m/, `${color}[virtual-router-hit]${ANSI_RESET}`);

@@ -731,8 +731,15 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
         registerRequestLogContext(providerContext.requestId, {
+          logSessionColorKey: mergedMetadata.logSessionColorKey,
+          clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
+          client_tmux_session_id: mergedMetadata.client_tmux_session_id,
+          tmuxSessionId: mergedMetadata.tmuxSessionId,
+          tmux_session_id: mergedMetadata.tmux_session_id,
           sessionId: mergedMetadata.sessionId,
-          conversationId: mergedMetadata.conversationId
+          session_id: mergedMetadata.session_id,
+          conversationId: mergedMetadata.conversationId,
+          conversation_id: mergedMetadata.conversation_id
         });
         const { providerProtocol, providerModel, providerLabel } = providerContext;
         if (clientHeadersForAttempt) {
