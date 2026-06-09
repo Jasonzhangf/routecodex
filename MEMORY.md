@@ -2799,3 +2799,9 @@ Tags: hub-pipeline, compat-types, dead-code, type-shell-pruning, residue-gate, 2
 - Media/image placeholder behavior belongs in Rust/native owners (`chat_process_media_semantics.rs`, `shared_responses_conversation_utils.rs`, req/outbound format build, and Virtual Router capability filtering), not in a TS chat-process helper.
 - Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` keeps the deleted file absent.
 Tags: hub-pipeline, multimodal, image-placeholder, dead-code, rust-owner, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline session usage bridge narrowed
+- `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts` only keeps live `saveChatProcessSessionActualUsage` side-effect glue. The zero-consumer token estimator branch (`estimateSessionBoundTokens`, `estimateDeltaTokens`, `buildSnapshot`, `SessionUsageSnapshot`, `countRequestTokens`) is removed.
+- Do not restore session-bound token estimation in this TS bridge; if needed, add it through the current Rust/native owner and function map rather than reviving old TS helper semantics.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks estimator branch revival.
+Tags: hub-pipeline, session-usage, dead-code, thin-shell, residue-gate, 2026-06-09

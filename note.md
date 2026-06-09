@@ -18617,3 +18617,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline chat-process-media dead file deletion:
 - Exact symbol/path scan showed `stripHistoricalImageAttachments`, `stripHistoricalVisualToolOutputs`, `containsImageAttachment`, and `chat-process-media.ts` had no source/test/script runtime consumer.
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts`; current media/image placeholder semantics remain Rust-owned in `chat_process_media_semantics.rs`, `shared_responses_conversation_utils.rs`, and outbound/native route capability logic. Added deleted-path gate.
+
+2026-06-09 HubPipeline session usage bridge pruning:
+- Exact scan showed `estimateSessionBoundTokens` had no live consumer. Removed that export plus `estimateDeltaTokens`, `buildSnapshot`, `SessionUsageSnapshot`, and `countRequestTokens` import from `chat-process-session-usage.ts`.
+- Kept live `saveChatProcessSessionActualUsage` response side-effect glue; updated boundary doc and added residue audit gate blocking estimator branch revival.

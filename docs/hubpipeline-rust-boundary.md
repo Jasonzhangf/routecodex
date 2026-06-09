@@ -24,7 +24,7 @@
 ### Runtime 基础设施（依赖 Node.js runtime，不属于 pipeline 语义）
 | 文件 | 性质 | 不可迁 Rust 原因 |
 |---|---|---|
-| `chat-process-session-usage.ts` | 会话 usage 快照持久化、token 估算 | 依赖 `loadRoutingInstructionStateSync` Node.js store |
+| `chat-process-session-usage.ts` | 会话 usage 快照持久化 | 依赖 `loadRoutingInstructionStateSync` Node.js store |
 
 ## Rust 真源路径索引
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/` → Hub Pipeline Rust lib 化总控入口骨架（`HubPipelineEngine`、typed contract、effect plan、diagnostics）；当前已接入 NAPI `executeHubPipelineJson`，但 TS 主链尚未切到该总入口。

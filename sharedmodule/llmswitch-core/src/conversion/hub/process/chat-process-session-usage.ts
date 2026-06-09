@@ -1,22 +1,14 @@
 import type { AdapterContext } from '../types/chat-envelope.js';
-import type { ProcessedRequest, StandardizedRequest, StandardizedMessage } from '../types/standardized.js';
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
-import { countRequestTokens } from '../../../native/router-hotpath/native-virtual-router-runtime.js';
 
 type UsageLike = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
-};
-
-type SessionUsageSnapshot = UsageLike & {
-  scope: string;
-  messageCount?: number;
-  updatedAtMs?: number;
 };
 
 function createEmptyRoutingInstructionState(): RoutingInstructionState {
@@ -71,26 +63,6 @@ function readRoundedToken(value: unknown): number | undefined {
   return rounded > 0 ? rounded : undefined;
 }
 
-function buildSnapshot(scope: string, state: RoutingInstructionState | null): SessionUsageSnapshot | null {
-  if (!state) {
-    return null;
-  }
-  const totalTokens = readRoundedToken(state.chatProcessLastTotalTokens);
-  const inputTokens = readRoundedToken(state.chatProcessLastInputTokens);
-  const messageCount = readRoundedToken(state.chatProcessLastMessageCount);
-  const updatedAtMs = readRoundedToken(state.chatProcessLastUpdatedAt);
-  if (totalTokens === undefined && inputTokens === undefined) {
-    return null;
-  }
-  return {
-    scope,
-    ...(totalTokens !== undefined ? { totalTokens } : {}),
-    ...(inputTokens !== undefined ? { inputTokens } : {}),
-    ...(messageCount !== undefined ? { messageCount } : {}),
-    ...(updatedAtMs !== undefined ? { updatedAtMs } : {})
-  };
-}
-
 function normalizeUsage(usage: Record<string, unknown> | undefined): UsageLike | null {
   if (!usage || typeof usage !== 'object') {
     return null;
@@ -126,50 +98,6 @@ function normalizeUsage(usage: Record<string, unknown> | undefined): UsageLike |
     ...(outputTokens !== undefined ? { outputTokens } : {}),
     ...(totalTokens !== undefined ? { totalTokens } : {})
   };
-}
-
-function estimateDeltaTokens(
-  request: StandardizedRequest | ProcessedRequest,
-  previousMessageCount: number
-): number | undefined {
-  const messages = Array.isArray(request.messages) ? request.messages : [];
-  if (previousMessageCount < 0 || previousMessageCount > messages.length) {
-    return undefined;
-  }
-  const appendedMessages = messages.slice(previousMessageCount);
-  if (appendedMessages.length === 0) {
-    return 0;
-  }
-  return countRequestTokens({
-    model: request.model,
-    messages: appendedMessages as StandardizedMessage[],
-    parameters: {},
-    metadata: { originalEndpoint: request.metadata?.originalEndpoint ?? '/v1/chat/completions' }
-  } as StandardizedRequest);
-}
-
-export function estimateSessionBoundTokens(
-  request: StandardizedRequest | ProcessedRequest,
-  metadata: Record<string, unknown> | undefined
-): number | undefined {
-  const scope = resolveSessionUsageScope(metadata);
-  if (!scope) {
-    return undefined;
-  }
-  const snapshot = buildSnapshot(scope, loadState(scope));
-  if (!snapshot) {
-    return undefined;
-  }
-  const previousTotal = snapshot.totalTokens ?? snapshot.inputTokens;
-  const previousMessageCount = snapshot.messageCount;
-  if (previousTotal === undefined || previousMessageCount === undefined) {
-    return undefined;
-  }
-  const deltaTokens = estimateDeltaTokens(request, previousMessageCount);
-  if (deltaTokens === undefined) {
-    return undefined;
-  }
-  return Math.max(1, Math.round(previousTotal + deltaTokens));
 }
 
 export function saveChatProcessSessionActualUsage(options: {

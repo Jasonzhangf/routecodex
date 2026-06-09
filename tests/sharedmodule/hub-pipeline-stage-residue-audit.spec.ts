@@ -2434,6 +2434,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('chat process session usage bridge must not restore retired token estimate branch', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'restores retired session token estimator export', pattern: /estimateSessionBoundTokens/ },
+      { label: 'restores retired session delta token estimator', pattern: /estimateDeltaTokens|countRequestTokens/ },
+      { label: 'restores retired session usage snapshot reader', pattern: /SessionUsageSnapshot|buildSnapshot/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
     const source = fs.readFileSync(filePath, 'utf8');
