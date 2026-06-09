@@ -2,6 +2,7 @@ import {
   buildClientExecCliProjectionOutputWithNative,
   buildClientVisibleProjectionShellWithNative
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 
 describe('servertool CLI native bridge', () => {
   it('uses Rust-owned projection output and client-visible shell', () => {
@@ -43,6 +44,36 @@ describe('servertool CLI native bridge', () => {
     });
     expect(JSON.stringify(shell)).not.toContain('"metadata"');
     expect(JSON.stringify(shell)).not.toContain('"__rt"');
+  });
+
+  it('keeps the raw NAPI projection shell contract as JSON string', () => {
+    const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+    const buildProjection = binding?.buildClientExecCliProjectionOutputJson;
+    const buildShell = binding?.buildClientVisibleProjectionShellJson;
+    expect(typeof buildProjection).toBe('function');
+    expect(typeof buildShell).toBe('function');
+
+    const rawProjection = (buildProjection as (input: string) => unknown)(JSON.stringify({
+      flowId: 'stop_message_flow',
+      input: {
+        continuationPrompt: '继续执行原任务',
+        repeatCount: 1,
+        maxRepeats: 3
+      },
+      stdoutPreview: 'continue'
+    }));
+    expect(typeof rawProjection).toBe('string');
+
+    const rawShell = (buildShell as (input: string) => unknown)(JSON.stringify({
+      requestId: 'req_native_raw_shell',
+      clientCallId: 'call_native_raw_shell',
+      nativeProjection: JSON.parse(rawProjection as string),
+      reasoningText: '模型 stop 后需要继续执行',
+      additionalToolCalls: []
+    }));
+
+    expect(typeof rawShell).toBe('string');
+    expect(JSON.parse(rawShell as string).choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 
   it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(

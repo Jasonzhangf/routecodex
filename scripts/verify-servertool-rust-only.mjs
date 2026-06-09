@@ -461,6 +461,12 @@ function checkServertoolCliProjectionMap() {
     'buildClientVisibleProjectionShellWithNative'
   );
   assertContains(
+    'cli-projection-native-raw-string-contract',
+    `${ROOT}/tests/servertool/servertool-cli-native-bridge.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/servertool-cli-native-bridge.spec.ts`),
+    'keeps the raw NAPI projection shell contract as JSON string'
+  );
+  assertContains(
     'cli-projection-command-contract',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
     rustCliContract,
