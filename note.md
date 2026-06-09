@@ -18877,3 +18877,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Anthropic alias public bridge deletion:
 - Inventory: `buildAnthropicToolAliasMapWithNative` / `buildAnthropicToolAliasMapJson` had no live runtime consumer. Rust mainline alias semantics are already internal via shared tool mapping and Hub req/resp owners; remaining public hits were required-export gate, stale coverage script, parser observability test, and stale migration docs.
 - Change: removed the TS wrapper, required-export entry, NAPI-only Rust module, stale coverage script, and retargeted parser observability to live response-governance native parsing.
+
+2026-06-09 Request-governance public bridge deletion:
+- Inventory: `resolveGovernanceContextWithNative`, `applyGovernedControlOperationsWithNative`, `applyGovernedMergeRequestWithNative`, `mergeGovernanceSummaryIntoMetadataWithNative`, `finalizeGovernedRequestWithNative` and matching JSON exports had no live runtime consumer; hits were limited to TS wrapper, required-export gate, stale coverage scripts, and docs/history.
+- Change: removed those TS wrappers/types/parsers, required-export entries, Rust modules `chat_governance_context.rs` / `chat_governance_finalize.rs`, NAPI-only request merge/control helpers from `chat_continue_execution_directive_injection.rs`, and stale `coverage-hub-chat-process-governance-finalize.mjs`. Kept live response governance / apply_patch / continue_execution directive wrappers.
+- Guard: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired request-governance bridge symbols, modules, and stale coverage script from returning; shared-json helper tests only allow the explicitly deleted request-governance scan roots to be absent.

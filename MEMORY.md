@@ -3089,3 +3089,9 @@ Tags: hub-pipeline, chat-node-result, dead-code, napi-export, rust-only, residue
 - Removed the zero-consumer TS wrapper, required-export entry, NAPI-only Rust module, and stale `coverage-hub-chat-process-anthropic-alias.mjs`; parser observability now targets live response-governance native parsing.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired alias wrapper/export/module/script from returning.
 Tags: hub-pipeline, anthropic-alias, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Request-governance public bridge removed
+- Exact scan found `resolveGovernanceContextWithNative`, `applyGovernedControlOperationsWithNative`, `applyGovernedMergeRequestWithNative`, `mergeGovernanceSummaryIntoMetadataWithNative`, `finalizeGovernedRequestWithNative`, and matching JSON exports had no live runtime consumer; active request governance is Rust Hub mainline / `req_process_stage1_tool_governance*`, not a standalone public bridge.
+- Removed those TS wrappers/types/parsers, required-export entries, Rust modules `chat_governance_context.rs` / `chat_governance_finalize.rs`, NAPI-only request merge/control helpers from `chat_continue_execution_directive_injection.rs`, and stale `coverage-hub-chat-process-governance-finalize.mjs`. Kept live response governance, apply_patch, and continue_execution directive bridges.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired request-governance bridge symbols/modules/script from returning; shared-json helper tests only allow the explicitly deleted request-governance scan roots to be absent.
+Tags: hub-pipeline, request-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

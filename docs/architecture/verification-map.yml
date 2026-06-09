@@ -366,6 +366,7 @@ verification:
       - Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal.
       - Retired responses tool-call remap public wrapper must stay deleted; live remap entry remains `remapChatToolCalls*`.
       - Retired req_outbound context/format/tool-session public wrappers must stay deleted, including standalone merge/normalize/style helper bridges; active Rust internals may remain only as mainline helpers, not standalone TS/NAPI bridge surfaces.
+      - Retired request-governance public bridge must stay deleted; `resolveGovernanceContext*` / `applyGoverned*` / `mergeGovernanceSummary*` / `finalizeGovernedRequest*` cannot return as public TS/NAPI bridge surfaces while active request governance is owned by the Rust Hub mainline.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.

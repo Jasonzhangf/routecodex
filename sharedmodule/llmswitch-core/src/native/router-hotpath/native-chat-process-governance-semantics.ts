@@ -4,14 +4,6 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
-export type NativeGovernanceContextPayload = {
-  entryEndpoint: string;
-  metadata: Record<string, unknown>;
-  providerProtocol: string;
-  metadataToolHints: unknown;
-  inboundStreamIntent: boolean;
-  rawRequestBody?: Record<string, unknown>;
-};
 export type NativeRespProcessToolGovernanceInput = {
   payload: Record<string, unknown>;
   clientProtocol: string;
@@ -73,35 +65,6 @@ function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAIL
   }
 }
 
-function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayload | null {
-  const parsed = parseJson('parseGovernanceContextPayload', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  const entryEndpoint = typeof row.entryEndpoint === 'string' ? row.entryEndpoint : '';
-  const providerProtocol = typeof row.providerProtocol === 'string' ? row.providerProtocol : '';
-  const inboundStreamIntent = row.inboundStreamIntent === true;
-  const metadata =
-    row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-      ? (row.metadata as Record<string, unknown>)
-      : null;
-  if (!entryEndpoint || !providerProtocol || !metadata) {
-    return null;
-  }
-  const rawRequestBody =
-    row.rawRequestBody && typeof row.rawRequestBody === 'object' && !Array.isArray(row.rawRequestBody)
-      ? (row.rawRequestBody as Record<string, unknown>)
-      : undefined;
-  return {
-    entryEndpoint,
-    metadata,
-    providerProtocol,
-    metadataToolHints: row.metadataToolHints === null ? undefined : row.metadataToolHints,
-    inboundStreamIntent,
-    ...(rawRequestBody ? { rawRequestBody } : {})
-  };
-}
 function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
   const parsed = parseJson('parseWebSearchOperationsPayload', raw);
   if (parsed === JSON_PARSE_FAILED || !Array.isArray(parsed)) {
@@ -262,22 +225,6 @@ function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unkn
     args.map((arg) => encodeJsonArg(capability, arg))
   );
 }
-export function resolveGovernanceContextWithNative(
-  request: unknown,
-  context: unknown
-): NativeGovernanceContextPayload {
-  const capability = 'resolveGovernanceContextJson';
-  const fail = (reason?: string): NativeGovernanceContextPayload =>
-    failNativeRequired<NativeGovernanceContextPayload>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, context ?? null]);
-    const parsed = parseGovernanceContextPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 export function buildWebSearchToolAppendOperationsWithNative(
   engines: unknown
 ): unknown[] {
@@ -286,78 +233,6 @@ export function buildWebSearchToolAppendOperationsWithNative(
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [engines ?? null]);
     const parsed = parseWebSearchOperationsPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-export function applyGovernedControlOperationsWithNative(
-  request: Record<string, unknown>,
-  governed: Record<string, unknown>,
-  inboundStreamIntent: boolean
-): Record<string, unknown> {
-  const capability = 'applyGovernedControlOperationsJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request, governed, inboundStreamIntent === true]);
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-export function applyGovernedMergeRequestWithNative(
-  request: Record<string, unknown>,
-  governed: Record<string, unknown>,
-  inboundStreamIntent: boolean,
-  governanceTimestampMs: number
-): Record<string, unknown> {
-  const capability = 'applyGovernedMergeRequestJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
-      request,
-      governed,
-      inboundStreamIntent === true,
-      Number.isFinite(governanceTimestampMs) ? governanceTimestampMs : Date.now()
-    ]);
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-export function mergeGovernanceSummaryIntoMetadataWithNative(
-  metadata: Record<string, unknown> | undefined,
-  summary: Record<string, unknown>
-): Record<string, unknown> {
-  const capability = 'mergeGovernanceSummaryIntoMetadataJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata ?? {}, summary ?? {}]);
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-export function finalizeGovernedRequestWithNative(
-  request: Record<string, unknown>,
-  summary: Record<string, unknown>
-): Record<string, unknown> {
-  const capability = 'finalizeGovernedRequestJson';
-  const fail = (reason?: string): Record<string, unknown> =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? {}, summary ?? {}]);
-    const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

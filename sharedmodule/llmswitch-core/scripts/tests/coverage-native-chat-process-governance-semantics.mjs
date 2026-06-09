@@ -10,9 +10,8 @@ const moduleUrl = pathToFileURL(
   path.join(
     repoRoot,
     'dist',
-    'router',
-    'virtual-router',
-    'engine-selection',
+    'native',
+    'router-hotpath',
     'native-chat-process-governance-semantics.js'
   )
 ).href;
@@ -46,54 +45,6 @@ async function main() {
 
   await withTempNativeModule(
     `
-exports.resolveGovernanceContextJson = () => JSON.stringify({
-  entryEndpoint: '/v1/responses',
-  metadata: { providerProtocol: 'openai-responses' },
-  providerProtocol: 'openai-responses',
-  metadataToolHints: { fromNative: true },
-  inboundStreamIntent: true,
-  rawRequestBody: { fromNative: true }
-});
-exports.applyGovernedControlOperationsJson = (requestJson) => {
-  const request = JSON.parse(requestJson);
-  return JSON.stringify({
-    ...request,
-    metadata: { ...(request.metadata || {}), inboundStream: true, __nativeApplied: true },
-    parameters: { ...(request.parameters || {}), stream: false, tool_choice: { type: 'function' } },
-    model: 'gpt-native'
-  });
-};
-exports.applyGovernedMergeRequestJson = (requestJson) => {
-  const request = JSON.parse(requestJson);
-  return JSON.stringify({
-    ...request,
-    messages: [{ role: 'assistant', content: 'native merge applied' }],
-    parameters: { ...(request.parameters || {}), top_p: 0.8 },
-    metadata: {
-      ...(request.metadata || {}),
-      toolChoice: 'auto',
-      originalStream: false,
-      stream: false,
-      providerStream: true,
-      governedTools: true,
-      governanceTimestamp: 1700000000000
-    }
-  });
-};
-exports.mergeGovernanceSummaryIntoMetadataJson = () => JSON.stringify({
-  originalEndpoint: '/v1/chat/completions',
-  toolGovernance: { previous: true, request: { applied: true, patched: 2 } }
-});
-exports.finalizeGovernedRequestJson = (requestJson) => {
-  const request = JSON.parse(requestJson);
-  return JSON.stringify({
-    ...request,
-    metadata: {
-      ...(request.metadata || {}),
-      __nativeFinalize: true
-    }
-  });
-};
 exports.governResponseJson = (inputJson) => {
   const input = JSON.parse(inputJson);
   const payload = input && input.payload && typeof input.payload === 'object' ? input.payload : {};
@@ -125,77 +76,6 @@ exports.finalizeChatResponseJson = (inputJson) => {
       setEnvVar('RCC_LLMS_ROUTER_NATIVE_PATH', undefined);
 
       const mod = await importFresh('native-chat-process-governance-semantics');
-
-      let governanceFallbackExecuted = false;
-      const governanceContext = mod.resolveGovernanceContextWithNative(
-        { model: 'gpt-base', parameters: { stream: true } },
-        { entryEndpoint: '/v1/chat/completions', metadata: { providerProtocol: 'openai-chat' } },
-        () => {
-          governanceFallbackExecuted = true;
-          return {
-            entryEndpoint: '/v1/chat/completions',
-            metadata: { providerProtocol: 'openai-chat' },
-            providerProtocol: 'openai-chat',
-            metadataToolHints: undefined,
-            inboundStreamIntent: false
-          };
-        }
-      );
-      assert.equal(governanceFallbackExecuted, false);
-      assert.equal(governanceContext.providerProtocol, 'openai-responses');
-      assert.equal(governanceContext.inboundStreamIntent, true);
-      assert.equal(governanceContext.rawRequestBody.fromNative, true);
-
-      const controlled = mod.applyGovernedControlOperationsWithNative(
-        {
-          model: 'gpt-base',
-          metadata: { originalEndpoint: '/v1/chat/completions' },
-          parameters: { stream: true }
-        },
-        { stream: false },
-        true
-      );
-      assert.equal(controlled.metadata.__nativeApplied, true);
-      assert.equal(controlled.metadata.inboundStream, true);
-      assert.equal(controlled.parameters.stream, false);
-      assert.equal(controlled.parameters.tool_choice.type, 'function');
-      assert.equal(controlled.model, 'gpt-native');
-
-      const mergedRequest = mod.applyGovernedMergeRequestWithNative(
-        {
-          model: 'gpt-base',
-          messages: [{ role: 'user', content: 'hi' }],
-          parameters: { stream: true },
-          metadata: { originalEndpoint: '/v1/chat/completions' }
-        },
-        { stream: false },
-        false,
-        1700000000000
-      );
-      assert.equal(Array.isArray(mergedRequest.messages), true);
-      assert.equal(mergedRequest.messages[0].content, 'native merge applied');
-      assert.equal(mergedRequest.parameters.top_p, 0.8);
-      assert.equal(mergedRequest.metadata.toolChoice, 'auto');
-      assert.equal(mergedRequest.metadata.providerStream, true);
-
-      const mergedMetadata = mod.mergeGovernanceSummaryIntoMetadataWithNative(
-        { originalEndpoint: '/v1/chat/completions', toolGovernance: { previous: true } },
-        { applied: true, patched: 2 }
-      );
-      assert.equal(mergedMetadata.originalEndpoint, '/v1/chat/completions');
-      assert.equal(mergedMetadata.toolGovernance.previous, true);
-      assert.equal(mergedMetadata.toolGovernance.request.applied, true);
-      assert.equal(mergedMetadata.toolGovernance.request.patched, 2);
-
-      const finalizedGovernedRequest = mod.finalizeGovernedRequestWithNative(
-        {
-          model: 'gpt-base',
-          messages: [{ role: 'user', content: 'hi' }],
-          metadata: { originalEndpoint: '/v1/chat/completions' }
-        },
-        { applied: true, patched: 2 }
-      );
-      assert.equal(finalizedGovernedRequest.metadata.__nativeFinalize, true);
 
       const stage1Governed = mod.applyRespProcessToolGovernanceWithNative(
         {

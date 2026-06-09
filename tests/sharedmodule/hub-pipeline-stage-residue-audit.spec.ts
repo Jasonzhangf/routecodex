@@ -2751,6 +2751,67 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired request-governance public bridge must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_governance_context.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_governance_finalize.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-governance-finalize.mjs',
+    ];
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_continue_execution_directive_injection.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-native-chat-process-governance-semantics.mjs',
+      ...retiredFiles,
+    ];
+    const retiredSymbols = [
+      'NativeGovernanceContextPayload',
+      'parseGovernanceContextPayload',
+      'resolveGovernanceContextWithNative',
+      'applyGovernedControlOperationsWithNative',
+      'applyGovernedMergeRequestWithNative',
+      'mergeGovernanceSummaryIntoMetadataWithNative',
+      'finalizeGovernedRequestWithNative',
+      'resolveGovernanceContextJson',
+      'applyGovernedControlOperationsJson',
+      'applyGovernedMergeRequestJson',
+      'mergeGovernanceSummaryIntoMetadataJson',
+      'finalizeGovernedRequestJson',
+      'mod chat_governance_context',
+      'mod chat_governance_finalize',
+      'resolve_governance_context_json',
+      'apply_governed_control_operations_json',
+      'apply_governed_merge_request_json',
+      'merge_governance_summary_into_metadata_json',
+      'finalize_governed_request_json',
+      'fn resolve_governed_control_plan',
+      'fn resolve_governed_merge_plan',
+      'fn apply_governed_control_operations',
+      'fn apply_governed_merge_request',
+      'GovernedControlPlanOutput',
+      'GovernedMergePlanOutput',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect({ existingRetiredFiles, findings }).toEqual({ existingRetiredFiles: [], findings: [] });
+  });
+
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [

@@ -540,6 +540,14 @@ mod tests {
             "hub_req_inbound_semantic_lift.rs",
         ] {
             let path = crate_src_path(relative);
+            if !path.exists() {
+                assert_eq!(
+                    relative, "chat_governance_context.rs",
+                    "shared helper deletion gate scan root missing unexpectedly: {}",
+                    relative
+                );
+                continue;
+            }
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
             assert!(
@@ -1401,9 +1409,8 @@ mod tests {
             path.display()
         );
         assert!(
-            source.contains("read_object_trimmed_string(&continuation, \"stateOrigin\")")
-                || source.contains("read_object_trimmed_string(resume_from, \"protocol\")"),
-            "chat_node_result_semantics.rs must use shared read_object_trimmed_string truth directly"
+            !source.contains("stateOrigin") && !source.contains("resume_from"),
+            "chat_node_result_semantics.rs must not restore retired continuation metadata readers"
         );
     }
 
@@ -1516,6 +1523,9 @@ mod tests {
     #[test]
     fn shared_json_record_helpers_deletion_gate_removed_chat_governance_finalize_local_wrappers() {
         let path = crate_src_path("chat_governance_finalize.rs");
+        if !path.exists() {
+            return;
+        }
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
