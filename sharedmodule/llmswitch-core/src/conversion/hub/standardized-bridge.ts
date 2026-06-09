@@ -13,13 +13,13 @@ import {
   standardizedToChatEnvelopeWithNative
 } from '../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 
-export interface ChatToStandardizedOptions {
+interface ChatToStandardizedOptions {
   adapterContext: AdapterContext;
   endpoint: string;
   requestId?: string;
 }
 
-export interface StandardizedToChatOptions {
+interface StandardizedToChatOptions {
   adapterContext: AdapterContext;
 }
 

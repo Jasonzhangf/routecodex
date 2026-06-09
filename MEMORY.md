@@ -2850,3 +2850,9 @@ Tags: servertool, backend-route, bootstrap-replay, captured-seed, rust-owner, th
 - Do not restore zero-consumer public helpers `JsonArray`, `isJsonArray`, or exported `JsonPrimitive`; array-specific JSON semantics should remain plain `JsonValue[]` unless a new Rust/native mapped owner and gate is added.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these retired public helpers from returning; function/verification maps include `types/json.ts` under `hub.metadata_boundary` bridge coverage.
 Tags: hub-pipeline, json-helper, public-surface, dead-code, residue-gate, function-map, 2026-06-09
+
+## 2026-06-09 HubPipeline zero-consumer type exports pruned
+- Standardized bridge and provider response helper option/result shapes are internal function-signature types only. Do not export `ChatToStandardizedOptions`, `StandardizedToChatOptions`, `ProviderResponseContextSignals`, or `ClientProtocol` unless a real external consumer and function-map owner is added.
+- `AnthropicResponseFromChatOptions` is internal to `response-runtime-anthropic.ts`; the public `response-runtime.ts` barrel must not re-export it.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public type shells from returning while preserving the live native-wrapper functions.
+Tags: hub-pipeline, public-surface, type-export, dead-code, residue-gate, thin-shell, 2026-06-09

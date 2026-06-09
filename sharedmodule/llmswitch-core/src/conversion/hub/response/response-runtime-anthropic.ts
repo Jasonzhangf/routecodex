@@ -6,7 +6,7 @@ import {
 
 type ToolAliasMap = Record<string, string>;
 
-export interface AnthropicResponseFromChatOptions {
+interface AnthropicResponseFromChatOptions {
   aliasMap?: ToolAliasMap;
 }
 

@@ -18658,3 +18658,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory found `sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts::jsonClone` is live through runtime metadata, Responses bridge, Anthropic shared utils, and servertool shadow, so it is not dead code.
 - Exact scan found `JsonArray`, `isJsonArray`, and exported `JsonPrimitive` had no live source/test/script consumers outside their own definition. Removed `JsonArray` / `isJsonArray` and made `JsonPrimitive` internal.
 - Added residue audit gate to block those zero-consumer public helpers from returning; updated `hub.metadata_boundary` function/verification map to mark `types/json.ts` as TS bridge-only helper surface.
+
+2026-06-09 HubPipeline zero-consumer type export pruning:
+- Exact scan found `ChatToStandardizedOptions`, `StandardizedToChatOptions`, `ProviderResponseContextSignals`, `ClientProtocol`, and `AnthropicResponseFromChatOptions` had no external type consumers; hits were their own function signatures or response-runtime barrel re-export.
+- Narrowed those option/result types to file-local types and removed `AnthropicResponseFromChatOptions` from `response-runtime.ts` public re-export. Runtime functions and native calls are unchanged.
+- Added residue gates blocking these public type shells from returning in standardized bridge, provider response helper, and Anthropic response runtime.

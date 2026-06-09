@@ -623,6 +623,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-client-protocol-openai-chat-default', pattern: /:\s*['"]openai-chat['"]/ },
       { label: 'ts-client-protocol-branching-default', pattern: /resolved\.clientProtocol\s*===/ },
       { label: 'ts-display-model-trim-defaulting', pattern: /resolved\.displayModel\.trim\(\)/ },
+      { label: 'exports zero-consumer client protocol type', pattern: /export\s+type\s+ClientProtocol\b/ },
+      { label: 'exports zero-consumer context signals interface', pattern: /export\s+interface\s+ProviderResponseContextSignals\b/ },
     ]);
 
     expect(source).toContain('resolveProviderResponseContextSignals');
@@ -641,6 +643,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('createMapper');
   });
 
+  it('standardized bridge must not export zero-consumer option type shells', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      { label: 'exports zero-consumer chat-to-standardized options', pattern: /export\s+interface\s+ChatToStandardizedOptions\b/ },
+      { label: 'exports zero-consumer standardized-to-chat options', pattern: /export\s+interface\s+StandardizedToChatOptions\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('chatEnvelopeToStandardizedWithNative');
+    expect(source).toContain('standardizedToChatEnvelopeWithNative');
+  });
+
   it('anthropic response runtime must not restore response semantics in TS', () => {
     const filePath = path.join(
       process.cwd(),
@@ -653,6 +671,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('buildChatResponseFromResponsesWithNative');
     expect(source).not.toContain('includeToolCallIds');
     expect(source).not.toContain('AnthropicResponseOptions');
+    expect(source).not.toContain('export interface AnthropicResponseFromChatOptions');
     expect(source).not.toContain('responses-reasoning-registry');
     expect(source).not.toContain('cloneJsonRecord');
     expect(source).not.toContain('stripInternalContinuationRequestId');
@@ -668,6 +687,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('__responses_output_text_meta');
     expect(source).not.toContain('__responses_payload_snapshot');
     expect(source).not.toContain('__responses_passthrough');
+
+    const barrel = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.ts'),
+      'utf8',
+    );
+    expect(barrel).not.toContain('AnthropicResponseFromChatOptions');
   });
 
   it('Hub Anthropic response scripts must not restore ignored includeToolCallIds option', () => {

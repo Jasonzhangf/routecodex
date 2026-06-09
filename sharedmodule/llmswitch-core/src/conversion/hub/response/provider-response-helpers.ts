@@ -5,9 +5,9 @@ import {
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 export type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
-export type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
 
-export interface ProviderResponseContextSignals {
+interface ProviderResponseContextSignals {
   isFollowup: boolean;
   toolSurfaceShadowEnabled: boolean;
   clientProtocol: ClientProtocol;
