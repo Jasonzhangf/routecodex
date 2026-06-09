@@ -646,6 +646,7 @@ owners:
       - Rust contract help owns the standard control/data split for Hub and VR nodes.
       - TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired.
       - Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath.
+      - Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage.
       - Retired provider-key analysis control surface (`virtual_router_provider_key.rs`, `parseProviderKeyJson`, TS `analyzeProviderKey` wrapper/parser/type) is physically deleted; do not restore an unused native provider-key parser.
       - Retired stop-message state codec control surface (`virtual_router_stop_message_state_codec.rs`, `serializeStopMessageStateJson`, `deserializeStopMessageStateJson`) is physically deleted; stopless state persistence now belongs to servertool-core contracts, not a standalone VR codec export.
 

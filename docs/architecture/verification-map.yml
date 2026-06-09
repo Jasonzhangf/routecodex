@@ -348,6 +348,7 @@ verification:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
       - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
+      - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers.
       - Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts.
 

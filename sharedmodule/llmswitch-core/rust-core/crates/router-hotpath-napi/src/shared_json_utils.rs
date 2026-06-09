@@ -535,7 +535,6 @@ mod tests {
             "hub_req_outbound_context_merge.rs",
             "hub_req_inbound_tool_output_snapshot.rs",
             "virtual_router_engine/routing/metadata.rs",
-            "hub_pipeline_target_utils.rs",
             "chat_governance_context.rs",
             "hub_submit_tool_outputs.rs",
             "hub_req_inbound_semantic_lift.rs",

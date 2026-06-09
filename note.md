@@ -18728,3 +18728,9 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Removed the Rust module plus `serializeStopMessageStateJson` / `deserializeStopMessageStateJson` required exports; shared helper tests now scan live files only.
 - Active architecture docs now point stopless state shape/lookup/transition to servertool-core contracts instead of the retired standalone VR codec.
 - Verified focused residue Jest, llmswitch-core tsc, function-map gate, Rust shared helper gates, and Rust Hub control/data contract tests.
+
+2026-06-09 HubPipeline target-utils dead export removal:
+- Exact scan found `hub_pipeline_target_utils.rs` only had Rust module/required-export wiring for `applyTargetMetadataJson`, `applyTargetToSubjectJson`, and `extractTargetModelIdJson`; no TS wrapper/runtime consumer.
+- Removed the Rust module and required exports; shared helper tests now scan live files only.
+- Target metadata/application semantics remain in Rust `req_process_stage2_route_select.rs` mainline.
+- Verified focused residue Jest, llmswitch-core tsc, function-map gate, Rust shared helper gate, and Rust Hub control/data contract tests.

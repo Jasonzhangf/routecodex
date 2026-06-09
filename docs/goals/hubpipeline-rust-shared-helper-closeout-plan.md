@@ -350,5 +350,6 @@ shared functions -> blocks / semantic modules -> orchestration
 - 2026-05-24：已补 deletion gate `shared_read_trimmed_string_deletion_gate_removed_local_clones_from_selected_modules`，锁住上述 4 处不再回长本地同形 helper。
 - 2026-06-09：`virtual_router_stop_message_state_codec.rs` 后续确认为零 consumer native 控制面并物理删除；共享 helper deletion gate 不再把已删文件作为 scan root。
 - 2026-05-25：第二批继续只收完全同形 helper；`virtual_router_engine/routing/metadata.rs`、`hub_pipeline_target_utils.rs`、`chat_governance_context.rs` 的本地 `read_trimmed_string` 副本已删除，统一指向 `shared_json_utils.rs`。
+- 2026-06-09：`hub_pipeline_target_utils.rs` 后续确认为零 consumer native 控制面并物理删除；target 应用语义留在 Rust `req_process_stage2_route_select.rs` 主链。
 - 2026-05-25：`req_process_stage2_route_select.rs` 的本地 `(map, key) -> Option<String>` 版 `read_trimmed_string` 已删除，调用点统一改用 `shared_json_utils::read_object_trimmed_string`。
 - 2026-05-25：已补第二条 deletion gate `shared_read_object_trimmed_string_deletion_gate_removed_local_map_key_clone`，锁住 route_select 不再回长本地 map-key 副本。

@@ -2928,3 +2928,9 @@ Tags: hub-pipeline, provider-key, dead-code, napi-export, residue-gate, 2026-06-
 - Removed the Rust module and required-export entries. Shared helper deletion tests were narrowed to live files so they do not keep a deleted module as a scan root.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export names from returning. Stopless state persistence/lookup must stay in current servertool-core contracts, not a zero-consumer VR codec export.
 Tags: hub-pipeline, stop-message-state, dead-code, napi-export, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline target-utils dead export removed
+- Exact scan found `hub_pipeline_target_utils.rs` only fed required native exports `applyTargetMetadataJson`, `applyTargetToSubjectJson`, and `extractTargetModelIdJson`; no TS wrapper/runtime consumer imported those exports.
+- Removed the Rust module and required-export entries. Shared helper deletion tests no longer keep the deleted module as a scan root.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export names from returning. Target metadata/application semantics remain in Rust `req_process_stage2_route_select.rs`.
+Tags: hub-pipeline, target-utils, dead-code, napi-export, residue-gate, 2026-06-09
