@@ -32,6 +32,7 @@ import {
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageStateFromAdapterContext,
   planStopMessageDefaultConfig,
+  planStopMessagePersistSnapshot,
   planStoplessDecisionContextGoalStatus,
   planStoplessDecisionContextSignals,
   planStopMessagePersistedLookup,
@@ -486,44 +487,22 @@ const handler: ServerToolHandler = async (
     // ── Execute persist I/O (TS writes state files) ──
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
-    const shouldCountBudget = schemaGate.count_budget !== false;
-    // The schema gate in Rust already enforces the per-path budget
-    // (3 rounds for provided schema, 10 rounds for missing schema) via
-    // `stop_schema_*_max_repeats`. The TS side must mirror that decision
-    // so the persisted `stopMessageMaxRepeats` reflects the *actual* cap
-    // the gate used, not a separate hard-coded constant. The gate's
-    // `max_repeats` is the source of truth — fall back to the snapshot's
-    // `decision.max_repeats` only if the gate didn't report one (e.g.
-    // allow_stop path).
-    const gateMaxRepeats = typeof schemaGate.max_repeats === 'number' && Number.isFinite(schemaGate.max_repeats)
-      ? Math.floor(schemaGate.max_repeats)
-      : 0;
-    const resolvedMaxRepeats = gateMaxRepeats > 0
-      ? gateMaxRepeats
-      : (typeof decision.max_repeats === 'number' && Number.isFinite(decision.max_repeats)
-          ? Math.floor(decision.max_repeats)
-          : 0);
-    const schemaBudgetMaxRepeats = Math.max(1, resolvedMaxRepeats);
-    // The compare context captures the *actual* gate cap so logs and
-    // samples show the real remaining budget (10 for missing schema,
-    // 3 for provided schema) instead of the snapshot's prior round value.
-    compare.maxRepeats = schemaBudgetMaxRepeats;
-    compare.remaining = schemaBudgetMaxRepeats > decision.used
-      ? schemaBudgetMaxRepeats - decision.used
-      : 0;
-    const nextMaxRepeats = shouldCountBudget
-      ? schemaBudgetMaxRepeats
-      : decision.max_repeats;
-    const nextUsed = shouldCountBudget
-      ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : schemaUsedBeforeCount + 1)
-      : decision.used;
+    const persistPlan = planStopMessagePersistSnapshot({
+      schemaGate,
+      decision,
+      stateUpdate,
+      defaultText: defaultConfig.text,
+      schemaUsedBeforeCount
+    });
+    compare.maxRepeats = persistPlan.compareMaxRepeats;
+    compare.remaining = persistPlan.compareRemaining;
     const snapInput = {
-      text: String(stateUpdate.text ?? defaultConfig.text),
-      maxRepeats: nextMaxRepeats,
-      used: nextUsed,
-      source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',
-      stageMode: typeof stateUpdate.stageMode === 'string' ? stateUpdate.stageMode as any : 'on' as any,
-      aiMode: 'off' as any,
+      text: persistPlan.snapshot.text,
+      maxRepeats: persistPlan.snapshot.maxRepeats,
+      used: persistPlan.snapshot.used,
+      source: persistPlan.snapshot.source,
+      stageMode: persistPlan.snapshot.stageMode as any,
+      aiMode: persistPlan.snapshot.aiMode,
       updatedAt: usedAt,
       lastUsedAt: usedAt
     };
@@ -548,8 +527,8 @@ const handler: ServerToolHandler = async (
               assistantStopText,
               serverToolLoopState: {
                 flowId: FLOW_ID,
-                repeatCount: nextUsed,
-                maxRepeats: nextMaxRepeats
+                repeatCount: persistPlan.nextUsed,
+                maxRepeats: persistPlan.nextMaxRepeats
               }
             }
           }

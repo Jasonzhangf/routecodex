@@ -53,6 +53,7 @@ const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/r
 const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`;
 const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_GOAL = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_goal.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_default_config.rs`;
+const RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_persist_plan.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
@@ -764,6 +765,12 @@ function checkStopMessagePersistedLookupRustOwner() {
     readRequired(RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG),
     'pub fn plan_stop_message_default_config'
   );
+  assertContains(
+    'stop-message-persist-plan-rust-owner',
+    RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN,
+    readRequired(RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN),
+    'pub fn plan_stop_message_persist_snapshot'
+  );
   for (const needle of [
     'resolveServertoolStateKeyWithNative',
     'resolveRuntimeStopMessageStateWithNative',
@@ -778,6 +785,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     'planStoplessDecisionContextSignalsWithNative',
     'planStoplessDecisionContextGoalStatusWithNative',
     'planStopMessageDefaultConfigWithNative',
+    'planStopMessagePersistSnapshotWithNative',
     'readServertoolFollowupFlowIdWithNative',
     'resolveBdWorkingDirectoryForRecordWithNative',
     'resolveStopMessageFollowupProviderKeyWithNative',
@@ -811,6 +819,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"planStoplessDecisionContextSignalsJson"',
     '"planStoplessDecisionContextGoalStatusJson"',
     '"planStopMessageDefaultConfigJson"',
+    '"planStopMessagePersistSnapshotJson"',
     '"readServertoolFollowupFlowIdJson"',
     '"resolveBdWorkingDirectoryForRecordJson"',
     '"resolveStopMessageFollowupProviderKeyJson"',
@@ -945,6 +954,12 @@ function checkStopMessagePersistedLookupRustOwner() {
       'stop-message-auto.ts must consume Rust-owned stop-message default config plan'
     );
   }
+  if (!stopMessageAuto.includes('planStopMessagePersistSnapshot({')) {
+    fail(
+      'stop-message-persist-plan-ts-thin-shell',
+      'stop-message-auto.ts must consume Rust-owned stop-message persist snapshot plan'
+    );
+  }
   for (const keyword of [
     'readPersistedStopMessageSnapshotFromCandidateKeys',
     'readPersistedStopMessageStageModeFromCandidateKeys',
@@ -964,6 +979,11 @@ function checkStopMessagePersistedLookupRustOwner() {
     'function readRequestScopedGoalState',
     'stoplessGoalStateSource',
     'hasExplicitGoalState',
+    'const gateMaxRepeats',
+    'const resolvedMaxRepeats',
+    'const schemaBudgetMaxRepeats',
+    'const nextMaxRepeats',
+    'const nextUsed',
     'ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;',
     'ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;',
     'const STOP_MESSAGE_EXECUTION_APPEND',

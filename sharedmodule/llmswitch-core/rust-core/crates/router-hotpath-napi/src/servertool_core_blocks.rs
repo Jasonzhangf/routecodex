@@ -26,6 +26,7 @@ use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_default_config;
 use servertool_core::stop_message_loop_guard;
+use servertool_core::stop_message_persist_plan;
 use servertool_core::stop_visible_text;
 use servertool_core::stopless_decision_context_goal;
 use servertool_core::stopless_decision_context_signals;
@@ -241,6 +242,14 @@ pub fn plan_stop_message_default_config_json(input_json: &str) -> Result<String,
             .map_err(|e| format!("deserialize stop-message default config input: {e}"))?;
     serde_json::to_string(&stop_message_default_config::plan_stop_message_default_config(&input))
         .map_err(|e| format!("serialize stop-message default config plan: {e}"))
+}
+
+pub fn plan_stop_message_persist_snapshot_json(input_json: &str) -> Result<String, String> {
+    let input: stop_message_persist_plan::StopMessagePersistPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message persist plan input: {e}"))?;
+    serde_json::to_string(&stop_message_persist_plan::plan_stop_message_persist_snapshot(&input))
+        .map_err(|e| format!("serialize stop-message persist plan: {e}"))
 }
 
 pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, String> {
@@ -2088,6 +2097,28 @@ mod tests {
         assert_eq!(plan["enabled"], true);
         assert_eq!(plan["text"], "config");
         assert_eq!(plan["maxRepeats"], 4);
+    }
+
+    #[test]
+    fn plans_stop_message_persist_snapshot_via_servertool_core_bridge() {
+        let output = plan_stop_message_persist_snapshot_json(
+            &json!({
+                "schemaGate": { "count_budget": true, "max_repeats": 3 },
+                "decision": { "used": 1, "max_repeats": 30 },
+                "stateUpdate": { "used": 2, "text": "keep going" },
+                "defaultText": "default",
+                "schemaUsedBeforeCount": 1
+            })
+            .to_string(),
+        )
+        .expect("stop-message persist plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("stop-message persist plan json");
+        assert_eq!(plan["compareMaxRepeats"], 3);
+        assert_eq!(plan["compareRemaining"], 2);
+        assert_eq!(plan["nextMaxRepeats"], 3);
+        assert_eq!(plan["nextUsed"], 2);
+        assert_eq!(plan["snapshot"]["text"], "keep going");
     }
 
     #[test]

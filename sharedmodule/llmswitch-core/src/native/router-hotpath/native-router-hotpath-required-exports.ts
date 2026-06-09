@@ -328,6 +328,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planStoplessDecisionContextSignalsJson",
   "planStoplessDecisionContextGoalStatusJson",
   "planStopMessageDefaultConfigJson",
+  "planStopMessagePersistSnapshotJson",
   "readServertoolFollowupFlowIdJson",
   "resolveBdWorkingDirectoryForRecordJson",
   "resolveStopMessageFollowupProviderKeyJson",

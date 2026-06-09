@@ -463,6 +463,23 @@ export interface StopMessageDefaultConfigPlan {
   maxRepeats: number;
 }
 
+export interface StopMessagePersistSnapshotPlan {
+  text: string;
+  maxRepeats: number;
+  used: number;
+  source: string;
+  stageMode: string;
+  aiMode: 'off';
+}
+
+export interface StopMessagePersistPlan {
+  compareMaxRepeats: number;
+  compareRemaining: number;
+  nextMaxRepeats: number;
+  nextUsed: number;
+  snapshot: StopMessagePersistSnapshotPlan;
+}
+
 export interface RuntimeStopMessageStateFromAdapterContextInput {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
@@ -1085,6 +1102,48 @@ export function planStopMessageDefaultConfigWithNative(input: {
     text: record.text,
     maxRepeats: record.maxRepeats,
   };
+}
+
+export function planStopMessagePersistSnapshotWithNative(input: {
+  schemaGate: unknown;
+  decision: unknown;
+  stateUpdate?: unknown;
+  defaultText?: string;
+  schemaUsedBeforeCount?: unknown;
+}): StopMessagePersistPlan {
+  const capability = 'planStopMessagePersistSnapshotJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessagePersistSnapshotJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessagePersistSnapshotJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  const snapshot = record.snapshot as Record<string, unknown> | undefined;
+  if (
+    typeof record.compareMaxRepeats !== 'number' ||
+    typeof record.compareRemaining !== 'number' ||
+    typeof record.nextMaxRepeats !== 'number' ||
+    typeof record.nextUsed !== 'number' ||
+    !snapshot ||
+    typeof snapshot !== 'object' ||
+    Array.isArray(snapshot) ||
+    typeof snapshot.text !== 'string' ||
+    typeof snapshot.maxRepeats !== 'number' ||
+    typeof snapshot.used !== 'number' ||
+    typeof snapshot.source !== 'string' ||
+    typeof snapshot.stageMode !== 'string' ||
+    snapshot.aiMode !== 'off'
+  ) {
+    throw new Error(`${capability} native returned invalid persist plan fields`);
+  }
+  return record as unknown as StopMessagePersistPlan;
 }
 
 export function readServertoolFollowupFlowIdWithNative(runtimeMetadata: unknown): string {

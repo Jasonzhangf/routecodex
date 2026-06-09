@@ -5,6 +5,7 @@ import {
   hasCompactionFlagWithNative,
   planPersistStopMessageStateWithNative,
   planStopMessageDefaultConfigWithNative,
+  planStopMessagePersistSnapshotWithNative,
   planStopMessagePersistedLookupWithNative,
   planStopMessagePersistedStateSelectionWithNative,
   planStoplessDecisionContextGoalStatusWithNative,
@@ -206,6 +207,29 @@ export function planStopMessageDefaultConfig(args: {
   maxRepeats: number;
 } {
   return planStopMessageDefaultConfigWithNative(args);
+}
+
+export function planStopMessagePersistSnapshot(args: {
+  schemaGate: unknown;
+  decision: unknown;
+  stateUpdate?: unknown;
+  defaultText?: string;
+  schemaUsedBeforeCount?: unknown;
+}): {
+  compareMaxRepeats: number;
+  compareRemaining: number;
+  nextMaxRepeats: number;
+  nextUsed: number;
+  snapshot: {
+    text: string;
+    maxRepeats: number;
+    used: number;
+    source: string;
+    stageMode: string;
+    aiMode: 'off';
+  };
+} {
+  return planStopMessagePersistSnapshotWithNative(args);
 }
 
 function buildServertoolRoutingMetadata(
