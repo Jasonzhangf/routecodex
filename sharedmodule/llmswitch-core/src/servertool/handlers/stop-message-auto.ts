@@ -31,6 +31,7 @@ import {
   resolveDefaultStopMessageSnapshot,
   resolveImplicitGeminiStopMessageSnapshot,
   resolveRuntimeStopMessageStateFromAdapterContext,
+  planStopMessageDefaultConfig,
   planStoplessDecisionContextSignals,
   planStopMessagePersistedLookup,
   planStopMessagePersistedStateSelection,
@@ -95,8 +96,6 @@ const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTE
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS = 3;
-const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
-
 function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
   return buildStopMessageTerminalVisiblePayloadWithNative({
     payload,
@@ -249,29 +248,6 @@ function isPersistentStickyKey(value: unknown): value is string {
   );
 }
 
-function resolveStopMessageDefaultEnabledLive(): boolean {
-  return resolveStopMessageDefaultEnabled() ?? true;
-}
-
-function resolveStopMessageDefaultTextLive(): string {
-  const fromConfig = resolveStopMessageDefaultText();
-  if (typeof fromConfig === 'string' && fromConfig.trim().length > 0) {
-    return fromConfig.trim();
-  }
-  const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;
-  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : STOP_MESSAGE_EXECUTION_APPEND;
-}
-
-function resolveStopMessageDefaultMaxRepeatsLive(): number {
-  const fromConfig = resolveStopMessageDefaultMaxRepeats();
-  if (Number.isFinite(fromConfig) && Number(fromConfig) > 0) {
-    return Math.floor(Number(fromConfig));
-  }
-  const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
-  const parsed = typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 3;
-}
-
 function debugLog(message: string, extra?: JsonObject): void {
   if (!STOPMESSAGE_DEBUG) {
     return;
@@ -400,6 +376,14 @@ const handler: ServerToolHandler = async (
     runtimeMetadata: rt,
     capturedRequest: captured
   });
+  const defaultConfig = planStopMessageDefaultConfig({
+    tombstoneCleared: tombstone.cleared,
+    configEnabled: resolveStopMessageDefaultEnabled(),
+    configText: resolveStopMessageDefaultText(),
+    configMaxRepeats: resolveStopMessageDefaultMaxRepeats(),
+    envText: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT,
+    envMaxRepeats: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS
+  });
   const assistantStopText = extractCurrentAssistantStopTextWithNative(ctx.base);
   const goalLoopContext = captured
     ? await evaluateGoalActiveStopLoopGuard({
@@ -442,9 +426,9 @@ const handler: ServerToolHandler = async (
         ? 'idle' as any
         : effectiveGoal.status as any),
     plan_mode_active: decisionSignals.planModeActive,
-    default_enabled: tombstone.cleared ? false : resolveStopMessageDefaultEnabledLive(),
-    default_max_repeats: resolveStopMessageDefaultMaxRepeatsLive(),
-    default_text: resolveStopMessageDefaultTextLive(),
+    default_enabled: defaultConfig.enabled,
+    default_max_repeats: defaultConfig.maxRepeats,
+    default_text: defaultConfig.text,
     provider_pin: undefined,
   };
 
@@ -587,7 +571,7 @@ const handler: ServerToolHandler = async (
       ? (typeof stateUpdate.used === 'number' ? stateUpdate.used : schemaUsedBeforeCount + 1)
       : decision.used;
     const snapInput = {
-      text: String(stateUpdate.text ?? STOP_MESSAGE_EXECUTION_APPEND),
+      text: String(stateUpdate.text ?? defaultConfig.text),
       maxRepeats: nextMaxRepeats,
       used: nextUsed,
       source: typeof stateUpdate.source === 'string' ? stateUpdate.source : 'default',

@@ -24,6 +24,7 @@ use servertool_core::pre_command_hook_contract;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
+use servertool_core::stop_message_default_config;
 use servertool_core::stop_message_loop_guard;
 use servertool_core::stop_visible_text;
 use servertool_core::stopless_decision_context_signals;
@@ -221,6 +222,14 @@ pub fn plan_stopless_decision_context_signals_json(input_json: &str) -> Result<S
         &stopless_decision_context_signals::plan_stopless_decision_context_signals(&input),
     )
     .map_err(|e| format!("serialize stopless decision context signals: {e}"))
+}
+
+pub fn plan_stop_message_default_config_json(input_json: &str) -> Result<String, String> {
+    let input: stop_message_default_config::StopMessageDefaultConfigInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message default config input: {e}"))?;
+    serde_json::to_string(&stop_message_default_config::plan_stop_message_default_config(&input))
+        .map_err(|e| format!("serialize stop-message default config plan: {e}"))
 }
 
 pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, String> {
@@ -2021,6 +2030,27 @@ mod tests {
         assert_eq!(plan["portStopMessageDisabled"], true);
         assert_eq!(plan["hasResponsesSubmitToolOutputsResume"], true);
         assert_eq!(plan["planModeActive"], true);
+    }
+
+    #[test]
+    fn plans_stop_message_default_config_via_servertool_core_bridge() {
+        let output = plan_stop_message_default_config_json(
+            &json!({
+                "tombstoneCleared": false,
+                "configEnabled": true,
+                "configText": " config ",
+                "configMaxRepeats": 4.8,
+                "envText": "env",
+                "envMaxRepeats": "2"
+            })
+            .to_string(),
+        )
+        .expect("stop-message default config plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("stop-message default config json");
+        assert_eq!(plan["enabled"], true);
+        assert_eq!(plan["text"], "config");
+        assert_eq!(plan["maxRepeats"], 4);
     }
 
     #[test]

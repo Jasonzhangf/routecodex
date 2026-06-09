@@ -452,6 +452,12 @@ export interface StoplessDecisionContextSignals {
   planModeActive: boolean;
 }
 
+export interface StopMessageDefaultConfigPlan {
+  enabled: boolean;
+  text: string;
+  maxRepeats: number;
+}
+
 export interface RuntimeStopMessageStateFromAdapterContextInput {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
@@ -1004,6 +1010,44 @@ export function planStoplessDecisionContextSignalsWithNative(input: {
     portStopMessageDisabled: record.portStopMessageDisabled,
     hasResponsesSubmitToolOutputsResume: record.hasResponsesSubmitToolOutputsResume,
     planModeActive: record.planModeActive,
+  };
+}
+
+export function planStopMessageDefaultConfigWithNative(input: {
+  tombstoneCleared?: boolean;
+  configEnabled?: unknown;
+  configText?: unknown;
+  configMaxRepeats?: unknown;
+  envText?: unknown;
+  envMaxRepeats?: unknown;
+}): StopMessageDefaultConfigPlan {
+  const capability = 'planStopMessageDefaultConfigJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageDefaultConfigJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageDefaultConfigJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.enabled !== 'boolean' ||
+    typeof record.text !== 'string' ||
+    typeof record.maxRepeats !== 'number' ||
+    !Number.isInteger(record.maxRepeats) ||
+    record.maxRepeats <= 0
+  ) {
+    throw new Error(`${capability} native returned invalid default config fields`);
+  }
+  return {
+    enabled: record.enabled,
+    text: record.text,
+    maxRepeats: record.maxRepeats,
   };
 }
 

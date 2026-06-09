@@ -18749,3 +18749,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `chat_post_governed_normalization_semantics.rs` only fed required native export `buildImageAttachmentMetadataJson`; no TS wrapper/runtime consumer.
 - Change: removed the Rust module, module declaration, required native export, and added residue gate/docs/function-map/verification-map/MEMORY entries.
 - Verification: residue scan only docs/gate/memory refs; hub-pipeline residue Jest + SSE required-export Jest, llmswitch-core tsc, function-map compile gate, Rust hub_pipeline_contracts, and `git diff --check` passed before staging.
+
+## 2026-06-09 stop-message default config Rust slice
+- Slice: moved stop-message-auto default `enabled/text/maxRepeats` final planning into Rust `servertool-core::stop_message_default_config::plan_stop_message_default_config`.
+- TS still performs config/env IO only; Rust owns tombstone-disable, config-over-env priority, text trimming, maxRepeats positive floor, and built-in default text/repeat policy.
+- Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, native export probe, and `git diff --check`.

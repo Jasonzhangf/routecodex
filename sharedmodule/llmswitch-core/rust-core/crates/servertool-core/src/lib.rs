@@ -20,6 +20,7 @@ pub mod pre_command_hook_contract;
 pub mod stop_gateway_context;
 pub mod stop_message_compare_context;
 pub mod stop_message_counter;
+pub mod stop_message_default_config;
 pub mod stop_message_loop_guard;
 pub mod stop_visible_text;
 pub mod stopless_decision_context_signals;

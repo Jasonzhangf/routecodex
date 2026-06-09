@@ -4,6 +4,7 @@ import {
   getCapturedRequestWithNative,
   hasCompactionFlagWithNative,
   planPersistStopMessageStateWithNative,
+  planStopMessageDefaultConfigWithNative,
   planStopMessagePersistedLookupWithNative,
   planStopMessagePersistedStateSelectionWithNative,
   planStoplessDecisionContextSignalsWithNative,
@@ -179,6 +180,21 @@ export function planStoplessDecisionContextSignals(args: {
   planModeActive: boolean;
 } {
   return planStoplessDecisionContextSignalsWithNative(args);
+}
+
+export function planStopMessageDefaultConfig(args: {
+  tombstoneCleared?: boolean;
+  configEnabled?: unknown;
+  configText?: unknown;
+  configMaxRepeats?: unknown;
+  envText?: unknown;
+  envMaxRepeats?: unknown;
+}): {
+  enabled: boolean;
+  text: string;
+  maxRepeats: number;
+} {
+  return planStopMessageDefaultConfigWithNative(args);
 }
 
 function buildServertoolRoutingMetadata(
