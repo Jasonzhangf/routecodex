@@ -241,6 +241,27 @@ pub struct ServertoolFollowupAppendUserTextPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolPreferredFinalResponseInput {
+    pub has_followup_body: bool,
+    pub has_requires_action_shape: bool,
+    pub is_empty_client_response_payload: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolPreferredFinalResponseSource {
+    FollowupBody,
+    FinalChatResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolPreferredFinalResponsePlan {
+    pub source: ServertoolPreferredFinalResponseSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolFollowupErrorPlanInput {
     pub error: Value,
 }
@@ -771,6 +792,19 @@ pub fn plan_followup_append_user_text(
             })
         });
     ServertoolFollowupAppendUserTextPlan { text }
+}
+
+pub fn plan_preferred_final_response(
+    input: ServertoolPreferredFinalResponseInput,
+) -> ServertoolPreferredFinalResponsePlan {
+    let source = if input.has_followup_body
+        && (input.has_requires_action_shape || !input.is_empty_client_response_payload)
+    {
+        ServertoolPreferredFinalResponseSource::FollowupBody
+    } else {
+        ServertoolPreferredFinalResponseSource::FinalChatResponse
+    };
+    ServertoolPreferredFinalResponsePlan { source }
 }
 
 pub fn plan_followup_error_envelope(
@@ -2097,6 +2131,52 @@ mod tests {
             followup_plan: json!({ "payload": { "input": "hello" } }),
         });
         assert_eq!(missing.text, None);
+    }
+
+    #[test]
+    fn preferred_final_response_selects_followup_for_requires_action_or_non_empty_body() {
+        let requires_action = plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
+            has_followup_body: true,
+            has_requires_action_shape: true,
+            is_empty_client_response_payload: true,
+        });
+        assert_eq!(
+            requires_action.source,
+            ServertoolPreferredFinalResponseSource::FollowupBody
+        );
+
+        let non_empty = plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
+            has_followup_body: true,
+            has_requires_action_shape: false,
+            is_empty_client_response_payload: false,
+        });
+        assert_eq!(
+            non_empty.source,
+            ServertoolPreferredFinalResponseSource::FollowupBody
+        );
+    }
+
+    #[test]
+    fn preferred_final_response_keeps_final_chat_for_empty_or_missing_followup() {
+        let empty = plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
+            has_followup_body: true,
+            has_requires_action_shape: false,
+            is_empty_client_response_payload: true,
+        });
+        assert_eq!(
+            empty.source,
+            ServertoolPreferredFinalResponseSource::FinalChatResponse
+        );
+
+        let missing = plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
+            has_followup_body: false,
+            has_requires_action_shape: true,
+            is_empty_client_response_payload: false,
+        });
+        assert_eq!(
+            missing.source,
+            ServertoolPreferredFinalResponseSource::FinalChatResponse
+        );
     }
 
     #[test]

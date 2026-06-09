@@ -3030,6 +3030,24 @@ function checkBackendRoutePolicyRustOwner() {
     'fn followup_append_user_text_ignores_blank_and_invalid_shapes'
   );
   assertContains(
+    'backend-route-preferred-final-response-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_preferred_final_response'
+  );
+  assertContains(
+    'backend-route-preferred-final-response-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'fn preferred_final_response_selects_followup_for_requires_action_or_non_empty_body'
+  );
+  assertContains(
+    'backend-route-preferred-final-response-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'fn preferred_final_response_keeps_final_chat_for_empty_or_missing_followup'
+  );
+  assertContains(
     'backend-route-followup-materialization-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
