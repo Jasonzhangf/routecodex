@@ -952,10 +952,6 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         .get("__seen_response_done")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let seen_done_chunk = probe
-        .get("__seen_done_chunk")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     let has_completed_output = probe
         .get("output")
         .and_then(Value::as_array)
