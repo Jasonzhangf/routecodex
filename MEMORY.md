@@ -2805,3 +2805,9 @@ Tags: hub-pipeline, multimodal, image-placeholder, dead-code, rust-owner, residu
 - Do not restore session-bound token estimation in this TS bridge; if needed, add it through the current Rust/native owner and function map rather than reviving old TS helper semantics.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks estimator branch revival.
 Tags: hub-pipeline, session-usage, dead-code, thin-shell, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline session usage load fail-fast
+- `chat-process-session-usage.ts::loadState` must not catch `loadRoutingInstructionStateSync` errors or return `null` on load failure. That silently converts storage/native failure into empty state and can overwrite persisted routing/session state.
+- Current behavior: native routing state load failures surface fail-fast; missing state is represented only by a successful native `null`.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` checks `loadState` has no catch/null compensation.
+Tags: hub-pipeline, session-usage, fail-fast, routing-state, no-silent-compensation, 2026-06-09

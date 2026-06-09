@@ -18621,3 +18621,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline session usage bridge pruning:
 - Exact scan showed `estimateSessionBoundTokens` had no live consumer. Removed that export plus `estimateDeltaTokens`, `buildSnapshot`, `SessionUsageSnapshot`, and `countRequestTokens` import from `chat-process-session-usage.ts`.
 - Kept live `saveChatProcessSessionActualUsage` response side-effect glue; updated boundary doc and added residue audit gate blocking estimator branch revival.
+
+2026-06-09 HubPipeline session usage load fail-fast:
+- `chat-process-session-usage.ts::loadState` caught `loadRoutingInstructionStateSync` failures and returned null, which could cause save path to create a new empty state and overwrite state after a load failure.
+- Removed catch/null compensation; routing state load failures now surface fail-fast. Added residue audit assertion that `loadState` has no catch/null path.

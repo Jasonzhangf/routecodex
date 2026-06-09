@@ -2446,6 +2446,14 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('chat process session usage bridge must not swallow routing state load failures', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const loadStateBlock = extractFunctionBlock(source, 'loadState');
+    expect(loadStateBlock).not.toMatch(/catch\s*\{/);
+    expect(loadStateBlock).not.toMatch(/return\s+null\s*;/);
+  });
+
   it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
     const source = fs.readFileSync(filePath, 'utf8');

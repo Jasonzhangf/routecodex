@@ -48,11 +48,7 @@ function resolveSessionUsageScope(record: Record<string, unknown> | undefined): 
 }
 
 function loadState(scope: string): RoutingInstructionState | null {
-  try {
-    return loadRoutingInstructionStateSync(scope);
-  } catch {
-    return null;
-  }
+  return loadRoutingInstructionStateSync(scope);
 }
 
 function readRoundedToken(value: unknown): number | undefined {
