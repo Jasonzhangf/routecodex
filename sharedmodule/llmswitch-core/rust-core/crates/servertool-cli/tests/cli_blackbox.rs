@@ -206,12 +206,36 @@ fn non_client_exec_servertools_fail_fast() {
             !output.status.success(),
             "{tool_name} must not be executable through client CLI stdout"
         );
+        assert!(
+            output.stdout.is_empty(),
+            "{tool_name} failure must not emit client-visible stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains(&format!("SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}")),
             "stderr={stderr}"
         );
     }
+}
+
+#[test]
+fn unknown_tool_fails_fast_without_client_stdout() {
+    let output = Command::new(bin())
+        .args(["run", "unknown_servertool", "--input-json", r#"{"value":1}"#])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "unknown tool failure must not emit client-visible stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("SERVERTOOL_UNSUPPORTED_TOOL: unknown_servertool"),
+        "stderr={stderr}"
+    );
 }
 
 #[test]
