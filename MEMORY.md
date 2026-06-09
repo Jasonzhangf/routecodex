@@ -2787,3 +2787,9 @@ Tags: hub-pipeline, control-data, contract-help, rust-owner, metadata-boundary, 
 - Native lifecycle/deps failures must surface fail-fast; route selection, health, cooldown, and dependency semantics remain Rust/native owned.
 - Function/verification map feature: `hub.runtime_ingress_bridge`; gates include `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
 Tags: hub-pipeline, runtime-ingress, fail-fast, thin-shell, function-map, 2026-06-09
+
+## 2026-06-09 HubPipeline compat type residue pruned
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts` is narrowed to live exports only: `AnthropicClaudeCodeSystemPromptConfig` and `CompatApplicationResult`.
+- Do not restore retired compat profile/stage/mapping/filter/protocol/action config shells (`CompatProfileConfig`, `CompatStageConfig`, `MappingInstruction`, `FilterInstruction`, `CompatDirection`, `CompatNativeProtocolToken`, or action config aliases).
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` scans `compat-types.ts` for these retired type shells.
+Tags: hub-pipeline, compat-types, dead-code, type-shell-pruning, residue-gate, 2026-06-09

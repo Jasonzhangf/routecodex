@@ -18609,3 +18609,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline runtime ingress bridge fail-fast slice:
 - Inventory found `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts` still swallowed native `unregisterProviderRuntimeIngress` failures through `logHubPipelineNonBlockingError`; this is runtime lifecycle glue, not snapshot observation, so it must fail-fast.
 - Removed the non-blocking unregister catch/logger; `dispose()` now surfaces native unregister failure. Added `hub.runtime_ingress_bridge` function/verification map entry and residue gate in `hub-pipeline-stage-residue-audit.spec.ts`.
+
+2026-06-09 HubPipeline compat type residue pruning:
+- Exact consumer scan showed `compat/compat-types.ts` only has live exports `AnthropicClaudeCodeSystemPromptConfig` and `CompatApplicationResult`; old compat profile/stage/mapping/filter/protocol/action config type shells had no source/test/script consumers.
+- Pruned `compat-types.ts` to live exports only and added residue audit gate to block restoring retired profile/mapping aliases.

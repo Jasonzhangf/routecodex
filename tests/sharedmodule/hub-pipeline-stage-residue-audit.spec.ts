@@ -2421,6 +2421,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('HubPipeline compat types must not restore retired profile/mapping type shells', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'restores retired compat profile config', pattern: /CompatProfileConfig|CompatStageConfig/ },
+      { label: 'restores retired compat mapping shells', pattern: /MappingInstruction|FilterInstruction|FieldMapping/ },
+      { label: 'restores retired compat protocol aliases', pattern: /CompatDirection|CompatNativeProtocolToken|NativeProviderProtocolToken/ },
+      { label: 'restores retired action config aliases', pattern: /ShapeFilterConfig|ResponseBlacklistConfig|RequestRulesConfig|AutoThinkingConfig|ResponseNormalizeConfig|ResponseValidateConfig|HarvestToolCallsFromTextConfig|ToolTextRequestGuidanceConfig|DeepSeekWebResponseConfig/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
     const source = fs.readFileSync(filePath, 'utf8');
