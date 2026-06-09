@@ -16,6 +16,8 @@ pub struct ServertoolBackendRoutePolicyInput {
     pub flow_id: Option<String>,
     pub input: Value,
     pub entry_endpoint: Option<String>,
+    #[serde(default)]
+    pub adapter_context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -315,7 +317,9 @@ pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             input: hint.input,
         },
         "vision_auto" => {
-            let skip_reason = resolve_vision_skip_reason(&hint.input);
+            let skip_reason = resolve_vision_skip_reason(
+                input.adapter_context.as_ref().unwrap_or(&Value::Null),
+            );
             ServertoolBackendRoutePolicy01Planned {
                 tool_name: hint.tool_name,
                 flow_id: normalize_flow_id(&hint.flow_id, "vision_auto_flow"),
@@ -1219,11 +1223,6 @@ fn has_qwen_image_generation_flag(value: &Value) -> bool {
     if is_enabled_object(obj.get("qwenImageGeneration")) {
         return true;
     }
-    if let Some(adapter) = obj.get("adapterContext") {
-        if has_qwen_image_generation_flag(adapter) {
-            return true;
-        }
-    }
     if let Some(rt) = obj.get("__rt") {
         if has_qwen_image_generation_flag(rt) {
             return true;
@@ -1330,6 +1329,7 @@ mod tests {
                 flow_id: None,
                 input: json!({"query":"latest rust"}),
                 entry_endpoint: Some("/v1/responses".to_string()),
+                adapter_context: None,
             },
         )
         .expect("web_search backend route plan");
@@ -1361,6 +1361,7 @@ mod tests {
                 flow_id: None,
                 input: json!(r#"{"query":"routecodex","count":3}"#),
                 entry_endpoint: None,
+                adapter_context: None,
             },
         )
         .expect("web_search backend route plan");
@@ -1376,6 +1377,7 @@ mod tests {
                 flow_id: None,
                 input: json!({"query":"routecodex","count":999}),
                 entry_endpoint: None,
+                adapter_context: None,
             },
         )
         .expect("web_search backend route plan");
@@ -1390,6 +1392,7 @@ mod tests {
                 flow_id: None,
                 input: json!({"image":"data"}),
                 entry_endpoint: None,
+                adapter_context: None,
             },
         )
         .expect("vision backend route plan");
@@ -1407,17 +1410,16 @@ mod tests {
             ServertoolBackendRoutePolicyInput {
                 tool_name: "vision_auto".to_string(),
                 flow_id: None,
-                input: json!({
-                    "adapterContext": {
-                        "__rt": {
-                            "qwenImageGeneration": {
-                                "enabled": true,
-                                "mode": "edit"
-                            }
+                input: json!({}),
+                entry_endpoint: None,
+                adapter_context: Some(json!({
+                    "__rt": {
+                        "qwenImageGeneration": {
+                            "enabled": true,
+                            "mode": "edit"
                         }
                     }
-                }),
-                entry_endpoint: None,
+                })),
             },
         )
         .expect("vision backend route plan");
@@ -1505,6 +1507,7 @@ mod tests {
                 flow_id: None,
                 input: json!({}),
                 entry_endpoint: None,
+                adapter_context: None,
             },
         )
         .expect_err("stop_message_auto is client exec, not backend route");
@@ -1526,6 +1529,7 @@ mod tests {
                 flow_id: None,
                 input: json!({}),
                 entry_endpoint: None,
+                adapter_context: None,
             },
         )
         .expect_err("memory cache is server io internal, not backend route");

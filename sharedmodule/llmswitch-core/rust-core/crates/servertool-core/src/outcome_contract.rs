@@ -212,6 +212,7 @@ pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
     input: ServertoolHubRespChatProcess03Input,
 ) -> Result<ServertoolBackendRouteHint01Planned, ServertoolOutcomeError> {
     validate_outcome(&input.tool_name, ServertoolOutcome::BackendRouteReenter)?;
+    validate_no_internal_carrier(&input.input)?;
     let flow_id = resolve_flow_id(&input, "servertool_backend_route")?;
     Ok(ServertoolBackendRouteHint01Planned {
         route_hint: match input.tool_name.as_str() {
@@ -230,6 +231,7 @@ pub fn build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
     input: ServertoolHubRespChatProcess03Input,
 ) -> Result<ServertoolServerIoInternal01Observed, ServertoolOutcomeError> {
     validate_outcome(&input.tool_name, ServertoolOutcome::ServerIoInternal)?;
+    validate_no_internal_carrier(&input.input)?;
     let flow_id = resolve_flow_id(&input, "servertool_server_io_internal")?;
     Ok(ServertoolServerIoInternal01Observed {
         tool_name: input.tool_name,
@@ -718,6 +720,41 @@ mod tests {
         assert_eq!(
             err,
             ServertoolOutcomeError::DeniedInternalCarrier("metadata")
+        );
+    }
+
+    #[test]
+    fn internal_carrier_in_backend_route_hint_fails_fast() {
+        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "web_search".to_string(),
+                flow_id: None,
+                input: json!({"__rt":{"requestId":"req_internal"}}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("internal carrier must be denied");
+        assert_eq!(err, ServertoolOutcomeError::DeniedInternalCarrier("__rt"));
+    }
+
+    #[test]
+    fn internal_carrier_in_server_io_observation_fails_fast() {
+        let err = build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "memory_cache_auto".to_string(),
+                flow_id: None,
+                input: json!({"snapshot":{"requestId":"req_internal"}}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("internal carrier must be denied");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::DeniedInternalCarrier("snapshot")
         );
     }
 
