@@ -364,6 +364,7 @@ verification:
       - npm run build:min
     notes:
       - HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking.
+      - HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel.
 
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high

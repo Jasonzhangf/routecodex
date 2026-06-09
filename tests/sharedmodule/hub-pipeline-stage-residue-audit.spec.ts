@@ -2498,6 +2498,44 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('HubPipeline type barrel must not export zero-consumer nested config shells', () => {
+    const typesSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts'),
+      'utf8',
+    );
+    const barrelSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts'),
+      'utf8',
+    );
+    const forbidden = [
+      'HubPolicyMode',
+      'HubPolicyConfig',
+      'HubShadowCompareRequestConfig',
+      'HubToolSurfaceMode',
+      'HubToolSurfaceConfig',
+      'HubPipelineRequestMetadata',
+    ];
+    const findings: string[] = [];
+    const exportBlock = barrelSource.match(/export type\s*\{[\s\S]*?\}\s*from\s*["']\.\/hub-pipeline-types\.js["'];/)?.[0] ?? '';
+
+    for (const name of forbidden) {
+      const exportedDeclaration = new RegExp(`export\\s+(?:type|interface)\\s+${name}\\b`);
+      if (exportedDeclaration.test(typesSource)) {
+        findings.push(`exported nested type ${name}`);
+      }
+      if (exportBlock.includes(name)) {
+        findings.push(`barrel re-exports nested type ${name}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+    expect(typesSource).toContain('export interface HubPipelineConfig');
+    expect(typesSource).toContain('export interface HubPipelineRequest');
+    expect(typesSource).toContain('export interface HubPipelineResult');
+    expect(typesSource).toContain('export interface NormalizedRequest');
+    expect(typesSource).toContain('export type ProviderProtocol');
+  });
+
   it('HubPipeline compat types must not restore retired profile/mapping type shells', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts');
     const source = fs.readFileSync(filePath, 'utf8');

@@ -674,6 +674,7 @@ owners:
       - TS owns only lifecycle glue that calls native Virtual Router runtime ingress/deps APIs.
       - Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback.
       - Route selection, health, cooldown, and dependency semantics remain in Rust/native owners.
+      - HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types.
 
   - feature_id: hub.response_anthropic_client_projection
     status: active

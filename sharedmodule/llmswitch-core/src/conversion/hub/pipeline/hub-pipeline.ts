@@ -28,9 +28,7 @@ export type {
   HubPipelineConfig,
   HubPipelineNodeResult,
   HubPipelineRequest,
-  HubPipelineRequestMetadata,
   HubPipelineResult,
-  HubShadowCompareRequestConfig,
   NormalizedRequest,
   ProviderProtocol,
 } from "./hub-pipeline-types.js";

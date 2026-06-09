@@ -18663,3 +18663,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `ChatToStandardizedOptions`, `StandardizedToChatOptions`, `ProviderResponseContextSignals`, `ClientProtocol`, and `AnthropicResponseFromChatOptions` had no external type consumers; hits were their own function signatures or response-runtime barrel re-export.
 - Narrowed those option/result types to file-local types and removed `AnthropicResponseFromChatOptions` from `response-runtime.ts` public re-export. Runtime functions and native calls are unchanged.
 - Added residue gates blocking these public type shells from returning in standardized bridge, provider response helper, and Anthropic response runtime.
+
+2026-06-09 HubPipeline nested pipeline type export pruning:
+- Exact source/test/script scan found `HubPolicyMode`, `HubPolicyConfig`, `HubShadowCompareRequestConfig`, `HubToolSurfaceMode`, `HubToolSurfaceConfig`, and `HubPipelineRequestMetadata` only used inside `hub-pipeline-types.ts` and the local `hub-pipeline.ts` type barrel.
+- Made those nested config/metadata type shells internal and removed them from the public barrel. Kept live public bridge types: `HubPipelineConfig`, `HubPipelineNodeResult`, `HubPipelineRequest`, `HubPipelineResult`, `NormalizedRequest`, and `ProviderProtocol`.
+- Added residue gate blocking nested type exports/barrel re-exports from returning.

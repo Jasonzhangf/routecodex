@@ -10,20 +10,20 @@ import type {
   VirtualRouterHealthStore,
 } from "../../../native/router-hotpath/virtual-router-contracts.js";
 
-export type HubPolicyMode = "off" | "observe" | "enforce";
+type HubPolicyMode = "off" | "observe" | "enforce";
 
-export interface HubPolicyConfig {
+interface HubPolicyConfig {
   mode?: HubPolicyMode;
   sampleRate?: number;
 }
 
-export type HubShadowCompareRequestConfig = {
+type HubShadowCompareRequestConfig = {
   baselineMode: HubPolicyMode;
 };
 
-export type HubToolSurfaceMode = "off" | "observe" | "shadow" | "enforce";
+type HubToolSurfaceMode = "off" | "observe" | "shadow" | "enforce";
 
-export interface HubToolSurfaceConfig {
+interface HubToolSurfaceConfig {
   mode: HubToolSurfaceMode;
   sampleRate?: number;
 }
@@ -39,7 +39,7 @@ export interface HubPipelineConfig {
   };
 }
 
-export interface HubPipelineRequestMetadata extends Record<string, unknown> {
+interface HubPipelineRequestMetadata extends Record<string, unknown> {
   entryEndpoint?: string;
   providerProtocol?: string;
   processMode?: "chat";

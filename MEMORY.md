@@ -2856,3 +2856,9 @@ Tags: hub-pipeline, json-helper, public-surface, dead-code, residue-gate, functi
 - `AnthropicResponseFromChatOptions` is internal to `response-runtime-anthropic.ts`; the public `response-runtime.ts` barrel must not re-export it.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public type shells from returning while preserving the live native-wrapper functions.
 Tags: hub-pipeline, public-surface, type-export, dead-code, residue-gate, thin-shell, 2026-06-09
+
+## 2026-06-09 HubPipeline nested pipeline type exports pruned
+- `hub-pipeline-types.ts` public surface must stay limited to live bridge types consumed outside the type file: `HubPipelineConfig`, `HubPipelineNodeResult`, `HubPipelineRequest`, `HubPipelineResult`, `NormalizedRequest`, and `ProviderProtocol`.
+- Do not re-export nested policy/tool-surface/request-metadata shells `HubPolicyMode`, `HubPolicyConfig`, `HubShadowCompareRequestConfig`, `HubToolSurfaceMode`, `HubToolSurfaceConfig`, or `HubPipelineRequestMetadata`; they are internal implementation details.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those nested type exports and barrel re-exports from returning.
+Tags: hub-pipeline, type-barrel, public-surface, dead-code, residue-gate, thin-shell, 2026-06-09
