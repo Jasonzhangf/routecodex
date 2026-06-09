@@ -100,6 +100,19 @@ const deletedPathDenylist = [
   'src/providers/core/utils/tool-result-text.ts',
   'src/providers/core/utils/transformation-engine.ts',
 ];
+const deletedContentDenylist = [
+  {
+    file: 'src/modules/pipeline/types/external-types.ts',
+    tokens: [
+      'export interface RCCBaseModule',
+      'export interface HttpClient',
+      'export interface ConfigManager',
+      'export interface Logger',
+      'export interface DispatchCenter',
+      'export interface DispatchNotification',
+    ],
+  },
+];
 
 function parseOwners(text) {
   const lines = text.split('\n');
@@ -142,6 +155,16 @@ for (const rel of deletedPathDenylist) {
     failures.push(`deleted_path resurrected -> ${rel}`);
   }
 }
+for (const entry of deletedContentDenylist) {
+  const abs = path.join(root, entry.file);
+  if (!fs.existsSync(abs)) continue;
+  const text = fs.readFileSync(abs, 'utf8');
+  for (const token of entry.tokens) {
+    if (text.includes(token)) {
+      failures.push(`deleted_content resurrected -> ${entry.file}: ${token}`);
+    }
+  }
+}
 for (const owner of parseOwners(mapText)) {
   for (const rel of owner.allowedPaths) {
     const abs = path.join(root, rel);
@@ -173,3 +196,4 @@ if (failures.length > 0) {
 console.log('[verify:architecture-deleted-path] ok');
 console.log(`- checked ${parseOwners(mapText).length} features for dead allowed_paths / required_tests / required_gates`);
 console.log(`- checked ${deletedPathDenylist.length} deleted paths stay absent`);
+console.log(`- checked ${deletedContentDenylist.length} files for deleted content residues`);

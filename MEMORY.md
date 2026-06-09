@@ -2768,3 +2768,9 @@ Tags: hub-pipeline, dead-code, legacy-modules, rust-owner, residue-gate, 2026-06
 - Remaining `src/modules/pipeline/utils/**` is logging/debug compatibility only; remaining `src/modules/pipeline/orchestrator/**` is the live `TargetMetadata` compatibility type only.
 - Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` keeps the deleted util sources and provider wrappers absent. Function/verification maps had no active owner entries for these zero-consumer wrappers, so no owner-path migration was needed.
 Tags: hub-pipeline, dead-code, util-wrapper, sanitizer-deletion, rust-owner, residue-gate, 2026-06-09
+
+## 2026-06-09 Legacy Hub Pipeline external type shims pruned
+- `src/modules/pipeline/types/external-types.ts` is narrowed to the live Host compatibility shims `ErrorHandlingCenter`, `DebugCenter`, and `DebugEvent`.
+- Do not restore generic TS abstractions in that file: `RCCBaseModule`, `HttpClient`, `ConfigManager`, `Logger`, `DispatchCenter`, or `DispatchNotification`. Current HTTP client, config, logging, and dispatch contracts have their own owners and must not be reintroduced through the legacy pipeline type directory.
+- Gate: `scripts/architecture/verify-architecture-deleted-path.mjs` now includes deleted-content checks for these removed symbols.
+Tags: hub-pipeline, dead-code, external-types, compatibility-shim, residue-gate, 2026-06-09

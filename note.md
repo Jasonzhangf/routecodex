@@ -18579,6 +18579,11 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Physically deleted all three pipeline util files plus the three provider re-export wrappers; added them to `verify:architecture-deleted-path`.
 - Updated remaining pipeline util/orchestrator README files to describe only live logging/debug/TargetMetadata compatibility surfaces. Function/verification maps had no active owner entries for these deleted files, so no owner-path migration was needed.
 
+2026-06-09 Hub Pipeline external-types pruning:
+- Exact-symbol scan showed only `ErrorHandlingCenter`, `DebugCenter`, and `DebugEvent` are live from `src/modules/pipeline/types/external-types.ts`; they are consumed by `http-server-bootstrap.ts`, `index.ts`, and `pipeline-interfaces.ts`.
+- Removed unused old mock abstractions from `external-types.ts`: `RCCBaseModule`, `HttpClient`, `ConfigManager`, `Logger`, `DispatchCenter`, and `DispatchNotification`.
+- Strengthened `verify:architecture-deleted-path` with content residue checks so those removed generic abstractions cannot be restored inside the still-live file.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.
