@@ -383,7 +383,7 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - Public TS ChatEnvelope/StandardizedRequest types are limited to externally consumed bridge declarations.
-      - Zero-consumer nested semantic aliases, tool-output detail aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal.
+      - Zero-consumer nested semantic aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal.
 
   - feature_id: hub.stage_timing_observation
     change_risk: low

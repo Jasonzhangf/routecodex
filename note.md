@@ -18698,3 +18698,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `ToolChoice`, `StandardizedTool`, `ToolCallResult`, `StandardizedMessageContent`, `StandardizedParameters`, and `StandardizedMetadata` only used inside `standardized.ts`.
 - Kept externally consumed `StandardizedMessage`, `StandardizedRequest`, and `ProcessedRequest` public; made zero-consumer field-detail aliases module-internal.
 - Extended `hub.chat_envelope_type_surface` docs/gate to cover StandardizedRequest field-detail alias export revival.
+
+2026-06-09 HubPipeline StandardizedRequest ToolCall public surface pruning:
+- Exact scan found `ToolCall` is not imported from `standardized.ts` by active source/tests/docs scripts; it only types `StandardizedMessage.tool_calls` in the same file.
+- Made `ToolCall` module-internal and extended the same residue gate/docs note to block re-export revival.

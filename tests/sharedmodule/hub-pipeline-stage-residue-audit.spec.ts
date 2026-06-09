@@ -2634,6 +2634,7 @@ describe('hub pipeline stage residue audit', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const forbidden = [
+      'ToolCall',
       'ToolChoice',
       'StandardizedTool',
       'ToolCallResult',

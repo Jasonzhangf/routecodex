@@ -2897,6 +2897,7 @@ Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residu
 
 ## 2026-06-09 HubPipeline StandardizedRequest nested type surface narrowed
 - `ToolChoice`, `StandardizedTool`, `ToolCallResult`, `StandardizedMessageContent`, `StandardizedParameters`, and `StandardizedMetadata` in `sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts` have no external source consumer; they only type `StandardizedRequest` / `ProcessedRequest` fields.
+- Follow-up exact scan confirmed `ToolCall` also has no external source consumer; it only types `StandardizedMessage.tool_calls` and must remain module-internal.
 - Public TS standardized type surface must remain limited to externally consumed `StandardizedMessage`, `StandardizedRequest`, and `ProcessedRequest`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the zero-consumer standardized field-detail aliases from being re-exported.
 Tags: hub-pipeline, standardized-request, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09

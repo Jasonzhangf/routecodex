@@ -24,7 +24,7 @@ interface StandardizedTool {
   };
 }
 
-export interface ToolCall {
+interface ToolCall {
   id: string;
   type: 'function';
   function: {
