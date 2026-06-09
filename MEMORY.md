@@ -2999,3 +2999,9 @@ Tags: hub-pipeline, orchestration-wrapper, dead-code, napi-export, rust-only, re
 - Removed only the public TS/NAPI helper surface and helper-only public Rust functions/tests. Kept internal Rust header parsing helpers because `extractSessionIdentifiersJson` still uses them to derive session/conversation IDs from request metadata headers.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired helper wrapper/export symbols from returning; `extractSessionIdentifiersJson` remains the sole public session identifier bridge.
 Tags: hub-pipeline, session-identifiers, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline mappable-semantics public wrapper removed
+- Exact scan found `findMappableSemanticsKeysWithNative` / `findMappableSemanticsKeysJson` had no TS/runtime consumer; remaining active references were the NAPI wrapper/re-export and Rust tests for the internal process-mode helper.
+- Removed the public TS wrapper, required-export entry, Rust NAPI JSON wrapper, and public hub_pipeline re-export. Kept Rust `find_mappable_semantics_keys` private because Rust Hub tests still cover process-mode tombstone behavior.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired public wrapper/export names from returning.
+Tags: hub-pipeline, process-mode, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

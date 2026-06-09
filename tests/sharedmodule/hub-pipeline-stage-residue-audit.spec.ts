@@ -2384,6 +2384,37 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired mappable semantics public wrapper must stay private to Rust process-mode internals', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
+    ];
+    const retiredSymbols = [
+      'findMappableSemanticsKeysWithNative',
+      'findMappableSemanticsKeysJson',
+      'find_mappable_semantics_keys_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

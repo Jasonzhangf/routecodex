@@ -149,9 +149,8 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
 
 pub use crate::hub_pipeline_blocks::napi_bindings::{
     build_router_metadata_input_json, coerce_standardized_request_from_payload_json,
-    extract_model_hint_from_metadata_json, find_mappable_semantics_keys_json,
-    normalize_hub_endpoint_json, resolve_sse_protocol_json, resolve_stop_message_router_metadata_json,
-    run_hub_pipeline_json,
+    extract_model_hint_from_metadata_json, normalize_hub_endpoint_json, resolve_sse_protocol_json,
+    resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
 };
 
 #[cfg(test)]

@@ -18807,3 +18807,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `coerceClientHeadersWithNative`, `findHeaderValueWithNative`, `pickHeaderWithNative`, `normalizeHeaderKeyWithNative` and their `*Json` exports had no consumer outside wrapper/required-export surfaces.
 - Change: removed the public TS wrappers, required-export entries, Rust NAPI JSON exports, and helper-only public Rust tests; kept internal Rust helpers used by `extract_session_identifiers_from_metadata`.
 - Guard: added residue gate so standalone session header helper public surfaces cannot return without a live consumer and map update.
+
+2026-06-09 HubPipeline mappable-semantics public wrapper deletion:
+- Exact scan: `findMappableSemanticsKeysWithNative` / `findMappableSemanticsKeysJson` had no TS/runtime consumer; active Rust references are private helper tests only.
+- Change: removed public TS wrapper, required-export entry, Rust NAPI JSON wrapper, and public hub_pipeline re-export; kept internal Rust `find_mappable_semantics_keys`.
+- Guard: residue gate blocks the public wrapper/export names from returning.
