@@ -366,6 +366,17 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 
 - Physically deleted the zero-consumer TS wrapper exports from the shared conversion files above.
 - Removed the unused single-tool native bridge wrappers and Rust NAPI exports for `bridgeToolToChatDefinitionJson`, `chatToolToBridgeDefinitionJson`, `extractOutputSegmentsJson`, and `normalizeOutputContentPartJson`.
+- Removed the remaining public native wrapper / required-export surface for zero-consumer response helpers:
+  - `collectToolCallsFromResponsesWithNative` / `collectToolCallsFromResponsesJson`
+  - `resolveFinishReasonWithNative` / `resolveFinishReasonJson`
+  - `normalizeResponsesToolCallIdsWithNative` / `normalizeResponsesToolCallIdsJson`
+  - `resolveToolCallIdStyleWithNative` / `resolveToolCallIdStyleJson`
 - Kept live wrappers that still act as thin native invocation glue, such as `normalizeMessageContentParts`, `normalizeMessageReasoningTools`, `mapBridgeToolsToChat`, `mapChatToolsToBridge`, and `createToolCallIdTransformer`.
 - Updated coverage scripts so they exercise only live exports.
 - Added `tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts` to lock TS wrapper deletion, native bridge deletion, required-export deletion, and Rust NAPI export deletion.
+- Updated `tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts` to also fail if those deleted response helper surfaces reappear through the native barrel or required-export gate.
+
+### Verification Evidence
+
+- PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- PASS: `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`

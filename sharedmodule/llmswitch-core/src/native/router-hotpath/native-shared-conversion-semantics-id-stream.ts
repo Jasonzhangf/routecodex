@@ -150,59 +150,6 @@ export function enforceToolCallIdStyleWithNative(messages: unknown[], state: Rec
   }
 }
 
-export function normalizeResponsesToolCallIdsWithNative(payload: unknown): Record<string, unknown> | null {
-  const capability = 'normalizeResponsesToolCallIdsJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload ?? null);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    return parseRecord(raw) ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveToolCallIdStyleWithNative(metadata: unknown): string {
-  const capability = 'resolveToolCallIdStyleJson';
-  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const metadataJson = safeStringify(metadata ?? null);
-  if (!metadataJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(metadataJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseJson(raw);
-    return typeof parsed === 'string' ? parsed : fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function stripInternalToolingMetadataWithNative(metadata: unknown): Record<string, unknown> | null {
   const capability = 'stripInternalToolingMetadataJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);

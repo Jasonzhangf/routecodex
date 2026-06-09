@@ -18,6 +18,14 @@ const responsesToolUtilsCoverageScriptPath = join(
   process.cwd(),
   'sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs'
 );
+const nativeBarrelPath = join(
+  process.cwd(),
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts'
+);
+const requiredExportsPath = join(
+  process.cwd(),
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'
+);
 
 describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   it('does not keep zero-consumer tool-call and finish-reason TS wrappers', () => {
@@ -28,6 +36,16 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
     expect(source).not.toContain('resolveFinishReasonWithNative');
     expect(source).not.toMatch(/export\s+function\s+collectToolCallsFromResponses\b/);
     expect(source).not.toMatch(/export\s+function\s+resolveFinishReason\b/);
+  });
+
+  it('does not keep public native wrapper exports for deleted response helpers', () => {
+    const barrel = readFileSync(nativeBarrelPath, 'utf8');
+    const requiredExports = readFileSync(requiredExportsPath, 'utf8');
+
+    expect(barrel).not.toContain('collectToolCallsFromResponsesWithNative');
+    expect(barrel).not.toContain('resolveFinishReasonWithNative');
+    expect(requiredExports).not.toContain('collectToolCallsFromResponsesJson');
+    expect(requiredExports).not.toContain('resolveFinishReasonJson');
   });
 
   it('does not keep coverage consumers for deleted wrapper exports', () => {
@@ -47,5 +65,15 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
     expect(source).not.toContain('resolveToolCallIdStyleWithNative');
     expect(coverageSource).not.toMatch(/\bnormalizeResponsesToolCallIds\b/);
     expect(coverageSource).not.toMatch(/\bresolveToolCallIdStyle\b/);
+  });
+
+  it('does not keep public native wrapper exports for deleted responses tool id helpers', () => {
+    const barrel = readFileSync(nativeBarrelPath, 'utf8');
+    const requiredExports = readFileSync(requiredExportsPath, 'utf8');
+
+    expect(barrel).not.toContain('normalizeResponsesToolCallIdsWithNative');
+    expect(barrel).not.toContain('resolveToolCallIdStyleWithNative');
+    expect(requiredExports).not.toContain('normalizeResponsesToolCallIdsJson');
+    expect(requiredExports).not.toContain('resolveToolCallIdStyleJson');
   });
 });

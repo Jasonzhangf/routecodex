@@ -6,8 +6,6 @@ import {
   parseArray,
   parseJson,
   parseRecord,
-  parseString,
-  parseStringArray,
   readNativeFunction,
   safeStringify
 } from './native-shared-conversion-semantics-core.js';
@@ -84,9 +82,7 @@ export {
   isCompactionRequestWithNative,
   isImagePathWithNative,
   normalizeIdValueWithNative,
-  normalizeResponsesToolCallIdsWithNative,
   resetStreamingToolExtractorStateWithNative,
-  resolveToolCallIdStyleWithNative,
   stripInternalToolingMetadataWithNative,
   transformToolCallIdWithNative
 } from './native-shared-conversion-semantics-id-stream.js';
@@ -107,41 +103,10 @@ export {
   repairArgumentsToStringWithNative
 } from './native-shared-conversion-semantics-misc.js';
 export {
-  collectToolCallsFromResponsesWithNative,
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from './native-shared-conversion-semantics-tool-definitions.js';
-
-export function resolveFinishReasonWithNative(
-  response: Record<string, unknown>,
-  toolCalls: Array<Record<string, unknown>>
-): string {
-  const capability = 'resolveFinishReasonJson';
-  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const responseJson = safeStringify(response ?? {});
-  const toolCallsJson = safeStringify(Array.isArray(toolCalls) ? toolCalls : []);
-  if (!responseJson || !toolCallsJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(responseJson, toolCallsJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    return parseString(raw) ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 
 export function buildChatResponseFromResponsesWithNative(payload: unknown): Record<string, unknown> | null {
   const capability = 'buildChatResponseFromResponsesJson';

@@ -100,32 +100,3 @@ export function flattenChatToolsForFunctionCallingWithNative(
     return fail(reason);
   }
 }
-
-export function collectToolCallsFromResponsesWithNative(
-  response: Record<string, unknown>
-): Array<Record<string, unknown>> {
-  const capability = 'collectToolCallsFromResponsesJson';
-  const fail = (reason?: string) => failNativeRequired<Array<Record<string, unknown>>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(response ?? {});
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    const parsed = parseToolDefinitionArray(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
