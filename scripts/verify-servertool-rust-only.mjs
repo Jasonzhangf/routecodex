@@ -590,6 +590,7 @@ function checkServertoolCliProjectionMap() {
     'validate_no_internal_carrier(&value)'
   );
   const cliDeniedCarrierBlock = extractConstArrayBlock(rustCliContract, 'DENIED_INTERNAL_CARRIER_KEYS');
+  const cliDeniedCarrierTextBlock = extractConstArrayBlock(rustCliContract, 'DENIED_INTERNAL_CARRIER_TEXT');
   for (const privateCarrier of [
     'reenterPipeline',
     'providerInvoker',
@@ -606,6 +607,12 @@ function checkServertoolCliProjectionMap() {
       'cli-projection-private-carrier-contract',
       `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
       cliDeniedCarrierBlock,
+      privateCarrier
+    );
+    assertContains(
+      'cli-projection-private-carrier-contract',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+      cliDeniedCarrierTextBlock,
       privateCarrier
     );
   }
@@ -3118,6 +3125,55 @@ function checkBackendRoutePolicyRustOwner() {
   const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
   const visionEligibilityShell = readRequired(TS_VISION_ELIGIBILITY);
+  const finalizeFunctionNames = Array.from(finalizeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (
+    finalizeFunctionNames.join(',') !==
+    'decorateFinalChatWithServerToolContext,shouldShortCircuitRequiresActionFollowup'
+  ) {
+    fail(
+      'backend-route-finalize-ts-thin-shell',
+      `backend-route-finalize-block.ts must remain a two-function native delegate; found exports: ${finalizeFunctionNames.join(',') || '(none)'}`
+    );
+  }
+  const finalizeShortCircuitBlock = extractFunctionBlock(finalizeShell, 'shouldShortCircuitRequiresActionFollowup');
+  assertContains(
+    'backend-route-finalize-ts-thin-shell',
+    TS_BACKEND_ROUTE_FINALIZE,
+    finalizeShortCircuitBlock,
+    'shouldShortCircuitRequiresActionFollowupWithNative'
+  );
+  const finalizeDecorateBlock = extractFunctionBlock(finalizeShell, 'decorateFinalChatWithServerToolContext');
+  assertContains(
+    'backend-route-finalize-ts-thin-shell',
+    TS_BACKEND_ROUTE_FINALIZE,
+    finalizeDecorateBlock,
+    'decorateServertoolFinalChatWithNative'
+  );
+  const visionEligibilityFunctionNames = Array.from(visionEligibilityShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (
+    visionEligibilityFunctionNames.join(',') !==
+    'shouldBypassStopMessageForMediaContext,shouldRunVisionFlowForAdapterContext'
+  ) {
+    fail(
+      'backend-route-vision-eligibility-ts-thin-shell',
+      `vision-eligibility.ts must remain a two-function native delegate; found exports: ${visionEligibilityFunctionNames.join(',') || '(none)'}`
+    );
+  }
+  for (const functionName of [
+    'shouldRunVisionFlowForAdapterContext',
+    'shouldBypassStopMessageForMediaContext',
+  ]) {
+    assertContains(
+      'backend-route-vision-eligibility-ts-thin-shell',
+      TS_VISION_ELIGIBILITY,
+      extractFunctionBlock(visionEligibilityShell, functionName),
+      'planVisionEligibilityWithNative'
+    );
+  }
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
     RUST_SRC_DIR + '/servertool_followup_delta.rs',
