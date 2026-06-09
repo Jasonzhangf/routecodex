@@ -69,7 +69,7 @@ describe('Provider error classifier - 429 handling', () => {
   it('does not escalate synthetic RateLimitCooldownError via register/force hooks', () => {
     let registerCalled = false;
     let forceCalled = false;
-    const error = new RateLimitCooldownError('provider cooling down after 429', 1_000);
+    const error = new RateLimitCooldownError('provider cooling down after 429');
 
     const classification = classifyProviderError({
       error,

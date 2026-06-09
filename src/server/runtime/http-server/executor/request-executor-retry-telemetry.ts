@@ -41,7 +41,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     throw new Error('retry telemetry requires retrySwitchPlan/backoffScope');
   }
   const retrySwitchPlan = args.retryExecutionPlan.retrySwitchPlan;
-  const nextAttempt = args.attempt + 1;
+  const nextAttempt = Math.max(args.attempt, Math.min(args.maxAttempts, args.attempt + 1));
   const switchLogArgs = {
     requestId: args.requestId,
     attempt: args.attempt,

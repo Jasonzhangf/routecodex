@@ -23,9 +23,7 @@ type NativeFailurePolicyModule = {
   ) => string;
   computeBackoffMsNative?: (
     classification: NativeFailureClassification,
-    attempt: number,
-    baseMs: number,
-    maxMs: number
+    attempt: number
   ) => number;
   getNetworkErrorCodes?: () => string[];
   isBlockingRecoverableNative?: (
@@ -727,15 +725,13 @@ export function shouldRetryNative(
 
 export function computeBackoffMsNative(
   classification: NativeFailureClassification,
-  attempt: number,
-  baseMs: number,
-  maxMs: number
+  attempt: number
 ): number {
   const fn = getFailurePolicyModule().computeBackoffMsNative;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] computeBackoffMsNative not available');
   }
-  return fn(classification, attempt, baseMs, maxMs);
+  return fn(classification, attempt);
 }
 
 export function getNetworkErrorCodes(): string[] {

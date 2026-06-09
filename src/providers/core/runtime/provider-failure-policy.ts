@@ -56,8 +56,7 @@ export type ProviderFailureDecisionLabel =
 export type ProviderFailureBackoffPlan = {
   scope: ProviderFailureBackoffScope;
   keyKind: ProviderFailureBackoffScope;
-  baseMs: number;
-  maxMs: number;
+  delaySequenceMs: readonly number[];
 };
 
 export type ProviderFailureActionPlan = {

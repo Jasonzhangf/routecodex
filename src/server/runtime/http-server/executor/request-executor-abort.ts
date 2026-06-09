@@ -52,7 +52,8 @@ export async function waitWithClientAbortSignal(
     try {
       signal?.addEventListener?.('abort', onAbort as EventListener, { once: true } as AddEventListenerOptions);
     } catch (error: unknown) {
-      logNonBlockingError('waitWithClientAbortSignal.addEventListener', error);
+      cleanup();
+      reject(error);
     }
   });
 }

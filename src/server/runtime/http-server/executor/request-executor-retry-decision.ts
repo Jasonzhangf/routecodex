@@ -125,6 +125,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     args.classification === 'recoverable'
     && !args.promptTooLong
     && !isImmediate429
+    && typeof args.status !== 'number'
     && args.retryError
     && args.transientRetryTracker
   ) {

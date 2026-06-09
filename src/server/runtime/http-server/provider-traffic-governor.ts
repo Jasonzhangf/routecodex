@@ -8,6 +8,10 @@ import type {
   ProviderRuntimeProfile
 } from '../../../providers/core/api/provider-types.js';
 import { resolveRccStateDir } from '../../../config/user-data-paths.js';
+import {
+  recordErrorActionBackoff,
+  waitErrorActionBackoffWithGate
+} from './executor/request-executor-error-action-queue.js';
 
 type LockHandle = {
   release(): Promise<void>;
@@ -90,7 +94,6 @@ export interface ProviderTrafficGovernorLike {
     providerKey?: string;
     requestId: string;
     runtime: ProviderRuntimeProfile;
-    softWaitTimeoutMs?: number;
     scopeKey?: string;
   }): Promise<ProviderTrafficAcquireResult>;
   release(permit: ProviderTrafficPermit): Promise<{ released: boolean; activeInFlight: number }>;
@@ -113,17 +116,12 @@ const DEFAULT_RPM_TIMEOUT_MS = 60_000;
 const DEFAULT_RPM_WINDOW_MS = 60_000;
 const LOCK_STALE_MS = 15_000;
 const LOCK_WAIT_BASE_MS = 20;
-const ACQUIRE_WAIT_BASE_MS = 100;
-const ACQUIRE_WAIT_MAX_MS = 2_000;
-const ACQUIRE_JITTER_MS = 40;
 const LOCK_WAIT_MAX_MS = 250;
 const PROVIDER_TRAFFIC_RUN_NAMESPACE =
   `run-${process.pid}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
 const ADAPTIVE_WINDOW_MINUTES = 15;
 const ADAPTIVE_STREAK_THRESHOLD = 5;
-const ADAPTIVE_BLOCK_BACKOFF_BASE_MS = 400;
-const ADAPTIVE_BLOCK_BACKOFF_MAX_MS = 8_000;
 const ADAPTIVE_DEFAULT_HARD_MAX = 64;
 const ADAPTIVE_DEFAULT_HARD_MULTIPLIER = 2;
 
@@ -145,8 +143,6 @@ type AdaptiveRuntimeState = {
   cooldownUntilMs: number;
   saturatedNo429Streak: number;
   saturated429Streak: number;
-  blockedBackoffLevel: number;
-  blockedBackoffUntilMs: number;
   lastDecisionMinute: number;
   triedIncreaseCaps: Set<number>;
   buckets: AdaptiveMinuteBucket[];
@@ -163,8 +159,6 @@ type AdaptivePersistedRuntimeState = {
   cooldownUntilMs: number;
   saturatedNo429Streak: number;
   saturated429Streak: number;
-  blockedBackoffLevel: number;
-  blockedBackoffUntilMs: number;
   triedIncreaseCaps: number[];
   updatedAtMs: number;
 };
@@ -279,20 +273,6 @@ function readAdaptiveEnvInt(keys: string[], fallback: number): number {
     }
   }
   return fallback;
-}
-
-function resolveAdaptiveBlockBackoffBaseMs(): number {
-  return readAdaptiveEnvInt(
-    ['ROUTECODEX_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_BASE_MS', 'RCC_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_BASE_MS'],
-    ADAPTIVE_BLOCK_BACKOFF_BASE_MS
-  );
-}
-
-function resolveAdaptiveBlockBackoffMaxMs(): number {
-  return readAdaptiveEnvInt(
-    ['ROUTECODEX_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_MAX_MS', 'RCC_DYNAMIC_CONCURRENCY_BLOCK_BACKOFF_MAX_MS'],
-    ADAPTIVE_BLOCK_BACKOFF_MAX_MS
-  );
 }
 
 function isRecoverable429Like(event: ProviderTrafficOutcomeEvent): boolean {
@@ -507,7 +487,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
   private readonly adaptiveHardMultiplier: number;
   private readonly adaptiveStateByRuntime = new Map<string, AdaptiveRuntimeState>();
   private readonly serverId: string;
-  private readonly waiterStateByRuntime = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
   private ensureDirsPromise: Promise<void> | null = null;
   private adaptiveLoadPromise: Promise<void> | null = null;
   private adaptiveWritePromise: Promise<void> | null = null;
@@ -569,61 +548,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     return clampInt(fallbackHardMax, 1, this.adaptiveHardMax);
   }
 
-  private resolveMaxAcquireWaiters(): number {
-    return readAdaptiveEnvInt(
-      ['ROUTECODEX_PROVIDER_TRAFFIC_MAX_WAITERS', 'RCC_PROVIDER_TRAFFIC_MAX_WAITERS'],
-      64
-    );
-  }
-
-  private acquireWaiterSlot(runtimeKey: string): { activeWaiters: number } {
-    const normalizedKey = runtimeKey.trim();
-    const now = Date.now();
-    for (const [existingKey, state] of this.waiterStateByRuntime.entries()) {
-      if (state.activeWaiters <= 0 || now - state.updatedAtMs >= DEFAULT_CONCURRENCY_STALE_MS) {
-        this.waiterStateByRuntime.delete(existingKey);
-      }
-    }
-    const current = this.waiterStateByRuntime.get(normalizedKey);
-    const nextActiveWaiters = (current?.activeWaiters ?? 0) + 1;
-    const maxWaiters = this.resolveMaxAcquireWaiters();
-    if (nextActiveWaiters > maxWaiters) {
-      throw new ProviderTrafficSaturatedError(
-        `provider traffic waiter queue overloaded for runtime ${normalizedKey}`,
-        {
-          reason: 'acquire_waiter_overload',
-          runtimeKey: normalizedKey,
-          activeWaiters: current?.activeWaiters ?? 0,
-          maxWaiters
-        }
-      );
-    }
-    this.waiterStateByRuntime.set(normalizedKey, {
-      activeWaiters: nextActiveWaiters,
-      updatedAtMs: now
-    });
-    return {
-      activeWaiters: nextActiveWaiters
-    };
-  }
-
-  private releaseWaiterSlot(runtimeKey: string): void {
-    const normalizedKey = runtimeKey.trim();
-    const current = this.waiterStateByRuntime.get(normalizedKey);
-    if (!current) {
-      return;
-    }
-    const nextActiveWaiters = Math.max(0, current.activeWaiters - 1);
-    if (nextActiveWaiters === 0) {
-      this.waiterStateByRuntime.delete(normalizedKey);
-      return;
-    }
-    this.waiterStateByRuntime.set(normalizedKey, {
-      activeWaiters: nextActiveWaiters,
-      updatedAtMs: Date.now()
-    });
-  }
-
   private async ensureAdaptiveLoaded(): Promise<void> {
     if (!this.adaptiveEnabled) {
       return;
@@ -657,8 +581,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
             const cooldownUntilMs = clampPositiveInt(row.cooldownUntilMs) ?? 0;
             const saturatedNo429Streak = clampNonNegativeInt(row.saturatedNo429Streak) ?? 0;
             const saturated429Streak = clampNonNegativeInt(row.saturated429Streak) ?? 0;
-            const blockedBackoffLevel = clampNonNegativeInt(row.blockedBackoffLevel) ?? 0;
-            const blockedBackoffUntilMs = clampNonNegativeInt(row.blockedBackoffUntilMs) ?? 0;
             const triedIncreaseCaps = Array.isArray(row.triedIncreaseCaps)
               ? row.triedIncreaseCaps
                   .map((entry) => clampPositiveInt(entry))
@@ -676,8 +598,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
               cooldownUntilMs,
               saturatedNo429Streak,
               saturated429Streak,
-              blockedBackoffLevel,
-              blockedBackoffUntilMs,
               lastDecisionMinute: -1,
               triedIncreaseCaps: new Set(triedIncreaseCaps),
               buckets: [],
@@ -711,8 +631,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         cooldownUntilMs: state.cooldownUntilMs,
         saturatedNo429Streak: state.saturatedNo429Streak,
         saturated429Streak: state.saturated429Streak,
-        blockedBackoffLevel: state.blockedBackoffLevel,
-        blockedBackoffUntilMs: state.blockedBackoffUntilMs,
         triedIncreaseCaps: Array.from(state.triedIncreaseCaps.values()).sort((a, b) => a - b),
         updatedAtMs: state.updatedAtMs
       };
@@ -766,8 +684,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       existing.safeCap = clampInt(existing.safeCap || existing.baseCap, existing.minCap, existing.hardMaxCap);
       existing.saturatedNo429Streak = clampNonNegativeInt(existing.saturatedNo429Streak) ?? 0;
       existing.saturated429Streak = clampNonNegativeInt(existing.saturated429Streak) ?? 0;
-      existing.blockedBackoffLevel = clampNonNegativeInt(existing.blockedBackoffLevel) ?? 0;
-      existing.blockedBackoffUntilMs = clampNonNegativeInt(existing.blockedBackoffUntilMs) ?? 0;
       return existing;
     }
     const state: AdaptiveRuntimeState = {
@@ -781,8 +697,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       cooldownUntilMs: 0,
       saturatedNo429Streak: 0,
       saturated429Streak: 0,
-      blockedBackoffLevel: 0,
-      blockedBackoffUntilMs: 0,
       lastDecisionMinute: -1,
       triedIncreaseCaps: new Set<number>(),
       buckets: [],
@@ -875,32 +789,12 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
         state.saturated429Streak = 0;
         changed = true;
       }
-      if (!got429 && state.blockedBackoffLevel > 0) {
-        state.blockedBackoffLevel = Math.max(0, state.blockedBackoffLevel - 1);
-        changed = true;
-      }
-      if (!got429 && state.blockedBackoffLevel === 0 && state.blockedBackoffUntilMs !== 0) {
-        state.blockedBackoffUntilMs = 0;
-        changed = true;
-      }
     } else if (got429) {
       state.saturated429Streak += 1;
       state.saturatedNo429Streak = 0;
       const tentativeDown = clampInt(state.currentCap - 1, state.minCap, state.hardMaxCap);
       if (tentativeDown !== state.tentativeCap) {
         state.tentativeCap = tentativeDown;
-        changed = true;
-      }
-      state.blockedBackoffLevel = Math.min(16, state.blockedBackoffLevel + 1);
-      const backoffBaseMs = resolveAdaptiveBlockBackoffBaseMs();
-      const backoffMaxMs = Math.max(backoffBaseMs, resolveAdaptiveBlockBackoffMaxMs());
-      const backoffMs = Math.min(
-        backoffMaxMs,
-        backoffBaseMs * Math.pow(2, Math.max(0, state.blockedBackoffLevel - 1))
-      );
-      const nextBackoffUntil = nowMs + backoffMs;
-      if (nextBackoffUntil > state.blockedBackoffUntilMs) {
-        state.blockedBackoffUntilMs = nextBackoffUntil;
         changed = true;
       }
       if (state.saturated429Streak >= ADAPTIVE_STREAK_THRESHOLD && state.currentCap > state.minCap) {
@@ -916,14 +810,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     } else {
       state.saturatedNo429Streak += 1;
       state.saturated429Streak = 0;
-      if (state.blockedBackoffLevel > 0) {
-        state.blockedBackoffLevel = Math.max(0, state.blockedBackoffLevel - 1);
-        changed = true;
-      }
-      if (state.blockedBackoffLevel === 0 && state.blockedBackoffUntilMs !== 0) {
-        state.blockedBackoffUntilMs = 0;
-        changed = true;
-      }
       const tentativeUp = clampInt(state.currentCap + 1, state.minCap, state.hardMaxCap);
       if (tentativeUp > state.tentativeCap) {
         state.tentativeCap = tentativeUp;
@@ -949,7 +835,7 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
       console.log(
         `[adaptive-concurrency] runtime=${runtimeKey} current=${beforeCurrentCap}->${state.currentCap} ` +
           `tentative=${beforeTentativeCap}->${state.tentativeCap} streak429=${state.saturated429Streak} ` +
-          `streakNo429=${state.saturatedNo429Streak} backoffLevel=${state.blockedBackoffLevel} reason=${reason || 'state_update'}`
+          `streakNo429=${state.saturatedNo429Streak} reason=${reason || 'state_update'}`
       );
     }
   }
@@ -1130,12 +1016,55 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     };
   }
 
+  private async waitProviderTrafficSaturationBackoff(args: {
+    runtimeKey: string;
+    scopeKey?: string;
+  }): Promise<number> {
+    const scopedRuntimeKey = composeScopedRuntimeKey(args.runtimeKey, args.scopeKey);
+    const scopeKey = `runtime:${scopedRuntimeKey}`;
+    const delayMs = recordErrorActionBackoff({
+      category: 'provider_traffic_saturated',
+      scopeKey
+    });
+    await waitErrorActionBackoffWithGate({
+      category: 'provider_traffic_saturated',
+      scopeKey,
+      ms: delayMs
+    });
+    return delayMs;
+  }
+
+  private buildSaturatedAcquireError(args: {
+    runtimeKey: string;
+    providerKey?: string;
+    reason: 'concurrency' | 'rpm' | 'mixed';
+    policy: ResolvedProviderTrafficPolicy;
+    activeInFlight: number;
+    rpmInWindow: number;
+    waitedMs: number;
+    unifiedBackoffMs: number;
+  }): ProviderTrafficSaturatedError {
+    return new ProviderTrafficSaturatedError(
+      `provider traffic saturated for runtime ${args.runtimeKey}`,
+      {
+        reason: `acquire_after_backoff_${args.reason}`,
+        runtimeKey: args.runtimeKey,
+        providerKey: args.providerKey,
+        maxInFlight: args.policy.concurrency.maxInFlight,
+        requestsPerMinute: args.policy.rpm.requestsPerMinute,
+        activeInFlight: args.activeInFlight,
+        rpmInWindow: args.rpmInWindow,
+        waitedMs: args.waitedMs,
+        unifiedBackoffMs: args.unifiedBackoffMs
+      }
+    );
+  }
+
   async acquire(options: {
     runtimeKey: string;
     providerKey?: string;
     requestId: string;
     runtime: ProviderRuntimeProfile;
-    softWaitTimeoutMs?: number;
     scopeKey?: string;
   }): Promise<ProviderTrafficAcquireResult> {
     const runtimeKey = options.runtimeKey.trim();
@@ -1165,159 +1094,98 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
           }
         }
       : policyBase;
-    const waitTimeoutMs = Math.min(
-      policy.concurrency.acquireTimeoutMs,
-      policy.rpm.acquireTimeoutMs
-    );
     const startedAt = Date.now();
-    const deadlineAt = startedAt + waitTimeoutMs;
-    const softWaitTimeoutMs = clampPositiveInt(options.softWaitTimeoutMs) ?? 0;
     const stateKey = toStateKey(composeScopedRuntimeKey(runtimeKey, scopeKey));
     const stateFile = this.getStateFile(stateKey);
     const lockFile = this.getLockFile(stateKey);
-    let waitAttempt = 0;
     let lastReason: 'concurrency' | 'rpm' | 'mixed' = 'mixed';
-    let waiterSlotHeld = false;
-    try {
-      while (true) {
-        let delayAfterReleaseMs = 0;
-        const lock = await this.acquireFileLock(lockFile, deadlineAt);
-        try {
-          const now = Date.now();
-          let state = await readTrafficState(stateFile);
-          state = this.pruneState(state, now, policy);
-          const activeInFlight = state.leases.length;
-          const rpmInWindow = state.rpmEvents.length;
-          const concurrencyBlocked = activeInFlight >= policy.concurrency.maxInFlight;
-          const rpmBlocked = rpmInWindow >= policy.rpm.requestsPerMinute;
-          if (!concurrencyBlocked && !rpmBlocked) {
-            const leaseId = randomUUID();
-            state.leases.push({
+    let waitedThroughUnifiedBackoff = false;
+    let unifiedBackoffMs = 0;
+    while (true) {
+      const lock = await this.acquireFileLock(lockFile, Date.now() + DEFAULT_CONCURRENCY_TIMEOUT_MS);
+      try {
+        const now = Date.now();
+        let state = await readTrafficState(stateFile);
+        state = this.pruneState(state, now, policy);
+        const activeInFlight = state.leases.length;
+        const rpmInWindow = state.rpmEvents.length;
+        const concurrencyBlocked = activeInFlight >= policy.concurrency.maxInFlight;
+        const rpmBlocked = rpmInWindow >= policy.rpm.requestsPerMinute;
+        if (!concurrencyBlocked && !rpmBlocked) {
+          const leaseId = randomUUID();
+          state.leases.push({
+            leaseId,
+            requestId,
+            pid: process.pid,
+            serverId: this.serverId,
+            startedAt: now,
+            expiresAt: now + policy.concurrency.staleLeaseMs
+          });
+          state.rpmEvents.push({
+            requestId,
+            startedAt: now
+          });
+          state.updatedAt = now;
+          await writeTrafficState(stateFile, state);
+          if (adaptiveState) {
+            const minute = toMinuteBucket(now);
+            const bucket = this.getOrCreateMinuteBucket(adaptiveState, minute);
+            bucket.requests += 1;
+            bucket.peakInFlight = Math.max(bucket.peakInFlight, activeInFlight + 1);
+            adaptiveState.updatedAtMs = now;
+          }
+          const waitedMs = Math.max(0, now - startedAt);
+          const newInFlight = activeInFlight + 1;
+          if (newInFlight >= policy.concurrency.maxInFlight && this.concurrencyBusyCallback) {
+            this.concurrencyBusyCallback(runtimeKey, true);
+          }
+          return {
+            permit: {
+              runtimeKey,
+              providerKey: options.providerKey,
+              requestId,
               leaseId,
-              requestId,
-              pid: process.pid,
-              serverId: this.serverId,
-              startedAt: now,
-              expiresAt: now + policy.concurrency.staleLeaseMs
-            });
-            state.rpmEvents.push({
-              requestId,
-              startedAt: now
-            });
-            state.updatedAt = now;
-            await writeTrafficState(stateFile, state);
-            if (adaptiveState) {
-              const minute = toMinuteBucket(now);
-              const bucket = this.getOrCreateMinuteBucket(adaptiveState, minute);
-              bucket.requests += 1;
-              bucket.peakInFlight = Math.max(bucket.peakInFlight, activeInFlight + 1);
-              adaptiveState.updatedAtMs = now;
-            }
-            const waitedMs = Math.max(0, now - startedAt);
-            const newInFlight = activeInFlight + 1;
-            if (newInFlight >= policy.concurrency.maxInFlight && this.concurrencyBusyCallback) {
-              this.concurrencyBusyCallback(runtimeKey, true);
-            }
-            return {
-              permit: {
-                runtimeKey,
-                providerKey: options.providerKey,
-                requestId,
-                leaseId,
-                stateKey,
-                ...(scopeKey ? { scopeKey } : {}),
-                maxInFlight: policy.concurrency.maxInFlight
-              },
-              policy,
-              waitedMs,
-              activeInFlight: newInFlight,
-              rpmInWindow: rpmInWindow + 1
-            };
-          }
-
-          if (!waiterSlotHeld) {
-            this.acquireWaiterSlot(runtimeKey);
-            waiterSlotHeld = true;
-          }
-
-          if (concurrencyBlocked && rpmBlocked) {
-            lastReason = 'mixed';
-          } else if (concurrencyBlocked) {
-            lastReason = 'concurrency';
-          } else {
-            lastReason = 'rpm';
-          }
-
-          const nowAfterCheck = Date.now();
-          const waitedMs = Math.max(0, nowAfterCheck - startedAt);
-          if (softWaitTimeoutMs > 0 && waitedMs >= softWaitTimeoutMs) {
-            throw new ProviderTrafficSaturatedError(
-              `provider traffic wait exceeded soft timeout for runtime ${runtimeKey}`,
-              {
-                reason: `acquire_soft_timeout_${lastReason}`,
-                runtimeKey,
-                providerKey: options.providerKey,
-                maxInFlight: policy.concurrency.maxInFlight,
-                requestsPerMinute: policy.rpm.requestsPerMinute,
-                activeInFlight,
-                rpmInWindow,
-                waitedMs,
-                softWaitTimeoutMs
-              }
-            );
-          }
-          if (nowAfterCheck >= deadlineAt) {
-            throw new ProviderTrafficSaturatedError(
-              `provider traffic saturated for runtime ${runtimeKey}`,
-              {
-                reason: `acquire_timeout_${lastReason}`,
-                runtimeKey,
-                providerKey: options.providerKey,
-                maxInFlight: policy.concurrency.maxInFlight,
-                requestsPerMinute: policy.rpm.requestsPerMinute,
-                activeInFlight,
-                rpmInWindow,
-                waitedMs
-              }
-            );
-          }
-
-          waitAttempt += 1;
-          const backoffMs = Math.min(
-            ACQUIRE_WAIT_MAX_MS,
-            ACQUIRE_WAIT_BASE_MS * Math.pow(2, Math.min(6, waitAttempt - 1))
-          );
-          let rpmWaitMs = 0;
-          if (rpmBlocked && state.rpmEvents.length > 0) {
-            const oldest = state.rpmEvents[0];
-            rpmWaitMs = Math.max(0, oldest.startedAt + policy.rpm.windowMs - nowAfterCheck);
-          }
-          const adaptiveBlockedWaitMs = (() => {
-            if (!adaptiveState || !concurrencyBlocked) {
-              return 0;
-            }
-            if (adaptiveState.blockedBackoffUntilMs <= nowAfterCheck) {
-              return 0;
-            }
-            return Math.max(0, adaptiveState.blockedBackoffUntilMs - nowAfterCheck);
-          })();
-          const combinedWaitMs = Math.min(
-            ACQUIRE_WAIT_MAX_MS,
-            Math.max(backoffMs, rpmWaitMs, adaptiveBlockedWaitMs)
-          );
-          const jitterMs = Math.floor(Math.random() * ACQUIRE_JITTER_MS);
-          delayAfterReleaseMs = Math.max(40, Math.min(combinedWaitMs + jitterMs, deadlineAt - nowAfterCheck));
-        } finally {
-          await lock.release();
+              stateKey,
+              ...(scopeKey ? { scopeKey } : {}),
+              maxInFlight: policy.concurrency.maxInFlight
+            },
+            policy,
+            waitedMs,
+            activeInFlight: newInFlight,
+            rpmInWindow: rpmInWindow + 1
+          };
         }
-        if (delayAfterReleaseMs > 0) {
-          await sleep(delayAfterReleaseMs);
+
+        if (concurrencyBlocked && rpmBlocked) {
+          lastReason = 'mixed';
+        } else if (concurrencyBlocked) {
+          lastReason = 'concurrency';
+        } else {
+          lastReason = 'rpm';
         }
+
+        const nowAfterCheck = Date.now();
+        const waitedMs = Math.max(0, nowAfterCheck - startedAt);
+        if (waitedThroughUnifiedBackoff) {
+          throw this.buildSaturatedAcquireError({
+            runtimeKey,
+            providerKey: options.providerKey,
+            reason: lastReason,
+            policy,
+            activeInFlight,
+            rpmInWindow,
+            waitedMs,
+            unifiedBackoffMs
+          });
+        }
+      } finally {
+        await lock.release();
       }
-    } finally {
-      if (waiterSlotHeld) {
-        this.releaseWaiterSlot(runtimeKey);
-      }
+      unifiedBackoffMs = await this.waitProviderTrafficSaturationBackoff({
+        runtimeKey,
+        scopeKey
+      });
+      waitedThroughUnifiedBackoff = true;
     }
   }
 

@@ -51,12 +51,6 @@ export {
   applySendFailureState
 } from './request-executor-failure-state.js';
 
-// Traffic soft-wait
-export {
-  isWebLikeRuntimeForTraffic,
-  resolveProviderTrafficSoftWaitTimeoutMs
-} from './request-executor-traffic-soft-wait.js';
-
 // Goal state persistence
 export {
   asFlatRecord,

@@ -2240,16 +2240,11 @@ pub fn should_retry_provider_failure_json(
 pub fn compute_provider_backoff_ms_json(
     classification_json: String,
     attempt: u32,
-    base_ms: i64,
-    max_ms: i64,
 ) -> NapiResult<i64> {
     let classification: failure_policy::FailureClassification =
         serde_json::from_str(&classification_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(
-        failure_policy::compute_backoff(classification, attempt, base_ms as u64, max_ms as u64)
-            as i64,
-    )
+    Ok(failure_policy::compute_backoff(classification, attempt) as i64)
 }
 
 #[napi(js_name = "filterOutExecutedServerToolCallsJson")]

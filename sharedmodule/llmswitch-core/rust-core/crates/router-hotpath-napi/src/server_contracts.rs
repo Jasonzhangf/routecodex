@@ -228,6 +228,46 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
             debug_flow: "1. Query describeServerModuleHelp('server.error_projection'). 2. Inspect http-error-mapper.ts source. 3. Verify public error body contains no internal metadata/auth details.",
             help: "Error projection: public error body must contain only client-safe error code and message. No internal auth details, request context, or runtime metadata in public error response.",
         },
+        ServerModuleHelp {
+            module_id: "server.error_action_queue",
+            version: CONTRACT_VERSION,
+            owner_module: "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts",
+            owner_builder: Some("describeErrorActionQueueContract"),
+            phase: "server.error_action",
+            description: "Unified error action queue for all host-side storm prevention waits. It records category/scope events, emits queue hooks, and performs blocking waits through one gate. Delay policy is fixed 1000ms -> 2000ms -> 3000ms cycle. It does not classify errors, mutate provider health, or project client errors.",
+            allowed_request_metadata_fields: &[],
+            forbidden_metadata_fields: &["metadata", "metaCarrier", "__rt", "errorCarrier"],
+            forbidden_provider_exits: vec![],
+            forbidden_client_exits: vec![],
+            forbidden_carriers: &[
+                "metadata",
+                "metaCarrier",
+                "runtimeMetadata",
+                "errorCarrier",
+                "classifiedError",
+                "__rt",
+                "snapshot",
+            ],
+            effects: &[
+                "record_error_action_backoff",
+                "emit_error_action_hook",
+                "blocking_wait_1s_2s_3s_cycle",
+                "enforce_fixed_waiter_cap",
+            ],
+            forbidden_paths: vec![
+                "provider.health",
+                "virtual_router.selection",
+                "client.response",
+                "provider.request",
+            ],
+            red_tests: &[
+                "request_executor_error_action_queue_fixed_cycle.red",
+                "provider_traffic_governor_unified_queue.red",
+                "server_module_help_error_action_queue.red",
+            ],
+            debug_flow: "1. Query describeServerModuleHelp('server.error_action_queue'). 2. Inspect request-executor-error-action-queue.ts contract. 3. Verify category/scope hook events and 1s/2s/3s blocking wait behavior in focused tests.",
+            help: "Error action queue: all error-storm waits use one fixed blocking queue: 1s -> 2s -> 3s -> repeat. Supported categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup. No per-call/env backoff configuration, no local soft-wait loops.",
+        },
     ]
 }
 
@@ -257,10 +297,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn describes_four_server_modules() {
+    fn describes_five_server_modules() {
         let output = describe_server_contracts();
         assert_eq!(output["contractVersion"], CONTRACT_VERSION);
-        assert_eq!(output["modules"].as_array().unwrap().len(), 4);
+        assert_eq!(output["modules"].as_array().unwrap().len(), 5);
     }
 
     #[test]

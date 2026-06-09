@@ -44,8 +44,7 @@ describe('provider failure policy ssot', () => {
       decisionLabel: 'direct_return',
       backoff: expect.objectContaining({
         scope: 'none',
-        baseMs: 0,
-        maxMs: 0
+        delaySequenceMs: []
       })
     }));
   });

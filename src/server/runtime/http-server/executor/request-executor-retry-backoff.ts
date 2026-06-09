@@ -43,13 +43,10 @@ export async function resolveProviderRetryBackoffPlan(args: {
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
   if (args.requestLocal) {
-    const retryBackoffMs =
-      args.retryError.statusCode === 429 || args.retryError.errorCode === 'HTTP_429' || args.retryError.upstreamCode === 'HTTP_429'
-        ? 0
-        : await waitBeforeRetry(args.error, {
-            attempt: args.attempt,
-            signal: args.abortSignal
-          });
+    const retryBackoffMs = await waitBeforeRetry(args.error, {
+      attempt: args.attempt,
+      signal: args.abortSignal
+    });
     return {
       blockingRecoverable,
       retryBackoffMs,
@@ -139,7 +136,7 @@ export async function resolveProviderRetryBackoffPlan(args: {
         : undefined;
     if (
       errRecord
-      && (errRecord.code === 'PROVIDER_TRAFFIC_SATURATED' || details?.reason === 'recoverable_waiter_overload')
+      && (errRecord.code === 'PROVIDER_TRAFFIC_SATURATED' || details?.reason === 'error_action_waiter_overload')
       && typeof args.stage === 'string'
     ) {
       errRecord.requestExecutorProviderErrorStage = args.stage;

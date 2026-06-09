@@ -8,6 +8,10 @@ import {
   ProviderTrafficSaturatedError,
   resolveProviderTrafficPolicy
 } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
+import {
+  registerErrorActionQueueHook,
+  resetErrorActionQueueStateForTests
+} from '../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
 
 function createRuntime(overrides?: Partial<ProviderRuntimeProfile>): ProviderRuntimeProfile {
   return {
@@ -26,7 +30,6 @@ function createRuntime(overrides?: Partial<ProviderRuntimeProfile>): ProviderRun
 
 describe('provider-traffic-governor', () => {
   const originalAdaptivePath = process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
-  const originalMaxWaiters = process.env.ROUTECODEX_PROVIDER_TRAFFIC_MAX_WAITERS;
 
   afterEach(() => {
     if (typeof originalAdaptivePath === 'string') {
@@ -34,11 +37,7 @@ describe('provider-traffic-governor', () => {
     } else {
       delete process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
     }
-    if (typeof originalMaxWaiters === 'string') {
-      process.env.ROUTECODEX_PROVIDER_TRAFFIC_MAX_WAITERS = originalMaxWaiters;
-    } else {
-      delete process.env.ROUTECODEX_PROVIDER_TRAFFIC_MAX_WAITERS;
-    }
+    resetErrorActionQueueStateForTests();
   });
 
   it('applies generic defaults when provider config omits concurrency/rpm', () => {
@@ -166,8 +165,6 @@ describe('provider-traffic-governor', () => {
           cooldownUntilMs: 0,
           saturatedNo429Streak: 5,
           saturated429Streak: 0,
-          blockedBackoffLevel: 0,
-          blockedBackoffUntilMs: 0,
           triedIncreaseCaps: [2],
           updatedAtMs: Date.now()
         }
@@ -450,8 +447,8 @@ describe('provider-traffic-governor', () => {
     }
   });
 
-  it('supports soft wait timeout to trigger fast provider switch', async () => {
-    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-soft-${process.pid}-${randomUUID()}`);
+  it('blocks once through the unified queue, then raises saturation if still full', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-unified-${process.pid}-${randomUUID()}`);
     const governor = new ProviderTrafficGovernor(rootDir);
     const runtime = createRuntime({
       runtimeKey: 'weighted.pool',
@@ -481,13 +478,19 @@ describe('provider-traffic-governor', () => {
           runtimeKey: runtime.runtimeKey,
           providerKey: 'openrouter.key1.qwen',
           requestId: 'soft-2',
-          runtime,
-          softWaitTimeoutMs: 120
+          runtime
         })
-      ).rejects.toBeInstanceOf(ProviderTrafficSaturatedError);
+      ).rejects.toMatchObject({
+        statusCode: 429,
+        code: 'PROVIDER_TRAFFIC_SATURATED',
+        details: expect.objectContaining({
+          reason: 'acquire_after_backoff_concurrency',
+          unifiedBackoffMs: 1000
+        })
+      });
       const elapsed = Date.now() - startedAt;
-      expect(elapsed).toBeGreaterThanOrEqual(100);
-      expect(elapsed).toBeLessThan(1500);
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(2500);
 
       await governor.release(first.permit);
     } finally {
@@ -495,12 +498,11 @@ describe('provider-traffic-governor', () => {
     }
   });
 
-  it('bounds blocked acquire waiters to avoid queue blow-up', async () => {
-    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-waiters-${process.pid}-${randomUUID()}`);
-    process.env.ROUTECODEX_PROVIDER_TRAFFIC_MAX_WAITERS = '1';
+  it('queues saturated acquires through unified action hooks before retrying capacity', async () => {
+    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-queue-${process.pid}-${randomUUID()}`);
     const governor = new ProviderTrafficGovernor(rootDir);
     const runtime = createRuntime({
-      runtimeKey: 'waiter.bound.runtime',
+      runtimeKey: 'queue.runtime',
       providerId: 'ali-coding-plan',
       providerFamily: 'ali-coding-plan',
       concurrency: {
@@ -513,6 +515,8 @@ describe('provider-traffic-governor', () => {
         acquireTimeoutMs: 2000
       }
     });
+    const events: unknown[] = [];
+    const unregister = registerErrorActionQueueHook((event) => events.push(event));
     try {
       const first = await governor.acquire({
         runtimeKey: runtime.runtimeKey,
@@ -528,27 +532,33 @@ describe('provider-traffic-governor', () => {
         runtime
       });
       await new Promise((resolve) => setTimeout(resolve, 150));
-
-      await expect(
-        governor.acquire({
-          runtimeKey: runtime.runtimeKey,
-          providerKey: 'ali-coding-plan.key1.glm-5',
-          requestId: 'waiter-3',
-          runtime
-        })
-      ).rejects.toMatchObject({
-        statusCode: 429,
-        code: 'PROVIDER_TRAFFIC_SATURATED',
-        details: expect.objectContaining({
-          reason: 'acquire_waiter_overload'
-        })
-      });
-
       await governor.release(first.permit);
       const secondPermit = await second;
       expect(secondPermit.activeInFlight).toBe(1);
+      expect(secondPermit.waitedMs).toBeGreaterThanOrEqual(1000);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'record',
+          category: 'provider_traffic_saturated',
+          scopeKey: 'runtime:queue.runtime',
+          delayMs: 1000
+        }),
+        expect.objectContaining({
+          type: 'wait_start',
+          category: 'provider_traffic_saturated',
+          scopeKey: 'runtime:queue.runtime',
+          delayMs: 1000
+        }),
+        expect.objectContaining({
+          type: 'wait_end',
+          category: 'provider_traffic_saturated',
+          scopeKey: 'runtime:queue.runtime',
+          delayMs: 1000
+        })
+      ]));
       await governor.release(secondPermit.permit);
     } finally {
+      unregister();
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });

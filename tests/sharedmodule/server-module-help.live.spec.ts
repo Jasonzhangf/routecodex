@@ -9,7 +9,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-vr-node-contracts.js';
 
 describe('server module help live NAPI verification (Phase Server-E)', () => {
-  it('lists exactly 4 server modules with contract version 2026-06-03.server-module-help.v1', () => {
+  it('lists exactly 5 server modules with contract version 2026-06-03.server-module-help.v1', () => {
     const all = describeServerContractsWithNative();
     expect(all).toMatchObject({
       contractVersion: '2026-06-03.server-module-help.v1',
@@ -20,6 +20,7 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
       'server.direct_passthrough',
       'server.response_projection',
       'server.error_projection',
+      'server.error_action_queue',
     ]);
   });
 
@@ -37,5 +38,21 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
       contractVersion: '2026-06-03.server-module-help.v1',
       module: { moduleId: 'server.direct_passthrough' },
     });
+  });
+
+  it('describes the unified error action queue policy', () => {
+    const one = describeServerModuleHelpWithNative('server.error_action_queue');
+    expect(one).toMatchObject({
+      contractVersion: '2026-06-03.server-module-help.v1',
+      module: {
+        moduleId: 'server.error_action_queue',
+        ownerBuilder: 'describeErrorActionQueueContract',
+        effects: expect.arrayContaining([
+          'record_error_action_backoff',
+          'blocking_wait_1s_2s_3s_cycle',
+        ]),
+      },
+    });
+    expect(String(one.module?.help ?? '')).toContain('1s -> 2s -> 3s -> repeat');
   });
 });

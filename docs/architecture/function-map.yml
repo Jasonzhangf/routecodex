@@ -431,6 +431,53 @@ owners:
     notes:
       - Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only.
 
+  - feature_id: error.backoff_action_queue
+    status: active
+    summary: unified blocking backoff queue for host-side error action categories
+    owner_module: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    canonical_types:
+      - ErrorActionCategory
+      - ErrorActionQueueEvent
+      - ErrorActionQueueState
+    canonical_builders:
+      - describeErrorActionQueueContract
+      - recordErrorActionBackoff
+      - waitErrorActionBackoffWithGate
+    allowed_paths:
+      - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+      - src/server/runtime/http-server/executor/request-executor-global-error-backoff.ts
+      - src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
+      - src/server/runtime/http-server/executor/request-executor-retry-state.ts
+      - src/server/runtime/http-server/executor/request-executor-retry-backoff.ts
+      - src/server/runtime/http-server/executor/retry-engine.ts
+      - src/server/runtime/http-server/executor-provider.ts
+      - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
+      - src/server/runtime/http-server/provider-traffic-governor.ts
+      - src/providers/core/runtime/provider-failure-policy-backoff.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
+      - tests/red-tests/server_module_help_contract.test.ts
+      - docs
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/src/servertool
+    required_tests:
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
+      - tests/red-tests/server_module_help_contract.test.ts
+      - tests/sharedmodule/server-module-help.live.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat.
+      - Categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup.
+      - Provider traffic saturation records provider_traffic_saturated, waits once through this queue, then raises saturation if still full so Virtual Router can switch provider even in priority mode.
+      - Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner.
+
   - feature_id: vr.route_selection
     status: active
     summary: virtual router route classification and selected target truth

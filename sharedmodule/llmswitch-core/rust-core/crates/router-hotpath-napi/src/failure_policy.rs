@@ -52,22 +52,7 @@ pub enum BackoffScope {
     Provider,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailureBackoffPlan {
-    pub scope: BackoffScope,
-    pub base_ms: u64,
-    pub max_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailureActionPlan {
-    pub classification: Option<FailureClassification>,
-    pub affects_health: bool,
-    pub blocking_recoverable: bool,
-    pub should_retry: bool,
-    pub action: RetryAction,
-    pub backoff: FailureBackoffPlan,
-}
+const ERROR_ACTION_BACKOFF_SEQUENCE_MS: [u64; 3] = [1_000, 2_000, 3_000];
 
 pub fn classify_failure(
     status_code: Option<u16>,
@@ -124,18 +109,12 @@ pub fn should_retry(
     attempt < max_attempts
 }
 
-pub fn compute_backoff(
-    classification: FailureClassification,
-    attempt: u32,
-    base_ms: u64,
-    max_ms: u64,
-) -> u64 {
+pub fn compute_backoff(classification: FailureClassification, attempt: u32) -> u64 {
     if classification != FailureClassification::Recoverable {
         return 0;
     }
-    let step = attempt.saturating_sub(1).min(6);
-    let delay = base_ms * (1u64 << step);
-    delay.min(max_ms)
+    let step = attempt.saturating_sub(1) as usize;
+    ERROR_ACTION_BACKOFF_SEQUENCE_MS[step % ERROR_ACTION_BACKOFF_SEQUENCE_MS.len()]
 }
 
 #[cfg(test)]
@@ -168,5 +147,15 @@ mod tests {
             classification,
             Some("host.response_contract")
         ));
+    }
+
+    #[test]
+    fn test_compute_backoff_uses_fixed_cycle() {
+        let classification = FailureClassification::Recoverable;
+        assert_eq!(compute_backoff(classification, 1), 1_000);
+        assert_eq!(compute_backoff(classification, 2), 2_000);
+        assert_eq!(compute_backoff(classification, 3), 3_000);
+        assert_eq!(compute_backoff(classification, 4), 1_000);
+        assert_eq!(compute_backoff(FailureClassification::Unrecoverable, 1), 0);
     }
 }

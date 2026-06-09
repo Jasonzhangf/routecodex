@@ -1,44 +1,28 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { waitBeforeRetry } from '../../../../src/server/runtime/http-server/executor-provider.js';
+import {
+  resetErrorActionQueueStateForTests
+} from '../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
 
 describe('executor-provider waitBeforeRetry', () => {
   afterEach(() => {
     jest.useRealTimers();
-    delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    delete process.env.RCC_429_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-    delete process.env.RCC_429_BACKOFF_MAX_MS;
-    delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
-    delete process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
-    delete process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS;
-    delete process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS;
-    delete process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_MAX_MS;
-    delete process.env.RCC_NETWORK_RETRY_BACKOFF_MAX_MS;
+    resetErrorActionQueueStateForTests();
   });
 
-  it('uses exponential backoff for HTTP 429', async () => {
+  it('uses unified 1s backoff for HTTP 429', async () => {
     jest.useFakeTimers();
-    const timerSpy = jest.spyOn(global, 'setTimeout');
     const err = Object.assign(new Error('HTTP 429: rate limited'), {
       statusCode: 429
     });
 
     const pending = waitBeforeRetry(err, { attempt: 3 });
-
-    expect(timerSpy).toHaveBeenCalled();
-    const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(800);
-
-    jest.runOnlyPendingTimers();
-    await pending;
-    timerSpy.mockRestore();
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(1000);
   });
 
-  it('honors Retry-After header when larger than exponential delay', async () => {
+  it('uses unified backoff for errors carrying upstream retry-after details', async () => {
     jest.useFakeTimers();
-    const timerSpy = jest.spyOn(global, 'setTimeout');
     const err = Object.assign(new Error('HTTP 429: rate limited'), {
       statusCode: 429,
       response: {
@@ -49,70 +33,41 @@ describe('executor-provider waitBeforeRetry', () => {
     });
 
     const pending = waitBeforeRetry(err, { attempt: 1 });
-
-    expect(timerSpy).toHaveBeenCalled();
-    const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(800);
-
-    jest.runOnlyPendingTimers();
-    await pending;
-    timerSpy.mockRestore();
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(1000);
   });
 
-  it('uses exponential backoff for transport errors', async () => {
+  it('uses unified 1s backoff for transport errors', async () => {
     jest.useFakeTimers();
-    const timerSpy = jest.spyOn(global, 'setTimeout');
     const err = Object.assign(new Error('fetch failed'), {
       code: 'ECONNRESET'
     });
 
     const pending = waitBeforeRetry(err, { attempt: 4 });
-
-    expect(timerSpy).toHaveBeenCalled();
-    const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(3000);
-
-    jest.runOnlyPendingTimers();
-    await pending;
-    timerSpy.mockRestore();
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(1000);
   });
 
-  it('uses generic exponential backoff for non-429 retries (single-provider pool)', async () => {
+  it('uses unified 1s backoff for non-429 retries (single-provider pool)', async () => {
     jest.useFakeTimers();
-    const timerSpy = jest.spyOn(global, 'setTimeout');
     const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
       statusCode: 500
     });
 
     const pending = waitBeforeRetry(err, { attempt: 4 });
-
-    expect(timerSpy).toHaveBeenCalled();
-    const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(3000);
-
-    jest.runOnlyPendingTimers();
-    await pending;
-    timerSpy.mockRestore();
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(1000);
   });
 
-  it('caps generic provider backoff env overrides at 3s', async () => {
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '64000';
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '8000';
+  it('keeps fixed sequence across attempts without per-call configuration', async () => {
     jest.useFakeTimers();
-    const timerSpy = jest.spyOn(global, 'setTimeout');
     const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
       statusCode: 500
     });
 
     const pending = waitBeforeRetry(err, { attempt: 2 });
-
-    expect(timerSpy).toHaveBeenCalled();
-    const delay = timerSpy.mock.calls.at(-1)?.[1];
-    expect(delay).toBe(3000);
-
-    jest.runOnlyPendingTimers();
-    await pending;
-    timerSpy.mockRestore();
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toBe(1000);
   });
 
   it('fails fast when abort listener registration fails instead of silently waiting for timeout', async () => {

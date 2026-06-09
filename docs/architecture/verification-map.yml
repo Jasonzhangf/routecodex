@@ -225,6 +225,30 @@ verification:
     notes:
       - Run broader executor retry stack when classification semantics change.
 
+  - feature_id: error.backoff_action_queue
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+      - src/providers/core/runtime/provider-failure-policy-backoff.ts
+    contract:
+      - tests/red-tests/server_module_help_contract.test.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/tests/server_module_help.rs
+    integration:
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
+      - tests/server/runtime/http-server/executor-provider.backoff.spec.ts
+      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
+      - tests/server/runtime/request-executor.single-attempt.spec.ts
+      - tests/sharedmodule/server-module-help.live.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility.
+      - Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests.
+
   - feature_id: vr.route_selection
     change_risk: high
     unit:

@@ -66,8 +66,8 @@
 - generic `500`：`recoverable=false`、`affectsHealth=true`
 - 短期 `429`：`recoverable=true`、但 `affectsHealth=true`
 
-这与当前全局规则冲突：
-- recoverable => block + exponential backoff
+这与当前全局规则冲突（2026-06-09 修正）：
+- recoverable => blocking wait through unified error action queue (`1s -> 2s -> 3s -> repeat`)
 - recoverable => health-neutral
 - unrecoverable => direct return
 

@@ -7,16 +7,18 @@ import {
   extractStatusCodeFromError
 } from './utils.js';
 import {
-  waitWithClientAbortSignal
-} from './request-executor-abort.js';
+  peekErrorActionBackoffConsecutiveForTests,
+  peekErrorActionBackoffWaitMs,
+  recordErrorActionBackoff,
+  resetErrorActionBackoff,
+  resetErrorActionQueueStateForTests,
+  waitErrorActionBackoffWithGate
+} from './request-executor-error-action-queue.js';
 
 const SESSION_STORM_BACKOFF_TTL_MS = 10 * 60_000;
-const SESSION_STORM_BACKOFF_MAX_CAP_MS = 3_000;
 
 const sessionStormBackoffState = new Map<string, {
-  consecutive: number;
   updatedAtMs: number;
-  nextAllowedAtMs: number;
   hardBlock?: boolean;
   code?: string;
   upstreamCode?: string;
@@ -187,14 +189,6 @@ export function isSessionStormBackoffCandidate(error: unknown): boolean {
 }
 
 export function resolveSessionStormBackoffBaseMs(): number {
-  const raw =
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS
-    ?? process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS
-    ?? '';
-  const parsed = Number.parseInt(String(raw).trim(), 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return Math.min(parsed, SESSION_STORM_BACKOFF_MAX_CAP_MS);
-  }
   return 1_000;
 }
 
@@ -209,38 +203,29 @@ export function resolveSessionStormBackoffBaseMsForError(error?: unknown): numbe
 }
 
 export function resolveSessionStormBackoffMaxMs(): number {
-  const raw =
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS
-    ?? process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS
-    ?? '';
-  const parsed = Number.parseInt(String(raw).trim(), 10);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return Math.min(parsed, SESSION_STORM_BACKOFF_MAX_CAP_MS);
-  }
-  return SESSION_STORM_BACKOFF_MAX_CAP_MS;
+  return 3_000;
 }
 
 export function resolveSessionStormHardBlockMsForError(error?: unknown): number {
-  if (isClientToolArgsInvalidStorm(error)) {
-    return resolveSessionStormBackoffBaseMs();
-  }
+  void error;
   return 0;
 }
 
 export function resolveSessionStormBackoffMaxMsForError(error?: unknown): number {
-  if (isClientToolArgsInvalidStorm(error)) {
-    return resolveSessionStormHardBlockMsForError(error) || 1_000;
-  }
   if (isDeterministicMalformedResponseStorm(error)) {
-    return SESSION_STORM_BACKOFF_MAX_CAP_MS;
+    return 3_000;
   }
   return resolveSessionStormBackoffMaxMs();
 }
 
 function pruneExpiredSessionStormBackoff(now = Date.now()): void {
   for (const [existingKey, state] of sessionStormBackoffState.entries()) {
-    if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS || state.nextAllowedAtMs < now) {
+    if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS) {
       sessionStormBackoffState.delete(existingKey);
+      resetErrorActionBackoff({
+        category: 'session_storm',
+        scopeKey: existingKey
+      });
     }
   }
 }
@@ -256,24 +241,15 @@ function readErrorMessage(error: unknown): string {
 export function consumeSessionStormBackoffMs(key: string, error?: unknown): number {
   const now = Date.now();
   pruneExpiredSessionStormBackoff(now);
-  const previous = sessionStormBackoffState.get(key);
-  const consecutive =
-    previous && now - previous.updatedAtMs < SESSION_STORM_BACKOFF_TTL_MS
-      ? Math.min(previous.consecutive + 1, 16)
-      : 1;
-  const hardBlockMs = resolveSessionStormHardBlockMsForError(error);
-  const delayMs = hardBlockMs > 0
-    ? hardBlockMs
-    : Math.min(
-      resolveSessionStormBackoffMaxMsForError(error),
-      resolveSessionStormBackoffBaseMsForError(error) * Math.pow(2, Math.max(0, consecutive - 1))
-    );
+  const hardBlock = isClientToolArgsInvalidStorm(error);
+  const delayMs = recordErrorActionBackoff({
+    category: 'session_storm',
+    scopeKey: key
+  });
   const errorRecord = error && typeof error === 'object' ? error as { code?: unknown; upstreamCode?: unknown } : {};
   sessionStormBackoffState.set(key, {
-    consecutive,
     updatedAtMs: now,
-    nextAllowedAtMs: now + delayMs,
-    ...(hardBlockMs > 0 ? { hardBlock: true } : {}),
+    ...(hardBlock ? { hardBlock: true } : {}),
     ...(normalizeCodeKey(errorRecord.code) ? { code: normalizeCodeKey(errorRecord.code) } : {}),
     ...(normalizeCodeKey(errorRecord.upstreamCode) ? { upstreamCode: normalizeCodeKey(errorRecord.upstreamCode) } : {}),
     ...(readErrorMessage(error) ? { reason: readErrorMessage(error).slice(0, 300) } : {})
@@ -289,12 +265,16 @@ export function peekSessionStormBackoffWaitMs(key: string): number {
   const now = Date.now();
   if (now - state.updatedAtMs >= SESSION_STORM_BACKOFF_TTL_MS) {
     sessionStormBackoffState.delete(key);
+    resetErrorActionBackoff({
+      category: 'session_storm',
+      scopeKey: key
+    });
     return 0;
   }
-  if (state.nextAllowedAtMs <= now) {
-    return 0;
-  }
-  return Math.max(0, state.nextAllowedAtMs - now);
+  return peekErrorActionBackoffWaitMs({
+    category: 'session_storm',
+    scopeKey: key
+  });
 }
 
 export function buildSessionStormHardBlockError(key: string): Error | undefined {
@@ -325,7 +305,10 @@ export function buildSessionStormHardBlockError(key: string): Error | undefined 
   err.details = {
     scope: key,
     waitMs,
-    consecutive: state.consecutive,
+    consecutive: peekErrorActionBackoffConsecutiveForTests({
+      category: 'session_storm',
+      scopeKey: key
+    }),
     reason: state.reason,
     sourceCode,
     sourceUpstreamCode: state.upstreamCode
@@ -338,10 +321,17 @@ export function clearSessionStormBackoff(key?: string): void {
     return;
   }
   sessionStormBackoffState.delete(key);
+  resetErrorActionBackoff({
+    category: 'session_storm',
+    scopeKey: key
+  });
 }
 
 export function peekSessionStormBackoffConsecutiveForTests(key: string): number {
-  return sessionStormBackoffState.get(key)?.consecutive ?? 0;
+  return peekErrorActionBackoffConsecutiveForTests({
+    category: 'session_storm',
+    scopeKey: key
+  });
 }
 
 export function peekSessionStormBackoffWaitMsForTests(key: string): number {
@@ -351,6 +341,7 @@ export function peekSessionStormBackoffWaitMsForTests(key: string): number {
 export function resetSessionStormBackoffStateForTests(): void {
   sessionStormBackoffState.clear();
   sessionStormBackoffGateState.clear();
+  resetErrorActionQueueStateForTests();
 }
 
 export async function waitSessionStormBackoffWithGate(
@@ -362,24 +353,11 @@ export async function waitSessionStormBackoffWithGate(
   if (!(ms > 0)) {
     return;
   }
-  const normalizedKey = key.trim() || 'session:unknown';
-  const previous = sessionStormBackoffGateState.get(normalizedKey) ?? Promise.resolve();
-  let release: () => void = () => undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
+  await waitErrorActionBackoffWithGate({
+    category: 'session_storm',
+    scopeKey: key,
+    ms,
+    signal,
+    logNonBlockingError
   });
-  sessionStormBackoffGateState.set(normalizedKey, current);
-  try {
-    await previous.catch((error: unknown) => {
-      logNonBlockingError('waitSessionStormBackoffWithGate.previous', error, {
-        key: normalizedKey
-      });
-    });
-    await waitWithClientAbortSignal(ms, signal, logNonBlockingError);
-  } finally {
-    release();
-    if (sessionStormBackoffGateState.get(normalizedKey) === current) {
-      sessionStormBackoffGateState.delete(normalizedKey);
-    }
-  }
 }

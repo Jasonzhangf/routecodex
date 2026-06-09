@@ -11,6 +11,10 @@ import {
   resolveServerToolNestedFollowupTimeoutMs
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
+import {
+  recordErrorActionBackoff,
+  waitErrorActionBackoffWithGate
+} from './request-executor-error-action-queue.js';
 
 type NativeHubPipelineSemanticMappersModule = {
   normalizeServertoolFollowupPayloadShapeWithNative?: (entryEndpoint: string, payload: Record<string, unknown>) => Record<string, unknown>;
@@ -45,7 +49,6 @@ async function normalizeFollowupPayloadShapeWithNative(entryEndpoint: string, pa
 }
 
 const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
-const SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS = 200;
 
 
 type ResponsesConversationModule = {
@@ -124,18 +127,9 @@ async function rebindNestedResponsesContextToResponseId(input: PipelineExecution
   mod.rebindResponsesConversationRequestId(input.requestId, responseId);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
-}
-
 function readForcedProviderKey(metadata?: Record<string, unknown>): string | undefined {
   const raw = metadata?.__shadowCompareForcedProviderKey;
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : undefined;
-}
-
-function computeExponentialBackoffMs(attempt: number): number {
-  const safeAttempt = Math.max(1, Math.floor(attempt));
-  return SAME_PROVIDER_FOLLOWUP_BACKOFF_BASE_MS * (2 ** (safeAttempt - 1));
 }
 
 function readNumericStatusFromError(error: unknown): number | undefined {
@@ -712,14 +706,22 @@ export async function executeServerToolReenterPipeline(args: {
       if (isLastAttempt) {
         break;
       }
-      const backoffMs = computeExponentialBackoffMs(attempt);
+      const backoffScopeKey = `request:${args.requestId}|provider:${forcedProviderKey}`;
+      const backoffMs = recordErrorActionBackoff({
+        category: 'servertool_followup',
+        scopeKey: backoffScopeKey
+      });
       console.warn(
         `[servertool.followup] req=${args.requestId} forcedProvider=${forcedProviderKey} `
         + `attempt=${attempt}/${maxAttempts} failed, retry in ${backoffMs}ms: `
         + `${error instanceof Error ? error.message : String(error)}`
       );
       await awaitNestedExecutionWithFailFast({
-        promise: sleep(backoffMs),
+        promise: waitErrorActionBackoffWithGate({
+          category: 'servertool_followup',
+          scopeKey: backoffScopeKey,
+          ms: backoffMs
+        }),
         abortSignal: getNestedFollowupAbortSignal(nestedInput.metadata),
         abortCarrier: nestedInput.metadata,
         timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),

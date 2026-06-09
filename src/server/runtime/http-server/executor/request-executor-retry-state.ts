@@ -1,26 +1,24 @@
 import {
-  computeProviderFailureBackoffDelayMs
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
-import {
   readString,
   normalizeCodeKey,
   normalizeRuntimeKey
 } from './request-executor-error-shared.js';
 import {
-  waitWithClientAbortSignal
-} from './request-executor-abort.js';
+  type ErrorActionCategory,
+  peekErrorActionBackoffConsecutiveForTests,
+  peekErrorActionBackoffWaitMs,
+  recordErrorActionBackoff,
+  resetErrorActionBackoff,
+  resetErrorActionBackoffByScopePrefix,
+  resetErrorActionQueueStateForTests,
+  waitErrorActionBackoffWithGate
+} from './request-executor-error-action-queue.js';
 
 const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
 
-const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
-const recoverableRetryGateState = new Map<string, Promise<void>>();
-const recoverableRetryWaiterState = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
 const providerTransportBackoffState = new Map<string, {
-  consecutive: number;
   updatedAtMs: number;
-  nextAllowedAtMs: number;
 }>();
-const providerTransportBackoffGateState = new Map<string, Promise<void>>();
 const logicalChainRetryState = new Map<string, {
   recoverableRetries: number;
   updatedAtMs: number;
@@ -49,8 +47,7 @@ export function buildRecoverableErrorBackoffKey(args: {
     || normalizeCodeKey(args.errorCode) === 'HTTP_429'
     || normalizeCodeKey(args.upstreamCode) === 'HTTP_429';
   if (is429) {
-    // Keep 429 backoff chain stable to preserve exponential growth across
-    // provider-specific wording/code noise in upstream payload.
+    // Keep 429 backoff scope stable across provider-specific wording/code noise.
     return `${providerScope}|status:429|rate_limit`;
   }
   const errorPart = normalizeCodeKey(args.errorCode) ?? 'error:none';
@@ -81,22 +78,10 @@ export function consumeRecoverableErrorBackoffMs(
     reason?: string;
   }
 ): number {
-  const now = Date.now();
-  for (const [existingKey, state] of recoverableErrorBackoffState.entries()) {
-    if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
-      recoverableErrorBackoffState.delete(existingKey);
-    }
-  }
-  const previous = recoverableErrorBackoffState.get(key);
-  const consecutive =
-    previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
-      ? Math.min(previous.consecutive + 1, 16)
-      : 1;
-  recoverableErrorBackoffState.set(key, { consecutive, updatedAtMs: now });
-  return computeProviderFailureBackoffDelayMs({
-    scope: 'recoverable',
-    statusCode: args.statusCode,
-    consecutive
+  void args;
+  return recordErrorActionBackoff({
+    category: 'provider_recoverable',
+    scopeKey: key
   });
 }
 
@@ -107,23 +92,10 @@ export function consumeProviderScopedRetryBackoffMs(
     statusCode?: number;
   }
 ): number {
-  const now = Date.now();
-  for (const [existingKey, state] of recoverableErrorBackoffState.entries()) {
-    if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
-      recoverableErrorBackoffState.delete(existingKey);
-    }
-  }
-  const previous = recoverableErrorBackoffState.get(key);
-  const consecutive =
-    previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
-      ? Math.min(previous.consecutive + 1, 16)
-      : 1;
-  recoverableErrorBackoffState.set(key, { consecutive, updatedAtMs: now });
-  return computeProviderFailureBackoffDelayMs({
-    scope: 'provider',
-    error: args.error,
-    statusCode: args.statusCode,
-    consecutive
+  void args;
+  return recordErrorActionBackoff({
+    category: 'provider_recoverable',
+    scopeKey: key
   });
 }
 
@@ -153,23 +125,19 @@ export function consumeProviderTransportBackoffMs(
   for (const [existingKey, state] of providerTransportBackoffState.entries()) {
     if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
       providerTransportBackoffState.delete(existingKey);
+      resetErrorActionBackoff({
+        category: 'provider_transport',
+        scopeKey: existingKey
+      });
     }
   }
-  const previous = providerTransportBackoffState.get(key);
-  const consecutive =
-    previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
-      ? Math.min(previous.consecutive + 1, 16)
-      : 1;
-  const delayMs = computeProviderFailureBackoffDelayMs({
-    scope: 'provider',
-    error: args.error,
-    statusCode: args.statusCode,
-    consecutive
+  void args;
+  const delayMs = recordErrorActionBackoff({
+    category: 'provider_transport',
+    scopeKey: key
   });
   providerTransportBackoffState.set(key, {
-    consecutive,
-    updatedAtMs: now,
-    nextAllowedAtMs: now + delayMs
+    updatedAtMs: now
   });
   return delayMs;
 }
@@ -182,23 +150,39 @@ export function peekProviderTransportBackoffWaitMs(key: string): number {
   const now = Date.now();
   if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
     providerTransportBackoffState.delete(key);
+    resetErrorActionBackoff({
+      category: 'provider_transport',
+      scopeKey: key
+    });
     return 0;
   }
-  return Math.max(0, state.nextAllowedAtMs - now);
+  return peekErrorActionBackoffWaitMs({
+    category: 'provider_transport',
+    scopeKey: key
+  });
 }
 
 export function clearProviderTransportBackoff(key?: string): void {
   if (key) {
     providerTransportBackoffState.delete(key);
+    resetErrorActionBackoff({
+      category: 'provider_transport',
+      scopeKey: key
+    });
   }
 }
 
 export function clearRecoverableErrorBackoff(key?: string): void {
   if (key) {
-    recoverableErrorBackoffState.delete(key);
+    resetErrorActionBackoff({
+      category: 'provider_recoverable',
+      scopeKey: key
+    });
     return;
   }
-  recoverableErrorBackoffState.clear();
+  resetErrorActionBackoff({
+    category: 'provider_recoverable'
+  });
 }
 
 export function clearRecoverableErrorBackoffForProvider(args: {
@@ -211,11 +195,32 @@ export function clearRecoverableErrorBackoffForProvider(args: {
   if (prefixes.length === 0) {
     return;
   }
-  for (const key of recoverableErrorBackoffState.keys()) {
-    if (prefixes.some((prefix) => key.startsWith(prefix))) {
-      recoverableErrorBackoffState.delete(key);
-    }
+  for (const prefix of prefixes) {
+    resetErrorActionBackoffByScopePrefix({
+      category: 'provider_recoverable',
+      scopePrefix: prefix
+    });
   }
+}
+
+function inferActionCategoryForBackoffKey(key: string): ErrorActionCategory {
+  return key.startsWith('runtime:') ? 'provider_transport' : 'provider_recoverable';
+}
+
+function waitBackoffWithGlobalGate(args: {
+  category: ErrorActionCategory;
+  key: string;
+  ms: number;
+  signal?: AbortSignal;
+  logNonBlockingError: LogNonBlockingError;
+}): Promise<void> {
+  return waitErrorActionBackoffWithGate({
+    category: args.category,
+    scopeKey: args.key,
+    ms: args.ms,
+    signal: args.signal,
+    logNonBlockingError: args.logNonBlockingError
+  }).then(() => undefined);
 }
 
 export async function waitProviderTransportBackoffWithGate(args: {
@@ -227,100 +232,13 @@ export async function waitProviderTransportBackoffWithGate(args: {
   if (!(args.ms > 0)) {
     return;
   }
-  const normalizedKey = args.key.trim() || 'provider:unknown';
-  const previous = providerTransportBackoffGateState.get(normalizedKey) ?? Promise.resolve();
-  let release: () => void = () => undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
+  await waitBackoffWithGlobalGate({
+    category: 'provider_transport',
+    key: args.key,
+    ms: args.ms,
+    signal: args.signal,
+    logNonBlockingError: args.logNonBlockingError
   });
-  providerTransportBackoffGateState.set(normalizedKey, current);
-  try {
-    await previous.catch((error: unknown) => {
-      args.logNonBlockingError('waitProviderTransportBackoffWithGate.previous', error, {
-        key: normalizedKey
-      });
-    });
-    await waitWithClientAbortSignal(args.ms, args.signal, args.logNonBlockingError);
-  } finally {
-    release();
-    if (providerTransportBackoffGateState.get(normalizedKey) === current) {
-      providerTransportBackoffGateState.delete(normalizedKey);
-    }
-  }
-}
-
-function resolveRecoverableBackoffMaxWaiters(): number {
-  const raw =
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS
-    ?? process.env.RCC_RECOVERABLE_BACKOFF_MAX_WAITERS
-    ?? '';
-  const parsed = Number.parseInt(String(raw).trim(), 10);
-  if (Number.isFinite(parsed) && parsed >= 1) {
-    return parsed;
-  }
-  return 64;
-}
-
-function acquireRecoverableWaiterSlot(key: string): { key: string; activeWaiters: number } {
-  const normalizedKey = key.trim() || 'recoverable:unknown';
-  const now = Date.now();
-  for (const [existingKey, state] of recoverableRetryWaiterState.entries()) {
-    if (state.activeWaiters <= 0 || now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
-      recoverableRetryWaiterState.delete(existingKey);
-    }
-  }
-  const current = recoverableRetryWaiterState.get(normalizedKey);
-  const nextActiveWaiters = (current?.activeWaiters ?? 0) + 1;
-  const maxWaiters = resolveRecoverableBackoffMaxWaiters();
-  if (nextActiveWaiters > maxWaiters) {
-    throw Object.assign(
-      new Error(`recoverable retry waiters overloaded for key ${normalizedKey}`),
-      {
-        statusCode: 429,
-        code: 'PROVIDER_TRAFFIC_SATURATED',
-        retryable: true,
-        details: {
-          reason: 'recoverable_waiter_overload',
-          recoverableKey: normalizedKey,
-          activeWaiters: current?.activeWaiters ?? 0,
-          maxWaiters
-        }
-      }
-    );
-  }
-  recoverableRetryWaiterState.set(normalizedKey, {
-    activeWaiters: nextActiveWaiters,
-    updatedAtMs: now
-  });
-  return {
-    key: normalizedKey,
-    activeWaiters: nextActiveWaiters
-  };
-}
-
-function releaseRecoverableWaiterSlot(key: string): void {
-  const normalizedKey = key.trim() || 'recoverable:unknown';
-  const current = recoverableRetryWaiterState.get(normalizedKey);
-  if (!current) {
-    return;
-  }
-  const nextActiveWaiters = Math.max(0, current.activeWaiters - 1);
-  if (nextActiveWaiters === 0) {
-    recoverableRetryWaiterState.delete(normalizedKey);
-    return;
-  }
-  recoverableRetryWaiterState.set(normalizedKey, {
-    activeWaiters: nextActiveWaiters,
-    updatedAtMs: Date.now()
-  });
-}
-
-export function acquireRecoverableRetryWaiterSlotForTests(key: string): { key: string; activeWaiters: number } {
-  return acquireRecoverableWaiterSlot(key);
-}
-
-export function releaseRecoverableRetryWaiterSlotForTests(key: string): void {
-  releaseRecoverableWaiterSlot(key);
 }
 
 export async function waitRecoverableBackoffWithGlobalGate(args: {
@@ -329,28 +247,13 @@ export async function waitRecoverableBackoffWithGlobalGate(args: {
   signal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<void> {
-  const waiter = acquireRecoverableWaiterSlot(args.key);
-  const normalizedKey = waiter.key;
-  const previous = recoverableRetryGateState.get(normalizedKey) ?? Promise.resolve();
-  let release: () => void = () => undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
+  await waitBackoffWithGlobalGate({
+    category: inferActionCategoryForBackoffKey(args.key),
+    key: args.key,
+    ms: args.ms,
+    signal: args.signal,
+    logNonBlockingError: args.logNonBlockingError
   });
-  recoverableRetryGateState.set(normalizedKey, current);
-  try {
-    await previous.catch((error: unknown) => {
-      args.logNonBlockingError('waitRecoverableBackoffWithGlobalGate.previous', error, {
-        key: normalizedKey
-      });
-    });
-    await waitWithClientAbortSignal(args.ms, args.signal, args.logNonBlockingError);
-  } finally {
-    release();
-    if (recoverableRetryGateState.get(normalizedKey) === current) {
-      recoverableRetryGateState.delete(normalizedKey);
-    }
-    releaseRecoverableWaiterSlot(normalizedKey);
-  }
 }
 
 export function deriveLogicalRequestChainKey(requestId: string): string {
@@ -433,20 +336,15 @@ export function consumeLogicalChainRecoverableRetry(key: string): {
   };
 }
 
-export function peekRecoverableRetryWaitersForTests(key: string): number {
-  const normalizedKey = key.trim() || 'recoverable:unknown';
-  return recoverableRetryWaiterState.get(normalizedKey)?.activeWaiters ?? 0;
-}
-
 export function peekProviderTransportBackoffConsecutiveForTests(key: string): number {
-  return providerTransportBackoffState.get(key)?.consecutive ?? 0;
+  return peekErrorActionBackoffConsecutiveForTests({
+    category: 'provider_transport',
+    scopeKey: key
+  });
 }
 
 export function resetRequestExecutorRetryStateForTests(): void {
-  recoverableErrorBackoffState.clear();
-  recoverableRetryGateState.clear();
-  recoverableRetryWaiterState.clear();
   providerTransportBackoffState.clear();
-  providerTransportBackoffGateState.clear();
   logicalChainRetryState.clear();
+  resetErrorActionQueueStateForTests();
 }

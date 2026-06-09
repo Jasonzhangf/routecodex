@@ -31,10 +31,13 @@ describe('request-executor-global-error-backoff', () => {
     expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(1000);
   });
 
-  test('uses exponential backoff for consecutive same-scope errors and resets on success', () => {
+  test('cycles 1s to 2s to 3s for consecutive same-scope errors and resets on success', () => {
     expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
     expect(recordScopedErrorBackoff(scopeA)).toBe(2000);
-    expect(recordScopedErrorBackoff(scopeA)).toBe(4000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(3000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(1000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(2000);
+    expect(recordScopedErrorBackoff(scopeA)).toBe(3000);
 
     resetScopedErrorBackoff(scopeA);
     expect(peekScopedErrorBackoffWaitMs(scopeA)).toBe(0);

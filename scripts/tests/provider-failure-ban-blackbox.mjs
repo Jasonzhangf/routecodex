@@ -336,9 +336,7 @@ async function withScenarioRuntime(options, fn) {
       setEnv('ROUTECODEX_SNAPSHOT', '0'),
       setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
       setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', String(responsesTimeoutMs)),
-      setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', String(maxProviderAttempts)),
-      setEnv('RCC_RECOVERABLE_BACKOFF_BASE_MS', '10'),
-      setEnv('ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS', '10')
+      setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', String(maxProviderAttempts))
     );
     const providerTraffic = await import('../../dist/server/runtime/http-server/provider-traffic-governor.js');
     providerTraffic.resetSharedProviderTrafficGovernorForTests?.();

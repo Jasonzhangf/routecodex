@@ -76,20 +76,16 @@ export function shouldRetryNative(
 export function computeBackoffMsNative(
   classification: FailureClassification,
   attempt: number,
-  baseMs: number,
-  maxMs: number,
 ): number {
   const binding = getBindingOrThrow();
   const fn = binding.computeProviderBackoffMsJson as (
     classificationJson: string,
     attempt: number,
-    baseMs: number,
-    maxMs: number,
   ) => number;
   if (typeof fn !== 'function') {
     throw failNativeRequired('computeProviderBackoffMsJson');
   }
-  return fn(JSON.stringify(classification), attempt, baseMs, maxMs);
+  return fn(JSON.stringify(classification), attempt);
 }
 
 export function getNetworkErrorCodes(): string[] {

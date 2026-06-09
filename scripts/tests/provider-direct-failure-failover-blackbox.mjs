@@ -43,7 +43,7 @@ async function main() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-direct-failover-'));
   const home = path.join(tmp, 'home'); const sessionDir = path.join(tmp, 'sessions');
   await fs.mkdir(home, { recursive: true }); await fs.mkdir(sessionDir, { recursive: true });
-  const restores = [setEnv('HOME', home), setEnv('RCC_HOME', path.join(home, '.rcc')), setEnv('ROUTECODEX_SESSION_DIR', sessionDir), setEnv('ROUTECODEX_SNAPSHOT', '0'), setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'), setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '15000'), setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3'), setEnv('RCC_RECOVERABLE_BACKOFF_BASE_MS', '10'), setEnv('ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS', '10')];
+  const restores = [setEnv('HOME', home), setEnv('RCC_HOME', path.join(home, '.rcc')), setEnv('ROUTECODEX_SESSION_DIR', sessionDir), setEnv('ROUTECODEX_SNAPSHOT', '0'), setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'), setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '15000'), setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')];
   const servers = [];
   try {
     const traffic = await import('../../dist/server/runtime/http-server/provider-traffic-governor.js'); traffic.resetSharedProviderTrafficGovernorForTests?.();

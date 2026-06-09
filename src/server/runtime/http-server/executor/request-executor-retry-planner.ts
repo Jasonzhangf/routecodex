@@ -2,7 +2,6 @@ import {
   computeProviderFailureBackoffDelayMs
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
-  acquireRecoverableRetryWaiterSlotForTests,
   buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
@@ -15,9 +14,7 @@ import {
   deriveLogicalRequestChainKey,
   peekProviderTransportBackoffConsecutiveForTests,
   peekProviderTransportBackoffWaitMs,
-  peekRecoverableRetryWaitersForTests,
   releaseLogicalRequestChain,
-  releaseRecoverableRetryWaiterSlotForTests,
   resetRequestExecutorRetryStateForTests,
   retainLogicalRequestChain,
   waitProviderTransportBackoffWithGate,
@@ -61,7 +58,6 @@ import type {
 } from './request-executor-error-types.js';
 
 export {
-  acquireRecoverableRetryWaiterSlotForTests,
   buildProviderRetryTelemetryPlan,
   buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
@@ -77,9 +73,7 @@ export {
   isLastAvailableProvider429,
   peekProviderTransportBackoffConsecutiveForTests,
   peekProviderTransportBackoffWaitMs,
-  peekRecoverableRetryWaitersForTests,
   releaseLogicalRequestChain,
-  releaseRecoverableRetryWaiterSlotForTests,
   resolveExcludedProviderReselectionPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,

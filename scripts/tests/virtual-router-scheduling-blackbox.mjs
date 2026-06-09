@@ -325,8 +325,6 @@ async function withRuntime(fn) {
     setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
     setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '12000'),
     setEnv('RCC_HTTP_RESPONSES_TIMEOUT_MS', '12000'),
-    setEnv('RCC_RECOVERABLE_BACKOFF_BASE_MS', '10'),
-    setEnv('ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS', '10'),
     setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')
   ];
   const closers = [];

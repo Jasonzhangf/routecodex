@@ -70,10 +70,6 @@ import {
   applySendFailureState
 } from './executor/request-executor-failure-state.js';
 import {
-  isWebLikeRuntimeForTraffic,
-  resolveProviderTrafficSoftWaitTimeoutMs
-} from './executor/request-executor-traffic-soft-wait.js';
-import {
   asFlatRecord,
   persistGoalStateFromMergedMetadata
 } from './executor/goal-state-persistence.js';
@@ -164,7 +160,6 @@ import {
 } from './executor/request-executor-provider-failure.js';
 import { buildProviderRetryTelemetryPlan } from './executor/request-executor-retry-telemetry.js';
 import {
-  acquireRecoverableRetryWaiterSlotForTests,
   isLastAvailableProvider429,
   buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
@@ -182,10 +177,8 @@ import {
   isSessionStormBackoffCandidate,
   peekSessionStormBackoffConsecutiveForTests,
   peekProviderTransportBackoffWaitMs,
-  peekRecoverableRetryWaitersForTests,
   peekSessionStormBackoffWaitMs,
   releaseLogicalRequestChain,
-  releaseRecoverableRetryWaiterSlotForTests,
   retainLogicalRequestChain,
   resetRequestExecutorRetryPlannerState,
   resolveExcludedProviderReselectionPlan,
@@ -269,22 +262,6 @@ export interface RequestExecutor {
 }
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
-const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
-const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
-const recoverableRetryGateState = new Map<string, Promise<void>>();
-const recoverableRetryWaiterState = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
-const providerTransportBackoffState = new Map<string, {
-  consecutive: number;
-  updatedAtMs: number;
-  nextAllowedAtMs: number;
-}>();
-const providerTransportBackoffGateState = new Map<string, Promise<void>>();
-const logicalChainRetryState = new Map<string, {
-  recoverableRetries: number;
-  updatedAtMs: number;
-  activeExecutions: number;
-}>();
-
 const PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const providerSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
 const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
@@ -899,12 +876,6 @@ export class HubRequestExecutor implements RequestExecutor {
               providerKey: target.providerKey,
               requestId: input.requestId,
               runtime: trafficRuntimeProfile,
-              softWaitTimeoutMs: resolveProviderTrafficSoftWaitTimeoutMs({
-                runtimeKey,
-                handle,
-                providerKey: target.providerKey,
-                compatibilityProfile: target.compatibilityProfile
-              }),
               ...(trafficScopeKey ? { scopeKey: trafficScopeKey } : {})
             });
             trafficPermit = trafficAcquired.permit;
@@ -1442,9 +1413,6 @@ export const __requestExecutorTestables = {
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,
   buildProviderRetryTelemetryPlan,
-  acquireRecoverableRetryWaiterSlotForTests,
-  peekRecoverableRetryWaitersForTests,
-  releaseRecoverableRetryWaiterSlotForTests,
   resetRequestExecutorInternalStateForTests
 };
 

@@ -1,6 +1,7 @@
 import {
   isHostRequestExecutorErrorStage,
   resolveRequestExecutorProviderErrorClassification,
+  shouldApplyProviderTransportBackoff,
 } from './request-executor-provider-failure.js';
 import {
   shouldCancelUnrecoverableRerouteWithoutAlternative,
@@ -114,7 +115,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
     classification === 'recoverable'
     && !hostContractFailure
     && !args.forceExcludeCurrentProviderOnRetry
-    && !args.promptTooLong;
+    && !args.promptTooLong
+    && typeof args.retryError.statusCode !== 'number'
+    && shouldApplyProviderTransportBackoff({
+      error: args.error,
+      retryError: args.retryError,
+      stage: args.stage
+    });
 
   const holdOnLastAvailable429 = isLastAvailableProvider429({
     providerKey: args.providerKey,

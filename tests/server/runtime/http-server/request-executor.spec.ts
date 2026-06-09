@@ -298,6 +298,125 @@ describe('HubRequestExecutor failover', () => {
     expect(marks).toEqual(['busy:deepseek-web.2', 'idle:deepseek-web.2']);
   });
 
+  test('fails fast on acquire-time concurrency saturation and reroutes to the next route candidate', async () => {
+    const providerA = '1token.key1.gpt-5.5';
+    const providerB = 'asxs.gpt-5.5';
+    const processA = jest.fn(async () => ({ status: 200, data: { id: 'should-not-run' } }));
+    const processB = jest.fn(async () => ({ status: 200, data: { id: 'rerouted-ok' } }));
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, processA)],
+      [providerB, buildHandle(providerB, processB)]
+    ]);
+    const acquire = jest.fn(async ({ runtimeKey }: { runtimeKey: string }) => {
+      if (runtimeKey === providerA) {
+        throw Object.assign(new Error('provider traffic saturated for runtime 1token.key1.gpt-5.5'), {
+          statusCode: 429,
+          code: 'PROVIDER_TRAFFIC_SATURATED',
+          retryable: true,
+          details: {
+            reason: 'acquire_after_backoff_concurrency',
+            runtimeKey,
+            providerKey: runtimeKey,
+            unifiedBackoffMs: 1000
+          }
+        });
+      }
+      return {
+        permit: {
+          runtimeKey,
+          providerKey: runtimeKey,
+          requestId: 'req-acquire-fast-fail',
+          leaseId: `lease-${runtimeKey}`,
+          stateKey: runtimeKey,
+          maxInFlight: 1
+        },
+        policy: {
+          concurrency: { maxInFlight: 1, acquireTimeoutMs: 100, staleLeaseMs: 1000 },
+          rpm: { requestsPerMinute: 10, acquireTimeoutMs: 100, windowMs: 60000 }
+        },
+        waitedMs: 1000,
+        activeInFlight: 1,
+        rpmInWindow: 1
+      };
+    });
+    const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
+      setConcurrencyBusyCallback() {},
+      acquire,
+      async release() {
+        return { released: true, activeInFlight: 0 };
+      },
+      async isProviderAtConcurrencyCapacity() { return false; },
+      isProviderAtConcurrencyCapacitySync(runtimeKey: string) {
+        return runtimeKey === providerA;
+      },
+      async observeOutcome() {}
+    };
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const selected = excluded.has(providerA) ? providerB : providerA;
+        return {
+          requestId: input.requestId,
+          providerPayload: { model: 'gpt-5.5', input: 'continue' },
+          target: {
+            providerKey: selected,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: selected
+          },
+          routingDecision: {
+            routeName: 'default',
+            pool: [providerA, providerB]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+    const logStage = jest.fn();
+    const executor = createRequestExecutor({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager(),
+      trafficGovernor: fakeTrafficGovernor
+    });
+    const result = await executor.execute({
+      requestId: 'req-acquire-fast-fail',
+      entryEndpoint: '/v1/responses',
+      body: { model: 'gpt-5.5', input: 'continue' },
+      headers: {},
+      metadata: {}
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(processA).toHaveBeenCalledTimes(0);
+    expect(processB).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(acquire.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ runtimeKey: providerA }));
+    expect(acquire.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ runtimeKey: providerB }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === 'provider.traffic.acquire.wait'
+      )
+    ).toBe(true);
+  });
+
   test('covers request-executor helper snapshots and truncation utilities', async () => {
     expect(__requestExecutorTestables.readString('  abc  ')).toBe('abc');
     expect(__requestExecutorTestables.readString('')).toBeUndefined();
@@ -484,6 +603,7 @@ describe('HubRequestExecutor failover', () => {
       shouldRetry: false,
       blockingRecoverable: false,
       excludedCurrentProvider: false,
+      requestLocalTransient: false,
       holdOnLastAvailable429: false,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
@@ -541,6 +661,7 @@ describe('HubRequestExecutor failover', () => {
       shouldRetry: false,
       blockingRecoverable: false,
       excludedCurrentProvider: false,
+      requestLocalTransient: false,
       holdOnLastAvailable429: false,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0,
@@ -1323,18 +1444,9 @@ describe('HubRequestExecutor failover', () => {
       blockingRecoverable: false
     });
 
-    const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-    const previousRecoverableBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-    const previousRecoverableMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
-    try {
-      const orchestratorExcluded = new Set<string>();
-      const recordAttempt = jest.fn();
-      const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+    const orchestratorExcluded = new Set<string>();
+    const recordAttempt = jest.fn();
+    const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
         error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429, code: 'HTTP_429' }),
         retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
         attempt: 1,
@@ -1468,6 +1580,7 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: false,
         blockingRecoverable: false,
         excludedCurrentProvider: true,
+        requestLocalTransient: false,
         holdOnLastAvailable429: false,
         retryBackoffMs: 0,
         recoverableBackoffMs: 0,
@@ -1517,7 +1630,7 @@ describe('HubRequestExecutor failover', () => {
       }));
       expect(Array.from(sqliteBusyExcluded)).toEqual(['deepseek.key1.deepseek-v4-pro']);
 
-      const followupExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+    const followupExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
         error: Object.assign(new Error('followup failed'), {
           code: 'SERVERTOOL_FOLLOWUP_FAILED',
           statusCode: 401,
@@ -1545,36 +1658,15 @@ describe('HubRequestExecutor failover', () => {
         logStage: () => undefined,
         status: 401
       });
-      expect(followupExecutionPlan).toEqual({
-        shouldRetry: false,
-        blockingRecoverable: false,
-        excludedCurrentProvider: true,
-        holdOnLastAvailable429: false,
-        retryBackoffMs: 0,
-        recoverableBackoffMs: 0,
-        });
-    } finally {
-      if (previous429Base === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previous429Base;
-      }
-      if (previous429Max === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
-      }
-      if (previousRecoverableBase === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousRecoverableBase;
-      }
-      if (previousRecoverableMax === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousRecoverableMax;
-      }
-    }
+    expect(followupExecutionPlan).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false,
+      excludedCurrentProvider: true,
+      requestLocalTransient: false,
+      holdOnLastAvailable429: false,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0,
+      });
 
   });
 
@@ -2718,11 +2810,6 @@ describe('HubRequestExecutor failover', () => {
       updateVirtualRouterConfig: jest.fn()
     };
 
-    const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '1';
-
     const deps = {
       runtimeManager,
       getHubPipeline: () => pipeline,
@@ -2736,37 +2823,24 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    try {
-      await expect(executor.execute({
-        requestId: 'req-single-pool-unavailable',
-        entryEndpoint: '/v1/chat/completions',
-        body: {},
-        headers: {},
-        metadata: {}
-      })).rejects.toThrow('HTTP 429: quota exhausted');
+    await expect(executor.execute({
+      requestId: 'req-single-pool-unavailable',
+      entryEndpoint: '/v1/chat/completions',
+      body: {},
+      headers: {},
+      metadata: {}
+    })).rejects.toThrow('HTTP 429: quota exhausted');
 
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      expect(failingProcess).toHaveBeenCalledTimes(1);
-      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-      expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
-      expect(
-        deps.logStage.mock.calls.some(
-          (call: unknown[]) =>
-            call[0] === 'provider.route_pool_cooldown_wait'
-        )
-      ).toBe(false);
-    } finally {
-      if (previous429Base === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previous429Base;
-      }
-      if (previous429Max === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
-      }
-    }
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(failingProcess).toHaveBeenCalledTimes(1);
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+    expect(
+      deps.logStage.mock.calls.some(
+        (call: unknown[]) =>
+          call[0] === 'provider.route_pool_cooldown_wait'
+      )
+    ).toBe(false);
   });
 
   test('reroutes 429 instead of retrying same provider when selected pool exposes no alternative candidate', async () => {
@@ -2916,11 +2990,7 @@ describe('HubRequestExecutor failover', () => {
       updateVirtualRouterConfig: jest.fn()
     };
 
-    const previousBase = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    const previousMax = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '5';
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
 
     try {
@@ -2955,16 +3025,6 @@ describe('HubRequestExecutor failover', () => {
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
     } finally {
-      if (previousBase === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previousBase;
-      }
-      if (previousMax === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previousMax;
-      }
       if (previousAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
       } else {
@@ -3031,11 +3091,7 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
-    const previousMax = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '4';
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '5';
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -3073,7 +3129,13 @@ describe('HubRequestExecutor failover', () => {
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
         .filter((line) => line.includes('[provider-switch]') && line.includes('req-blackbox-converted-503-reroute'));
-      expect(switchLines.some((line) => line.includes(`provider=${providerA}`) && line.includes('switch=exclude_and_reroute') && line.includes('status=503'))).toBe(true);
+      expect(switchLines.some((line) => (
+        line.includes(`provider=${providerA}`)
+        && line.includes('switch=exclude_and_reroute')
+        && line.includes('decision=provider_backoff_then_reroute')
+        && line.includes('backoffScope=provider')
+        && line.includes('status=503')
+      ))).toBe(true);
     } finally {
       warnSpy.mockRestore();
       if (previousAttempts === undefined) {
@@ -3081,19 +3143,9 @@ describe('HubRequestExecutor failover', () => {
       } else {
         process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
       }
-      if (previousBase === undefined) {
-        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
-      }
-      if (previousMax === undefined) {
-        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
-      }
     }
   });
-  test('reroutes generic recoverable 500 to another provider with provider backoff', async () => {
+  test('retries generic recoverable 500 on the same provider with recoverable backoff', async () => {
     const providerA = 'tabglm.key1.glm-5.1';
     const providerB = 'crs.key2.gpt-5.3-codex';
     const providerC = 'ali-coding-plan.key1.qwen3.6-plus';
@@ -3148,11 +3200,6 @@ describe('HubRequestExecutor failover', () => {
       updateVirtualRouterConfig: jest.fn()
     };
 
-    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
-    const previousMax = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = '5';
-
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
@@ -3185,22 +3232,14 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toMatch(/backoff=\d+ms/);
+      expect(switchLines[0]).toContain('switch=exclude_and_reroute');
       expect(switchLines[0]).toContain('backoffScope=provider');
       expect(switchLines[0]).toContain('decision=provider_backoff_then_reroute');
+      expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       expect(processC).toHaveBeenCalledTimes(0);
     } finally {
       warnSpy.mockRestore();
-      if (previousBase === undefined) {
-        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
-      }
-      if (previousMax === undefined) {
-        delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS = previousMax;
-      }
     }
   });
 
@@ -3544,17 +3583,16 @@ describe('HubRequestExecutor failover', () => {
     );
   });
 
-  test('blocking recoverable retries ignore logical-chain caps and keep waiting until success', async () => {
+  test('blocking recoverable retry waits once before same-provider success', async () => {
     const providerA = 'storm.a.glm-5';
-    const retryable429 = () => Object.assign(new Error('HTTP 429: rate limited'), {
-      statusCode: 429,
-      code: 'HTTP_429'
+    const retryableRecoverable = () => Object.assign(new Error('fetch failed'), {
+      code: 'ECONNRESET'
     });
-    let failuresLeft = 2;
+    let failuresLeft = 1;
     const processIncoming = jest.fn(async () => {
       if (failuresLeft > 0) {
         failuresLeft -= 1;
-        throw retryable429();
+        throw retryableRecoverable();
       }
       return {
         status: 200,
@@ -3591,11 +3629,7 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const previousLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
-    const previousBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-    const previousMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
     process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
 
     try {
       const logStage = jest.fn();
@@ -3626,7 +3660,7 @@ describe('HubRequestExecutor failover', () => {
       });
 
       expect(result.status).toBe(200);
-      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
       expect(
         logStage.mock.calls.some((call) => call[0] === 'provider.retry.logical_chain_limit_hit')
       ).toBe(false);
@@ -3635,16 +3669,6 @@ describe('HubRequestExecutor failover', () => {
         delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
       } else {
         process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = previousLimit;
-      }
-      if (previousBase === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousBase;
-      }
-      if (previousMax === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousMax;
       }
     }
   });
@@ -3694,11 +3718,7 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const prevAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    const prevBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-    const prevMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '1';
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -3741,82 +3761,54 @@ describe('HubRequestExecutor failover', () => {
       } else {
         process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = prevAttempts;
       }
-      if (prevBase === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = prevBase;
-      }
-      if (prevMax === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = prevMax;
-      }
     }
   });
 
   test('isolates recoverable fetch-failed backoff by provider key', () => {
-    const prevBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-    const prevMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '64000';
+    const keyA = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
+      providerKey: 'tabglm.key1.glm-5.1',
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
+    const keyB = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
+      providerKey: 'crs.key2.gpt-5.3-codex',
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
 
-    try {
-      const keyA = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
-        providerKey: 'tabglm.key1.glm-5.1',
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
-      const keyB = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
-        providerKey: 'crs.key2.gpt-5.3-codex',
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
+    expect(keyA).not.toBe(keyB);
 
-      expect(keyA).not.toBe(keyB);
+    const delayA1 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
+    const delayA2 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
+    const delayB1 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyB, {
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
 
-      const delayA1 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
-      const delayA2 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
-      const delayB1 = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyB, {
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
+    expect(delayA1).toBe(1000);
+    expect(delayA2).toBe(2000);
+    expect(delayB1).toBe(1000);
 
-      expect(delayA1).toBe(1000);
-      expect(delayA2).toBe(2000);
-      expect(delayB1).toBe(1000);
-
-      __requestExecutorTestables.clearRecoverableErrorBackoffForProvider({
-        providerKey: 'tabglm.key1.glm-5.1'
-      });
-      const delayAAfterSuccess = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      });
-      expect(delayAAfterSuccess).toBe(1000);
-    } finally {
-      if (prevBase === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = prevBase;
-      }
-      if (prevMax === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = prevMax;
-      }
-    }
+    __requestExecutorTestables.clearRecoverableErrorBackoffForProvider({
+      providerKey: 'tabglm.key1.glm-5.1'
+    });
+    const delayAAfterSuccess = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      reason: 'fetch failed'
+    });
+    expect(delayAAfterSuccess).toBe(1000);
   });
 
   test('keeps 429 recoverable backoff key stable across reason/code variants for same provider', () => {
@@ -3942,121 +3934,6 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
   });
 
-  test('rejects when recoverable backoff waiter queue is overloaded', async () => {
-    const providerKey = 'ali-coding-plan.key1.glm-5';
-    const processIncoming = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 429: Too many requests'), {
-        statusCode: 429,
-        code: 'HTTP_429',
-        retryable: true
-      });
-    });
-
-    const handle = buildHandle(providerKey, processIncoming);
-    const recoverableBackoffKey = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
-      providerKey,
-      runtimeKey: providerKey,
-      statusCode: 429,
-      errorCode: 'HTTP_429',
-      reason: 'HTTP 429: Too many requests'
-    });
-    const runtimeManager = {
-      resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === providerKey ? handle : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn(async (input: any) => ({
-        requestId: input.id,
-        providerPayload: {},
-        processMode: 'chat',
-        target: {
-          providerKey,
-          providerType: 'openai',
-          outboundProfile: 'openai-responses',
-          runtimeKey: providerKey
-        },
-        routingDecision: { routeName: 'tools', pool: [providerKey] },
-        metadata: {}
-      })),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const previousWaiters = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS;
-    const previous429Base = process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    const previous429Max = process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-    const previousBase = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-    const previousMax = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-    const previousServerToolState = getServerToolRuntimeState();
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS = '1';
-    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '500';
-    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '500';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = '500';
-    process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = '500';
-    setServerToolEnabled(false, 'request-executor.spec overload');
-
-    try {
-      const deps = {
-        runtimeManager,
-        getHubPipeline: () => pipeline,
-        getModuleDependencies: () => ({
-          errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
-        }),
-        logStage: jest.fn(),
-        stats: new StatsManager()
-      };
-
-      const executor = createRequestExecutor(deps);
-      __requestExecutorTestables.acquireRecoverableRetryWaiterSlotForTests(recoverableBackoffKey);
-      const blocked = executor.execute({
-        requestId: 'req-recoverable-overload-2',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      });
-
-      await expect(blocked).rejects.toMatchObject({
-        statusCode: 429,
-        code: 'PROVIDER_TRAFFIC_SATURATED',
-        details: expect.objectContaining({
-          reason: 'recoverable_waiter_overload'
-        })
-      });
-      expect(processIncoming).toHaveBeenCalledTimes(1);
-    } finally {
-      __requestExecutorTestables.releaseRecoverableRetryWaiterSlotForTests(recoverableBackoffKey);
-      if (previousWaiters === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_WAITERS = previousWaiters;
-      }
-      if (previous429Base === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_BASE_MS = previous429Base;
-      }
-      if (previous429Max === undefined) {
-        delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_429_BACKOFF_MAX_MS = previous429Max;
-      }
-      if (previousBase === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS = previousBase;
-      }
-      if (previousMax === undefined) {
-        delete process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS;
-      } else {
-        process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS = previousMax;
-      }
-      setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
-    }
-  });
-
 });
 
 describe('HubRequestExecutor session storm backoff', () => {
@@ -4068,16 +3945,9 @@ describe('HubRequestExecutor session storm backoff', () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS;
-    delete process.env.RCC_SESSION_STORM_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS;
-    delete process.env.RCC_SESSION_STORM_BACKOFF_MAX_MS;
   });
 
-  test('backs off repeated provider-unavailable failures and caps wait at three seconds', () => {
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
-
+  test('backs off repeated provider-unavailable failures with unified 1s-2s-3s cycle', () => {
     const key = __requestExecutorTestables.resolveSessionStormBackoffScope({
       sessionId: 'session-1'
     });
@@ -4101,8 +3971,8 @@ describe('HubRequestExecutor session storm backoff', () => {
     jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(3000);
     jest.setSystemTime(new Date('2026-04-22T12:00:06.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(3000);
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(3000);
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs(key!)).toBe(1000);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(1000);
 
     __requestExecutorTestables.clearSessionStormBackoff(key!);
     expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(0);
@@ -4124,9 +3994,6 @@ describe('HubRequestExecutor session storm backoff', () => {
   });
 
   test('shares storm backoff across sessions through workdir scope for client tool args invalid storms', () => {
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '30000';
-
     const scopes = __requestExecutorTestables.resolveSessionStormBackoffScopes({
       sessionId: 'session-a',
       conversationId: 'conv-a',
@@ -4158,10 +4025,7 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toBeUndefined();
   });
 
-  test('treats deterministic malformed response contract errors as storm candidates and caps wait at three seconds', () => {
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '30000';
-
+  test('treats deterministic malformed response contract errors as storm candidates and uses unified cycle', () => {
     const err = Object.assign(
       new Error('[hub_response] Non-canonical response payload at chat_process.response.entry'),
       { code: 'MALFORMED_RESPONSE' }
@@ -4174,13 +4038,10 @@ describe('HubRequestExecutor session storm backoff', () => {
     jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
     expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(3000);
     jest.setSystemTime(new Date('2026-04-22T12:00:06.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(3000);
+    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(1000);
   });
 
   test('RED: records storm backoff when hub routing fails before provider send', async () => {
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_SESSION_STORM_BACKOFF_MAX_MS = '8000';
-
     const pipelineError = Object.assign(
       new Error('No available providers after applying routing instructions'),
       { code: 'PROVIDER_NOT_AVAILABLE' }
@@ -4227,16 +4088,9 @@ describe('HubRequestExecutor provider transport backoff', () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    delete process.env.ROUTECODEX_429_BACKOFF_BASE_MS;
-    delete process.env.RCC_429_BACKOFF_BASE_MS;
-    delete process.env.ROUTECODEX_429_BACKOFF_MAX_MS;
-    delete process.env.RCC_429_BACKOFF_MAX_MS;
   });
 
-  test('records provider-scoped exponential backoff for repeated 429s', () => {
-    process.env.ROUTECODEX_429_BACKOFF_BASE_MS = '1000';
-    process.env.ROUTECODEX_429_BACKOFF_MAX_MS = '4000';
-
+  test('records provider-scoped unified backoff for repeated 429s', () => {
     const key = __requestExecutorTestables.buildProviderTransportBackoffKey({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
       runtimeKey: 'runtime:mimo'

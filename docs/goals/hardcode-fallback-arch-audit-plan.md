@@ -74,7 +74,7 @@
 - `src/server/runtime/http-server/request-executor.ts`（行 949-950）—— 同样改 provider family 抽象。
 - `src/server/runtime/http-server/http-server-runtime-providers.ts`（行 214/233/303/432）—— 删 provider key 字符串前缀判断，改为 runtime profile 字段判断。
 - `src/server/runtime/http-server/executor/provider-response-converter.ts`（行 910-921）—— provider-specific response conversion 必须只通过 provider runtime/profile 抽象进入，禁止在 executor 层写 provider key 分支。
-- `src/server/runtime/http-server/executor/request-executor-traffic-soft-wait.ts`（行 26-36）—— `compatibilityProfile === 'chat:deepseek-web' / 'chat:qwenchat-web'` 字面量已在 `compatibilityProfile` 抽象里，但白名单审计要保留。
+- `src/server/runtime/http-server/executor/request-executor-traffic-soft-wait.ts` —— 2026-06-09 已物理删除；traffic saturation 必须走统一 `request-executor-error-action-queue.ts`，禁止恢复 soft-wait 白名单或 per-provider wait timeout。
 
 **Rust 侧**：
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs`（行 220-243）—— persisted 503 family cleanup 循环逻辑保留但不得 `starts_with(...)` provider 前缀，改用传入 `provider_key` 自身的 `reason.as_deref() == Some(PERSIST_REASON_HTTP_503_DAILY)` 判断；若有兄弟 provider key 通过同 family 联动，则 family 概念下沉到 `provider_family` 字段。

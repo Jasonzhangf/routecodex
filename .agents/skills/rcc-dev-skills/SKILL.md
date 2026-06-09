@@ -172,7 +172,7 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 2. 网络错误（含 HTTP_502 / timeout / transport）属于“可恢复错误”的普通成员，不能做专门旁路策略。
 3. 分类入口唯一：`resolveProviderFailureClassification(...)`；执行出口唯一：`resolveProviderFailureActionPlan(...)` + Virtual Router policy。
 4. 任何模块（RequestExecutor / Converter / Followup）发现新错误样本时，只能补“归一映射”，不能新增“该错误独有处理流程”。
-5. 可恢复错误统一遵循：请求内指数退避（1s 起）+ 连续 3 次失败进入 provider 冷却池；冷却阶梯按 10m -> 30m -> 5h 循环；重启后首命中允许一次被动探测。
+5. 可恢复错误统一遵循：先进入 `request-executor-error-action-queue.ts` 的 blocking backoff 队列，固定 `1s -> 2s -> 3s -> repeat`；provider 冷却/health 仍由统一错误链和 VR policy 投影，禁止调用点恢复 env/exponential/Retry-After 分散 backoff。
 
 ### 功能说明
 每个 Provider 可以在内部自动重试某些可恢复错误，不触发 health impact 上报。
@@ -806,7 +806,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - QwenChat override 回归边界（2026-04-19）：**禁词/反诱导断言只检查 provider 注入的 override block**，不要扫描整段消息内容；用户/历史正文允许出现这些词。真正的上线验收仍看**模型实际输出**：若仍吐原生 `function_call` / 非预期工具壳，说明 override 目标未达成，不能投入使用。
 - QwenChat live/source 不一致排查（2026-04-19）：若单测里的 `src/*qwenchat*` override 已更新，但 **5520 实测仍回 “unlock / capability verification / bypass safety”**，先直接检查 `dist/providers/core/runtime/qwenchat-http-provider-helpers.js`；qwenchat live 行为以 **dist 实际注入 prompt** 为准，build 前不要拿 src 文本当证据。
 - QwenChat schema-first override（2026-04-19）：5520 实测表明，仅写“只用 declared tools”还不够；要在 provider override 里显式写 **tool 名 + 精确 input key schema + 最小 JSON example**（如 `exec_command => input { cmd:string }`，且明确 `cmd` 不能写成 `command`），这样 qwenchat 的文本 harvest 才能稳定对回原始工具列表。
-- QwenChat create-session 高频 404（2026-04-19）：`/api/v2/chats/new` 的瞬时 404 在高频 burst 下可能可恢复；正确修法是 **provider 内部串行化同 alias create-session + 指数回退**，不要把一次可恢复的 404 立即上升成外层 provider 风暴。
+- QwenChat create-session 高频 404（2026-04-19，2026-06-09 修正）：`/api/v2/chats/new` 的瞬时 404 在高频 burst 下可能可恢复；正确修法是 **provider 内部串行化同 alias create-session + 统一 blocking backoff 队列**，不要把一次可恢复的 404 立即上升成外层 provider 风暴，也不要恢复本地指数回退。
 - QwenChat create-session 404 日志边界（2026-04-19）：若 5520 实测里 qwenchat 最终请求都成功，但日志仍刷 `[provider-switch] ... QWENCHAT_CREATE_SESSION_FAILED 404`，应在 `request-executor` 把这类 **qwenchat provider.send 404** 降为内部 stage log；对用户侧/顶层日志，恢复成功的瞬时 create-session 404 应视为**已吸收的 provider 内部抖动**。
 - QwenChat tools × webSearch 冲突（2026-04-19）：若请求里 **已声明 client tools**，即使 metadata/route 带了 `webSearch=true` / `chat_type=search`，provider request 也必须把 **`feature_config.auto_search=false` 且 `research_mode` 关严（默认 `off`）**；否则 upstream 会把“禁止原生搜索”的 prompt 与 `auto_search=true` 的 body 冲突解释成原生 `web_search`。
 - QwenChat hidden-native-tool 止损顺序（2026-04-19）：非流式 `/v1/responses` 若仍遇到 `QWENCHAT_HIDDEN_NATIVE_TOOL`，要先在 **aggregate SSE reader 增量解析并即时中止**，不要等整条 upstream SSE 结束后才报错；随后在 provider 内部做 **同请求静默二次尝试**（如 `off -> disable`），优先把问题吸收到 provider 层，减少外层 provider-switch 噪音与长 `decode.sse` 假象。
@@ -996,7 +996,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 
 - 触发信号：`--snap` / retry 场景出现 OOM，同时日志窗口里 `provider-switch`、`ServerTool followup failed`、`SERVERTOOL_TIMEOUT` 密集共现。
 - 可复用动作：先把根因锁到“风暴链 + 等待队列 + 大 payload retry/snapshot 放大”三件套；不要先怀疑 `~/.rcc/errorsamples` 这类小文件目录。
-- 可复用动作：429 / concurrency / recoverable followup 一律保持“阻塞 + 指数回退”，但必须给 **recoverable backoff queue** 和 **provider traffic acquire queue** 都加 waiter 上限；否则只是把重试风暴改成排队堆内存。
+- 可复用动作：429 / concurrency / recoverable followup 一律进入统一 `request-executor-error-action-queue.ts`，固定 blocking `1s -> 2s -> 3s -> repeat`，并使用统一 waiter cap；禁止恢复 recoverable/provider-traffic/servertool 各自的指数回退、softWaitTimeoutMs、jitter 或本地 waiter queue。
 - 可复用动作：本地盘 snapshot gate 要在 `provider.send.start` 之后、`processIncoming` 之前放行；如果等 provider 返回后才放行，`provider-request / provider-response / provider-error` 的本地 mirror 会整段丢失。
 - 可复用动作：查 5555/5520 的 SSE snapshot 缺口时，不要只看 generic `postStream` 分支；`executePreparedRequest`（SDK transport）返回的 `__sse_responses` 也必须走同一套 `wrapUpstreamSseResponse + provider-response snapshot` 收口。
 - 可复用动作：`client-response` / `client-response.error` snapshot 只能由 `SnapshotStageKind`（`shouldCaptureSnapshotStage(stage)`）控制；`ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS` 只允许影响 provider stream capture，不能作为 client final response 的 env bypass。
@@ -1010,9 +1010,9 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 触发信号：`SERVERTOOL_TIMEOUT` 出现 `followup timeout after 500000ms`，且伴随多 provider 重试风暴。
 - 可复用动作：把 servertool/followup 默认超时收敛到 120s/90s（并设上限），并对 `reasoning_only_continue/ reasoning_stop_guard/ reasoning_stop_continue` 启用 auto-limit，避免无限续轮卡死。
 - 触发信号：`429`（含 `insufficient_quota`）后立刻连刷 `provider-switch` / `PROVIDER_NOT_AVAILABLE` / `unknown-unknown-*` 新请求。
-- 可复用动作：`429` 必须先按 **provider 维度阻塞 + 指数 backoff**；只有**已确认存在显式替代候选**时才允许 reroute。若无显式替代候选（尤其单 provider / singleton pool / routePool 缺证据），必须 **hold 当前 provider 等待**，禁止先自杀式 exclude 再把请求打成 `PROVIDER_NOT_AVAILABLE`。
+- 可复用动作：`429` 必须先进入统一 error action queue 做固定 blocking backoff；有显式替代候选时按错误链/VR policy reroute。若无显式替代候选，等待后仍应 fail-fast 返回最后 provider error，禁止恢复 provider-local 指数等待或把请求打成 `PROVIDER_NOT_AVAILABLE` 循环。
 - 触发信号：日志出现 `PROVIDER_TRAFFIC_SATURATED` + `exclude_and_reroute` + `PROVIDER_NOT_AVAILABLE` 连锁风暴。
-- 可复用动作：对 `PROVIDER_TRAFFIC_SATURATED` 统一走 **same-provider 阻塞指数 backoff**（不排除当前 provider、不做 runtime-scope exclusion），并标记为 provider health-neutral；并发自适应只在“满并发样本”上做 **5 次无429升 / 5 次429降**，避免被短时抖动打到 `concurrency=1`。
+- 可复用动作：对 `PROVIDER_TRAFFIC_SATURATED` 统一走 `provider_traffic_saturated` category：traffic governor 释放锁后 blocking wait 一次，醒后重查；仍满则抛显式饱和错误，由错误链/VR 切到替代 provider。禁止恢复 same-provider 指数等待、runtime-scope 本地 exclusion、softWaitTimeoutMs 或本地 waiter queue。
 - 触发信号：`provider.send` 命中 `fetch failed` / `ECONNRESET` / `socket hang up` / `network timeout` 后，下一批请求立刻出现 `PROVIDER_NOT_AVAILABLE`。
 - 可复用动作：这类 **网络传输层错误** 必须按 **same-provider 阻塞 backoff + health-neutral** 处理；禁止把当前 provider 打进 reroute exclusion / router cooldown，否则单 provider 路由会被瞬时毒化成跨请求不可用。
 - 触发信号：某个请求已经进入 recoverable backoff，但并发里的**新 sibling 请求**仍直接冲到同一 provider，继续刷 429 / fetch failed。
@@ -1554,7 +1554,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 - 红测必须包含真实 `/v1/responses` HTTP handler + HubPipeline：metadata exclusion 覆盖 default pool 全部目标时仍返回 200 并选回池内 provider。
 
 ### 2026-05-30 VR recoverable busy 精华
-- 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 阻塞指数退避重试 3 次后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。
+- 全池 provider 临时 busy/冷却必须走唯一 recoverable 错误处理路径：Rust VR 输出 `HTTP_429` details，RequestExecutor 通过统一 error action queue 固定 blocking `1s -> 2s -> 3s` 循环防风暴，达到执行上限后才返回 429；禁止 `PROVIDER_NOT_AVAILABLE`，禁止 fallback/旁路。
 - 2026-05-30 router-mode relay 注意：5555 MiniMax 是 relay/HubPipeline/VR；`router-direct.hub_pipeline_failed` 只是 same-protocol direct 预选日志。预选遇到 route-pool recoverable 错误必须让请求回 RequestExecutor 唯一错误链处理，禁止吞成普通 direct skip 或改成 direct fallback。
 
 ## 2026-05-31 调试精华（Rust response effect plan 执行）
@@ -1705,7 +1705,7 @@ const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
 ### Stopless schema gate 精华（2026-06-03）
 - stopless schema gate 只在 `finish_reason=stop` 且非 `/goal active`、非 plan mode 时激活；只解析当前 assistant stop 文本，不扫历史、不改历史、不改工具列表。
 - stop schema 只校验数字字段 `stopreason` / `has_evidence`；`reason` / `next_step` / `evidence` / `issue_cause` / `excluded_factors` / `diagnostic_order` 只判空。followup prompt 必须质询六项：目标、过程、证据、问题原因、已排除因素、排查顺序；`stopreason=0|1` 且 reason 非空才允许 stop 并 prefix summary；缺 schema、无效 schema、`stopreason=2` 都计入同一个连续 stop 预算；非 stop/工具进展必须 reset；第三次连续 stop 预算耗尽并输出 summary。
-- stopless summary 提示锁：任何 system prompt / ai-followup prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 也会增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
+- stopless summary 提示锁：任何 stopless system prompt 要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报时，必须同条消息要求 stop schema JSON；缺 schema 的 stop 也会增加 `stopMessageUsed`，`serverToolLoopState.repeatCount` 只用于 loop guard，不是 schema budget。
 
 ### 2026-06-04 stopless Responses followup 红测精华
 - stopless 线上日志出现 `decision=trigger` 仍“没作用”时，红测不能只断 `executed/flowId`；必须断最终 `reenterPipeline.body`：`/v1/responses` 入口要有 `input`、无 `messages`、包含原始历史与 stop schema 质询文本。

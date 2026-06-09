@@ -168,7 +168,6 @@ async function main() {
     setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
     setEnv('ROUTECODEX_STAGE_LOG', '1'),
     setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '12000'),
-    setEnv('RCC_RECOVERABLE_BACKOFF_BASE_MS', '10'),
     setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')
   ];
   const primaryHits = { count: 0 };

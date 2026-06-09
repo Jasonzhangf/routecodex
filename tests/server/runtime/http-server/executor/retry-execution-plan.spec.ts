@@ -42,7 +42,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toContain('minimax.key1.MiniMax-M3');
   });
 
-  it('retries recoverable 502 on the same provider once without excluding it', async () => {
+  it('switches recoverable HTTP 502 to an alternative provider without same-provider retry', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
@@ -75,13 +75,13 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('recoverable_backoff_same_provider');
-    expect(plan.excludedCurrentProvider).toBe(false);
-    expect(Array.from(excludedProviderKeys)).toEqual([]);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
-  it('switches provider after the same recoverable error repeats on the same provider', async () => {
+  it('excludes current provider immediately for recoverable HTTP 502 when alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
@@ -111,20 +111,15 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       transientRetryTracker
     };
 
-    const firstPlan = await resolveProviderRetryExecutionPlan({
+    const plan = await resolveProviderRetryExecutionPlan({
       ...commonArgs,
       attempt: 1
     });
-    const secondPlan = await resolveProviderRetryExecutionPlan({
-      ...commonArgs,
-      attempt: 2
-    });
 
-    expect(firstPlan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
-    expect(secondPlan.shouldRetry).toBe(true);
-    expect(secondPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(secondPlan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
-    expect(secondPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
+    expect(plan.excludedCurrentProvider).toBe(true);
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
@@ -165,7 +160,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['dibittai.crsa.gpt-5.5']);
   });
 
-  it('keeps other excluded providers but does not add current provider on first recoverable retry', async () => {
+  it('keeps other excluded providers and adds current HTTP 503 provider for reroute', async () => {
     const excludedProviderKeys = new Set<string>(['cc.key1.gpt-5.5']);
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 503'), {
@@ -198,13 +193,13 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('recoverable_backoff_same_provider');
-    expect(plan.excludedCurrentProvider).toBe(false);
-    expect(Array.from(excludedProviderKeys)).toEqual(['cc.key1.gpt-5.5']);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual(['cc.key1.gpt-5.5', 'sdfv.key1.gpt-5.5']);
   });
 
-  it('excludes current provider only after repeated recoverable error when alternatives exist', async () => {
+  it('excludes current HTTP 503 provider immediately when alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 503'), {
@@ -213,28 +208,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       upstreamCode: 'HTTP_503'
     });
 
-    await resolveProviderRetryExecutionPlan({
-      error,
-      retryError: {
-        statusCode: 503,
-        errorCode: 'HTTP_503',
-        upstreamCode: 'HTTP_503',
-        reason: 'HTTP 503'
-      },
-      attempt: 3,
-      maxAttempts: 6,
-      stage: 'provider.send',
-      providerKey: 'sdfv.key1.gpt-5.5',
-      runtimeKey: 'sdfv.key1',
-      logicalRequestChainKey: 'req-priority-threshold',
-      logicalChainRetryLimitStageRequestId: 'req-priority-threshold',
-      routePool: ['sdfv.key1.gpt-5.5', 'cc.key1.gpt-5.5', 'mimo.key2.mimo-v2.5'],
-      excludedProviderKeys,
-      recordAttempt: jest.fn(),
-      logStage: jest.fn(),
-      logNonBlockingError: jest.fn(),
-      transientRetryTracker
-    });
     const plan = await resolveProviderRetryExecutionPlan({
       error,
       retryError: {

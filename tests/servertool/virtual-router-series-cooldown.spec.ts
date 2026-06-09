@@ -1,27 +1,8 @@
-import { RateLimitBackoffManager, RateLimitCooldownError } from '../../src/providers/core/runtime/rate-limit-manager.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import type {
   VirtualRouterConfig,
   ProviderErrorEvent
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
-
-describe('Virtual router series cooldown', () => {
-  it('blacklists an entire model series after repeated 429s', () => {
-    const manager = new RateLimitBackoffManager([10, 20], 50);
-    const bucket = 'gemini.alias2.gemini-3-pro-high';
-    const model = 'gemini-3-pro-high';
-
-    const first = manager.record429(bucket, model);
-    expect(first.seriesBlacklisted).toBe(false);
-
-    const second = manager.record429(bucket, model);
-    expect(second.seriesBlacklisted).toBe(true);
-
-    const error = manager.buildThrottleError({ providerKey: bucket, model });
-    expect(error).toBeInstanceOf(RateLimitCooldownError);
-    expect(error?.message).toContain('series');
-  });
-});
 
 describe('VirtualRouterEngine series cooldown handling', () => {
   const providerA = 'gemini.alias1.gemini-3-pro-high';

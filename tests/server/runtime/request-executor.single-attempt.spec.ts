@@ -1821,10 +1821,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(excluded).toEqual(['tab.key1']);
   });
 
-  it('retries the same provider once for a transient recoverable error before switching provider', async () => {
-    const transientError = Object.assign(new Error('HTTP 502: transient upstream'), {
-      statusCode: 502,
-      code: 'HTTP_502',
+  it('retries the same provider once for a transport recoverable error before switching provider', async () => {
+    const transientError = Object.assign(new Error('socket reset'), {
+      code: 'ECONNRESET',
       retryable: true
     });
     const providerACalls: number[] = [];
@@ -1943,7 +1942,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(stages).not.toContain('server.global_error_backoff_wait');
   });
 
-  it('uses short soft wait timeout for web provider traffic acquire', async () => {
+  it('does not pass legacy soft-wait options to provider traffic acquire', async () => {
     const acquireArgs: Array<Record<string, unknown>> = [];
     const trafficGovernor = {
       acquire: jest.fn(async (options: Record<string, unknown>) => {
@@ -2032,7 +2031,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     });
 
-    expect(acquireArgs[0]?.softWaitTimeoutMs).toBe(1500);
+    expect(acquireArgs[0]).not.toHaveProperty('softWaitTimeoutMs');
 
     (fakePipeline.execute as jest.Mock).mockResolvedValueOnce({
       ...pipelineResult,
@@ -2050,7 +2049,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: { stream: false, inboundStream: false }
     });
 
-    expect(acquireArgs[1]?.softWaitTimeoutMs).toBe(1500);
+    expect(acquireArgs[1]).not.toHaveProperty('softWaitTimeoutMs');
   });
 
   it('bypasses provider traffic governor for servertool followup hops', async () => {
