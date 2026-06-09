@@ -488,6 +488,23 @@ function checkServertoolCliProjectionMap() {
     nativeServertoolWrapper,
     'buildClientVisibleProjectionShellWithNative'
   );
+  for (const [capability, expected] of [
+    ['buildClientExecCliProjectionOutputJson', 'buildClientExecCliProjectionOutputJson native error: ${message}'],
+    ['buildClientVisibleProjectionShellJson', 'buildClientVisibleProjectionShellJson native error: ${message}'],
+  ]) {
+    assertContains(
+      'cli-projection-native-error-contract',
+      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+      nativeServertoolWrapper,
+      capability
+    );
+    assertContains(
+      'cli-projection-native-error-contract',
+      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+      nativeServertoolWrapper,
+      expected
+    );
+  }
   assertContains(
     'cli-projection-native-raw-string-contract',
     `${ROOT}/tests/servertool/servertool-cli-native-bridge.spec.ts`,
