@@ -459,6 +459,22 @@ function checkServertoolCliProjectionMap() {
     rustOutcomeContract,
     'quote_posix_single_argument(&input_json)'
   );
+  for (const needle of [
+    'pub struct ServertoolHubRespChatProcess03Input',
+    'pub struct ServertoolClientExecCliProjection01Planned',
+    'pub struct ServertoolBackendRouteHint01Planned',
+    'pub struct ServertoolServerIoInternal01Observed',
+    'pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03',
+    'pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
+    'pub fn build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03',
+  ]) {
+    assertContains(
+      'servertool-outcome-topology-rust-owner',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+      rustOutcomeContract,
+      needle
+    );
+  }
   assertContains(
     'cli-projection-command-contract',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
