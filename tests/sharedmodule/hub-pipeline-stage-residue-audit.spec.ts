@@ -1861,6 +1861,10 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
       expect(source).not.toMatch(/cleanMalformedRoutingInstructionMarkersJson|runHashlineNativeEditJson/);
+      expect(source).not.toMatch(/cleanRoutingInstructionMarkersJson|cleanRoutingInstructionMarkersWithNative/);
+      expect(source).not.toMatch(
+        /parseAndPreprocessRoutingInstructions|extractClearInstruction|extractStopMessageClearInstruction|applyRoutingInstructionsToStateWithNative/,
+      );
     }
     for (const source of [respToolGovernanceBindings, respToolGovernanceReexports, requiredExports]) {
       expect(source).not.toMatch(/collectToolNamesFromCandidateJson|collect_tool_names_from_candidate_json/);
@@ -1875,6 +1879,7 @@ describe('hub pipeline stage residue audit', () => {
       'utf8',
     );
     expect(rustLib).not.toMatch(/clean_malformed_routing_instruction_markers_json|run_hashline_native_edit_json/);
+    expect(rustLib).not.toMatch(/clean_routing_instruction_markers_json/);
   });
 
   it('legacy TS chat-process request utility residue must be physically removed', () => {
@@ -2609,6 +2614,40 @@ describe('hub pipeline stage residue audit', () => {
       '#[napi]\npub fn validate_chat_envelope_json',
       '#[napi]\npub fn parse_format_envelope_json',
       '#[napi]\npub fn parse_resp_format_envelope_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+    ];
+    const retiredSymbols = [
+      'export function cleanRoutingInstructionMarkersWithNative',
+      'export function parseAndPreprocessRoutingInstructions',
+      'export function extractClearInstruction',
+      'export function extractStopMessageClearInstruction',
+      'export function applyRoutingInstructionsToStateWithNative',
+      'cleanRoutingInstructionMarkersJson',
+      '#[napi]\npub fn clean_routing_instruction_markers_json',
     ];
     const findings: string[] = [];
 

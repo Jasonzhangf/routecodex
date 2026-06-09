@@ -1788,15 +1788,6 @@ pub fn inject_mcp_tools_for_responses_json(
 }
 
 #[napi]
-pub fn clean_routing_instruction_markers_json(request_json: String) -> NapiResult<String> {
-    let mut request: Value =
-        serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    virtual_router_engine::instructions::clean_routing_instruction_markers(&mut request);
-    serde_json::to_string(&request).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-
-#[napi]
 pub fn extract_tool_calls_from_reasoning_text_json(
     text: String,
     id_prefix: Option<String>,

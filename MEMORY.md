@@ -3035,3 +3035,9 @@ Tags: virtual-router, bootstrap, stop-message, dead-code, napi-export, rust-only
 - Removed the zero-consumer TS wrappers, required-export entries, Rust NAPI JSON wrappers, and the SSE effect-plan public bridge; kept live Rust helpers and live public bridges that remain consumed by req/resp/mainline code.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public wrapper/export names from returning while allowing active Rust mainline helpers and still-consumed public bridges.
 Tags: hub-pipeline, edge-stage, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Virtual Router routing-instruction public helpers removed
+- Exact scan found `cleanRoutingInstructionMarkersWithNative`, `cleanRoutingInstructionMarkersJson`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, and `applyRoutingInstructionsToStateWithNative` had no consumer outside their defining TS bridge/public export surface.
+- Removed the zero-consumer TS helpers, required-export entry, and standalone Rust NAPI cleanup wrapper. Kept Rust `clean_routing_instruction_markers` internal because the active Virtual Router route mainline still calls it.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired routing-instruction public helper/export names from returning.
+Tags: virtual-router, routing-instructions, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

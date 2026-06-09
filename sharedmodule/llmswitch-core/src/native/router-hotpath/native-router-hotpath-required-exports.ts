@@ -390,7 +390,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "shouldRunHubChatProcessJson",
   "stripOrphanFunctionCallsTagJson",
   "stripChatProcessHistoricalImagesJson",
-  "cleanRoutingInstructionMarkersJson",
   "classifyProviderFailureJson",
   "networkErrorSetJson",
   "isProviderFailureBlockingRecoverableJson",

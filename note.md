@@ -18841,3 +18841,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Rust client-semantics flaky test note:
 - While validating edge-stage wrapper deletion, `cargo test -p router-hotpath-napi hub_resp_outbound_client_semantics --lib -- --nocapture` failed only on `build_responses_payload_from_chat_json_matches_core_shape` because the test compares a direct core output and JSON wrapper output that each generate `resp_<now_unix_millis()>`; repeated run reproduced a 1ms id mismatch.
 - This is a pre-existing time-sensitive test design issue, not caused by edge-stage public wrapper deletion. Fix separately by making the test compare stable fields or injecting deterministic id/time into both paths.
+
+2026-06-09 VR routing-instruction public helper deletion:
+- Inventory: `cleanRoutingInstructionMarkersWithNative`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, and `applyRoutingInstructionsToStateWithNative` had zero external consumers. `cleanRoutingInstructionMarkersJson` only existed as a standalone required-export/NAPI bridge. Live `parseRoutingInstructions` / `applyRoutingInstructionsWithNative` remain consumed by routing-instruction tests, and Rust cleanup remains used by VR route mainline.
+- Change: removed zero-consumer TS helpers, removed required-export entry and Rust NAPI wrapper for `cleanRoutingInstructionMarkersJson`, and added residue/map/memory notes.
