@@ -44,6 +44,43 @@ verification:
       - Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs.
       - stop_message_auto lifecycle must prove CLI input/output carries continuationPrompt, repeatCount, maxRepeats, and does not re-project after CLI output returns.
 
+  - feature_id: hub.servertool_loop_warning
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs
+      - sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/stop-message-auto.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Rust/followup-core owns warning text and repeat-count policy; TS must stay native payload/callback glue.
+
+  - feature_id: hub.servertool_orchestration_policy
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/followup-runtime-provider-pin.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - servertool-core owns timeout, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers.
+
   - feature_id: error.provider_failure_policy
     change_risk: high
     unit:

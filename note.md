@@ -6,6 +6,13 @@
 - Rust/native 真源已存在：`sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs::inject_loop_warning`，NAPI wrapper 为 `injectLoopWarningWithNative`。
 - 本 slice 物理删除旧 TS export，只保留 `buildStopMessageLoopPayload` 作为 native payload builder shell；`appendStopMessageLoopWarning` 作为 backend-route client-inject/reenter 参数名暂保留，因为它是 callback slot，不是 TS warning owner。
 
+## 2026-06-09 servertool orchestration policy Rust slice
+
+- 发现 `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts` 仍有 TS 语义 owner：timeout parse/floor、boolean-like parse、followup sanitize、HTTP/HTML/length error compaction、adapter providerKey walker；另有未导出死 wrapper `isStopFinishReasonWithoutToolCalls`。
+- 已迁到 Rust owner `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`，TS 文件只读 env/metadata/value 并调用 native wrappers；`containsSyntheticRouteCodexControlText` 继续走既有 native chat-process wrapper。
+- Native required exports 新增并实测存在：`parseServertoolTimeoutMsJson`、`readClientInjectOnlyJson`、`normalizeClientInjectTextJson`、`compactFollowupErrorReasonJson`、`resolveAdapterContextProviderKeyJson`。
+- `verify:servertool-rust-only` 新增 `servertool-orchestration-policy-rust-owner` gate，阻止 TS 恢复 `parseTimeoutMs`、`parseBooleanLike`、`sanitizeFollowupText`、`FOLLOWUP_ERROR_REASON_MAX_LENGTH`、HTTP regex、providerKey walker、stop-gateway wrapper等本地语义。
+
 ## 2026-06-09 5555 forwarder route_failed closeout
 
 - User invariant restated: priority pools are ordered, `default` is a configured pool, and if `default` has providers it must not become an empty provider pool. Pool-internal transient/provider errors must not remove the final provider and turn selection into `PROVIDER_NOT_AVAILABLE`.
@@ -18404,3 +18411,15 @@ Tags: virtual-router, no-fallback, function-map, architecture-gate, rust-owner, 
 - Git diff distinction: ACMR diff paths contain no Windsurf/Cascade/Codeium matches; remaining matched paths are tracked `D` entries only for removed Windsurf/Cascade docs, scripts, provider runtime, Rust projection, fixtures, and tests awaiting commit.
 - Config-diff check returned no `config.toml`, provider TOML, `.rcc`, or Windsurf config path changes.
 - Verification PASS in this pass: `npm run verify:architecture-deleted-path`; `npm run verify:architecture-provider-specific-leaks`; `npm run verify:llmswitch-core-tsc`; `npm run build --prefix sharedmodule/llmswitch-core`; `git diff --check`.
+
+2026-06-09 function-map update for servertool Rust slices:
+- User correction: function map must be updated when servertool/Hub owner slices move to Rust.
+- Added `hub.servertool_loop_warning` to `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml`; owner is followup-core `inject_loop_warning`, while TS `stop-message-loop-payload-block.ts` is only native payload/callback glue.
+- Added `hub.servertool_orchestration_policy`; owner is servertool-core `orchestration_policy_contract.rs` for timeout parse, clientInjectOnly, client inject normalization, followup error compaction, and adapter provider key policy.
+- Added source anchors in `stop-message-loop-payload-block.ts` and `orchestration-policy-block.ts`.
+- Verification PASS: `npm run verify:function-map-compile-gate`; `npm run verify:servertool-rust-only`; `npm run verify:llmswitch-core-tsc`; root `npx tsc --noEmit --pretty false`; `git diff --check`.
+
+2026-06-09 responses SSE official-contract 收口:
+- `/v1/responses` 当前对外协议是 OpenAI Responses SSE，不是 Vercel AI SDK UI message stream；现存漂移点是把 chat-style `[DONE]` 混进了 Responses 终止链。
+- 已收口 owner：`src/server/handlers/handler-response-utils.ts`、`shared_responses_response_utils.rs`、`ResponsesEventSerializer`。Responses terminal 统一为 `response.completed` / `response.done`，不再输出或 repair `[DONE]`。
+- relay/direct 切换一致性补丁：`RouteCodexHttpServer.buildProviderDirectResult()` 现在与 `buildRouterDirectResult()` 同步执行 `recordResponsesResponseForRequest` 和 `finalizeResponsesConversationRequestRetention`；provider-direct 在 5xx 或 SSE wrapper 无 canonical body 时显式清理 retention，避免 submit_tool_outputs/续轮在直连切换后丢链。
