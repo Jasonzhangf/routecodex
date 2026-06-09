@@ -2,6 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
 
+// feature_id: hub.servertool_flow_presentation
+
 fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
     json!({
         "version": 1,
@@ -281,6 +283,43 @@ fn build_progress_config(document: &Value) -> Value {
     })
 }
 
+fn normalize_flow_id(value: Option<&Value>) -> Option<String> {
+    read_trimmed_string(value)
+}
+
+fn resolve_progress_tool_name(document: &Value, flow_id: &str) -> String {
+    let Some(normalized) = normalize_flow_id(Some(&Value::String(flow_id.to_string()))) else {
+        return "unknown".to_string();
+    };
+    let progress = build_progress_config(document);
+    progress
+        .get("toolNameByFlowId")
+        .and_then(Value::as_object)
+        .and_then(|record| record.get(&normalized))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or(normalized)
+}
+
+fn should_use_gold_progress_highlight(document: &Value, flow_id: &str) -> bool {
+    let Some(normalized) = normalize_flow_id(Some(&Value::String(flow_id.to_string()))) else {
+        return false;
+    };
+    let progress = build_progress_config(document);
+    progress
+        .get("goldHighlightFlowIds")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .any(|item| item == normalized)
+        })
+        .unwrap_or(false)
+}
+
 fn build_followup_config(document: &Value) -> Value {
     let followup = skeleton_root(document)
         .and_then(|value| value.get("followup"))
@@ -500,6 +539,28 @@ pub fn resolve_servertool_tool_spec_json(input_json: String) -> NapiResult<Strin
 }
 
 #[napi]
+pub fn resolve_servertool_progress_tool_name_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let flow_id = read_trimmed_string(input.get("flowId")).unwrap_or_default();
+    let output = resolve_progress_tool_name(&document, &flow_id);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn should_use_servertool_gold_progress_highlight_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let flow_id = read_trimmed_string(input.get("flowId")).unwrap_or_default();
+    let output = should_use_gold_progress_highlight(&document, &flow_id);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn resolve_servertool_followup_flow_profile_json(flow_id: String) -> NapiResult<String> {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -553,7 +614,8 @@ mod tests {
     use super::{
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
         plan_servertool_followup_runtime_json, plan_servertool_skeleton_derived_config_json,
-        resolve_servertool_followup_flow_profile_json, resolve_servertool_tool_spec_json,
+        resolve_servertool_followup_flow_profile_json, resolve_servertool_progress_tool_name_json,
+        resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
     };
     use serde_json::{json, Value};
 
@@ -733,6 +795,38 @@ mod tests {
             resolve_servertool_tool_spec_json(json!({ "name": "reasoning_stop" }).to_string())
                 .expect("missing tool spec");
         assert_eq!(missing, "null");
+    }
+
+    #[test]
+    fn resolves_progress_presentation_from_skeleton_config() {
+        let known = resolve_servertool_progress_tool_name_json(
+            json!({ "flowId": " web_search_flow " }).to_string(),
+        )
+        .expect("progress tool");
+        assert_eq!(known, "\"web_search\"");
+
+        let unknown = resolve_servertool_progress_tool_name_json(
+            json!({ "flowId": " custom_flow " }).to_string(),
+        )
+        .expect("unknown progress tool");
+        assert_eq!(unknown, "\"custom_flow\"");
+
+        let empty =
+            resolve_servertool_progress_tool_name_json(json!({ "flowId": "   " }).to_string())
+                .expect("empty progress tool");
+        assert_eq!(empty, "\"unknown\"");
+
+        let gold = should_use_servertool_gold_progress_highlight_json(
+            json!({ "flowId": " continue_execution_flow " }).to_string(),
+        )
+        .expect("gold highlight");
+        assert_eq!(gold, "true");
+
+        let regular = should_use_servertool_gold_progress_highlight_json(
+            json!({ "flowId": " web_search_flow " }).to_string(),
+        )
+        .expect("regular highlight");
+        assert_eq!(regular, "false");
     }
 
     #[test]

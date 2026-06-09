@@ -43,6 +43,24 @@ verification:
       - Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter.
       - Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs.
       - stop_message_auto lifecycle must prove CLI input/output carries continuationPrompt, repeatCount, maxRepeats, and does not re-project after CLI output returns.
+      - `servertool_fixture` must be dispatched by Rust CLI projection without restoring the deleted TS fixture handler.
+
+  - feature_id: hub.servertool_flow_presentation
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
+      - sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/servertool-progress-logging.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; TS is a native wrapper only.
 
   - feature_id: hub.servertool_loop_warning
     change_risk: high

@@ -588,6 +588,43 @@ export function resolveServertoolToolSpecWithNative(input: {
   }
 }
 
+export function resolveServertoolProgressToolNameWithNative(input: {
+  flowId: unknown;
+  document?: unknown;
+}): string {
+  const capability = 'resolveServertoolProgressToolNameJson';
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson('resolveServertoolProgressToolName', raw);
+    if (parsed === JSON_PARSE_FAILED || typeof parsed !== 'string' || !parsed.trim()) {
+      return fail('invalid payload');
+    }
+    return parsed.trim();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function shouldUseServertoolGoldProgressHighlightWithNative(input: {
+  flowId: unknown;
+  document?: unknown;
+}): boolean {
+  const capability = 'shouldUseServertoolGoldProgressHighlightJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseBoolean(raw);
+    return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function planServertoolToolCallDispatchWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;

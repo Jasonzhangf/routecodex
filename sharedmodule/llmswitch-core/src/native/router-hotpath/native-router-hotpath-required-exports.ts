@@ -283,6 +283,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planServertoolSkeletonDerivedConfigJson",
   "normalizeServertoolRegistrationSpecJson",
   "resolveServertoolToolSpecJson",
+  "resolveServertoolProgressToolNameJson",
+  "shouldUseServertoolGoldProgressHighlightJson",
   "planServertoolToolCallDispatchJson",
   "planServertoolOutcomeJson",
   "planServertoolAutoHookQueuesJson",

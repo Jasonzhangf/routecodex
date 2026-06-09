@@ -51,6 +51,7 @@ const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/r
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
+const TS_FLOW_PRESENTATION = `${SERVERTOOL_TS_DIR}/flow-presentation-block.ts`;
 const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
 const TS_BACKEND_ROUTE_SHAPE_GUARD = `${SERVERTOOL_TS_DIR}/backend-route-shape-guard.ts`;
 const TS_BACKEND_ROUTE_FINALIZE = `${SERVERTOOL_TS_DIR}/backend-route-finalize-block.ts`;
@@ -334,6 +335,7 @@ function checkServertoolCliProjectionMap() {
   const verificationMap = readRequired(VERIFICATION_MAP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const cliProjection = readRequired(CLI_PROJECTION);
+  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
@@ -362,6 +364,25 @@ function checkServertoolCliProjectionMap() {
     orchestration,
     'build_servertool_cli_projection_01_from_hub_resp_chatprocess_03'
   );
+  assertContains(
+    'servertool-fixture-rust-dispatch-owner',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES'
+  );
+  assertContains(
+    'servertool-fixture-rust-dispatch-owner',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    '"client_exec_cli_projection".to_string()'
+  );
+  if (existsSync(`${SERVERTOOL_TS_DIR}/handlers/fixture.ts`)) {
+    fail('servertool-fixture-ts-handler-deleted', 'servertool fixture TS handler must stay physically deleted');
+  }
+  if (serverSideTools.includes("import './handlers/fixture.js'")) {
+    fail('servertool-fixture-ts-handler-deleted', 'server-side-tools.ts must not side-effect import deleted fixture handler');
+  }
+  pass('servertool-fixture-ts-handler-deleted', 'servertool fixture TS handler is deleted; Rust dispatch owns CLI projection');
   assertContains(
     'cli-projection-command-contract',
     CHAT_SERVERTOOL_ORCHESTRATION,
@@ -1897,6 +1918,72 @@ function checkPendingSessionRustOwner() {
   );
 }
 
+function checkServertoolFlowPresentationRustOwner() {
+  const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
+  const flowPresentationShell = readRequired(TS_FLOW_PRESENTATION);
+  const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const needle of [
+    'pub fn resolve_servertool_progress_tool_name_json',
+    'pub fn should_use_servertool_gold_progress_highlight_json',
+  ]) {
+    assertContains(
+      'servertool-flow-presentation-rust-owner',
+      `${RUST_SRC_DIR}/servertool_skeleton_config.rs`,
+      rustSkeletonConfig,
+      needle
+    );
+  }
+  for (const needle of [
+    'resolveServertoolProgressToolNameJson',
+    'shouldUseServertoolGoldProgressHighlightJson',
+  ]) {
+    assertContains(
+      'servertool-flow-presentation-required-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      needle
+    );
+  }
+  for (const needle of [
+    'resolveServertoolProgressToolNameWithNative',
+    'shouldUseServertoolGoldProgressHighlightWithNative',
+  ]) {
+    assertContains(
+      'servertool-flow-presentation-native-bridge',
+      NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+    assertContains(
+      'servertool-flow-presentation-ts-thin-shell',
+      TS_FLOW_PRESENTATION,
+      flowPresentationShell,
+      needle
+    );
+  }
+  for (const keyword of [
+    'function normalizeFlowId',
+    'buildServertoolProgressConfig',
+    'toolNameByFlowId',
+    'goldHighlightFlowIds',
+    'new Set(',
+    "return 'unknown'",
+  ]) {
+    if (flowPresentationShell.includes(keyword)) {
+      fail(
+        'servertool-flow-presentation-no-ts-owner',
+        `Forbidden TS flow presentation semantic "${keyword}" found in flow-presentation-block.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-flow-presentation-no-ts-owner',
+    'flow-presentation-block.ts is native-only shell for progress tool name and highlight semantics'
+  );
+}
+
 // ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
@@ -2785,6 +2872,7 @@ checkStopMessageCounterRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
 checkPendingSessionRustOwner();
+checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();

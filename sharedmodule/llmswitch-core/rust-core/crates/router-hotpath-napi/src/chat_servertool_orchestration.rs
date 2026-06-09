@@ -27,6 +27,7 @@ pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() 
 /// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
+const CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES: [&str; 1] = ["servertool_fixture"];
 const LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT: &str = "继续执行";
 const DEFAULT_STOP_MESSAGE_EXECUTION_PROMPTS: [&str; 3] = [
     "第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，直接调用工具补证据；若目标已完成或阻塞，给出简洁结论并附 stop schema。",
@@ -1647,6 +1648,16 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
                 id: tool_call.id,
                 name: normalized_name,
                 arguments: tool_call.arguments,
+            });
+            continue;
+        }
+        if CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES.contains(&normalized_name.as_str()) {
+            executable_tool_calls.push(ServertoolDispatchCandidateOutput {
+                id: tool_call.id,
+                name: normalized_name,
+                arguments: tool_call.arguments,
+                execution_mode: "client_exec_cli_projection".to_string(),
+                strip_after_execute: true,
             });
             continue;
         }
@@ -3371,6 +3382,39 @@ mod tests {
                 .and_then(|row| row.get("reason"))
                 .and_then(|v| v.as_str()),
             Some("apply_patch_client_mode")
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_dispatch_projects_fixture_without_ts_handler_registration() {
+        let raw = serde_json::json!({
+            "toolCalls": [
+                { "id": "call_fixture", "name": "servertool_fixture", "arguments": "{\"value\":1}" }
+            ],
+            "disableToolCallHandlers": false,
+            "registeredToolCallHandlers": []
+        });
+        let output = plan_servertool_tool_call_dispatch_json(raw.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        let executable = parsed
+            .get("executableToolCalls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(executable.len(), 1);
+        assert_eq!(
+            executable[0].get("name").and_then(|v| v.as_str()),
+            Some("servertool_fixture")
+        );
+        assert_eq!(
+            executable[0].get("executionMode").and_then(|v| v.as_str()),
+            Some("client_exec_cli_projection")
+        );
+        assert_eq!(
+            executable[0]
+                .get("stripAfterExecute")
+                .and_then(|v| v.as_bool()),
+            Some(true)
         );
     }
 

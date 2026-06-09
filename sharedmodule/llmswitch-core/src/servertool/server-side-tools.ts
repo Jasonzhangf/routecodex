@@ -12,7 +12,6 @@ import {
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import './handlers/stop-message-auto.js';
 import './handlers/vision.js';
-import './handlers/fixture.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import {

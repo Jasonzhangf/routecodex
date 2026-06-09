@@ -1,21 +1,18 @@
-import { buildServertoolProgressConfig } from './skeleton-config.js';
+import {
+  resolveServertoolProgressToolNameWithNative,
+  shouldUseServertoolGoldProgressHighlightWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
-function normalizeFlowId(flowId: unknown): string {
-  return typeof flowId === 'string' ? flowId.trim() : '';
-}
+export const SERVERTOOL_FLOW_PRESENTATION_FEATURE_ID = 'feature_id: hub.servertool_flow_presentation';
+export const SERVERTOOL_FLOW_PRESENTATION_CANONICAL_BUILDERS = [
+  'resolve_servertool_progress_tool_name_json',
+  'should_use_servertool_gold_progress_highlight_json'
+] as const;
 
 export function resolveProgressToolName(flowId: unknown): string {
-  const normalized = normalizeFlowId(flowId);
-  if (!normalized) {
-    return 'unknown';
-  }
-  const record = buildServertoolProgressConfig().toolNameByFlowId;
-  return record[normalized] ?? normalized;
+  return resolveServertoolProgressToolNameWithNative({ flowId });
 }
 
 export function shouldUseGoldProgressHighlight(flowId: unknown): boolean {
-  const normalized = normalizeFlowId(flowId);
-  return normalized
-    ? new Set(buildServertoolProgressConfig().goldHighlightFlowIds).has(normalized)
-    : false;
+  return shouldUseServertoolGoldProgressHighlightWithNative({ flowId });
 }

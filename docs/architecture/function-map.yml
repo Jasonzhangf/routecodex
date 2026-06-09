@@ -36,7 +36,7 @@ owners:
       - Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner.
 
   - feature_id: hub.servertool_cli_projection
-    status: planned
+    status: active
     summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
@@ -70,6 +70,41 @@ owners:
       - stop_message_auto CLI input must include continuationPrompt, repeatCount, and maxRepeats when stopless state is available.
       - CLI execution path must not call server-side followup/reenter for migrated flows.
       - `apply_patch` is excluded; it remains native/freeform client tooling.
+      - `servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted.
+
+  - feature_id: hub.servertool_flow_presentation
+    status: active
+    summary: servertool progress log tool-name and highlight presentation policy
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
+    canonical_types:
+      - ServertoolProgressPresentationInput
+      - ServertoolProgressPresentationDecision
+    canonical_builders:
+      - resolve_servertool_progress_tool_name_json
+      - should_use_servertool_gold_progress_highlight_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
+      - tests/servertool/servertool-progress-logging.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/servertool-progress-logging.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions.
+      - TS flow-presentation-block may only call native wrappers.
+      - Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS.
 
   - feature_id: hub.servertool_loop_warning
     status: active
