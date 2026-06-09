@@ -2667,6 +2667,56 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired chat node-result public builders must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-node-result-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-node-result.mjs',
+    ];
+    const retiredSymbols = [
+      'buildChatProcessContextMetadataWithNative',
+      'applyChatProcessedRequestWithNative',
+      'buildChatProcessedDescriptorWithNative',
+      'buildChatNodeResultMetadataWithNative',
+      'buildChatNodeResultObservationWithNative',
+      'buildProcessedRequestFromChatResponseWithNative',
+      'restoreResponseContinuationSemanticsWithNative',
+      'buildChatProcessContextMetadataJson',
+      'applyChatProcessedRequestJson',
+      'buildChatProcessedDescriptorJson',
+      'buildChatNodeResultMetadataJson',
+      'buildChatNodeResultObservationJson',
+      'buildProcessedRequestFromChatResponseJson',
+      'restoreResponseContinuationSemanticsJson',
+      'fn build_context_metadata',
+      'fn build_processed_descriptor',
+      'fn build_node_result_metadata',
+      'fn build_node_result_observation',
+      'fn apply_chat_processed_request',
+      'fn restore_response_continuation_semantics',
+      'fn build_processed_request_from_chat_response',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [

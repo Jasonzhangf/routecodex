@@ -3077,3 +3077,9 @@ Tags: shared-conversion, hub-pipeline, dead-code, napi-export, rust-only, residu
 - Removed the zero-consumer TS wrappers, required-export entries, Rust public NAPI functions, wrapper-only stats tests, and the timeout helper chain. Kept live SSE parser/stream/error descriptor/context diagnostics public exports.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired SSE stats/timeout public wrappers and Rust NAPI exports from returning; `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` now asserts these retired helpers are not required exports.
 Tags: hub-pipeline, sse, resp-inbound, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Chat node-result public builders removed
+- Exact scan found the old chat node-result builder/descriptor/restore public bridge surface had no live runtime consumer: `buildChatProcessContextMetadataWithNative`, `applyChatProcessedRequestWithNative`, `buildChatProcessedDescriptorWithNative`, `buildChatNodeResultMetadataWithNative`, `buildChatNodeResultObservationWithNative`, `buildProcessedRequestFromChatResponseWithNative`, `restoreResponseContinuationSemanticsWithNative`, and matching JSON exports.
+- Removed the zero-consumer TS wrappers, required-export entries, Rust public wrapper functions, the now-dead private Rust helper chain, and stale `coverage-hub-chat-process-node-result.mjs`. Kept live request-executor and finish/empty-response classification bridges.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these retired node-result builder/descriptor/restore wrappers, JSON exports, Rust helper names, and stale coverage script path from returning.
+Tags: hub-pipeline, chat-node-result, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
