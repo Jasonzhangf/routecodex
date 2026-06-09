@@ -125,33 +125,6 @@ export function analyzeChatWebSearchIntent(messages: unknown[]): {
   return { ...parsed, source: 'native' };
 }
 
-export function sanitizeChatProcessMessagesWithNative(request: Record<string, unknown>): {
-    messages: Record<string, unknown>[];
-    removedAssistantTurns: number;
-    removedEmptyAssistantTurns: number;
-    removedTemplateAssistantTurns: number;
-    removedDuplicateMirrorAssistantTurns: number;
-    removedHistoricalGoalTurns: number;
-    didMutateMessageShapes: boolean;
-} {
-    const capability = 'sanitizeChatProcessMessagesJson';
-    const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown>;
-    const fn = binding?.[capability] as ((input: string) => string) | undefined;
-    if (typeof fn !== 'function') {
-        throw makeNativeRequiredError(capability);
-    }
-    const raw = fn(JSON.stringify(request));
-    return JSON.parse(raw) as {
-        messages: Record<string, unknown>[];
-        removedAssistantTurns: number;
-        removedEmptyAssistantTurns: number;
-        removedTemplateAssistantTurns: number;
-        removedDuplicateMirrorAssistantTurns: number;
-        removedHistoricalGoalTurns: number;
-        didMutateMessageShapes: boolean;
-    };
-}
-
 export function loadNativeRouterHotpathBindingForInternalUse(): unknown {
   return loadNativeRouterHotpathBinding();
 }

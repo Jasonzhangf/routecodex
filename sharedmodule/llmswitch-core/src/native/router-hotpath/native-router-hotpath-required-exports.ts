@@ -208,7 +208,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "validateResponsePayloadJson",
   "normalizeResponsePayloadJson",
   "applyResponseBlacklistJson",
-    "sanitizeChatProcessMessagesJson",
   "normalizeToolCallIdsJson",
   "normalizeResponsesToolCallIdsJson",
   "resolveToolCallIdStyleJson",

@@ -18812,3 +18812,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `findMappableSemanticsKeysWithNative` / `findMappableSemanticsKeysJson` had no TS/runtime consumer; active Rust references are private helper tests only.
 - Change: removed public TS wrapper, required-export entry, Rust NAPI JSON wrapper, and public hub_pipeline re-export; kept internal Rust `find_mappable_semantics_keys`.
 - Guard: residue gate blocks the public wrapper/export names from returning.
+
+2026-06-09 HubPipeline chat sanitize public wrapper deletion:
+- Exact scan: `sanitizeChatProcessMessagesWithNative` / `sanitizeChatProcessMessagesJson` had no TS/runtime consumer outside wrapper/required-export/root NAPI surfaces.
+- Change: removed public TS wrapper, required-export entry, and Rust root NAPI JSON wrapper; kept internal Rust sanitization helpers because request governance / responses context still use them.
+- Guard: residue gate scans only public TS/NAPI surfaces so internal Rust `shared_response_compat` helpers remain private implementation, not public bridge.

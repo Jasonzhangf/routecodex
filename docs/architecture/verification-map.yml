@@ -357,6 +357,7 @@ verification:
       - Retired zero-consumer Hub orchestration public wrappers and standalone NAPI JSON exports must stay deleted; internal Rust helper functions may remain private to active Hub mainline/tests, but aggregate TS re-export and required-export gate must not preserve dead public surfaces.
       - Retired zero-consumer session header helper NAPI wrappers must stay deleted; `extractSessionIdentifiersJson` is the only public session identifier bridge, and header helpers remain private Rust implementation details.
       - Retired mappable-semantics public wrapper must stay deleted; process-mode mappable key detection is internal Rust logic, not standalone TS/NAPI control surface.
+      - Retired chat-process sanitize public wrapper must stay deleted; chat-process message sanitization remains private Rust request-governance/responses-context internals, not a standalone TS/NAPI bridge.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
