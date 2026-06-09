@@ -676,6 +676,39 @@ owners:
       - Route selection, health, cooldown, and dependency semantics remain in Rust/native owners.
       - HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types.
 
+  - feature_id: hub.chat_envelope_type_surface
+    status: active
+    summary: Hub ChatEnvelope TS bridge type surface for still-consumed envelope/context aliases
+    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+    canonical_types:
+      - AdapterContext
+      - ChatContinuationSemantics
+      - ChatSemantics
+      - ChatEnvelope
+    canonical_builders:
+      - chatEnvelopeToStandardized
+      - standardizedToChatEnvelope
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - tests/sharedmodule
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/chat-semantics-stage1.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - ChatEnvelope TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned.
+      - Zero-consumer nested semantic aliases must stay module-internal and absent from the public type surface.
+
   - feature_id: hub.stage_timing_observation
     status: active
     summary: Hub stage timing observation glue for logs and runtime metadata top-summary attachment

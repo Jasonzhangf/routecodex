@@ -1,4 +1,6 @@
-export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+// feature_id: hub.chat_envelope_type_surface
+
+type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
 import type { JsonObject, JsonValue } from './json.js';
 
@@ -78,13 +80,13 @@ export interface AdapterContext {
   [key: string]: unknown;
 }
 
-export type ChatContinuationScope =
+type ChatContinuationScope =
   | 'request_chain'
   | 'session'
   | 'conversation'
   | 'request';
 
-export type ChatContinuationStateOrigin =
+type ChatContinuationStateOrigin =
   | 'openai-responses'
   | 'openai-chat'
   | 'anthropic-messages'
@@ -93,7 +95,7 @@ export type ChatContinuationStateOrigin =
   | 'tool-loop'
   | 'unknown';
 
-export interface ChatContinuationPointer extends JsonObject {
+interface ChatContinuationPointer extends JsonObject {
   protocol?: string;
   requestId?: string;
   responseId?: string;
@@ -101,7 +103,7 @@ export interface ChatContinuationPointer extends JsonObject {
   turnId?: string;
 }
 
-export interface ChatToolContinuation extends JsonObject {
+interface ChatToolContinuation extends JsonObject {
   mode?:
     | 'required_action'
     | 'submit_tool_outputs'
@@ -124,13 +126,13 @@ export interface ChatContinuationSemantics extends JsonObject {
   protocolHints?: JsonObject;
 }
 
-export type ChatProtocolMappingDisposition =
+type ChatProtocolMappingDisposition =
   | 'preserved'
   | 'lossy'
   | 'dropped'
   | 'unsupported';
 
-export interface ChatProtocolMappingAuditEntry extends JsonObject {
+interface ChatProtocolMappingAuditEntry extends JsonObject {
   field: string;
   disposition: ChatProtocolMappingDisposition;
   reason: string;
@@ -139,7 +141,7 @@ export interface ChatProtocolMappingAuditEntry extends JsonObject {
   source?: string;
 }
 
-export interface ChatSemanticAudit extends JsonObject {
+interface ChatSemanticAudit extends JsonObject {
   protocolMapping?: {
     preserved?: ChatProtocolMappingAuditEntry[];
     lossy?: ChatProtocolMappingAuditEntry[];
@@ -148,14 +150,14 @@ export interface ChatSemanticAudit extends JsonObject {
   };
 }
 
-export interface ChatToolSemantics extends JsonObject {
+interface ChatToolSemantics extends JsonObject {
   explicitEmpty?: boolean;
   clientToolsRaw?: JsonValue[];
   toolNameAliasMap?: JsonObject;
   toolAliasMap?: JsonObject;
 }
 
-export interface ChatResponsesSemantics extends JsonObject {
+interface ChatResponsesSemantics extends JsonObject {
   context?: JsonObject;
   resume?: JsonObject;
   requestParameters?: JsonObject;
@@ -172,7 +174,7 @@ export interface ChatResponsesSemantics extends JsonObject {
   modalities?: JsonValue;
 }
 
-export interface ChatAnthropicSemantics extends JsonObject {
+interface ChatAnthropicSemantics extends JsonObject {
   systemBlocks?: JsonValue[];
   toolNameAliasMap?: JsonObject;
   clientToolsRaw?: JsonValue[];
@@ -180,7 +182,7 @@ export interface ChatAnthropicSemantics extends JsonObject {
   providerMetadata?: JsonObject;
 }
 
-export interface ChatGeminiSemantics extends JsonObject {
+interface ChatGeminiSemantics extends JsonObject {
   systemInstruction?: JsonValue;
   safetySettings?: JsonValue;
   generationConfig?: JsonObject;

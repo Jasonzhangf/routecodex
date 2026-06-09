@@ -18678,3 +18678,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `measureHubStage` only consumed by `tests/sharedmodule/hub-stage-timing-top-summary.spec.ts`; production callers use `logHubStageTiming`, `clearHubStageTiming`, `peekHubStageTopSummary`, `attachHubStageTopSummary`, or `isHubStageTimingDetailEnabled`.
 - Removed `measureHubStageExecution` and exported `measureHubStage` from `hub-stage-timing.ts`; changed the top-summary test to record elapsed stages through production `logHubStageTiming`.
 - Added `hub.stage_timing_observation` function/verification map entries and a residue gate blocking measure wrapper revival.
+
+2026-06-09 HubPipeline ChatEnvelope nested type surface pruning:
+- Exact scan found `ChatContinuationScope`, `ChatContinuationStateOrigin`, `ChatContinuationPointer`, `ChatToolContinuation`, protocol mapping/audit namespace types, and provider semantic namespace detail types are only used inside `chat-envelope.ts`.
+- Kept externally consumed public types (`AdapterContext`, `ChatContinuationSemantics`, `ChatSemantics`, `ChatEnvelope`, message/tool types) and made zero-consumer nested aliases module-internal.
+- Added `hub.chat_envelope_type_surface` function/verification map entries and a residue gate blocking nested semantic type export revival.

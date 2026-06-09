@@ -366,6 +366,25 @@ verification:
       - HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking.
       - HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel.
 
+  - feature_id: hub.chat_envelope_type_surface
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/chat-semantics-stage1.spec.ts
+    integration:
+      - tests/sharedmodule/chat-semantics-stage1.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run verify:llmswitch-core-tsc
+    notes:
+      - Public TS ChatEnvelope types are limited to externally consumed bridge declarations.
+      - Zero-consumer nested semantic aliases are residue and must remain module-internal.
+
   - feature_id: hub.stage_timing_observation
     change_risk: low
     unit:

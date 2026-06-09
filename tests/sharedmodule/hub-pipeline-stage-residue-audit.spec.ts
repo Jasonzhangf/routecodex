@@ -2593,6 +2593,40 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('ChatEnvelope type surface must not export zero-consumer nested semantic shells', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const forbidden = [
+      'ChatRole',
+      'ChatContinuationScope',
+      'ChatContinuationStateOrigin',
+      'ChatContinuationPointer',
+      'ChatToolContinuation',
+      'ChatProtocolMappingDisposition',
+      'ChatProtocolMappingAuditEntry',
+      'ChatSemanticAudit',
+      'ChatToolSemantics',
+      'ChatResponsesSemantics',
+      'ChatAnthropicSemantics',
+      'ChatGeminiSemantics',
+    ];
+    const findings: string[] = [];
+
+    for (const name of forbidden) {
+      const exportedDeclaration = new RegExp(`export\\s+(?:type|interface)\\s+${name}\\b`);
+      if (exportedDeclaration.test(source)) {
+        findings.push(`exported zero-consumer nested type ${name}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('feature_id: hub.chat_envelope_type_surface');
+    expect(source).toContain('export interface AdapterContext');
+    expect(source).toContain('export interface ChatContinuationSemantics');
+    expect(source).toContain('export interface ChatSemantics');
+    expect(source).toContain('export interface ChatEnvelope');
+  });
+
   it('chat process session usage bridge must not restore retired token estimate branch', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
     const source = fs.readFileSync(filePath, 'utf8');

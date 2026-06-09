@@ -2882,3 +2882,9 @@ Tags: hub-pipeline, snapshot-recorder, public-surface, dead-code, residue-gate, 
 - `measureHubStage` / `measureHubStageExecution` were test-only orchestration wrappers after the old `hub-stage-timing-measure-blocks.ts` deletion and must not be restored.
 - Function/verification map feature: `hub.stage_timing_observation`; gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks measure wrapper revival.
 Tags: hub-pipeline, stage-timing, dead-code, public-surface, residue-gate, observation-glue, 2026-06-09
+
+## 2026-06-09 HubPipeline ChatEnvelope nested type surface narrowed
+- `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts` public exports must stay limited to externally consumed bridge declarations such as `AdapterContext`, `ChatContinuationSemantics`, `ChatSemantics`, `ChatEnvelope`, message/tool envelope types, and missing-field/tool-output types.
+- Zero-consumer nested semantic aliases (`ChatContinuationScope`, `ChatContinuationPointer`, protocol mapping/audit namespace types, provider semantic namespace detail types, etc.) are module-internal TS type shells and must not be re-exported.
+- Function/verification map feature: `hub.chat_envelope_type_surface`; gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks nested type export revival.
+Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
