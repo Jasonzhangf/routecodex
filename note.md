@@ -18559,6 +18559,11 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Physically deleted `scripts/enhance-module.js`, `docs/MODULE_ENHANCEMENT_SYSTEM.md`, and stale `docs/pipeline-routing-report.md`; added them to the deleted-path gate.
 - Updated remaining design docs to say old `src/modules/pipeline/modules/**` locations are absent/forbidden and current truth is llmswitch-core Rust/native Hub Pipeline plus Host bridge.
 
+2026-06-09 Hub Pipeline zero-consumer utility/validation cleanup:
+- Exact scans found no active import/runtime/test consumer for `src/modules/pipeline/utils/oauth-helpers.ts`; despite the name it only exported `findOpenPort/checkPort` and was unrelated to current OAuth/runtime owners.
+- Exact scans found no active import/runtime/test consumer for `src/modules/pipeline/validation/config-validator.ts`; only its own README and `src/core/README.md` referenced the directory. The validator used old TS `PipelineConfig/ModuleConfig/ProviderConfig` and is not current Rust/Hub config truth.
+- Physically deleted `oauth-helpers.ts` and the `src/modules/pipeline/validation/**` directory files; added them to the deleted-path gate.
+
 2026-06-09 servertool backend-route origin-seed Rust closeout:
 - Moved backend-route origin seed source precedence into Rust: `router-hotpath-napi/src/servertool_followup_delta.rs::resolve_followup_origin_seed` now owns adapter `capturedEntryRequest`/`capturedChatRequest`, persisted snapshot captured entry/chat, and snapshot root fallback order plus existing seed normalization.
 - TS `backend-route-origin-delta.ts` now only resolves scope, loads optional origin snapshot IO, and calls `resolveFollowupOriginSeedWithNative`; it no longer imports `extractCapturedChatSeed` or performs captured request field selection.

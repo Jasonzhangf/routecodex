@@ -11,5 +11,5 @@ src/core/
 ## Key Components
 
 ## Related Documentation
-- `src/modules/pipeline/validation/` - Configuration validation
+- `docs/agent-routing/10-runtime-ssot-routing.md` - Rust/Hub runtime truth
 - `docs/error-handling-v2.md` - Error handling architecture
