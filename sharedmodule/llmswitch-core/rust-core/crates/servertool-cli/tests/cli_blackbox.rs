@@ -94,6 +94,28 @@ fn invalid_stop_message_flow_id_fails_fast() {
 }
 
 #[test]
+fn invalid_stop_message_repeat_budget_fails_fast() {
+    for input_json in [
+        r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":1,"maxRepeats":0}"#,
+        r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":4,"maxRepeats":3}"#,
+    ] {
+        let output = Command::new(bin())
+            .args(["run", "stop_message_auto", "--input-json", input_json])
+            .output()
+            .expect("run routecodex-servertool");
+        assert!(
+            !output.status.success(),
+            "{input_json} must fail-fast"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats"),
+            "stderr={stderr}"
+        );
+    }
+}
+
+#[test]
 fn non_client_exec_servertools_fail_fast() {
     for tool_name in ["web_search", "vision_auto", "memory_cache_auto"] {
         let output = Command::new(bin())
