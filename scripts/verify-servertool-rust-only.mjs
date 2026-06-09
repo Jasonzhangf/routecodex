@@ -736,6 +736,11 @@ function checkStandaloneServertoolBinary() {
   const rustCliBlackbox = readRequired(RUST_SERVERTOOL_CLI_BLACKBOX);
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn private_carrier_text_fails_fast');
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'SERVERTOOL_DENIED_INTERNAL_CARRIER: serverToolFollowup');
+  assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
+  for (const toolName of ['web_search', 'vision_auto', 'memory_cache_auto']) {
+    assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, toolName);
+    assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, `SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}`);
+  }
   const nativeBuild = readRequired(NATIVE_BUILD_SCRIPT);
   assertContains('servertool-cli-packaged-binary', NATIVE_BUILD_SCRIPT, nativeBuild, "'servertool-cli'");
   assertContains('servertool-cli-packaged-binary', NATIVE_BUILD_SCRIPT, nativeBuild, 'packagedServertoolBinary');
