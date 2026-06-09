@@ -3198,6 +3198,30 @@ function checkBackendRoutePolicyRustOwner() {
     originDeltaShell,
     'resolveFollowupOriginSeedWithNative'
   );
+  const originDeltaFunctionNames = Array.from(originDeltaShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (
+    originDeltaFunctionNames.join(',') !==
+    'applyFollowupDeltaPlan,extractAssistantFollowupMessage,loadFollowupOriginSeed'
+  ) {
+    fail(
+      'backend-route-origin-delta-ts-thin-shell',
+      `backend-route-origin-delta.ts must remain a three-function IO/native delegate; found exports: ${originDeltaFunctionNames.join(',') || '(none)'}`
+    );
+  }
+  for (const [functionName, nativeCall] of [
+    ['extractAssistantFollowupMessage', 'extractAssistantFollowupMessageWithNative'],
+    ['loadFollowupOriginSeed', 'resolveFollowupOriginSeedWithNative'],
+    ['applyFollowupDeltaPlan', 'applyFollowupDeltaPlanWithNative'],
+  ]) {
+    assertContains(
+      'backend-route-origin-delta-ts-thin-shell',
+      TS_BACKEND_ROUTE_ORIGIN_DELTA,
+      extractFunctionBlock(originDeltaShell, functionName),
+      nativeCall
+    );
+  }
   for (const keyword of [
     'function cloneJson',
     'JSON.parse(JSON.stringify',
