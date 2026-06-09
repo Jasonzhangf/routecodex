@@ -1,4 +1,22 @@
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageTerminalVisiblePayloadInput {
+    pub payload: Value,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageTerminalVisiblePayloadOutput {
+    pub payload: Value,
+    pub changed: bool,
+}
 
 pub fn strip_stop_schema_control_text(text: &str) -> String {
     strip_stop_schema_control_blocks(text)
@@ -17,6 +35,47 @@ pub fn strip_stop_schema_control_payload(payload: &mut Value) {
             sanitize_stop_schema_visible_node(item);
         }
     }
+}
+
+pub fn extract_current_assistant_stop_text(payload: &Value) -> String {
+    let mut texts = Vec::<String>::new();
+    if let Some(choices) = payload.get("choices").and_then(Value::as_array) {
+        for choice in choices {
+            let Some(message) = choice.get("message") else {
+                continue;
+            };
+            collect_text_blocks(message.get("content"), &mut texts);
+        }
+    }
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for item in output {
+            collect_text_blocks(item.get("content"), &mut texts);
+        }
+    }
+    texts.join("\n").trim().to_string()
+}
+
+pub fn build_stop_message_terminal_visible_payload(
+    input: StopMessageTerminalVisiblePayloadInput,
+) -> StopMessageTerminalVisiblePayloadOutput {
+    let mut payload = input.payload;
+    strip_stop_schema_control_payload(&mut payload);
+    let prefix = input.prefix.unwrap_or_default().trim().to_string();
+    let mode = input
+        .mode
+        .unwrap_or_else(|| "strip".to_string())
+        .trim()
+        .to_ascii_lowercase();
+    let mut changed = false;
+    if !prefix.is_empty() {
+        changed = match mode.as_str() {
+            "replace" => replace_visible_stop_content(&mut payload, &prefix),
+            "prefix" => prefix_visible_stop_content(&mut payload, &prefix),
+            _ => false,
+        };
+    }
+    strip_terminal_visible_reasoning_fields(&mut payload);
+    StopMessageTerminalVisiblePayloadOutput { payload, changed }
 }
 
 fn strip_stop_schema_control_blocks(text: &str) -> String {
@@ -206,6 +265,182 @@ fn sanitize_stop_schema_summary_array(value: Option<&mut Value>) {
     }
 }
 
+fn collect_text_blocks(value: Option<&Value>, out: &mut Vec<String>) {
+    let Some(value) = value else {
+        return;
+    };
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                match item {
+                    Value::String(text) => {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            out.push(trimmed.to_string());
+                        }
+                    }
+                    Value::Object(row) => {
+                        let text = row
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .or_else(|| row.get("output_text").and_then(Value::as_str))
+                            .or_else(|| row.get("content").and_then(Value::as_str))
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty());
+                        if let Some(text) = text {
+                            out.push(text.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn prefix_visible_stop_content(payload: &mut Value, prefix: &str) -> bool {
+    prefix_chat_choice_content(payload, prefix) || prefix_responses_output_content(payload, prefix)
+}
+
+fn replace_visible_stop_content(payload: &mut Value, prefix: &str) -> bool {
+    replace_chat_choice_content(payload, prefix)
+        || replace_responses_output_content(payload, prefix)
+}
+
+fn prefix_chat_choice_content(payload: &mut Value, prefix: &str) -> bool {
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for choice in choices {
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        match message.get_mut("content") {
+            Some(Value::String(text)) => {
+                *text = format!("{prefix}\n{text}");
+                changed = true;
+            }
+            Some(Value::Array(content)) => {
+                content.insert(0, json!({ "type": "text", "text": format!("{prefix}\n") }));
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn replace_chat_choice_content(payload: &mut Value, prefix: &str) -> bool {
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for choice in choices {
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        message.insert("content".to_string(), Value::String(prefix.to_string()));
+        changed = true;
+    }
+    changed
+}
+
+fn prefix_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    for item in output {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(Value::Array(content)) = row.get_mut("content") else {
+            continue;
+        };
+        content.insert(
+            0,
+            json!({ "type": "output_text", "text": format!("{prefix}\n") }),
+        );
+        if let Some(Value::String(output_text)) = payload.get_mut("output_text") {
+            *output_text = format!("{prefix}\n{output_text}");
+        }
+        return true;
+    }
+    false
+}
+
+fn replace_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for item in output {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        if row.get("content").and_then(Value::as_array).is_some()
+            || row.get("type") == Some(&Value::String("message".to_string()))
+        {
+            row.insert(
+                "content".to_string(),
+                json!([{ "type": "output_text", "text": prefix }]),
+            );
+            changed = true;
+        }
+    }
+    if changed || payload.get("output_text").and_then(Value::as_str).is_some() {
+        if let Some(row) = payload.as_object_mut() {
+            row.insert("output_text".to_string(), Value::String(prefix.to_string()));
+        }
+    }
+    changed
+}
+
+fn strip_terminal_visible_reasoning_fields(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            let mut index = 0usize;
+            while index < items.len() {
+                if is_responses_reasoning_item(&items[index]) {
+                    items.remove(index);
+                    continue;
+                }
+                strip_terminal_visible_reasoning_fields(&mut items[index]);
+                index += 1;
+            }
+        }
+        Value::Object(row) => {
+            for key in [
+                "reasoning_text",
+                "reasoning_content",
+                "reasoning",
+                "reasoning_details",
+            ] {
+                row.remove(key);
+            }
+            for child in row.values_mut() {
+                strip_terminal_visible_reasoning_fields(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_responses_reasoning_item(value: &Value) -> bool {
+    value
+        .as_object()
+        .and_then(|row| row.get("type"))
+        .and_then(Value::as_str)
+        == Some("reasoning")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +504,78 @@ visible after
             "summary  ok"
         );
         assert_eq!(payload["output"][0]["content"][0]["output_text"], "ok");
+    }
+
+    #[test]
+    fn extracts_current_assistant_stop_text_from_all_chat_and_responses_items() {
+        let payload = json!({
+            "choices": [{
+                "message": {
+                    "content": [
+                        { "text": "one" },
+                        { "output_text": "two" },
+                        "three"
+                    ]
+                }
+            }],
+            "output": [{
+                "content": [
+                    { "output_text": "four" },
+                    { "content": "five" }
+                ]
+            }]
+        });
+        assert_eq!(
+            extract_current_assistant_stop_text(&payload),
+            "one\ntwo\nthree\nfour\nfive"
+        );
+    }
+
+    #[test]
+    fn builds_prefixed_terminal_chat_payload_without_reasoning_or_stop_schema() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "choices": [{
+                        "message": {
+                            "content": "answer {\"stopreason\":\"0\",\"reason\":\"done\"}",
+                            "reasoning": { "summary": [{ "text": "private" }] }
+                        }
+                    }]
+                }),
+                mode: Some("prefix".to_string()),
+                prefix: Some("summary".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(
+            output.payload["choices"][0]["message"]["content"],
+            "summary\nanswer"
+        );
+        assert!(output.payload["choices"][0]["message"]
+            .get("reasoning")
+            .is_none());
+    }
+
+    #[test]
+    fn builds_replaced_terminal_responses_payload_and_removes_reasoning_items() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "output_text": "old",
+                    "output": [
+                        { "type": "reasoning", "summary": [{ "text": "private" }] },
+                        { "type": "message", "content": [{ "type": "output_text", "text": "old" }] }
+                    ]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("needs user".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(output.payload["output_text"], "needs user");
+        assert_eq!(output.payload["output"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            output.payload["output"][0]["content"][0]["text"],
+            "needs user"
+        );
     }
 }

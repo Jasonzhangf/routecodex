@@ -1717,14 +1717,20 @@ pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiRe
 }
 
 #[napi]
+pub fn extract_current_assistant_stop_text_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::extract_current_assistant_stop_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn strip_stop_schema_control_text_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::strip_stop_schema_control_text_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
 #[napi]
-pub fn strip_stop_schema_control_payload_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::strip_stop_schema_control_payload_json(&input_json)
+pub fn build_stop_message_terminal_visible_payload_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::build_stop_message_terminal_visible_payload_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

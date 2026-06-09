@@ -3219,6 +3219,18 @@ function checkStopVisibleTextRustOwner() {
   );
   assertContains(
     'stop-visible-text-rust-owner',
+    RUST_SERVERTOOL_STOP_VISIBLE_TEXT,
+    rustStopVisibleText,
+    'pub fn extract_current_assistant_stop_text'
+  );
+  assertContains(
+    'stop-visible-text-rust-owner',
+    RUST_SERVERTOOL_STOP_VISIBLE_TEXT,
+    rustStopVisibleText,
+    'pub fn build_stop_message_terminal_visible_payload'
+  );
+  assertContains(
+    'stop-visible-text-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
     servertoolCoreLib,
     'pub mod stop_visible_text'
@@ -3231,9 +3243,33 @@ function checkStopVisibleTextRustOwner() {
   );
   assertContains(
     'stop-visible-text-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'extract_current_assistant_stop_text_json'
+  );
+  assertContains(
+    'stop-visible-text-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'build_stop_message_terminal_visible_payload_json'
+  );
+  assertContains(
+    'stop-visible-text-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'pub fn strip_stop_schema_control_text_json'
+  );
+  assertContains(
+    'stop-visible-text-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn extract_current_assistant_stop_text_json'
+  );
+  assertContains(
+    'stop-visible-text-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn build_stop_message_terminal_visible_payload_json'
   );
   assertContains(
     'stop-visible-text-native-export',
@@ -3242,16 +3278,59 @@ function checkStopVisibleTextRustOwner() {
     'stripStopSchemaControlTextJson'
   );
   assertContains(
+    'stop-visible-text-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'extractCurrentAssistantStopTextJson'
+  );
+  assertContains(
+    'stop-visible-text-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'buildStopMessageTerminalVisiblePayloadJson'
+  );
+  assertContains(
     'stop-visible-text-native-wrapper',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeServertoolWrapper,
     'stripStopSchemaControlTextWithNative'
   );
   assertContains(
+    'stop-visible-text-native-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'extractCurrentAssistantStopTextWithNative'
+  );
+  assertContains(
+    'stop-visible-text-native-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'buildStopMessageTerminalVisiblePayloadWithNative'
+  );
+  for (const [file, content, keyword] of [
+    [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'strip_stop_schema_control_payload_json'],
+    [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn strip_stop_schema_control_payload_json'],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports, 'stripStopSchemaControlPayloadJson'],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeServertoolWrapper, 'stripStopSchemaControlPayloadWithNative'],
+  ]) {
+    if (content.includes(keyword)) {
+      fail(
+        'stop-visible-text-dead-export-deleted',
+        `Forbidden dead stop visible text export "${keyword}" found in ${file.replace(`${ROOT}/`, '')}`
+      );
+    }
+  }
+  assertContains(
     'stop-visible-text-thin-shell',
     STOP_MESSAGE_AUTO_HANDLER,
     stopMessageHandler,
-    'stripStopSchemaControlPayloadWithNative'
+    'extractCurrentAssistantStopTextWithNative(ctx.base)'
+  );
+  assertContains(
+    'stop-visible-text-thin-shell',
+    STOP_MESSAGE_AUTO_HANDLER,
+    stopMessageHandler,
+    'buildStopMessageTerminalVisiblePayloadWithNative'
   );
   assertContains(
     'stop-visible-text-thin-shell',
@@ -3270,6 +3349,14 @@ function checkStopVisibleTextRustOwner() {
       'findJsonObjectEnd',
       '<stop_schema>',
       '停止原因',
+      'function extractCurrentAssistantStopText',
+      'function collectTextBlocks',
+      'function prefixChatChoiceContent',
+      'function replaceChatChoiceContent',
+      'function prefixResponsesOutputContent',
+      'function replaceResponsesOutputContent',
+      'function stripVisibleReasoningFields',
+      'function isResponsesReasoningItem',
     ]) {
       if (content.includes(keyword)) {
         fail(

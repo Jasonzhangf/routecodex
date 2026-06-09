@@ -56,7 +56,8 @@ import {
   writeStoplessLearnedNoteEntry
 } from './memory/cache-writer.js';
 import {
-  stripStopSchemaControlPayloadWithNative
+  buildStopMessageTerminalVisiblePayloadWithNative,
+  extractCurrentAssistantStopTextWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
@@ -96,108 +97,28 @@ const FLOW_ID = 'stop_message_flow';
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS = 3;
 const STOP_MESSAGE_EXECUTION_APPEND = '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果。';
 
-function extractCurrentAssistantStopText(payload: unknown): string {
-  const row = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
-  if (!row) return '';
-  const choices = Array.isArray(row.choices) ? row.choices : [];
-  const texts: string[] = [];
-  for (const choice of choices) {
-    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
-    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
-      ? choiceRow.message as Record<string, unknown>
-      : null;
-    collectTextBlocks(message?.content, texts);
-  }
-  const output = Array.isArray(row.output) ? row.output : [];
-  for (const item of output) {
-    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
-    collectTextBlocks(itemRow?.content, texts);
-  }
-  return texts.join('\n').trim();
-}
-
-function collectTextBlocks(value: unknown, out: string[]): void {
-  if (typeof value === 'string') {
-    const text = value.trim();
-    if (text) out.push(text);
-    return;
-  }
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (typeof part === 'string') {
-      const text = part.trim();
-      if (text) out.push(text);
-      continue;
-    }
-    const partRow = part && typeof part === 'object' && !Array.isArray(part) ? part as Record<string, unknown> : null;
-    const text = typeof partRow?.text === 'string'
-      ? partRow.text
-      : typeof partRow?.output_text === 'string'
-        ? partRow.output_text
-        : typeof partRow?.content === 'string'
-          ? partRow.content
-          : '';
-    const trimmed = text.trim();
-    if (trimmed) out.push(trimmed);
-  }
-}
-
 function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
-  const text = typeof prefix === 'string' ? prefix.trim() : '';
-  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
-  if (!text) return cloned;
-  if (prefixChatChoiceContent(cloned, text)) return cloned;
-  if (prefixResponsesOutputContent(cloned, text)) return cloned;
-  return cloned;
+  return buildStopMessageTerminalVisiblePayloadWithNative({
+    payload,
+    mode: 'prefix',
+    prefix: typeof prefix === 'string' ? prefix : null
+  }) as JsonObject;
 }
 
 function replaceStopSummaryContent(payload: JsonObject, prefix: unknown): JsonObject {
-  const text = typeof prefix === 'string' ? prefix.trim() : '';
-  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
-  if (!text) return cloned;
-  if (replaceChatChoiceContent(cloned, text)) return cloned;
-  if (replaceResponsesOutputContent(cloned, text)) return cloned;
-  return cloned;
+  return buildStopMessageTerminalVisiblePayloadWithNative({
+    payload,
+    mode: 'replace',
+    prefix: typeof prefix === 'string' ? prefix : null
+  }) as JsonObject;
 }
 
 function stripTerminalStopVisiblePayload(payload: JsonObject): JsonObject {
-  const cloned = stripStopSchemaControlPayloadWithNative(JSON.parse(JSON.stringify(payload)) as JsonObject);
-  stripVisibleReasoningFields(cloned);
-  return cloned;
-}
-
-function stripVisibleReasoningFields(value: unknown): void {
-  if (!value || typeof value !== 'object') {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (let index = value.length - 1; index >= 0; index -= 1) {
-      const entry = value[index];
-      if (isResponsesReasoningItem(entry)) {
-        value.splice(index, 1);
-        continue;
-      }
-      stripVisibleReasoningFields(entry);
-    }
-    return;
-  }
-  const row = value as Record<string, unknown>;
-  delete row.reasoning_text;
-  delete row.reasoning_content;
-  delete row.reasoning;
-  delete row.reasoning_details;
-  for (const child of Object.values(row)) {
-    stripVisibleReasoningFields(child);
-  }
-}
-
-function isResponsesReasoningItem(value: unknown): boolean {
-  return Boolean(
-    value
-      && typeof value === 'object'
-      && !Array.isArray(value)
-      && (value as Record<string, unknown>).type === 'reasoning'
-  );
+  return buildStopMessageTerminalVisiblePayloadWithNative({
+    payload,
+    mode: 'strip',
+    prefix: null
+  }) as JsonObject;
 }
 
 function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPlan {
@@ -286,81 +207,6 @@ function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
     : {};
   attachStopMessageRuntimeStateToMetadata(metadata, state);
   row.metadata = metadata;
-}
-
-function prefixChatChoiceContent(payload: JsonObject, prefix: string): boolean {
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  let changed = false;
-  for (const choice of choices) {
-    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
-    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
-      ? choiceRow.message as Record<string, unknown>
-      : null;
-    if (!message) continue;
-    if (typeof message.content === 'string') {
-      message.content = `${prefix}\n${message.content}`;
-      changed = true;
-      continue;
-    }
-    if (Array.isArray(message.content)) {
-      message.content.unshift({ type: 'text', text: `${prefix}\n` });
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-function replaceChatChoiceContent(payload: JsonObject, prefix: string): boolean {
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  let changed = false;
-  for (const choice of choices) {
-    const choiceRow = choice && typeof choice === 'object' && !Array.isArray(choice) ? choice as Record<string, unknown> : null;
-    const message = choiceRow?.message && typeof choiceRow.message === 'object' && !Array.isArray(choiceRow.message)
-      ? choiceRow.message as Record<string, unknown>
-      : null;
-    if (!message) continue;
-    message.content = prefix;
-    changed = true;
-  }
-  return changed;
-}
-
-function prefixResponsesOutputContent(payload: JsonObject, prefix: string): boolean {
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  for (const item of output) {
-    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
-    const content = Array.isArray(itemRow?.content) ? itemRow.content : null;
-    if (!content) continue;
-    content.unshift({ type: 'output_text', text: `${prefix}\n` });
-    if (typeof payload.output_text === 'string') {
-      payload.output_text = `${prefix}\n${payload.output_text}`;
-    }
-    return true;
-  }
-  return false;
-}
-
-function replaceResponsesOutputContent(payload: JsonObject, prefix: string): boolean {
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  let changed = false;
-  for (const item of output) {
-    const itemRow = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : null;
-    const content = Array.isArray(itemRow?.content) ? itemRow.content : null;
-    if (!itemRow) continue;
-    if (content) {
-      itemRow.content = [{ type: 'output_text', text: prefix }];
-      changed = true;
-      continue;
-    }
-    if (itemRow.type === 'message') {
-      itemRow.content = [{ type: 'output_text', text: prefix }];
-      changed = true;
-    }
-  }
-  if (typeof payload.output_text === 'string' || changed) {
-    payload.output_text = prefix;
-  }
-  return changed;
 }
 
 function clearPersistedStopMessageRuntimeState(keys: string[]): void {
@@ -686,7 +532,7 @@ const handler: ServerToolHandler = async (
   );
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);
-  const assistantStopText = extractCurrentAssistantStopText(ctx.base);
+  const assistantStopText = extractCurrentAssistantStopTextWithNative(ctx.base);
   const goalLoopContext = captured
     ? await evaluateGoalActiveStopLoopGuard({
         capturedRequest: captured as Record<string, unknown>,
@@ -796,7 +642,7 @@ const handler: ServerToolHandler = async (
     }
 
     let schemaGate = evaluateStopSchemaGateWithNative({
-      assistantText: extractCurrentAssistantStopText(ctx.base),
+      assistantText: extractCurrentAssistantStopTextWithNative(ctx.base),
       used: decision.used,
       maxRepeats: decision.max_repeats
     });

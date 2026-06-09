@@ -2440,6 +2440,23 @@ export function extractTextFromChatLikeWithNative(payload: unknown): string {
   return parsed;
 }
 
+export function extractCurrentAssistantStopTextWithNative(payload: unknown): string {
+  const capability = 'extractCurrentAssistantStopTextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractCurrentAssistantStopTextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(payload));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractCurrentAssistantStopTextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'string') {
+    throw new Error(`extractCurrentAssistantStopTextJson native returned invalid payload: ${typeof parsed}`);
+  }
+  return parsed;
+}
+
 export function stripStopSchemaControlTextWithNative(text: string): string {
   const capability = 'stripStopSchemaControlTextJson';
   const fn = readNativeFunction(capability);
@@ -2457,21 +2474,31 @@ export function stripStopSchemaControlTextWithNative(text: string): string {
   return parsed;
 }
 
-export function stripStopSchemaControlPayloadWithNative<TPayload extends Record<string, unknown>>(
-  payload: TPayload,
-): TPayload {
-  const capability = 'stripStopSchemaControlPayloadJson';
+export function buildStopMessageTerminalVisiblePayloadWithNative<TPayload extends Record<string, unknown>>(input: {
+  payload: TPayload;
+  mode: 'strip' | 'prefix' | 'replace';
+  prefix?: string | null;
+}): TPayload {
+  const capability = 'buildStopMessageTerminalVisiblePayloadJson';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    throw new Error('stripStopSchemaControlPayloadJson native unavailable');
+    throw new Error('buildStopMessageTerminalVisiblePayloadJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(payload));
+  const resultJson = fn(JSON.stringify({
+    payload: input.payload,
+    mode: input.mode,
+    prefix: input.prefix ?? null
+  }));
   if (typeof resultJson !== 'string') {
-    throw new Error(`stripStopSchemaControlPayloadJson native returned non-string: ${typeof resultJson}`);
+    throw new Error(`buildStopMessageTerminalVisiblePayloadJson native returned non-string: ${typeof resultJson}`);
   }
   const parsed = JSON.parse(resultJson) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`stripStopSchemaControlPayloadJson native returned invalid payload: ${typeof parsed}`);
+    throw new Error(`buildStopMessageTerminalVisiblePayloadJson native returned invalid payload: ${typeof parsed}`);
   }
-  return parsed as TPayload;
+  const payload = (parsed as Record<string, unknown>).payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('buildStopMessageTerminalVisiblePayloadJson native returned invalid terminal payload');
+  }
+  return payload as TPayload;
 }

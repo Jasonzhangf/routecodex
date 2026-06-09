@@ -636,6 +636,13 @@ pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, Stri
     serde_json::to_string(&text).map_err(|e| format!("serialize extracted text: {e}"))
 }
 
+pub fn extract_current_assistant_stop_text_json(input_json: &str) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize current assistant stop text payload: {e}"))?;
+    let text = stop_visible_text::extract_current_assistant_stop_text(&payload);
+    serde_json::to_string(&text).map_err(|e| format!("serialize current assistant stop text: {e}"))
+}
+
 pub fn strip_stop_schema_control_text_json(input_json: &str) -> Result<String, String> {
     let text: String = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize stop schema text input: {e}"))?;
@@ -643,11 +650,14 @@ pub fn strip_stop_schema_control_text_json(input_json: &str) -> Result<String, S
     serde_json::to_string(&stripped).map_err(|e| format!("serialize stripped text: {e}"))
 }
 
-pub fn strip_stop_schema_control_payload_json(input_json: &str) -> Result<String, String> {
-    let mut payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop schema payload input: {e}"))?;
-    stop_visible_text::strip_stop_schema_control_payload(&mut payload);
-    serde_json::to_string(&payload).map_err(|e| format!("serialize stripped payload: {e}"))
+pub fn build_stop_message_terminal_visible_payload_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: stop_visible_text::StopMessageTerminalVisiblePayloadInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize terminal visible payload input: {e}"))?;
+    let output = stop_visible_text::build_stop_message_terminal_visible_payload(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize terminal visible payload: {e}"))
 }
 
 /// Resolve default max repeats.
@@ -1144,20 +1154,30 @@ mod tests {
     }
 
     #[test]
-    fn strips_stop_schema_control_payload_via_servertool_core_bridge() {
-        let raw = strip_stop_schema_control_payload_json(
+    fn builds_terminal_visible_payload_via_servertool_core_bridge() {
+        let raw = build_stop_message_terminal_visible_payload_json(
             &json!({
-                "choices": [{
-                    "message": {
-                        "content": "answer {\"stopreason\":\"blocked\",\"next_step\":\"inspect\"}"
-                    }
-                }]
+                "payload": {
+                    "choices": [{
+                        "message": {
+                            "content": "answer {\"stopreason\":\"blocked\",\"next_step\":\"inspect\"}",
+                            "reasoning_text": "private"
+                        }
+                    }]
+                },
+                "mode": "strip"
             })
             .to_string(),
         )
-        .expect("strip payload");
+        .expect("terminal payload");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["choices"][0]["message"]["content"], "answer");
+        assert_eq!(
+            parsed["payload"]["choices"][0]["message"]["content"],
+            "answer"
+        );
+        assert!(parsed["payload"]["choices"][0]["message"]
+            .get("reasoning_text")
+            .is_none());
     }
 
     #[test]
