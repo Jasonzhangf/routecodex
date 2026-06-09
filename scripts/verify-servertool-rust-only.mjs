@@ -3012,6 +3012,24 @@ function checkBackendRoutePolicyRustOwner() {
     'pub fn plan_followup_materialization'
   );
   assertContains(
+    'backend-route-followup-append-user-text-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_append_user_text'
+  );
+  assertContains(
+    'backend-route-followup-append-user-text-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'fn followup_append_user_text_uses_first_non_empty_append_op'
+  );
+  assertContains(
+    'backend-route-followup-append-user-text-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'fn followup_append_user_text_ignores_blank_and_invalid_shapes'
+  );
+  assertContains(
     'backend-route-followup-materialization-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,

@@ -229,6 +229,18 @@ pub struct ServertoolFollowupMaterializationPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupAppendUserTextInput {
+    pub followup_plan: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupAppendUserTextPlan {
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolFollowupErrorPlanInput {
     pub error: Value,
 }
@@ -317,9 +329,8 @@ pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             input: hint.input,
         },
         "vision_auto" => {
-            let skip_reason = resolve_vision_skip_reason(
-                input.adapter_context.as_ref().unwrap_or(&Value::Null),
-            );
+            let skip_reason =
+                resolve_vision_skip_reason(input.adapter_context.as_ref().unwrap_or(&Value::Null));
             ServertoolBackendRoutePolicy01Planned {
                 tool_name: hint.tool_name,
                 flow_id: normalize_flow_id(&hint.flow_id, "vision_auto_flow"),
@@ -733,6 +744,33 @@ pub fn plan_followup_materialization(
         payload: None,
         injection: None,
     }
+}
+
+pub fn plan_followup_append_user_text(
+    input: ServertoolFollowupAppendUserTextInput,
+) -> ServertoolFollowupAppendUserTextPlan {
+    let text = input
+        .followup_plan
+        .as_object()
+        .and_then(|plan| plan.get("injection"))
+        .and_then(Value::as_object)
+        .and_then(|injection| injection.get("ops"))
+        .and_then(Value::as_array)
+        .and_then(|ops| {
+            ops.iter().find_map(|op| {
+                let record = op.as_object()?;
+                if record.get("op").and_then(Value::as_str) != Some("append_user_text") {
+                    return None;
+                }
+                record
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+        });
+    ServertoolFollowupAppendUserTextPlan { text }
 }
 
 pub fn plan_followup_error_envelope(
@@ -2023,6 +2061,42 @@ mod tests {
         );
         assert!(plan.payload.is_none());
         assert!(plan.injection.is_none());
+    }
+
+    #[test]
+    fn followup_append_user_text_uses_first_non_empty_append_op() {
+        let plan = plan_followup_append_user_text(ServertoolFollowupAppendUserTextInput {
+            followup_plan: json!({
+                "injection": {
+                    "ops": [
+                        { "op": "inject_system_text", "text": "system" },
+                        { "op": "append_user_text", "text": "  continue A  " },
+                        { "op": "append_user_text", "text": "continue B" }
+                    ]
+                }
+            }),
+        });
+        assert_eq!(plan.text.as_deref(), Some("continue A"));
+    }
+
+    #[test]
+    fn followup_append_user_text_ignores_blank_and_invalid_shapes() {
+        let blank = plan_followup_append_user_text(ServertoolFollowupAppendUserTextInput {
+            followup_plan: json!({
+                "injection": {
+                    "ops": [
+                        { "op": "append_user_text", "text": "  " },
+                        { "op": "append_user_text", "text": 42 }
+                    ]
+                }
+            }),
+        });
+        assert_eq!(blank.text, None);
+
+        let missing = plan_followup_append_user_text(ServertoolFollowupAppendUserTextInput {
+            followup_plan: json!({ "payload": { "input": "hello" } }),
+        });
+        assert_eq!(missing.text, None);
     }
 
     #[test]
