@@ -28,4 +28,3 @@ pub mod stopless_decision_context_signals;
 pub mod stopless_goal_state_contract;
 pub mod stopless_orchestration_contract;
 pub mod text_extraction;
-pub mod tool_name_projection;

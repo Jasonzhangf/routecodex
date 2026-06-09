@@ -89,4 +89,39 @@ describe('servertool active js shadow audit', () => {
     for (const root of scannedRoots) walk(root);
     expect(findings).toEqual([]);
   });
+
+  it('servertool Rust core must not restore exec_command output back to internal tool identity', () => {
+    const forbiddenFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/tool_name_projection.rs'
+    ];
+    const forbiddenMarkers = [
+      'project_exec_command_result_to_model_tool_result',
+      'ToolNameProjectionResult',
+      'client exec_command result → model-side original tool name'
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of forbiddenFiles) {
+      if (fs.existsSync(repoPath(relativePath))) {
+        findings.push(`${relativePath} must stay physically deleted`);
+      }
+    }
+
+    const rustCoreRoot = repoPath('sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src');
+    const scanRustFile = (filePath: string) => {
+      const source = fs.readFileSync(filePath, 'utf8');
+      for (const marker of forbiddenMarkers) {
+        if (source.includes(marker)) {
+          findings.push(`${path.relative(process.cwd(), filePath)} contains ${marker}`);
+        }
+      }
+    };
+    for (const entry of fs.readdirSync(rustCoreRoot, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.rs')) {
+        scanRustFile(path.join(rustCoreRoot, entry.name));
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
 });
