@@ -2376,11 +2376,18 @@ Tags: snapshot, client-response, SnapshotStageKind, no-env-bypass, direct-relay,
 Tags: hub-pipeline-rust-closeout, zero-consumer, dynamic-import, physical-delete, 2026-06-07
 
 ## 2026-06-07 OpenAI Responses prebuilt SSE stopless boundary
-- OpenAI Responses prebuilt SSE wrappers must not bypass stopless when `__routecodex_finish_reason=stop` and stopless goal state is present. TS may gate passthrough, but SSE terminal-event materialization belongs to Rust `RespInbound`.
+- OpenAI Responses prebuilt SSE wrappers must not bypass stopless when `__routecodex_finish_reason=stop` / finish reason is `stop` or unknown and servertools are enabled; this applies to default non-goal stopless too, not only goal-state requests. TS may gate passthrough, but SSE terminal-event materialization belongs to Rust `RespInbound`.
 - Do not use `__routecodex_stream_contract_probe_body` / snapshot/debug probe as normal provider response semantics. The valid path is upstream stream -> TS transport `bodyText` bridge -> Rust `parse_openai_responses_response` materializes Responses JSON -> Rust `RespChatProcess` stopless CLI projection -> client.
 - Stopless CLI projection reasoning should expose the intercepted assistant stop text; continuation prompts and stop schema guidance belong in the CLI `--input-json` payload, not as replacement reasoning. Strip bare stop schema control JSON before projecting assistant stop text.
 - Verified: Rust `hub_resp_inbound_format_parse` 16/16 PASS; request-executor + provider-response Jest 43/43 PASS; `npm run verify:servertool-rust-only` PASS; `npx tsc --noEmit --pretty false` PASS; `git diff --check` PASS.
 Tags: responses-sse, stopless, servertool-cli-projection, resp-inbound, no-probe-replay, 2026-06-07
+
+## 2026-06-09 OpenAI Responses default stopless prebuilt SSE fix
+- Root cause: `provider-response-converter` prebuilt SSE gate required a stopless goal state before entering bridge, so non-goal/default `/v1/responses` streams with `finish_reason=stop` could passthrough before Rust `RespChatProcess` and never emit the client-visible `exec_command -> stop_message_auto` projection.
+- Fix: the prebuilt SSE stopless bridge gate now depends on `serverToolsEnabled && (finish_reason === "stop" || finish_reason === undefined)`, not goal state. Goal state remains logging/ledger context only.
+- Live validation detail: client body `metadata.routeHint` is intentionally forbidden; use header `x-route-hint: search` for route-forced probes. Same-protocol direct (`sameProtocolBehavior=direct`) is passthrough and must not be used as stopless evidence.
+- Verified on 0.90.3039: focused prebuilt SSE regression 2/2 PASS; stopless CLI/default/native tests 37/37 PASS; `verify:servertool-rust-only` PASS; llmswitch-core tsc PASS; `build:min` PASS; `install:global` PASS; `routecodex restart --port 5520`; `/health` and `/v1/models` on 5520/5555 PASS; real 5555 `/v1/responses` with `x-route-hint: search` returned `requires_action` with `exec_command` / `stop_message_auto`.
+Tags: responses-sse, stopless, default-stopless, prebuilt-sse, servertool-cli-projection, 2026-06-09
 
 ## 2026-06-07 stopless CLI projection reasoning source order
 - Stopless CLI projection reasoning must preserve the intercepted assistant stop text, not the continuation prompt. Source order is `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default message`.

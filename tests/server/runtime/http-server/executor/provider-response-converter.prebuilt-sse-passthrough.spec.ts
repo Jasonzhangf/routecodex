@@ -15,6 +15,9 @@ const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
     const first = record.choices[0] as Record<string, unknown> | undefined;
     return typeof first?.finish_reason === 'string' ? first.finish_reason : undefined;
   }
+  if (record.status === 'requires_action' || record.required_action) {
+    return 'tool_calls';
+  }
   if (
     record.status === 'completed'
     || (typeof record.output_text === 'string' && record.output_text.trim())
@@ -62,6 +65,96 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockB
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 describe('provider-response-converter prebuilt SSE passthrough gate', () => {
+  it('bridges openai responses prebuilt SSE stop through default stopless even without goal state', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const prebuiltSse = new PassThrough();
+    prebuiltSse.end(
+      'event: response.completed\n'
+      + 'data: {"type":"response.completed","response":{"id":"resp_prebuilt_stop_1","status":"completed","output_text":"阶段完成"}}\n\n'
+    );
+    const convertedSse = new PassThrough();
+    convertedSse.end(
+      'event: response.output_item.done\n'
+      + 'data: {"type":"response.output_item.done","item":{"type":"function_call","name":"exec_command","call_id":"call_stopless_cli_1","arguments":"{}"}}\n\n'
+    );
+
+    mockConvertProviderResponse.mockResolvedValue({
+      __sse_responses: convertedSse,
+      body: {
+        id: 'resp_stopless_cli_projection_1',
+        object: 'response',
+        status: 'requires_action',
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_stopless_cli_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({
+                    cmd: 'routecodex servertool run stop_message_auto --input-json \'{"flowId":"stop_message_flow"}\''
+                  })
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'openai',
+        requestId: 'req_prebuilt_sse_default_stopless_no_goal',
+        wantsStream: true,
+        serverToolsEnabled: true,
+        entryOriginRequest: {
+          model: 'gpt-test',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行当前目标' }] }]
+        },
+        response: {
+          body: {
+            __sse_responses: prebuiltSse,
+            status: 'completed',
+            output_text: '阶段完成'
+          }
+        } as any,
+        pipelineMetadata: {
+          routecodexPortStopMessageEnabled: true,
+          stopMessageEnabled: true
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(bridgeArgs.providerProtocol).toBe('openai-responses');
+    expect(bridgeArgs.clientInjectDispatch).toBeDefined();
+
+    const wrappedBody = converted.body as Record<string, unknown>;
+    expect(wrappedBody.__sse_responses).toBe(convertedSse);
+    expect(wrappedBody[STREAM_LOG_FINISH_REASON_KEY]).toBe('tool_calls');
+    expect(wrappedBody.__sse_responses).not.toBe(prebuiltSse);
+  });
+
   it('RED: does not passthrough anthropic raw SSE directly on /v1/responses', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
