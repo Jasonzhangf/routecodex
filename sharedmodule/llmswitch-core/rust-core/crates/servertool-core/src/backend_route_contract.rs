@@ -5,6 +5,7 @@ use crate::outcome_contract::{
     build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03,
     ServertoolHubRespChatProcess03Input, ServertoolOutcomeError,
 };
+use crate::persisted_lookup::STOP_MESSAGE_FOLLOWUP_FLOW_ID;
 
 // feature_id: hub.servertool_backend_route_runtime
 
@@ -174,6 +175,7 @@ pub struct ServertoolFollowupClientInjectMetadataPlan {
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolFollowupRuntimeActionPlan {
     pub flow_id: Option<String>,
+    pub is_stop_message_flow: bool,
     pub loop_payload_source: ServertoolFollowupLoopPayloadSource,
     pub auto_limit: ServertoolFollowupAutoLimitPlan,
     pub client_inject_metadata: ServertoolFollowupClientInjectMetadataPlan,
@@ -515,6 +517,7 @@ pub fn plan_followup_runtime_action(
         .flow_id
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let is_stop_message_flow = flow_id.as_deref() == Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID);
     let decision = input.decision;
     let outcome_mode = decision
         .as_ref()
@@ -532,6 +535,7 @@ pub fn plan_followup_runtime_action(
     if outcome_mode == "skip" || no_followup {
         return Ok(ServertoolFollowupRuntimeActionPlan {
             flow_id,
+            is_stop_message_flow,
             loop_payload_source: ServertoolFollowupLoopPayloadSource::None,
             auto_limit: ServertoolFollowupAutoLimitPlan {
                 exceeded: false,
@@ -606,6 +610,7 @@ pub fn plan_followup_runtime_action(
     let force_client_inject_metadata = client_inject_only && !input.metadata_client_inject_only;
     Ok(ServertoolFollowupRuntimeActionPlan {
         flow_id,
+        is_stop_message_flow,
         loop_payload_source,
         auto_limit: auto_limit_plan,
         client_inject_metadata: ServertoolFollowupClientInjectMetadataPlan {
@@ -1707,6 +1712,7 @@ mod tests {
             plan.loop_payload_source,
             ServertoolFollowupLoopPayloadSource::Payload
         );
+        assert!(plan.is_stop_message_flow);
         assert!(!plan.auto_limit.exceeded);
         assert!(!plan.client_inject_metadata.force);
     }
@@ -1733,6 +1739,7 @@ mod tests {
             plan.loop_payload_source,
             ServertoolFollowupLoopPayloadSource::SeedLoopPayload
         );
+        assert!(plan.is_stop_message_flow);
     }
 
     #[test]
@@ -1754,6 +1761,7 @@ mod tests {
         })
         .expect("runtime action");
         assert!(plan.auto_limit.exceeded);
+        assert!(!plan.is_stop_message_flow);
         assert_eq!(plan.auto_limit.status, Some(502));
         assert_eq!(
             plan.auto_limit.code.as_deref(),
@@ -1784,6 +1792,7 @@ mod tests {
         })
         .expect("runtime action");
         assert!(plan.client_inject_metadata.force);
+        assert!(!plan.is_stop_message_flow);
         assert_eq!(
             plan.client_inject_metadata.source.as_deref(),
             Some("servertool.continue_execution")
@@ -1834,6 +1843,7 @@ mod tests {
             plan.loop_payload_source,
             ServertoolFollowupLoopPayloadSource::None
         );
+        assert!(!plan.is_stop_message_flow);
         assert!(!plan.auto_limit.exceeded);
         assert!(!plan.client_inject_metadata.force);
     }

@@ -2824,3 +2824,10 @@ Tags: servertool, stopless, routing-state, rust-owner, native-bridge, thin-shell
 - Function/verification map truth: `snapshot.stage_contract` includes `snapshot-recorder.ts` as TS observation bridge, while selector/stage contract and payload normalization remain `src/utils` + Rust/native snapshot hooks.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks `trimSnapshotHotpathPayloadForNative` and TS snapshot hotpath sanitize helper revival.
 Tags: hub-pipeline, snapshot-recorder, dead-code, thin-shell, rust-owner, residue-gate, 2026-06-09
+
+## 2026-06-09 Servertool backend-route runtime action stop-message flow Rust owner
+- `servertool-core::backend_route_contract::plan_followup_runtime_action` owns `is_stop_message_flow`; TS must consume `resolveFollowupRuntimeActionPlan(...).isStopMessageFlow` and must not compare `args.execution.flowId === 'stop_message_flow'`.
+- `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts::resolveFollowupRuntimeActionPlan` is the only TS helper for this runtime action plan; mainline/runtime blocks remain native-plan consumers only.
+- Gate: `npm run verify:servertool-rust-only` requires Rust owner/native bridge/thin shell and blocks TS flow-id semantic revival.
+- Verified on 2026-06-09: Rust/NAPI focused tests, native probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool-core and servertool-cli Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3036`.
+Tags: servertool, backend-route, stopless, runtime-action, rust-owner, thin-shell, 2026-06-09

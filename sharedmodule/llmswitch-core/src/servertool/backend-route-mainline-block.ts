@@ -9,6 +9,7 @@ import {
   assertAutoLimitNotExceeded,
   materializeFollowupPayload,
   planFollowupMaterialization,
+  resolveFollowupRuntimeActionPlan,
   resolveFollowupExecutionMode,
   resolveLoopPayload
 } from './backend-route-runtime-block.js';
@@ -183,7 +184,12 @@ export async function runFollowupMainline(args: {
     };
   }
 
-  const isStopMessageFlow = args.execution.flowId === 'stop_message_flow';
+  const isStopMessageFlow = resolveFollowupRuntimeActionPlan({
+    flowId: args.execution.flowId,
+    decision,
+    metadataClientInjectOnly: false,
+    hasFollowupPayloadRaw: false
+  }).isStopMessageFlow;
   const followupPlan = args.execution.followup;
   const followupMaterialization = planFollowupMaterialization({
     followupPlan,

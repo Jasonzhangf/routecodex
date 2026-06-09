@@ -2584,10 +2584,22 @@ function checkBackendRoutePolicyRustOwner() {
     'pub fn plan_followup_runtime_action'
   );
   assertContains(
+    'backend-route-followup-runtime-action-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'is_stop_message_flow'
+  );
+  assertContains(
     'backend-route-followup-runtime-action-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
     'planFollowupRuntimeActionWithNative'
+  );
+  assertContains(
+    'backend-route-followup-runtime-action-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'isStopMessageFlow'
   );
   assertContains(
     'backend-route-followup-runtime-action-native-export',
@@ -2595,6 +2607,13 @@ function checkBackendRoutePolicyRustOwner() {
     requiredExports,
     'planFollowupRuntimeActionJson'
   );
+  const backendRouteMainlineShell = readRequired(`${SERVERTOOL_TS_DIR}/backend-route-mainline-block.ts`);
+  if (backendRouteMainlineShell.includes("args.execution.flowId === 'stop_message_flow'")) {
+    fail(
+      'backend-route-followup-runtime-action-no-ts-flow-owner',
+      'backend-route-mainline-block.ts must read isStopMessageFlow from Rust runtime action plan'
+    );
+  }
   assertContains(
     'backend-route-followup-runtime-metadata-rust-owner',
     RUST_SERVERTOOL_BACKEND_ROUTE,
@@ -3021,12 +3040,19 @@ function checkBackendRoutePolicyRustOwner() {
       ],
     ],
   ]) {
+    const runtimeActionPlanBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupRuntimeActionPlan');
+    assertContains(
+      'backend-route-followup-runtime-action-thin-shell',
+      TS_BACKEND_ROUTE_RUNTIME,
+      runtimeActionPlanBlock,
+      'planFollowupRuntimeActionWithNative'
+    );
     const block = extractFunctionBlock(runtimeShell, functionName);
     assertContains(
       'backend-route-followup-runtime-action-thin-shell',
       TS_BACKEND_ROUTE_RUNTIME,
       block,
-      'planFollowupRuntimeActionWithNative'
+      'resolveFollowupRuntimeActionPlan'
     );
     for (const keyword of keywords) {
       if (block.includes(keyword)) {

@@ -316,6 +316,7 @@ export interface ServertoolFollowupRuntimeActionInput {
 
 export interface ServertoolFollowupRuntimeActionPlan {
   flowId?: string;
+  isStopMessageFlow: boolean;
   loopPayloadSource: 'payload' | 'seed_loop_payload' | 'none';
   autoLimit: {
     exceeded: boolean;
@@ -2173,6 +2174,9 @@ export function planFollowupRuntimeActionWithNative(
     throw new Error('planFollowupRuntimeActionJson native returned invalid payload');
   }
   const record = parsed as Record<string, unknown>;
+  if (typeof record.isStopMessageFlow !== 'boolean') {
+    throw new Error('planFollowupRuntimeActionJson native returned invalid isStopMessageFlow');
+  }
   if (
     record.loopPayloadSource !== 'payload' &&
     record.loopPayloadSource !== 'seed_loop_payload' &&
@@ -2216,6 +2220,7 @@ export function planFollowupRuntimeActionWithNative(
     rawAutoLimitCategory ? 'INTERNAL_ERROR' : undefined;
   return {
     ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
+    isStopMessageFlow: record.isStopMessageFlow as boolean,
     loopPayloadSource: record.loopPayloadSource,
     autoLimit: {
       exceeded: autoLimitRecord.exceeded,

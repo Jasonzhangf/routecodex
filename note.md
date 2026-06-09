@@ -18636,3 +18636,9 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Deleted the identity TS hotpath trim helper and passed `payload` directly into native snapshot normalization. This avoids preserving a fake TS trim/sanitize semantic owner in the Hub observation bridge.
 - Added residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocking `trimSnapshotHotpathPayloadForNative` / TS snapshot hotpath sanitize helpers from returning.
 - Updated `snapshot.stage_contract` function/verification map entries to list `snapshot-recorder.ts` as TS observation glue only; selector/stage contract and payload normalization remain `src/utils` + Rust/native snapshot hooks.
+
+2026-06-09 servertool backend-route runtime action stop-message flow Rust closeout:
+- `servertool-core::backend_route_contract::plan_followup_runtime_action` now owns stop-message flow kind detection through `is_stop_message_flow`; TS receives `isStopMessageFlow` from native and does not compare `args.execution.flowId === 'stop_message_flow'`.
+- `backend-route-runtime-block.ts::resolveFollowupRuntimeActionPlan` is the only TS helper calling the native runtime action plan; mainline/runtime consumers read that plan instead of duplicating decision payload assembly.
+- Gate strengthened in `verify:servertool-rust-only` to require Rust owner/native bridge/thin shell and block TS flow-id semantic revival.
+- Verification PASS: servertool Rust focused/full suites, NAPI bridge, native probe, servertool Jest, llmswitch-core/root tsc, `verify:servertool-rust-only`, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health` ready version 0.90.3036, `/v1/models` non-empty, and real `/v1/responses` exact output `routecodex-e2e-3036`.

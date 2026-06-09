@@ -7,6 +7,7 @@ import {
   planFollowupMaterializationWithNative,
   planFollowupRuntimeMetadataWithNative,
   planFollowupRuntimeActionWithNative,
+  type ServertoolFollowupRuntimeActionPlan,
   type ServertoolFollowupMaterializationPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -30,6 +31,32 @@ export type ServerToolLoopStateLike = {
 export type FollowupPayloadSource = 'payload' | 'injection' | 'none';
 
 export type FollowupMaterializationPlan = ServertoolFollowupMaterializationPlan;
+
+export function resolveFollowupRuntimeActionPlan(args: {
+  flowId: string | undefined;
+  decision?: FollowupFlowDecision;
+  metadataClientInjectOnly: boolean;
+  hasFollowupPayloadRaw: boolean;
+  loopState?: ServerToolLoopStateLike | null;
+  clientInjectSource?: string;
+}): ServertoolFollowupRuntimeActionPlan {
+  const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
+  return planFollowupRuntimeActionWithNative({
+    ...(args.flowId ? { flowId: args.flowId } : {}),
+    decision: {
+      outcomeMode: decision.outcomeMode,
+      noFollowup: decision.noFollowup,
+      autoLimit: decision.autoLimit,
+      clientInjectOnly: decision.clientInjectOnly,
+      seedLoopPayload: decision.seedLoopPayload,
+      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
+    },
+    metadataClientInjectOnly: args.metadataClientInjectOnly,
+    hasFollowupPayloadRaw: args.hasFollowupPayloadRaw,
+    ...(typeof args.loopState?.repeatCount === 'number' ? { loopStateRepeatCount: args.loopState.repeatCount } : {}),
+    ...(args.clientInjectSource ? { clientInjectSource: args.clientInjectSource } : {})
+  });
+}
 
 export function planFollowupMaterialization(args: {
   followupPlan: unknown;
@@ -92,17 +119,9 @@ export function resolveLoopPayload(args: {
   followupPayloadRaw: JsonObject | null;
   buildSeedLoopPayload: () => JsonObject | null;
 }): JsonObject | null {
-  const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  const plan = planFollowupRuntimeActionWithNative({
-    ...(args.flowId ? { flowId: args.flowId } : {}),
-    decision: {
-      outcomeMode: decision.outcomeMode,
-      noFollowup: decision.noFollowup,
-      autoLimit: decision.autoLimit,
-      clientInjectOnly: decision.clientInjectOnly,
-      seedLoopPayload: decision.seedLoopPayload,
-      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
-    },
+  const plan = resolveFollowupRuntimeActionPlan({
+    flowId: args.flowId,
+    decision: args.decision,
     metadataClientInjectOnly: false,
     hasFollowupPayloadRaw: Boolean(args.followupPayloadRaw)
   });
@@ -121,20 +140,12 @@ export function assertAutoLimitNotExceeded(args: {
   loopState: ServerToolLoopStateLike | null;
   requestId: string;
 }): void {
-  const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  const plan = planFollowupRuntimeActionWithNative({
-    ...(args.flowId ? { flowId: args.flowId } : {}),
-    decision: {
-      outcomeMode: decision.outcomeMode,
-      noFollowup: decision.noFollowup,
-      autoLimit: decision.autoLimit,
-      clientInjectOnly: decision.clientInjectOnly,
-      seedLoopPayload: decision.seedLoopPayload,
-      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
-    },
+  const plan = resolveFollowupRuntimeActionPlan({
+    flowId: args.flowId,
+    decision: args.decision,
     metadataClientInjectOnly: false,
     hasFollowupPayloadRaw: false,
-    ...(typeof args.loopState?.repeatCount === 'number' ? { loopStateRepeatCount: args.loopState.repeatCount } : {})
+    loopState: args.loopState
   });
   if (!plan.autoLimit.exceeded) {
     return;
@@ -178,16 +189,9 @@ export function applyClientInjectOnlyMetadata(args: {
     typeof record.clientInjectSource === 'string'
       ? record.clientInjectSource.trim()
       : '';
-  const plan = planFollowupRuntimeActionWithNative({
-    ...(args.flowId ? { flowId: args.flowId } : {}),
-    decision: {
-      outcomeMode: decision.outcomeMode,
-      noFollowup: decision.noFollowup,
-      autoLimit: decision.autoLimit,
-      clientInjectOnly: decision.clientInjectOnly,
-      seedLoopPayload: decision.seedLoopPayload,
-      ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
-    },
+  const plan = resolveFollowupRuntimeActionPlan({
+    flowId: args.flowId,
+    decision,
     metadataClientInjectOnly: args.readClientInjectOnly(args.metadata),
     hasFollowupPayloadRaw: false,
     ...(existingClientInjectSource ? { clientInjectSource: existingClientInjectSource } : {})
