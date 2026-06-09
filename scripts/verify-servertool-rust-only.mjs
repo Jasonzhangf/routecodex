@@ -2842,6 +2842,15 @@ function checkBackendRoutePolicyRustOwner() {
     flowPolicyShell,
     'planServertoolFollowupRuntimeWithNative'
   );
+  const flowPolicyFunctionNames = Array.from(flowPolicyShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
+    .map((match) => match[1])
+    .sort();
+  if (flowPolicyFunctionNames.join(',') !== 'resolveFollowupFlowDecision') {
+    fail(
+      'backend-route-flow-policy-ts-thin-shell',
+      `backend-route-flow-policy.ts must remain a single native delegate; found exports: ${flowPolicyFunctionNames.join(',') || '(none)'}`
+    );
+  }
   if (flowPolicyShell.includes('function normalizeFlowId') || flowPolicyShell.includes('normalizeFlowId(')) {
     fail(
       'backend-route-flow-policy-no-ts-owner',
