@@ -197,59 +197,6 @@ fn select_tool_call_id_style(
     Some(resolved)
 }
 
-fn strip_private_fields_in_place(value: &mut Value) {
-    match value {
-        Value::Array(list) => {
-            for entry in list.iter_mut() {
-                strip_private_fields_in_place(entry);
-            }
-        }
-        Value::Object(row) => {
-            let keys: Vec<String> = row.keys().cloned().collect();
-            for key in keys {
-                if key.starts_with("__rcc_") {
-                    row.remove(key.as_str());
-                    continue;
-                }
-                if let Some(child) = row.get_mut(key.as_str()) {
-                    strip_private_fields_in_place(child);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn strip_private_fields(value: &Value) -> Value {
-    let mut next = value.clone();
-    strip_private_fields_in_place(&mut next);
-    if let Value::Object(row) = &mut next {
-        if matches!(row.get("reasoning"), Some(Value::Null)) {
-            row.remove("reasoning");
-        }
-    }
-    next
-}
-
-fn resolve_compat_profile(
-    adapter_context: &Value,
-    explicit_profile: Option<String>,
-) -> Option<String> {
-    if let Some(explicit) = explicit_profile {
-        let trimmed = explicit.trim().to_string();
-        if !trimmed.is_empty() {
-            return Some(trimmed);
-        }
-    }
-
-    adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("compatibilityProfile"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 fn should_attach_req_outbound_context_snapshot(
     has_snapshot: bool,
     context_metadata_key: Option<String>,
@@ -361,49 +308,6 @@ pub fn select_tool_call_id_style_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let output = select_tool_call_id_style(&adapter_context, &snapshot, current_style);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn strip_private_fields_json(payload_json: String) -> NapiResult<String> {
-    let payload: Value =
-        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = strip_private_fields(&payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[cfg(test)]
-mod strip_private_fields_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn strips_top_level_null_reasoning_without_changing_false_parallel_tool_calls() {
-        let output = strip_private_fields(&json!({
-            "model": "deepseek-v4-flash-free",
-            "messages": [{"role": "user", "content": "ping"}],
-            "reasoning": null,
-            "parallel_tool_calls": false,
-            "tool_choice": "auto"
-        }));
-
-        assert!(output.get("reasoning").is_none());
-        assert_eq!(output["parallel_tool_calls"], Value::Bool(false));
-        assert_eq!(output["tool_choice"], Value::String("auto".to_string()));
-    }
-}
-
-#[napi]
-pub fn resolve_compat_profile_json(
-    adapter_context_json: String,
-    explicit_profile_json: String,
-) -> NapiResult<String> {
-    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let explicit_profile: Option<String> = serde_json::from_str(&explicit_profile_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-
-    let output = resolve_compat_profile(&adapter_context, explicit_profile);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

@@ -838,8 +838,7 @@ pub fn parse_resp_format_envelope(
     Ok(RespFormatParseOutput { envelope })
 }
 
-#[napi]
-pub fn parse_resp_format_envelope_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn parse_resp_format_envelope_json(input_json: String) -> napi::Result<String> {
     if input_json.trim().is_empty() {
         return Err(napi::Error::from_reason("Input JSON is empty"));
     }

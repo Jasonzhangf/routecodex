@@ -3029,3 +3029,9 @@ Tags: hub-pipeline, req-process, route-selection, dead-code, napi-export, rust-o
 - Removed the zero-consumer TS wrappers, required-export entries, the `bootstrapVirtualRouterProviderProfilesJson` NAPI bridge, and public NAPI exposure for `parse_stop_message_instruction_json`; kept both Rust helpers crate-internal.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public wrapper/export names from returning while allowing Rust-internal mainline helpers.
 Tags: virtual-router, bootstrap, stop-message, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline edge-stage public wrappers removed
+- Exact scan found zero-consumer TS wrappers in `native-hub-pipeline-edge-stage-semantics.ts` for chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope surfaces. Keep live TS wrappers only where tests or runtime still consume them (`sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, `processSseStreamWithNative`).
+- Removed the zero-consumer TS wrappers, required-export entries, Rust NAPI JSON wrappers, and the SSE effect-plan public bridge; kept live Rust helpers and live public bridges that remain consumed by req/resp/mainline code.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public wrapper/export names from returning while allowing active Rust mainline helpers and still-consumed public bridges.
+Tags: hub-pipeline, edge-stage, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

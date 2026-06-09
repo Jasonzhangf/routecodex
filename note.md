@@ -18832,3 +18832,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory picked two single zero-consumer wrappers: `bootstrapProviderProfilesWithNative` and `parseStopMessageInstructionWithNative`.
 - Change: removed the TS wrappers, required-export entries, `bootstrapVirtualRouterProviderProfilesJson` NAPI bridge, and public NAPI exposure for `parse_stop_message_instruction_json`. Kept Rust-internal provider-profile bootstrap and stop-message parser because Rust config/bootstrap and routing-instruction parser still call them.
 - Guard: residue gate blocks the public wrapper/export names while allowing crate-internal Rust helpers.
+
+2026-06-09 HubPipeline edge-stage public wrapper deletion:
+- Inventory confirmed zero-consumer TS wrappers in `native-hub-pipeline-edge-stage-semantics.ts` for chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope surfaces.
+- Change: removed those TS wrappers, the associated required-export entries, the Rust NAPI JSON bridges, and the SSE effect-plan public bridge; kept active TS wrappers `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, `processSseStreamWithNative`, and kept Rust mainline helpers for req/resp parsing and response semantics.
+- Guard: residue gate now blocks the retired edge-stage public wrapper/export names while allowing live mainline helpers and still-consumed public bridges.

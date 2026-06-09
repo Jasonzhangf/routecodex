@@ -2572,6 +2572,62 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('retired edge-stage public wrappers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_chat_envelope_validator.rs',
+    ];
+    const retiredSymbols = [
+      'sanitizeChatCompletionLikeWithNative',
+      'normalizeOpenaiChatReasoningOutboundWithNative',
+      'stripPrivateFieldsWithNative',
+      'resolveCompatProfileWithNative',
+      'planSseStreamEffectWithNative',
+      'parseReqInboundFormatEnvelopeWithNative',
+      'parseRespInboundFormatEnvelopeWithNative',
+      'validateChatEnvelopeWithNative',
+      'sanitizeChatCompletionLikeJson',
+      'normalizeOpenaiChatReasoningOutboundJson',
+      'stripPrivateFieldsJson',
+      'resolveCompatProfileJson',
+      'planSseStreamEffectJson',
+      'validateChatEnvelopeJson',
+      '#[napi]\npub fn sanitize_chat_completion_like_json',
+      '#[napi]\npub fn normalize_openai_chat_reasoning_outbound_json',
+      '#[napi]\npub fn strip_private_fields_json',
+      '#[napi]\npub fn resolve_compat_profile_json',
+      '#[napi]\npub fn plan_sse_stream_effect_json',
+      '#[napi]\npub fn validate_chat_envelope_json',
+      '#[napi]\npub fn parse_format_envelope_json',
+      '#[napi]\npub fn parse_resp_format_envelope_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shadow-gate migration manifest scripts must stay deleted', () => {
     const repoRoot = process.cwd();
     const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

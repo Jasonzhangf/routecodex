@@ -794,11 +794,6 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
     )
 }
 
-#[napi(js_name = "planSseStreamEffectJson")]
-pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {
-    hub_resp_outbound_sse_stream::plan_sse_stream_effect_json(input_json)
-}
-
 #[napi(js_name = "resolveClientToolFromIndexJson")]
 pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::resolve_client_tool_from_index_json(input_json)

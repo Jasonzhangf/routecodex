@@ -1,5 +1,3 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde_json::{Map, Value};
 
 fn build_validation_error(
@@ -646,19 +644,6 @@ fn validate_chat_envelope(
     validate_tool_outputs(chat_row.get("toolOutputs"), stage, direction, source)?;
     validate_metadata(chat_row.get("metadata"), stage, direction, source)?;
     Ok(())
-}
-
-#[napi]
-pub fn validate_chat_envelope_json(
-    chat_json: String,
-    stage: String,
-    direction: String,
-    source: Option<String>,
-) -> NapiResult<String> {
-    let chat: Value = serde_json::from_str(chat_json.as_str())
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    validate_chat_envelope(&chat, stage.as_str(), direction.as_str(), source.as_deref())?;
-    serde_json::to_string(&true).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]

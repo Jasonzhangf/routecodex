@@ -361,6 +361,7 @@ verification:
       - Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update.
       - Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection.
       - Retired VR bootstrap provider-profile and stop-message parse public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for Rust-internal bootstrap/profile or routing-instruction parse helpers.
+      - Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.

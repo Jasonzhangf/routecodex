@@ -6,9 +6,6 @@ use crate::hub_resp_outbound_client_semantics_blocks::anthropic_chat_response::{
     build_openai_chat_from_anthropic_message_full, BuildOpenAiChatFromAnthropicMessageFullInput,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
-use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
-    normalize_openai_chat_reasoning_outbound, sanitize_chat_completion_like,
-};
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::normalize_responses_tool_call_arguments_for_client;
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
@@ -81,22 +78,6 @@ pub fn sanitize_responses_function_name_json(raw_name_json: String) -> NapiResul
     let raw_name: Value = serde_json::from_str(&raw_name_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = normalize_responses_function_name(raw_name.as_str());
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn sanitize_chat_completion_like_json(candidate_json: String) -> NapiResult<String> {
-    let candidate: Value = serde_json::from_str(&candidate_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = sanitize_chat_completion_like(&candidate);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi(js_name = "normalizeOpenaiChatReasoningOutboundJson")]
-pub fn normalize_openai_chat_reasoning_outbound_json(candidate_json: String) -> NapiResult<String> {
-    let candidate: Value = serde_json::from_str(&candidate_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_openai_chat_reasoning_outbound(&candidate);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
