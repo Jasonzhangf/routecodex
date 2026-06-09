@@ -893,9 +893,16 @@ const DENIED_INTERNAL_CARRIER_TEXT: &[&str] = &[
     "__rt",
     "__raw_request_body",
     "__servertool_cli_projection",
+    "metadata",
     "metaCarrier",
+    "snapshot",
+    "debugCarrier",
     "restoration handle",
     "restoration store",
+    "reenterPipeline",
+    "providerInvoker",
+    "serverToolFollowup",
+    "serverToolFollowupSource",
 ];
 
 fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolCliError> {
@@ -1447,6 +1454,32 @@ mod tests {
                 0,
             ),
             Err(ServertoolCliError::DeniedInternalCarrier("metadata"))
+        );
+    }
+
+    #[test]
+    fn projection_rejects_private_carrier_text_input() {
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "servertool_fixture",
+                "servertool_cli_projection",
+                json!({"value":"serverToolFollowup should never be client-visible"}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedInternalCarrier(
+                "serverToolFollowup"
+            ))
+        );
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "servertool_fixture",
+                "servertool_cli_projection",
+                json!({"value":"providerInvoker carrier leaked"}),
+                0,
+                0,
+            ),
+            Err(ServertoolCliError::DeniedInternalCarrier("providerInvoker"))
         );
     }
 
