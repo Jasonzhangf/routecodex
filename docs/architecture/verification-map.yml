@@ -785,6 +785,22 @@ verification:
     notes:
       - entry shell only: lifecycle, port registry, route wiring, restart runtime.
 
+  - feature_id: server.models_capability_contract
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/routes.ts
+    contract:
+      - tests/server/http-server/routes.invalid-json.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:models-capability-contract
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - `/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`.
+      - Drift on capability-signaling fields is a release blocker because Codex client behavior depends on these flags.
+
   - feature_id: server.responses_handler_family
     change_risk: high
     unit:

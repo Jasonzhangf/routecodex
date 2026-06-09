@@ -2976,3 +2976,8 @@ Tags: hub-pipeline, virtual-router, hashline, dead-code, napi-export, rust-only,
 - Removed only the zero-consumer public NAPI wrappers/re-exports. Kept internal Rust helpers because they are still used by the current Rust Hub mainline/tests; retiring passthrough-mode semantics is a separate larger slice.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the public wrapper/re-export names from returning in active Rust/native export surfaces.
 Tags: hub-pipeline, passthrough, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 `/v1/models` gpt-5.5 capability contract
+- Bare `gpt-5.5` in RouteCodex `/v1/models` is a Codex compatibility contract, not a provider runtime snapshot. It must keep Codex capability-signaling fields stable: `prefer_websockets=true`, `minimal_client_version=0.124.0`, `context_window=max_context_window=272000`, plus the full reasoning/verbosity/search/image/apply_patch metadata.
+- Provider-prefixed aliases may override runtime-derived fields such as `context_window/max_context_window`, `supports_streaming`, and provider description, but must not drift on Codex capability fields. Gate truth is `docs/design/codex-model-capability-contract.md` plus `npm run verify:models-capability-contract`.
+- Closeout for this contract requires full runtime proof, not just unit tests: `npm run build:min` -> `npm run install:global` -> `routecodex restart --port 5555` -> live `/health`, `/v1/models`, and a real `/v1/responses` request on the target port. The 2026-06-09 verified install/runtime version for this fix is `0.90.3043`.

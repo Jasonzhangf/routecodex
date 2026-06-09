@@ -1,3 +1,4 @@
+// feature_id: server.models_capability_contract
 import type { Application, Request, Response } from 'express';
 import { handleChatCompletions } from '../../handlers/chat-handler.js';
 import { handleImageEdits, handleImageGenerations } from '../../handlers/images-handler.js';
@@ -194,7 +195,11 @@ const CODEX_ADVANCED_MODEL_METADATA: Record<string, unknown> = {
 const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
   'gpt-5.5': {
     ...CODEX_ADVANCED_MODEL_METADATA,
-    description: 'Latest advanced agentic coding model.'
+    description: 'Frontier model for complex coding, research, and real-world work.',
+    prefer_websockets: true,
+    minimal_client_version: '0.124.0',
+    context_window: 272000,
+    max_context_window: 272000
   },
   'gpt-5.4': {
     ...CODEX_ADVANCED_MODEL_METADATA,
@@ -261,6 +266,7 @@ function buildCodexModelMetadata(
   };
   if (contextWindow) {
     item.context_window = contextWindow;
+    item.max_context_window = contextWindow;
   }
   if (supportsStreaming !== undefined) {
     item.supports_streaming = supportsStreaming;

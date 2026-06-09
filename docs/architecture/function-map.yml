@@ -1404,6 +1404,34 @@ owners:
     migration_target: ts
     notes:
       - entry shell only: lifecycle, port registry, route wiring, restart runtime. No tool governance semantics.
+  - feature_id: server.models_capability_contract
+    status: active
+    summary: `/v1/models` Codex-facing capability metadata for bare and provider-prefixed model aliases
+    owner_module: src/server/runtime/http-server/routes.ts
+    canonical_types:
+      - ModelListItem
+    canonical_builders:
+      - buildCodexModelMetadata
+      - buildCodexAdvancedModelMetadata
+      - collectConfiguredModelItems
+    allowed_paths:
+      - src/server/runtime/http-server/routes.ts
+      - tests/server/http-server/routes.invalid-json.spec.ts
+      - docs/design/codex-model-capability-contract.md
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/conversion
+    required_tests:
+      - tests/server/http-server/routes.invalid-json.spec.ts
+    required_gates:
+      - npm run verify:models-capability-contract
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets`, `minimal_client_version`, modalities, reasoning, and tool metadata.
+      - Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields.
   - feature_id: server.responses_handler_family
     status: active
     summary: handlers/chat/config-admin/images/messages/responses project client protocol; Hub tool governance must stay out
