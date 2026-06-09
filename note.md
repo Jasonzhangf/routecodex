@@ -18774,3 +18774,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json` had no TS/runtime consumer; remaining references were Rust NAPI wrapper and public re-export.
 - Change: removed only the zero-consumer NAPI wrapper/re-export, kept internal `collect_tool_names_from_candidate` helper because Rust `resolve_requested_tool_names` still uses it.
 - Verification PASS: residue scan only docs/gate/memory refs plus internal Rust private helper; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust response tool-governance 195 passed / 1 ignored; `git diff --check` PASS.
+
+2026-06-09 HubPipeline utility NAPI wrapper deletion:
+- Exact scan: `cleanMalformedRoutingInstructionMarkersJson` and `runHashlineNativeEditJson` had no TS/runtime consumer and only existed as standalone NAPI wrappers in `router-hotpath-napi/src/lib.rs`.
+- Change: removed only public NAPI wrappers; kept internal Rust helpers because malformed routing marker cleanup is used by Virtual Router route cleanup and hashline native edit is used by response apply_patch governance.
+- Verification PASS: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust VR instructions 11/11; Rust hashline apply_patch directed test 1/1; `git diff --check` PASS.

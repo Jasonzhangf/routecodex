@@ -351,6 +351,7 @@ verification:
       - Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) must stay deleted; do not restore standalone hint/reasoning-alias/response-governance/default-rules control surfaces.
       - Retired standalone tool-governance native export/file (`governRequestJson`, `hub_tool_governance_semantics.rs`) must stay deleted; request/tool governance must remain in the active Hub Rust mainline owners.
       - Retired zero-consumer response-tool NAPI export (`collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json`) must stay deleted while the internal helper remains Rust-private to active response governance.
+      - Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) must stay deleted; do not expose internal VR cleanup/hashline helpers as standalone NAPI surfaces without runtime consumers.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.

@@ -1872,10 +1872,16 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/governRequestJson|governToolNameResponseJson|resolveDefaultToolGovernanceRulesJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
+      expect(source).not.toMatch(/cleanMalformedRoutingInstructionMarkersJson|runHashlineNativeEditJson/);
     }
     for (const source of [respToolGovernanceBindings, respToolGovernanceReexports, requiredExports]) {
       expect(source).not.toMatch(/collectToolNamesFromCandidateJson|collect_tool_names_from_candidate_json/);
     }
+    const rustLib = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs'),
+      'utf8',
+    );
+    expect(rustLib).not.toMatch(/clean_malformed_routing_instruction_markers_json|run_hashline_native_edit_json/);
   });
 
   it('legacy TS chat-process request utility residue must be physically removed', () => {

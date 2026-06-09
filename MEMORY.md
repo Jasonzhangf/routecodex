@@ -2964,3 +2964,9 @@ Tags: hub-pipeline, tool-governance, dead-code, napi-export, rust-only, residue-
 - Removed only the zero-consumer NAPI wrapper/re-export. Kept internal `collect_tool_names_from_candidate` because it is still used by Rust `resolve_requested_tool_names`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the NAPI export/re-export names from returning.
 Tags: hub-pipeline, resp-process, tool-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline utility NAPI wrappers removed
+- Exact scan found `cleanMalformedRoutingInstructionMarkersJson` and `runHashlineNativeEditJson` had no TS/runtime consumer; they only existed as standalone NAPI wrappers in `router-hotpath-napi/src/lib.rs`.
+- Removed only the public NAPI wrappers. Kept the internal Rust helpers because malformed routing marker cleanup is still used by Virtual Router route cleanup, and hashline native edit is still used by response apply_patch governance.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the public wrapper names and Rust export function names from returning.
+Tags: hub-pipeline, virtual-router, hashline, dead-code, napi-export, rust-only, residue-gate, 2026-06-09

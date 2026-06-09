@@ -1802,15 +1802,6 @@ pub fn clean_routing_instruction_markers_json(request_json: String) -> NapiResul
     serde_json::to_string(&request).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn clean_malformed_routing_instruction_markers_json(
-    request_json: String,
-) -> NapiResult<String> {
-    let mut request: Value =
-        serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    virtual_router_engine::instructions::clean_malformed_routing_instruction_markers(&mut request);
-    serde_json::to_string(&request).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
 
 #[napi]
 pub fn extract_tool_calls_from_reasoning_text_json(
@@ -2321,13 +2312,6 @@ pub fn filter_out_executed_server_tool_calls_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi(js_name = "runHashlineNativeEditJson")]
-pub fn run_hashline_native_edit_json(input_json: String) -> NapiResult<String> {
-    let input: hashline::HashlineNativeEditInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = hashline::run_hashline_native_edit(input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
 
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
