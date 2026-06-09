@@ -62,10 +62,6 @@ jest.unstable_mockModule(
       pendingInjectionConfig: {
         messageKinds: ['assistant_tool_calls', 'tool_outputs']
       },
-      progressConfig: {
-        toolNameByFlowId: {},
-        goldHighlightFlowIds: []
-      },
       followupConfig: {
         genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
         nativeSupportedOps: [],

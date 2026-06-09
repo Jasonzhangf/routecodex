@@ -1921,6 +1921,7 @@ function checkPendingSessionRustOwner() {
 function checkServertoolFlowPresentationRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   const flowPresentationShell = readRequired(TS_FLOW_PRESENTATION);
+  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
   const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
@@ -1978,9 +1979,26 @@ function checkServertoolFlowPresentationRustOwner() {
       );
     }
   }
+  for (const keyword of [
+    'buildServertoolProgressConfig',
+    'progressConfig:',
+    'toolNameByFlowId:',
+    'goldHighlightFlowIds:',
+  ]) {
+    if (skeletonConfigShell.includes(keyword)) {
+      fail(
+        'servertool-flow-presentation-no-skeleton-ts-owner',
+        `Forbidden TS skeleton progress presentation semantic "${keyword}" found in skeleton-config.ts`
+      );
+    }
+  }
   pass(
     'servertool-flow-presentation-no-ts-owner',
     'flow-presentation-block.ts is native-only shell for progress tool name and highlight semantics'
+  );
+  pass(
+    'servertool-flow-presentation-no-skeleton-ts-owner',
+    'skeleton-config.ts has no progress presentation projection shell'
   );
 }
 

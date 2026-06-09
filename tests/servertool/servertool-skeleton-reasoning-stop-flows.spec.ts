@@ -39,7 +39,6 @@ jest.unstable_mockModule(
       toolSpecList: [],
       autoHookQueueConfig: { optionalPrimaryOrder: [], mandatoryOrder: [] },
       pendingInjectionConfig: { messageKinds: [] },
-      progressConfig: { toolNameByFlowId: {}, goldHighlightFlowIds: [] },
       followupConfig: {
         genericInjectionOps: [],
         nativeSupportedOps: [],

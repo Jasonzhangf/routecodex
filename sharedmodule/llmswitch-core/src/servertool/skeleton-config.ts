@@ -71,10 +71,6 @@ type ServertoolSkeletonDerivedConfig = {
   pendingInjectionConfig: {
     messageKinds: string[];
   };
-  progressConfig: {
-    toolNameByFlowId: Record<string, string>;
-    goldHighlightFlowIds: string[];
-  };
   followupConfig: ServertoolFollowupConfig;
   stateConfig: ServertoolStateConfig;
 };
@@ -125,13 +121,6 @@ export function buildServertoolPendingInjectionConfig(): {
   messageKinds: string[];
 } {
   return getDerivedConfig().pendingInjectionConfig;
-}
-
-export function buildServertoolProgressConfig(): {
-  toolNameByFlowId: Record<string, string>;
-  goldHighlightFlowIds: string[];
-} {
-  return getDerivedConfig().progressConfig;
 }
 
 export function buildServertoolFollowupConfig(): ServertoolFollowupConfig {

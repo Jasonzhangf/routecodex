@@ -50,6 +50,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
