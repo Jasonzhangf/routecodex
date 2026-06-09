@@ -600,6 +600,8 @@ function checkBuildIncludesServertoolGate() {
 function checkNoOldCliRestorationRuntime() {
   const forbidden = [
     '--ticket',
+    'stcli_',
+    'rcc_cli_',
     'old_cli_',
     'old_cli_result_',
     'restoration handle',

@@ -474,6 +474,11 @@ mod tests {
 
     #[test]
     fn denied_cli_markers_detected() {
+        assert!(DENIED_CLI_MARKERS.contains(&"--ticket"));
+        assert!(DENIED_CLI_MARKERS.contains(&"stcli_"));
+        assert!(DENIED_CLI_MARKERS.contains(&"rcc_cli_"));
+        assert!(DENIED_CLI_MARKERS.contains(&"old_cli_"));
+        assert!(DENIED_CLI_MARKERS.contains(&"old_cli_result_"));
         assert!(contains_denied_cli_marker("cmd --ticket abc"));
         assert!(contains_denied_cli_marker("cmd stcli_123"));
         assert!(contains_denied_cli_marker("cmd rcc_cli_123"));
