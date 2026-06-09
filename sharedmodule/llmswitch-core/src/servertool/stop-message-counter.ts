@@ -13,6 +13,7 @@ import { readStoplessGoalState } from './handlers/stopless-goal-state.js';
 import { inspectStopGatewaySignal } from './stop-gateway-context.js';
 import {
   planBudgetStateUpdateWithNative,
+  planStopMessageDefaultConfigWithNative,
   type BudgetSnapshot,
   type DefaultBudgetConfig
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -46,10 +47,17 @@ function readPersistedStopMessageSnapshot(candidateKeys: string[]): StopMessageS
 function buildDefaultBudgetConfig(adapterContext: AdapterContext): DefaultBudgetConfig {
   const goal = readStoplessGoalState(adapterContext).state;
   const isNonActiveManaged = Boolean(goal && goal.status !== 'idle' && goal.status !== 'active');
+  const plan = planStopMessageDefaultConfigWithNative({
+    configEnabled: resolveStopMessageDefaultEnabled(),
+    configText: resolveStopMessageDefaultText(),
+    configMaxRepeats: resolveStopMessageDefaultMaxRepeats(),
+    envText: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT,
+    envMaxRepeats: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS
+  });
   return {
-    enabled: resolveStopMessageDefaultEnabled() !== false,
-    text: resolveStopMessageDefaultText()?.trim() || '继续执行',
-    max_repeats: resolveStopMessageDefaultMaxRepeats() ?? 3,
+    enabled: plan.enabled,
+    text: plan.text,
+    max_repeats: plan.maxRepeats,
     is_non_active_managed_goal: isNonActiveManaged,
   };
 }

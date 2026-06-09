@@ -84,6 +84,7 @@ const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
+const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
 const STOPLESS_GOAL_STATE_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stopless-goal-state.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
@@ -768,6 +769,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
   const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
+  const stopMessageCounter = readRequired(TS_STOP_MESSAGE_COUNTER);
   const followupDispatchSpec = readRequired(`${ROOT}/tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts`);
 
   assertContains(
@@ -1031,6 +1033,25 @@ function checkStopMessagePersistedLookupRustOwner() {
     fail(
       'stop-message-default-config-ts-thin-shell',
       'stop-message-auto.ts must consume Rust-owned stop-message default config plan'
+    );
+  }
+  const stopMessageConfig = readRequired(STOP_MESSAGE_AUTO_CONFIG);
+  for (const keyword of [
+    'function readPositiveInt',
+    'const floored = Math.floor(parsed)',
+    'readPositiveInt(defaultConfig.maxRepeats)'
+  ]) {
+    if (stopMessageConfig.includes(keyword)) {
+      fail(
+        'stop-message-default-config-no-ts-owner',
+        `config.ts must not restore TS default maxRepeats parse semantic "${keyword}"`
+      );
+    }
+  }
+  if (!stopMessageCounter.includes('planStopMessageDefaultConfigWithNative')) {
+    fail(
+      'stop-message-default-config-ts-thin-shell',
+      'stop-message-counter.ts must consume Rust-owned stop-message default config plan'
     );
   }
   if (!stopMessageAuto.includes('planStopMessagePersistSnapshot({')) {

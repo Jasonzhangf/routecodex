@@ -12,7 +12,7 @@ export type StopMessageRuntimeConfig = {
   default?: {
     enabled?: boolean;
     text?: string;
-    maxRepeats?: number;
+    maxRepeats?: unknown;
   };
 };
 
@@ -65,15 +65,6 @@ function readBoolean(value: unknown): boolean | undefined {
     return false;
   }
   return undefined;
-}
-
-function readPositiveInt(value: unknown): number | undefined {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-  const floored = Math.floor(parsed);
-  return floored > 0 ? floored : undefined;
 }
 
 function asRecord(value: unknown): StopMessageRecord | undefined {
@@ -132,9 +123,7 @@ function loadConfigSnapshot(): StopMessageRuntimeConfig {
                 ? { enabled: readBoolean(defaultConfig.enabled) }
                 : {}),
               ...(readString(defaultConfig.text) ? { text: readString(defaultConfig.text) } : {}),
-              ...(readPositiveInt(defaultConfig.maxRepeats)
-                ? { maxRepeats: readPositiveInt(defaultConfig.maxRepeats) }
-                : {})
+              ...('maxRepeats' in defaultConfig ? { maxRepeats: defaultConfig.maxRepeats } : {})
             }
           }
         : {})
@@ -175,7 +164,7 @@ export function resolveStopMessageDefaultText(): string | undefined {
   return resolveStopMessageRuntimeConfig().default?.text;
 }
 
-export function resolveStopMessageDefaultMaxRepeats(): number | undefined {
+export function resolveStopMessageDefaultMaxRepeats(): unknown {
   return resolveStopMessageRuntimeConfig().default?.maxRepeats;
 }
 
