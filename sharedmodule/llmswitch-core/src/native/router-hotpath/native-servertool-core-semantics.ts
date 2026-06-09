@@ -395,6 +395,23 @@ export interface RuntimeStopMessageStateSnapshot {
   aiMode?: 'on' | 'off';
 }
 
+export interface StopMessageRoutingStateApplyPlan {
+  source: string;
+  text: string;
+  maxRepeats: number;
+  used: number;
+  updatedAt?: number;
+  lastUsedAt?: number;
+  stageMode?: 'on' | 'off' | 'auto';
+  aiMode: 'on' | 'off';
+  aiSeedPrompt?: string;
+  aiHistory?: Array<Record<string, unknown>>;
+}
+
+export interface StopMessageRoutingStateClearPlan {
+  timestamp: number;
+}
+
 export interface RuntimeStopMessageStateFromAdapterContextInput {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
@@ -804,6 +821,101 @@ export function readRuntimeStopMessageStageModeWithNative(
   return stageMode;
 }
 
+export function normalizeStopMessageStageModeValueWithNative(
+  value: unknown,
+): 'on' | 'off' | 'auto' | undefined {
+  const capability = 'normalizeStopMessageStageModeValueJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('normalizeStopMessageStageModeValueJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(value ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`normalizeStopMessageStageModeValueJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  const stageMode = readStopMessageStageModeField(parsed, 'normalizeStopMessageStageModeValueJson');
+  if (!stageMode) {
+    throw new Error('normalizeStopMessageStageModeValueJson native returned invalid stage mode');
+  }
+  return stageMode;
+}
+
+export function hasArmedStopMessageStateWithNative(state: unknown): boolean {
+  const capability = 'hasArmedStopMessageStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('hasArmedStopMessageStateJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(state ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`hasArmedStopMessageStateJson native returned non-string: ${typeof resultJson}`);
+  }
+  if (resultJson === 'true') {
+    return true;
+  }
+  if (resultJson === 'false') {
+    return false;
+  }
+  throw new Error(`hasArmedStopMessageStateJson native returned invalid bool: ${resultJson}`);
+}
+
+export function planStopMessageRoutingSnapshotWithNative(
+  raw: unknown,
+): RuntimeStopMessageStateSnapshot | null {
+  const capability = 'planStopMessageRoutingSnapshotJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageRoutingSnapshotJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ raw }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageRoutingSnapshotJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
+}
+
+export function planStopMessageRoutingStateApplyWithNative(
+  snapshot: unknown,
+): StopMessageRoutingStateApplyPlan {
+  const capability = 'planStopMessageRoutingStateApplyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageRoutingStateApplyJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ snapshot }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageRoutingStateApplyJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseStopMessageRoutingStateApplyPayload(resultJson, capability);
+}
+
+export function planStopMessageRoutingStateClearWithNative(
+  now: unknown,
+): StopMessageRoutingStateClearPlan {
+  const capability = 'planStopMessageRoutingStateClearJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageRoutingStateClearJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ now }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageRoutingStateClearJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const timestamp = (parsed as Record<string, unknown>).timestamp;
+  if (!Number.isInteger(timestamp)) {
+    throw new Error(`${capability} native returned invalid timestamp`);
+  }
+  return { timestamp: timestamp as number };
+}
+
 export function readServertoolFollowupFlowIdWithNative(runtimeMetadata: unknown): string {
   const capability = 'readServertoolFollowupFlowIdJson';
   const fn = readNativeFunction(capability);
@@ -839,6 +951,50 @@ function readStopMessageAiModeField(value: unknown, source: string): 'on' | 'off
     return value;
   }
   throw new Error(`${source} returned invalid stop-message ai mode`);
+}
+
+function parseStopMessageRoutingStateApplyPayload(
+  resultJson: string,
+  capability: string,
+): StopMessageRoutingStateApplyPlan {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.source !== 'string' || !record.source.trim()) {
+    throw new Error(`${capability} native returned invalid source`);
+  }
+  if (typeof record.text !== 'string' || !record.text.trim()) {
+    throw new Error(`${capability} native returned invalid text`);
+  }
+  if (!Number.isInteger(record.maxRepeats) || (record.maxRepeats as number) <= 0) {
+    throw new Error(`${capability} native returned invalid maxRepeats`);
+  }
+  if (!Number.isInteger(record.used) || (record.used as number) < 0) {
+    throw new Error(`${capability} native returned invalid used`);
+  }
+  const stageMode = readStopMessageStageModeField(record.stageMode, `${capability} stageMode`);
+  const aiMode = readStopMessageAiModeField(record.aiMode, `${capability} aiMode`);
+  if (!aiMode) {
+    throw new Error(`${capability} native returned invalid aiMode`);
+  }
+  const aiHistory = record.aiHistory;
+  if (aiHistory !== undefined && !Array.isArray(aiHistory)) {
+    throw new Error(`${capability} native returned invalid aiHistory`);
+  }
+  return {
+    source: record.source.trim(),
+    text: record.text.trim(),
+    maxRepeats: record.maxRepeats as number,
+    used: record.used as number,
+    ...(typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) ? { updatedAt: record.updatedAt } : {}),
+    ...(typeof record.lastUsedAt === 'number' && Number.isFinite(record.lastUsedAt) ? { lastUsedAt: record.lastUsedAt } : {}),
+    ...(stageMode ? { stageMode } : {}),
+    aiMode,
+    ...(typeof record.aiSeedPrompt === 'string' && record.aiSeedPrompt.trim() ? { aiSeedPrompt: record.aiSeedPrompt.trim() } : {}),
+    ...(Array.isArray(aiHistory) ? { aiHistory: aiHistory as Array<Record<string, unknown>> } : {}),
+  };
 }
 
 export function planStopMessagePersistedLookupWithNative(input: {

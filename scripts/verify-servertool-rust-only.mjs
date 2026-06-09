@@ -77,6 +77,7 @@ const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
+const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
 const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
 const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
@@ -670,6 +671,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const runtimeUtils = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
+  const routingState = readRequired(STOP_MESSAGE_ROUTING_STATE);
   const stateScope = readRequired(SERVERTOOL_STATE_SCOPE);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
@@ -687,6 +689,11 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn resolve_runtime_stop_message_state',
     'pub fn resolve_runtime_stop_message_state_from_adapter_context',
     'pub fn read_runtime_stop_message_stage_mode',
+    'pub fn normalize_stop_message_stage_mode_value',
+    'pub fn has_armed_stop_message_state',
+    'pub fn plan_stop_message_routing_snapshot',
+    'pub fn plan_stop_message_routing_state_apply',
+    'pub fn plan_stop_message_routing_state_clear',
     'pub fn read_servertool_followup_flow_id',
     'pub fn resolve_bd_working_directory_for_record',
     'pub fn resolve_stop_message_followup_provider_key',
@@ -731,6 +738,11 @@ function checkStopMessagePersistedLookupRustOwner() {
     'resolveRuntimeStopMessageStateWithNative',
     'resolveRuntimeStopMessageStateFromAdapterContextWithNative',
     'readRuntimeStopMessageStageModeWithNative',
+    'normalizeStopMessageStageModeValueWithNative',
+    'hasArmedStopMessageStateWithNative',
+    'planStopMessageRoutingSnapshotWithNative',
+    'planStopMessageRoutingStateApplyWithNative',
+    'planStopMessageRoutingStateClearWithNative',
     'readServertoolFollowupFlowIdWithNative',
     'resolveBdWorkingDirectoryForRecordWithNative',
     'resolveStopMessageFollowupProviderKeyWithNative',
@@ -755,6 +767,11 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"resolveRuntimeStopMessageStateJson"',
     '"resolveRuntimeStopMessageStateFromAdapterContextJson"',
     '"readRuntimeStopMessageStageModeJson"',
+    '"normalizeStopMessageStageModeValueJson"',
+    '"hasArmedStopMessageStateJson"',
+    '"planStopMessageRoutingSnapshotJson"',
+    '"planStopMessageRoutingStateApplyJson"',
+    '"planStopMessageRoutingStateClearJson"',
     '"readServertoolFollowupFlowIdJson"',
     '"resolveBdWorkingDirectoryForRecordJson"',
     '"resolveStopMessageFollowupProviderKeyJson"',
@@ -978,6 +995,41 @@ function checkStopMessagePersistedLookupRustOwner() {
       fail(
         'stop-message-runtime-stage-ts-thin-shell',
         `runtime-utils.ts readRuntimeStopMessageStageMode must not contain TS stage-mode semantic "${keyword}"`
+      );
+    }
+  }
+
+  for (const [functionName, nativeSymbol] of [
+    ['hasArmedStopMessageState', 'hasArmedStopMessageStateWithNative'],
+    ['normalizeStopMessageStageMode', 'normalizeStopMessageStageModeValueWithNative'],
+    ['resolveStopMessageSnapshot', 'planStopMessageRoutingSnapshotWithNative'],
+    ['applyStopMessageSnapshotToState', 'planStopMessageRoutingStateApplyWithNative'],
+    ['clearStopMessageState', 'planStopMessageRoutingStateClearWithNative'],
+  ]) {
+    const block = extractFunctionBlock(routingState, functionName);
+    if (!block.includes(nativeSymbol)) {
+      fail(
+        'stop-message-routing-state-ts-thin-shell',
+        `routing-state.ts ${functionName} must call ${nativeSymbol}`
+      );
+    }
+  }
+  for (const keyword of [
+    'DEFAULT_STOP_MESSAGE_MAX_REPEATS',
+    'normalizeStopMessageModeValue',
+    'resolveStopMessageMaxRepeats',
+    'normalizeStopMessageAiMode',
+    'Number.isFinite',
+    'Math.floor',
+    'Math.max',
+    '.toLowerCase()',
+    '.trim()',
+    "stageMode === 'off'",
+  ]) {
+    if (routingState.includes(keyword)) {
+      fail(
+        'stop-message-routing-state-no-ts-owner',
+        `routing-state.ts must not contain TS routing-state semantic "${keyword}"`
       );
     }
   }

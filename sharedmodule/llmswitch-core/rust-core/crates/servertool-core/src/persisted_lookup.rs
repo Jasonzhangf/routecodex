@@ -56,6 +56,50 @@ pub struct RuntimeStopMessageStateSnapshot {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingSnapshotPlanInput {
+    pub raw: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingStateApplyPlanInput {
+    pub snapshot: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingStateApplyPlanOutput {
+    pub source: String,
+    pub text: String,
+    pub max_repeats: i64,
+    pub used: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_mode: Option<String>,
+    pub ai_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_seed_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_history: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingStateClearPlanInput {
+    pub now: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingStateClearPlanOutput {
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeStopMessageStateFromAdapterContextInput {
     pub adapter_context: Value,
     pub runtime_metadata: Option<Value>,
@@ -203,6 +247,86 @@ pub fn read_runtime_stop_message_stage_mode(runtime_metadata: &Value) -> Option<
     let runtime = runtime_metadata.as_object()?;
     let state = runtime.get("stopMessageState").and_then(Value::as_object)?;
     normalize_stop_message_stage_mode(state.get("stopMessageStageMode"))
+}
+
+pub fn normalize_stop_message_stage_mode_value(raw: &Value) -> Option<String> {
+    normalize_stop_message_stage_mode(Some(raw))
+}
+
+pub fn has_armed_stop_message_state(state: &Value) -> bool {
+    let Some(record) = state.as_object() else {
+        return false;
+    };
+    let stage_mode = normalize_stop_message_stage_mode(record.get("stopMessageStageMode"));
+    if stage_mode.as_deref() == Some("off") {
+        return false;
+    }
+    let text = read_trimmed_string(record.get("stopMessageText")).unwrap_or_default();
+    let max_repeats = resolve_stop_message_max_repeats(
+        record.get("stopMessageMaxRepeats"),
+        stage_mode.as_deref(),
+    );
+    !text.is_empty() && max_repeats > 0
+}
+
+pub fn plan_stop_message_routing_snapshot(
+    input: &StopMessageRoutingSnapshotPlanInput,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    resolve_stop_message_snapshot(Some(&input.raw))
+}
+
+pub fn plan_stop_message_routing_state_apply(
+    input: &StopMessageRoutingStateApplyPlanInput,
+) -> Result<StopMessageRoutingStateApplyPlanOutput, String> {
+    let record = input
+        .snapshot
+        .as_object()
+        .ok_or_else(|| "stop-message routing apply snapshot must be an object".to_string())?;
+    let text = read_trimmed_string(record.get("text"))
+        .ok_or_else(|| "stop-message routing apply snapshot requires text".to_string())?;
+    let max_repeats =
+        read_positive_finite_floor_value(record.get("maxRepeats")).ok_or_else(|| {
+            "stop-message routing apply snapshot requires positive maxRepeats".to_string()
+        })?;
+    let used = read_finite_number(record.get("used"))
+        .map(|value| value.floor() as i64)
+        .map(|value| value.max(0))
+        .unwrap_or(0);
+    let source =
+        read_trimmed_string(record.get("source")).unwrap_or_else(|| "explicit".to_string());
+    let stage_mode = normalize_stop_message_stage_mode(record.get("stageMode"));
+    let ai_mode =
+        normalize_stop_message_ai_mode(record.get("aiMode")).unwrap_or_else(|| "on".to_string());
+    let ai_seed_prompt = read_trimmed_string(record.get("aiSeedPrompt"));
+    let ai_history = record
+        .get("aiHistory")
+        .and_then(Value::as_array)
+        .map(|items| Value::Array(items.clone()));
+
+    Ok(StopMessageRoutingStateApplyPlanOutput {
+        source,
+        text,
+        max_repeats,
+        used,
+        updated_at: read_finite_number(record.get("updatedAt")),
+        last_used_at: read_finite_number(record.get("lastUsedAt")),
+        stage_mode,
+        ai_mode,
+        ai_seed_prompt,
+        ai_history,
+    })
+}
+
+pub fn plan_stop_message_routing_state_clear(
+    input: &StopMessageRoutingStateClearPlanInput,
+) -> StopMessageRoutingStateClearPlanOutput {
+    let timestamp = input
+        .now
+        .as_ref()
+        .and_then(|value| read_finite_number(Some(value)))
+        .map(|value| value.floor() as i64)
+        .unwrap_or_else(current_time_millis);
+    StopMessageRoutingStateClearPlanOutput { timestamp }
 }
 
 pub fn read_servertool_followup_flow_id(runtime_metadata: &Value) -> String {
@@ -1298,6 +1422,13 @@ fn read_positive_finite_floor_value(value: Option<&Value>) -> Option<i64> {
     Some(parsed.floor() as i64)
 }
 
+fn current_time_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1332,6 +1463,88 @@ mod tests {
         assert_eq!(plan.lookup_policy, STOP_MESSAGE_PERSISTED_LOOKUP_POLICY);
         assert!(plan.read_stop_message_snapshot);
         assert!(plan.read_stop_message_tombstone);
+    }
+
+    #[test]
+    fn routing_snapshot_rejects_off_or_missing_text() {
+        assert!(
+            plan_stop_message_routing_snapshot(&StopMessageRoutingSnapshotPlanInput {
+                raw: json!({
+                    "stopMessageText": " continue ",
+                    "stopMessageStageMode": "off",
+                    "stopMessageMaxRepeats": 3
+                }),
+            })
+            .is_none()
+        );
+
+        assert!(
+            plan_stop_message_routing_snapshot(&StopMessageRoutingSnapshotPlanInput {
+                raw: json!({
+                    "stopMessageStageMode": "on",
+                    "stopMessageMaxRepeats": 3
+                }),
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn routing_snapshot_defaults_max_repeats_and_ai_mode() {
+        let snapshot = plan_stop_message_routing_snapshot(&StopMessageRoutingSnapshotPlanInput {
+            raw: json!({
+                "stopMessageText": " continue ",
+                "stopMessageStageMode": " AUTO ",
+                "stopMessageUsed": 2.9,
+                "stopMessageAiMode": " OFF "
+            }),
+        })
+        .expect("snapshot");
+
+        assert_eq!(snapshot.text, "continue");
+        assert_eq!(snapshot.max_repeats, DEFAULT_STOP_MESSAGE_MAX_REPEATS);
+        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.stage_mode.as_deref(), Some("auto"));
+        assert_eq!(snapshot.ai_mode.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn routing_apply_plan_normalizes_fields() {
+        let plan = plan_stop_message_routing_state_apply(&StopMessageRoutingStateApplyPlanInput {
+            snapshot: json!({
+                "text": " continue ",
+                "maxRepeats": 4.8,
+                "used": -2,
+                "source": " persisted ",
+                "stageMode": " ON ",
+                "aiMode": " OFF ",
+                "aiSeedPrompt": " seed ",
+                "aiHistory": [{ "role": "assistant" }],
+                "updatedAt": 101.5,
+                "lastUsedAt": 102.5
+            }),
+        })
+        .expect("apply plan");
+
+        assert_eq!(plan.source, "persisted");
+        assert_eq!(plan.text, "continue");
+        assert_eq!(plan.max_repeats, 4);
+        assert_eq!(plan.used, 0);
+        assert_eq!(plan.stage_mode.as_deref(), Some("on"));
+        assert_eq!(plan.ai_mode, "off");
+        assert_eq!(plan.ai_seed_prompt.as_deref(), Some("seed"));
+        assert_eq!(plan.ai_history, Some(json!([{ "role": "assistant" }])));
+        assert_eq!(plan.updated_at, Some(101.5));
+        assert_eq!(plan.last_used_at, Some(102.5));
+    }
+
+    #[test]
+    fn routing_clear_plan_floors_timestamp() {
+        let plan = plan_stop_message_routing_state_clear(&StopMessageRoutingStateClearPlanInput {
+            now: Some(json!(1234.9)),
+        });
+
+        assert_eq!(plan.timestamp, 1234);
     }
 
     #[test]

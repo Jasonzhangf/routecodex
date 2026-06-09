@@ -18625,3 +18625,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline session usage load fail-fast:
 - `chat-process-session-usage.ts::loadState` caught `loadRoutingInstructionStateSync` failures and returned null, which could cause save path to create a new empty state and overwrite state after a load failure.
 - Removed catch/null compensation; routing state load failures now surface fail-fast. Added residue audit assertion that `loadState` has no catch/null path.
+
+2026-06-09 servertool stop-message routing-state Rust closeout:
+- Moved stop-message routing snapshot/apply/clear planning into `servertool-core::persisted_lookup`; TS `stop-message-auto/routing-state.ts` now only calls native wrappers and mutates the JS `RoutingInstructionState` shell.
+- Native bridge/required exports cover stage-mode normalization, armed-state detection, snapshot plan, state apply plan, and clear plan; `verify:servertool-rust-only` blocks TS semantic revival for routing-state.
+- Verification PASS: focused Rust/NAPI tests, native hotpath build/export probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` exact output `routecodex-e2e-3034`.

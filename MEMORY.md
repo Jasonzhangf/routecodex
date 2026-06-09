@@ -2811,3 +2811,9 @@ Tags: hub-pipeline, session-usage, dead-code, thin-shell, residue-gate, 2026-06-
 - Current behavior: native routing state load failures surface fail-fast; missing state is represented only by a successful native `null`.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` checks `loadState` has no catch/null compensation.
 Tags: hub-pipeline, session-usage, fail-fast, routing-state, no-silent-compensation, 2026-06-09
+
+## 2026-06-09 Servertool stop-message routing-state Rust owner
+- Stop-message routing snapshot/apply/clear semantics are Rust-owned by `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`; TS `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/routing-state.ts` is only a native-call + JS state mutation shell.
+- Do not restore TS defaults/normalization/clamping/stage policy in `routing-state.ts` (`DEFAULT_STOP_MESSAGE_MAX_REPEATS`, local stage normalize, `Number.isFinite`, `Math.floor`, `Math.max`, `.trim()`, `.toLowerCase()`, stage off policy). `npm run verify:servertool-rust-only` locks the owner/native export/thin-shell boundary.
+- Verified on 2026-06-09: Rust/NAPI focused tests, native hotpath build/export probe, servertool rust-only gate, focused servertool Jest, llmswitch-core/root tsc, full servertool-core and servertool-cli Rust suites, `git diff --check`, `npm run build:min`, `npm run install:global`, `routecodex restart --port 5520`, `/health`, `/v1/models`, and real `/v1/responses` completed with exact output `routecodex-e2e-3034`.
+Tags: servertool, stopless, routing-state, rust-owner, native-bridge, thin-shell, 2026-06-09

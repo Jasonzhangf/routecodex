@@ -1381,6 +1381,36 @@ pub fn read_runtime_stop_message_stage_mode_json(input_json: String) -> NapiResu
 }
 
 #[napi]
+pub fn normalize_stop_message_stage_mode_value_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::normalize_stop_message_stage_mode_value_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn has_armed_stop_message_state_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::has_armed_stop_message_state_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stop_message_routing_snapshot_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_routing_snapshot_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stop_message_routing_state_apply_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_routing_state_apply_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stop_message_routing_state_clear_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stop_message_routing_state_clear_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn read_servertool_followup_flow_id_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::read_servertool_followup_flow_id_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

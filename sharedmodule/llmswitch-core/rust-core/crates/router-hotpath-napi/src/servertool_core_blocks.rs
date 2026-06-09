@@ -150,6 +150,55 @@ pub fn read_runtime_stop_message_stage_mode_json(input_json: &str) -> Result<Str
         .map_err(|e| format!("serialize runtime stop-message stage mode: {e}"))
 }
 
+pub fn normalize_stop_message_stage_mode_value_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stop-message stage mode input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::normalize_stop_message_stage_mode_value(
+        &input,
+    ))
+    .map_err(|e| format!("serialize stop-message stage mode: {e}"))
+}
+
+pub fn has_armed_stop_message_state_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize armed stop-message state input: {e}"))?;
+    Ok(if persisted_lookup::has_armed_stop_message_state(&input) {
+        "true"
+    } else {
+        "false"
+    }
+    .to_string())
+}
+
+pub fn plan_stop_message_routing_snapshot_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageRoutingSnapshotPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message routing snapshot input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::plan_stop_message_routing_snapshot(
+        &input,
+    ))
+    .map_err(|e| format!("serialize stop-message routing snapshot: {e}"))
+}
+
+pub fn plan_stop_message_routing_state_apply_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageRoutingStateApplyPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message routing apply input: {e}"))?;
+    let plan = persisted_lookup::plan_stop_message_routing_state_apply(&input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize stop-message routing apply plan: {e}"))
+}
+
+pub fn plan_stop_message_routing_state_clear_json(input_json: &str) -> Result<String, String> {
+    let input: persisted_lookup::StopMessageRoutingStateClearPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stop-message routing clear input: {e}"))?;
+    serde_json::to_string(&persisted_lookup::plan_stop_message_routing_state_clear(
+        &input,
+    ))
+    .map_err(|e| format!("serialize stop-message routing clear plan: {e}"))
+}
+
 pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
     let input: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize servertool followup flow id input: {e}"))?;
@@ -1688,6 +1737,50 @@ mod tests {
         assert_eq!(plan["repeatCount"], 1);
         assert_eq!(plan["maxRepeats"], 3);
         assert_eq!(plan["input"]["continuationPrompt"], "continue with tools");
+    }
+
+    #[test]
+    fn plans_stop_message_routing_state_via_servertool_core_bridge() {
+        let snapshot = plan_stop_message_routing_snapshot_json(
+            &json!({
+                "raw": {
+                    "stopMessageText": " continue ",
+                    "stopMessageStageMode": "auto"
+                }
+            })
+            .to_string(),
+        )
+        .expect("routing snapshot");
+        let snapshot_plan: serde_json::Value =
+            serde_json::from_str(&snapshot).expect("routing snapshot json");
+        assert_eq!(snapshot_plan["text"], "continue");
+        assert_eq!(snapshot_plan["maxRepeats"], 10);
+
+        let apply = plan_stop_message_routing_state_apply_json(
+            &json!({
+                "snapshot": {
+                    "text": " continue ",
+                    "maxRepeats": 3,
+                    "used": 1,
+                    "source": " persisted ",
+                    "stageMode": "on",
+                    "aiMode": "off"
+                }
+            })
+            .to_string(),
+        )
+        .expect("routing apply");
+        let apply_plan: serde_json::Value =
+            serde_json::from_str(&apply).expect("routing apply json");
+        assert_eq!(apply_plan["source"], "persisted");
+        assert_eq!(apply_plan["aiMode"], "off");
+
+        let clear =
+            plan_stop_message_routing_state_clear_json(&json!({ "now": 123.9 }).to_string())
+                .expect("routing clear");
+        let clear_plan: serde_json::Value =
+            serde_json::from_str(&clear).expect("routing clear json");
+        assert_eq!(clear_plan["timestamp"], 123);
     }
 
     #[test]

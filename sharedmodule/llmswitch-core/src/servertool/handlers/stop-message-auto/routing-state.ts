@@ -1,53 +1,18 @@
 import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
-import { DEFAULT_STOP_MESSAGE_MAX_REPEATS } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
+import {
+  hasArmedStopMessageStateWithNative,
+  normalizeStopMessageStageModeValueWithNative,
+  planStopMessageRoutingSnapshotWithNative,
+  planStopMessageRoutingStateApplyWithNative,
+  planStopMessageRoutingStateClearWithNative
+} from '../../../native/router-hotpath/native-servertool-core-semantics.js';
 
 export function hasArmedStopMessageState(state: RoutingInstructionState): boolean {
-  const text = typeof state.stopMessageText === 'string' ? state.stopMessageText.trim() : '';
-  const stageMode = normalizeStopMessageModeValue(state.stopMessageStageMode);
-  const maxRepeats = resolveStopMessageMaxRepeats(state.stopMessageMaxRepeats, stageMode);
-  if (stageMode === 'off') {
-    return false;
-  }
-  return text.length > 0 && maxRepeats > 0;
-}
-
-export function normalizeStopMessageModeValue(value: unknown): 'on' | 'off' | 'auto' | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'auto') {
-    return normalized;
-  }
-  return undefined;
+  return hasArmedStopMessageStateWithNative(state);
 }
 
 export function normalizeStopMessageStageMode(value: unknown): 'on' | 'off' | 'auto' | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off' || normalized === 'auto') {
-    return normalized;
-  }
-  return undefined;
-}
-
-export function resolveStopMessageMaxRepeats(
-  value: unknown,
-  stageMode: 'on' | 'off' | 'auto' | undefined
-): number {
-  const parsed =
-    typeof value === 'number' && Number.isFinite(value)
-      ? Math.floor(value)
-      : 0;
-  if (parsed > 0) {
-    return parsed;
-  }
-  if (stageMode === 'on' || stageMode === 'auto') {
-    return DEFAULT_STOP_MESSAGE_MAX_REPEATS;
-  }
-  return 0;
+  return normalizeStopMessageStageModeValueWithNative(value);
 }
 
 export function resolveStopMessageSnapshot(raw: unknown): {
@@ -60,46 +25,7 @@ export function resolveStopMessageSnapshot(raw: unknown): {
   stageMode?: 'on' | 'off' | 'auto';
   aiMode?: 'on' | 'off';
 } | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  const text = typeof record.stopMessageText === 'string' ? record.stopMessageText.trim() : '';
-  const stageMode = normalizeStopMessageStageMode(record.stopMessageStageMode);
-  const aiMode = normalizeStopMessageAiMode(record.stopMessageAiMode) || 'on';
-  const maxRepeats = resolveStopMessageMaxRepeats(record.stopMessageMaxRepeats, stageMode);
-  if (stageMode === 'off') {
-    return null;
-  }
-  if (!text || maxRepeats <= 0) {
-    return null;
-  }
-  const used =
-    typeof record.stopMessageUsed === 'number' && Number.isFinite(record.stopMessageUsed)
-      ? Math.max(0, Math.floor(record.stopMessageUsed))
-      : 0;
-  const updatedAt =
-    typeof record.stopMessageUpdatedAt === 'number' && Number.isFinite(record.stopMessageUpdatedAt)
-      ? record.stopMessageUpdatedAt
-      : undefined;
-  const lastUsedAt =
-    typeof record.stopMessageLastUsedAt === 'number' && Number.isFinite(record.stopMessageLastUsedAt)
-      ? record.stopMessageLastUsedAt
-      : undefined;
-  const source =
-    typeof record.stopMessageSource === 'string' && record.stopMessageSource.trim()
-      ? record.stopMessageSource.trim()
-      : undefined;
-  return {
-    text,
-    maxRepeats,
-    used,
-    ...(source ? { source } : {}),
-    ...(updatedAt ? { updatedAt } : {}),
-    ...(lastUsedAt ? { lastUsedAt } : {}),
-    ...(stageMode ? { stageMode } : {}),
-    ...(aiMode ? { aiMode } : {})
-  };
+  return planStopMessageRoutingSnapshotWithNative(raw);
 }
 
 export function createStopMessageState(snapshot: {
@@ -154,40 +80,30 @@ export function applyStopMessageSnapshotToState(
     preCommandScriptPath: undefined,
     preCommandUpdatedAt: undefined
   };
-  next.stopMessageSource = snapshot.source && snapshot.source.trim() ? snapshot.source.trim() : 'explicit';
-  next.stopMessageText = snapshot.text;
-  next.stopMessageMaxRepeats = snapshot.maxRepeats;
-  next.stopMessageUsed = snapshot.used;
-  next.stopMessageUpdatedAt = snapshot.updatedAt;
-  next.stopMessageLastUsedAt = snapshot.lastUsedAt;
-  next.stopMessageStageMode = snapshot.stageMode;
-  next.stopMessageAiMode = snapshot.aiMode || 'on';
-  next.stopMessageAiSeedPrompt = snapshot.aiSeedPrompt;
-  next.stopMessageAiHistory = Array.isArray(snapshot.aiHistory) ? snapshot.aiHistory : undefined;
+  const plan = planStopMessageRoutingStateApplyWithNative(snapshot);
+  next.stopMessageSource = plan.source;
+  next.stopMessageText = plan.text;
+  next.stopMessageMaxRepeats = plan.maxRepeats;
+  next.stopMessageUsed = plan.used;
+  next.stopMessageUpdatedAt = plan.updatedAt;
+  next.stopMessageLastUsedAt = plan.lastUsedAt;
+  next.stopMessageStageMode = plan.stageMode;
+  next.stopMessageAiMode = plan.aiMode;
+  next.stopMessageAiSeedPrompt = plan.aiSeedPrompt;
+  next.stopMessageAiHistory = plan.aiHistory;
   return next;
 }
 
-export function clearStopMessageState(state: RoutingInstructionState, _now: number): void {
-  const now = Number.isFinite(_now) ? Math.floor(_now) : Date.now();
+export function clearStopMessageState(state: RoutingInstructionState, now: number): void {
+  const plan = planStopMessageRoutingStateClearWithNative(now);
   state.stopMessageText = undefined;
   state.stopMessageMaxRepeats = undefined;
   state.stopMessageUsed = undefined;
   state.stopMessageSource = undefined;
   state.stopMessageStageMode = undefined;
   state.stopMessageAiMode = undefined;
-  state.stopMessageUpdatedAt = now;
-  state.stopMessageLastUsedAt = now;
+  state.stopMessageUpdatedAt = plan.timestamp;
+  state.stopMessageLastUsedAt = plan.timestamp;
   state.stopMessageAiSeedPrompt = undefined;
   state.stopMessageAiHistory = undefined;
-}
-
-function normalizeStopMessageAiMode(value: unknown): 'on' | 'off' | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'on' || normalized === 'off') {
-    return normalized;
-  }
-  return undefined;
 }
