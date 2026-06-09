@@ -237,6 +237,19 @@ export interface StopMessageCliProjectionSeed {
   input: Record<string, unknown>;
 }
 
+export interface StoplessGoalStateSyncPlanInput {
+  latestUserText: string;
+  currentState?: unknown;
+  nowMs?: number;
+}
+
+export interface StoplessGoalStateSyncPlan {
+  hadDirective: boolean;
+  directiveTypes: string[];
+  rewrittenText?: string | null;
+  nextState?: Record<string, unknown> | null;
+}
+
 export interface StoplessOrchestrationActionInput {
   flowId?: string;
   execution: unknown;
@@ -1110,6 +1123,39 @@ export function planStoplessOrchestrationActionWithNative(
     isStopMessageFlow,
     reason: record.reason.trim()
   };
+}
+
+export function planStoplessGoalStateSyncWithNative(
+  input: StoplessGoalStateSyncPlanInput,
+): StoplessGoalStateSyncPlan {
+  const capability = 'planStoplessGoalStateSyncJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessGoalStateSyncJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    if (nativeError instanceof Error || typeof nativeError.message === 'string' || typeof nativeError.code === 'string') {
+      const message = typeof nativeError.message === 'string' && nativeError.message.trim()
+        ? nativeError.message.trim()
+        : String(resultJson);
+      throw new Error(`planStoplessGoalStateSyncJson native error: ${message}`);
+    }
+  }
+  const parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) as unknown : resultJson;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planStoplessGoalStateSyncJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.hadDirective !== 'boolean' ||
+    !Array.isArray(record.directiveTypes) ||
+    !record.directiveTypes.every((entry) => typeof entry === 'string')
+  ) {
+    throw new Error(`planStoplessGoalStateSyncJson native returned invalid fields: ${JSON.stringify(record)}`);
+  }
+  return record as unknown as StoplessGoalStateSyncPlan;
 }
 
 export function buildClientVisibleProjectionShellWithNative(

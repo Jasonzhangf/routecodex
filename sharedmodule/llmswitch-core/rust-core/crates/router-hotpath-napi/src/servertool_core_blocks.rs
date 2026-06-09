@@ -22,6 +22,7 @@ use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::pre_command_hook_contract;
 use servertool_core::stop_gateway_context;
+use servertool_core::stopless_goal_state_contract;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
 use servertool_core::stop_message_loop_guard;
@@ -198,6 +199,14 @@ pub fn plan_stop_message_routing_state_clear_json(input_json: &str) -> Result<St
         &input,
     ))
     .map_err(|e| format!("serialize stop-message routing clear plan: {e}"))
+}
+
+pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_goal_state_contract::StoplessGoalStateSyncPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless goal state sync input: {e}"))?;
+    let plan = stopless_goal_state_contract::plan_stopless_goal_state_sync(input)?;
+    serde_json::to_string(&plan).map_err(|e| format!("serialize stopless goal state plan: {e}"))
 }
 
 pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
@@ -1840,6 +1849,26 @@ mod tests {
             serde_json::from_str(&followup).expect("stopless followup action json");
         assert_eq!(followup_plan["action"], "followup_mainline");
         assert_eq!(followup_plan["isStopMessageFlow"], false);
+    }
+
+    #[test]
+    fn plans_stopless_goal_state_sync_via_servertool_core_bridge() {
+        let output = plan_stopless_goal_state_sync_json(
+            &json!({
+                "latestUserText": "前文\n<**rcc**>\nstopless start\n实现统一 RCC stopless\n</rcc**>\n后文",
+                "currentState": null,
+                "nowMs": 100
+            })
+            .to_string(),
+        )
+        .expect("stopless goal state sync plan");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("stopless goal state json");
+        assert_eq!(plan["hadDirective"], true);
+        assert_eq!(plan["directiveTypes"], json!(["stopless.start"]));
+        assert_eq!(plan["rewrittenText"], "前文\n实现统一 RCC stopless\n后文");
+        assert_eq!(plan["nextState"]["status"], "active");
+        assert_eq!(plan["nextState"]["objective"], "实现统一 RCC stopless");
     }
 
     #[test]

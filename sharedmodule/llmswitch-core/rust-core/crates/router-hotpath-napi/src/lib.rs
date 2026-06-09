@@ -1752,6 +1752,12 @@ pub fn apply_stopless_goal_directive_json(payload_json: String) -> NapiResult<St
 }
 
 #[napi]
+pub fn plan_stopless_goal_state_sync_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_goal_state_sync_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn inject_mcp_tools_for_chat_json(
     tools_json: String,
     discovered_servers_json: String,

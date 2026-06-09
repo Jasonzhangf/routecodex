@@ -1,90 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
-
-function parseDirective(text: string) {
-  const match = text.match(/<\*\*rcc\*\*>\s*([\s\S]*?)<\/rcc\*\*>/);
-  if (!match) {
-    return { blocks: [], directives: [] };
-  }
-  const full = match[0];
-  const inner = match[1] ?? '';
-  const normalized = inner.replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n').filter((line, index, arr) => !(index === 0 && !line.trim()) && !(index === arr.length - 1 && !line.trim()));
-  const commandLine = lines[0]?.trim() ?? '';
-  const [domain = '', action = ''] = commandLine.split(/\s+/);
-  const body = lines.slice(1).join('\n').trim();
-  return {
-    blocks: [{
-      raw: full,
-      startOffset: text.indexOf(full),
-      endOffset: text.indexOf(full) + full.length,
-      commandLine,
-      domain,
-      action,
-      args: [],
-      body
-    }],
-    directives: [{
-      directiveType: `${domain}.${action}`,
-      domain,
-      action,
-      args: [],
-      body,
-      passthrough: action === 'start' ? 'body-forward' : 'private-only'
-    }]
-  };
-}
-
-function applyDirective(input: {
-  currentState?: {
-    status: 'idle' | 'active' | 'paused' | 'stopped' | 'completed';
-    objective: string;
-    latestNote?: string;
-    completionEvidence?: string;
-    updatedAt: number;
-    createdAt: number;
-  };
-  directive: {
-    action: string;
-    body: string;
-  };
-  nowMs?: number | null;
-}) {
-  const nowMs = Math.max(0, Number(input.nowMs ?? 0));
-  const current = input.currentState ?? {
-    status: 'idle' as const,
-    objective: '',
-    updatedAt: nowMs,
-    createdAt: nowMs
-  };
-  if (input.directive.action === 'start') {
-    return {
-      status: 'active' as const,
-      objective: input.directive.body,
-      updatedAt: nowMs,
-      createdAt: nowMs
-    };
-  }
-  if (input.directive.action === 'pause') {
-    return {
-      ...current,
-      status: 'paused' as const,
-      latestNote: input.directive.body,
-      updatedAt: nowMs
-    };
-  }
-  throw new Error(`unsupported action ${input.directive.action}`);
-}
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-rcc-fence-semantics.js',
-  () => ({
-    parseRccFenceDocumentWithNative: parseDirective,
-    applyStoplessGoalDirectiveWithNative: applyDirective
-  })
-);
+import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 
 describe('syncStoplessGoalStateFromRequest', () => {
   const prevHome = process.env.RCC_HOME;
@@ -98,7 +15,7 @@ describe('syncStoplessGoalStateFromRequest', () => {
     process.env.RCC_HOME = tempRoot;
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;
-    delete process.env.ROUTECODEX_SESSION_DIR;
+    process.env.ROUTECODEX_SESSION_DIR = path.join(tempRoot, 'routing-state');
   });
 
   afterEach(() => {

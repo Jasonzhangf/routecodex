@@ -51,6 +51,7 @@ const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/ru
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
+const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
@@ -77,6 +78,7 @@ const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
+const STOPLESS_GOAL_STATE_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stopless-goal-state.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
@@ -3449,6 +3451,50 @@ function checkStoplessOrchestrationActionRustOwner() {
   pass('stopless-orchestration-action-rust-owner', 'servertool-core owns stopless CLI/terminal/followup action planning');
 }
 
+// ── Check 15e: stopless goal-state sync has Rust owner ────────
+function checkStoplessGoalStateSyncRustOwner() {
+  const rustGoalState = readRequired(RUST_SERVERTOOL_STOPLESS_GOAL_STATE);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const tsGoalState = readRequired(STOPLESS_GOAL_STATE_HANDLER);
+
+  for (const [check, file, content, needle] of [
+    ['stopless-goal-state-sync-rust-owner', RUST_SERVERTOOL_STOPLESS_GOAL_STATE, rustGoalState, 'pub fn plan_stopless_goal_state_sync'],
+    ['stopless-goal-state-sync-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_goal_state_sync_json'],
+    ['stopless-goal-state-sync-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_goal_state_sync_json'],
+    ['stopless-goal-state-sync-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessGoalStateSyncJson'],
+    ['stopless-goal-state-sync-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStoplessGoalStateSyncWithNative'],
+    ['stopless-goal-state-sync-thin-shell', STOPLESS_GOAL_STATE_HANDLER, tsGoalState, 'planStoplessGoalStateSyncWithNative'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
+
+  for (const keyword of [
+    'parseRccFenceDocumentWithNative',
+    'applyStoplessGoalDirectiveWithNative',
+    'consumeStoplessDirectivesFromText',
+    'compactRewrittenText',
+    'directive.domain',
+    'directive.passthrough',
+    'directive.directiveType',
+    'directive.body',
+    'block.startOffset',
+    'block.endOffset',
+    'RccDirective',
+    'RccFenceDocument',
+  ]) {
+    if (tsGoalState.includes(keyword)) {
+      fail(
+        'stopless-goal-state-sync-no-ts-owner',
+        `Forbidden TS stopless goal-state semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.ts`
+      );
+    }
+  }
+  pass('stopless-goal-state-sync-rust-owner', 'servertool-core owns stopless goal directive sync and rewrite planning');
+}
+
 // ── Check 16: servertool CLI result guard has Rust owner ──────
 function checkServertoolCliResultGuardRustOwner() {
   const rustCliResultGuard = readRequired(RUST_SERVERTOOL_CLI_RESULT_GUARD);
@@ -3658,6 +3704,7 @@ checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();
 checkStopMessageCliProjectionSeedRustOwner();
 checkStoplessOrchestrationActionRustOwner();
+checkStoplessGoalStateSyncRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();

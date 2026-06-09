@@ -6,12 +6,7 @@ import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
-import {
-  applyStoplessGoalDirectiveWithNative,
-  parseRccFenceDocumentWithNative,
-  type RccDirective,
-  type RccFenceDocument
-} from '../../native/router-hotpath/native-rcc-fence-semantics.js';
+import { planStoplessGoalStateSyncWithNative } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
 
 type StoplessGoalStateSyncResult = {
@@ -249,63 +244,6 @@ function findLatestUserTextHolder(source: unknown): TextHolder | null {
   return null;
 }
 
-function compactRewrittenText(text: string): string {
-  return text
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function consumeStoplessDirectivesFromText(
-  text: string,
-  document: RccFenceDocument
-): {
-  rewrittenText: string;
-  directiveTypes: string[];
-  stoplessDirectives: RccDirective[];
-} {
-  if (!text || document.blocks.length === 0 || document.blocks.length !== document.directives.length) {
-    return {
-      rewrittenText: text,
-      directiveTypes: [],
-      stoplessDirectives: []
-    };
-  }
-
-  const out: string[] = [];
-  const directiveTypes: string[] = [];
-  const stoplessDirectives: RccDirective[] = [];
-  let cursor = 0;
-
-  for (let index = 0; index < document.blocks.length; index += 1) {
-    const block = document.blocks[index];
-    const directive = document.directives[index];
-    out.push(text.slice(cursor, block.startOffset));
-
-    if (directive.domain !== 'stopless') {
-      out.push(block.raw);
-      cursor = block.endOffset;
-      continue;
-    }
-
-    directiveTypes.push(directive.directiveType);
-    stoplessDirectives.push(directive);
-    if (directive.passthrough === 'body-forward') {
-      out.push(directive.body);
-    }
-    cursor = block.endOffset;
-  }
-
-  out.push(text.slice(cursor));
-  return {
-    rewrittenText: compactRewrittenText(out.join('')),
-    directiveTypes,
-    stoplessDirectives
-  };
-}
-
 function requirePersistentStickyKey(adapterContext: unknown): string {
   const stickyKey = resolveServertoolPersistentScopeKey(adapterContext) ?? '';
   if (!stickyKey) {
@@ -427,9 +365,15 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): Stopl
   }
 
   const persistedStickyKey = requirePersistentStickyKey(adapterContext);
-  const parsed = parseRccFenceDocumentWithNative(latestUserText);
-  const consumed = consumeStoplessDirectivesFromText(latestUserText, parsed);
-  if (consumed.stoplessDirectives.length === 0) {
+  const currentState =
+    (loadRoutingInstructionStateSync(persistedStickyKey) as LegacyReasoningStopRoutingState | null)
+    ?? createEmptyRoutingInstructionState();
+  const plan = planStoplessGoalStateSyncWithNative({
+    latestUserText,
+    currentState: currentState.stoplessGoalState ?? null,
+    nowMs: Date.now()
+  });
+  if (!plan.hadDirective) {
     if (persistedGoalState) {
       applyGoalStateToAdapterRecord({
         record,
@@ -446,18 +390,12 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): Stopl
     };
   }
 
-  let currentState =
-    (loadRoutingInstructionStateSync(persistedStickyKey) as LegacyReasoningStopRoutingState | null)
-    ?? createEmptyRoutingInstructionState();
-  let nextGoalState = currentState.stoplessGoalState;
-  const nowMs = Date.now();
-  for (const directive of consumed.stoplessDirectives) {
-    nextGoalState = applyStoplessGoalDirectiveWithNative({
-      currentState: nextGoalState,
-      directive,
-      nowMs
-    });
+  if (!isStoplessGoalStateSnapshot(plan.nextState)) {
+    throw new Error('STOPLESS_GOAL_STATE_SYNC_PLAN_MISSING_STATE');
   }
+  const nextGoalState = plan.nextState;
+  const directiveTypes = plan.directiveTypes;
+  const rewrittenText = typeof plan.rewrittenText === 'string' ? plan.rewrittenText : latestUserText;
 
   currentState.stoplessGoalState = nextGoalState;
   currentState.reasoningStopMode = undefined;
@@ -470,21 +408,21 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): Stopl
   saveRoutingInstructionStateSync(persistedStickyKey, currentState);
 
   if (textHolder) {
-    textHolder.setText(consumed.rewrittenText);
+    textHolder.setText(rewrittenText);
   }
 
   applyGoalStateToAdapterRecord({
     record,
     state: nextGoalState,
     hadDirective: true,
-    directiveTypes: consumed.directiveTypes
+    directiveTypes
   });
 
   return {
     stickyKey: persistedStickyKey,
     hadDirective: true,
-    directiveTypes: consumed.directiveTypes,
+    directiveTypes,
     ...(nextGoalState ? { state: nextGoalState } : {}),
-    ...(consumed.rewrittenText ? { rewrittenLatestUserText: consumed.rewrittenText } : {})
+    ...(rewrittenText ? { rewrittenLatestUserText: rewrittenText } : {})
   };
 }
