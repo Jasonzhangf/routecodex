@@ -1625,6 +1625,12 @@ pub fn plan_servertool_backend_route_policy_json(input_json: String) -> NapiResu
 }
 
 #[napi]
+pub fn plan_vision_eligibility_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_vision_eligibility_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn decorate_servertool_final_chat_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::decorate_servertool_final_chat_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

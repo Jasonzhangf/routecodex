@@ -65,6 +65,7 @@ const TS_BACKEND_ROUTE_ORIGIN_DELTA = `${SERVERTOOL_TS_DIR}/backend-route-origin
 const TS_BACKEND_ROUTE_RUNTIME = `${SERVERTOOL_TS_DIR}/backend-route-runtime-block.ts`;
 const TS_BACKEND_ROUTE_REENTER = `${SERVERTOOL_TS_DIR}/backend-route-reenter-block.ts`;
 const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
+const TS_VISION_ELIGIBILITY = `${SERVERTOOL_TS_DIR}/handlers/vision-eligibility.ts`;
 const TS_LOOP_STATE_BLOCK = `${SERVERTOOL_TS_DIR}/loop-state-block.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
 const TS_STOP_MESSAGE_COMPARE_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-message-compare-context.ts`;
@@ -2685,6 +2686,7 @@ function checkBackendRoutePolicyRustOwner() {
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
   const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
+  const visionEligibilityShell = readRequired(TS_VISION_ELIGIBILITY);
   assertContains(
     'backend-route-origin-delta-native-seed-owner',
     RUST_SRC_DIR + '/servertool_followup_delta.rs',
@@ -2726,6 +2728,57 @@ function checkBackendRoutePolicyRustOwner() {
       );
     }
   }
+  assertContains(
+    'backend-route-vision-eligibility-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_vision_eligibility'
+  );
+  assertContains(
+    'backend-route-vision-eligibility-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planVisionEligibilityWithNative'
+  );
+  assertContains(
+    'backend-route-vision-eligibility-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planVisionEligibilityJson'
+  );
+  assertContains(
+    'backend-route-vision-eligibility-ts-thin-shell',
+    TS_VISION_ELIGIBILITY,
+    visionEligibilityShell,
+    'planVisionEligibilityWithNative'
+  );
+  for (const keyword of [
+    'containsImageAttachment',
+    'readRuntimeMetadata',
+    'extractCapturedChatSeed',
+    'VIDEO_URL_HINT_RE',
+    'latestUserTurnContainsVideo',
+    'resolveInlineMultimodalSupport',
+    'hasInlineMultimodalSupport',
+    'isImageGenerationRequest',
+    'hasImageGenerationFlag',
+    'readMediaUrlCandidate',
+    'supportsMultimodal',
+    'routeHint',
+    'forceVision',
+    'hasVideoAttachment'
+  ]) {
+    if (visionEligibilityShell.includes(keyword)) {
+      fail(
+        'backend-route-vision-eligibility-no-ts-owner',
+        `Forbidden TS vision eligibility semantic "${keyword}" found in vision-eligibility.ts`
+      );
+    }
+  }
+  pass(
+    'backend-route-vision-eligibility-no-ts-owner',
+    'vision-eligibility.ts delegates vision/media eligibility to Rust native plan'
+  );
   assertContains(
     'backend-route-bootstrap-replay-native-request-id-owner',
     TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY,

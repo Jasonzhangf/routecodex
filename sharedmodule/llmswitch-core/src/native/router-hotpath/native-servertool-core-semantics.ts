@@ -267,6 +267,12 @@ export interface ServertoolBackendRoutePolicyOutput {
   input: unknown;
 }
 
+export interface ServertoolVisionEligibilityPlan {
+  shouldRunVisionFlow: boolean;
+  shouldBypassStopMessage: boolean;
+  reason: string;
+}
+
 export interface ServertoolBackendRouteFinalizeDecision {
   contextDecorationMode?: string;
   ignoreRequiresActionFollowup?: boolean;
@@ -1896,6 +1902,32 @@ export function planServertoolBackendRoutePolicyWithNative(
     throw new Error(`planServertoolBackendRoutePolicyJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson) as ServertoolBackendRoutePolicyOutput;
+}
+
+export function planVisionEligibilityWithNative(adapterContext: unknown): ServertoolVisionEligibilityPlan {
+  const capability = 'planVisionEligibilityJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planVisionEligibilityJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ adapterContext: adapterContext ?? null }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planVisionEligibilityJson native returned non-string: ${typeof resultJson}`);
+  }
+  const plan = JSON.parse(resultJson) as Partial<ServertoolVisionEligibilityPlan> | null;
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    throw new Error('planVisionEligibilityJson native returned invalid payload');
+  }
+  if (typeof plan.shouldRunVisionFlow !== 'boolean') {
+    throw new Error('planVisionEligibilityJson native returned invalid shouldRunVisionFlow');
+  }
+  if (typeof plan.shouldBypassStopMessage !== 'boolean') {
+    throw new Error('planVisionEligibilityJson native returned invalid shouldBypassStopMessage');
+  }
+  if (typeof plan.reason !== 'string') {
+    throw new Error('planVisionEligibilityJson native returned invalid reason');
+  }
+  return plan as ServertoolVisionEligibilityPlan;
 }
 
 export function decorateServertoolFinalChatWithNative(input: {

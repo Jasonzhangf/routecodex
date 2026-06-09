@@ -4,12 +4,13 @@ use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
     plan_followup_error_envelope, plan_followup_execution_mode, plan_followup_materialization,
     plan_followup_runtime_action, plan_followup_runtime_metadata,
-    plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03,
+    plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
     ServertoolBootstrapReplayPlanInput, ServertoolFollowupErrorPlanInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
     ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
+    ServertoolVisionEligibilityInput,
 };
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -509,6 +510,13 @@ pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<Str
     serde_json::to_string(&output).map_err(|e| format!("serialize backend route plan: {e}"))
 }
 
+pub fn plan_vision_eligibility_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolVisionEligibilityInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize vision eligibility input: {e}"))?;
+    let output = plan_vision_eligibility(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize vision eligibility plan: {e}"))
+}
+
 pub fn decorate_servertool_final_chat_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolBackendRouteFinalizeInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize backend route finalize input: {e}"))?;
@@ -683,6 +691,33 @@ mod tests {
         assert_eq!(parsed["routeHint"], "servertool_backend_route:web_search");
         assert_eq!(parsed["executionMode"], "reenter");
         assert_eq!(parsed["shapeGuard"]["failOnMissingPayload"], true);
+    }
+
+    #[test]
+    fn plans_vision_eligibility_via_servertool_core_bridge() {
+        let raw = plan_vision_eligibility_json(
+            &json!({
+                "adapterContext": {
+                    "providerProtocol": "openai-chat",
+                    "routeHint": "default",
+                    "capturedChatRequest": {
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                { "type": "text", "text": "describe" },
+                                { "type": "image_url", "image_url": { "url": "https://example.com/a.png" } }
+                            ]
+                        }]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("vision eligibility");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["shouldRunVisionFlow"], true);
+        assert_eq!(parsed["shouldBypassStopMessage"], true);
+        assert_eq!(parsed["reason"], "image_attachment");
     }
 
     #[test]

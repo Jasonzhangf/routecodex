@@ -260,6 +260,20 @@ pub struct ServertoolBootstrapReplayPlan {
     pub replay_payload: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolVisionEligibilityInput {
+    pub adapter_context: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolVisionEligibilityPlan {
+    pub should_run_vision_flow: bool,
+    pub should_bypass_stop_message: bool,
+    pub reason: String,
+}
+
 pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
     input: ServertoolBackendRoutePolicyInput,
 ) -> Result<ServertoolBackendRoutePolicy01Planned, ServertoolOutcomeError> {
@@ -325,6 +339,60 @@ pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
         _ => return Err(ServertoolOutcomeError::InvalidField("toolName")),
     };
     Ok(policy)
+}
+
+pub fn plan_vision_eligibility(
+    input: ServertoolVisionEligibilityInput,
+) -> ServertoolVisionEligibilityPlan {
+    let adapter_context = &input.adapter_context;
+    let runtime_metadata = read_runtime_metadata(adapter_context);
+    let captured = get_captured_chat_request(adapter_context);
+    let seed = captured.and_then(extract_captured_chat_seed);
+    let has_image_attachment = seed
+        .and_then(|seed| seed.get("messages").and_then(Value::as_array))
+        .map(|messages| contains_current_turn_image(messages))
+        .unwrap_or(false);
+    let has_video_attachment = seed
+        .and_then(|seed| seed.get("messages").and_then(Value::as_array))
+        .map(|messages| latest_user_turn_contains_video(messages))
+        .unwrap_or(false)
+        || read_boolish(adapter_context.get("hasVideoAttachment"))
+        || runtime_metadata
+            .map(|rt| read_boolish(rt.get("hasVideoAttachment")))
+            .unwrap_or(false);
+    let should_bypass_stop_message = has_image_attachment || has_video_attachment;
+
+    let (should_run_vision_flow, reason) =
+        if has_inline_multimodal_support(adapter_context, runtime_metadata) {
+            (false, "inline_multimodal")
+        } else if resolve_adapter_route(adapter_context, runtime_metadata).as_deref()
+            == Some("multimodal")
+        {
+            (false, "multimodal_route")
+        } else if runtime_metadata
+            .map(|rt| read_boolish(rt.get("serverToolFollowup")))
+            .unwrap_or(false)
+        {
+            (false, "servertool_followup")
+        } else if is_image_generation_request(adapter_context, runtime_metadata, captured) {
+            (false, "image_generation")
+        } else if !has_image_attachment {
+            (false, "no_image_attachment")
+        } else if has_video_attachment {
+            (false, "video_attachment")
+        } else if read_boolish(adapter_context.get("forceVision")) {
+            (true, "force_vision")
+        } else if has_inline_multimodal_provider(adapter_context, runtime_metadata) {
+            (false, "inline_multimodal_provider")
+        } else {
+            (true, "image_attachment")
+        };
+
+    ServertoolVisionEligibilityPlan {
+        should_run_vision_flow,
+        should_bypass_stop_message,
+        reason: reason.to_string(),
+    }
 }
 
 pub fn decorate_servertool_final_chat_with_context(
@@ -772,6 +840,172 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
+fn read_lower_string(value: Option<&Value>) -> Option<String> {
+    read_trimmed_string(value).map(|value| value.to_ascii_lowercase())
+}
+
+fn read_boolish(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(true)) => true,
+        Some(Value::String(raw)) => {
+            matches!(raw.trim().to_ascii_lowercase().as_str(), "true" | "1")
+        }
+        _ => false,
+    }
+}
+
+fn read_runtime_metadata(adapter_context: &Value) -> Option<&Value> {
+    adapter_context
+        .get("__rt")
+        .or_else(|| adapter_context.get("runtimeMetadata"))
+        .or_else(|| adapter_context.get("runtime_metadata"))
+        .filter(|value| value.as_object().is_some())
+}
+
+fn get_captured_chat_request(adapter_context: &Value) -> Option<&Value> {
+    adapter_context
+        .get("capturedChatRequest")
+        .filter(|value| value.as_object().is_some())
+}
+
+fn extract_captured_chat_seed(source: &Value) -> Option<&Value> {
+    if source.get("messages").and_then(Value::as_array).is_some() {
+        return Some(source);
+    }
+    source
+        .get("capturedChatRequest")
+        .filter(|value| value.get("messages").and_then(Value::as_array).is_some())
+}
+
+fn has_inline_multimodal_provider(
+    adapter_context: &Value,
+    runtime_metadata: Option<&Value>,
+) -> bool {
+    matches!(
+        read_lower_string(adapter_context.get("providerProtocol")).as_deref(),
+        Some("gemini-chat" | "gemini")
+    ) || read_lower_string(adapter_context.get("providerType")).as_deref() == Some("gemini")
+        || runtime_metadata
+            .and_then(|rt| read_lower_string(rt.get("multimodalProvider")))
+            .as_deref()
+            == Some("native")
+}
+
+fn has_inline_multimodal_support(
+    adapter_context: &Value,
+    runtime_metadata: Option<&Value>,
+) -> bool {
+    read_boolish(adapter_context.get("supportsMultimodal"))
+        || adapter_context
+            .get("target")
+            .filter(|target| target.as_object().is_some())
+            .map(|target| read_boolish(target.get("supportsMultimodal")))
+            .unwrap_or(false)
+        || runtime_metadata
+            .map(|rt| read_boolish(rt.get("supportsMultimodal")))
+            .unwrap_or(false)
+        || has_inline_multimodal_provider(adapter_context, runtime_metadata)
+}
+
+fn resolve_adapter_route(
+    adapter_context: &Value,
+    runtime_metadata: Option<&Value>,
+) -> Option<String> {
+    read_lower_string(adapter_context.get("routeId"))
+        .or_else(|| runtime_metadata.and_then(|rt| read_lower_string(rt.get("routeHint"))))
+        .or_else(|| read_lower_string(adapter_context.get("routeHint")))
+        .or_else(|| runtime_metadata.and_then(|rt| read_lower_string(rt.get("routeName"))))
+}
+
+fn is_image_generation_request(
+    adapter_context: &Value,
+    runtime_metadata: Option<&Value>,
+    captured: Option<&Value>,
+) -> bool {
+    has_image_generation_flag(adapter_context)
+        || runtime_metadata
+            .map(has_image_generation_flag)
+            .unwrap_or(false)
+        || captured.map(has_image_generation_flag).unwrap_or(false)
+}
+
+fn has_image_generation_flag(node: &Value) -> bool {
+    let tool = read_lower_string(node.get("tool")).unwrap_or_default();
+    if matches!(tool.as_str(), "image_generation" | "text-to-image") {
+        return true;
+    }
+    read_boolish(node.get("isImageGeneration"))
+}
+
+fn contains_current_turn_image(messages: &[Value]) -> bool {
+    latest_user_message(messages)
+        .and_then(|message| message.get("content").and_then(Value::as_array))
+        .map(|parts| parts.iter().any(part_contains_image_attachment))
+        .unwrap_or(false)
+}
+
+fn latest_user_turn_contains_video(messages: &[Value]) -> bool {
+    latest_user_message(messages)
+        .and_then(|message| message.get("content").and_then(Value::as_array))
+        .map(|parts| parts.iter().any(part_contains_video_attachment))
+        .unwrap_or(false)
+}
+
+fn latest_user_message(messages: &[Value]) -> Option<&Value> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| read_lower_string(message.get("role")).as_deref() == Some("user"))
+}
+
+fn part_contains_image_attachment(part: &Value) -> bool {
+    let part_type = read_lower_string(part.get("type")).unwrap_or_default();
+    if part_type.contains("image") {
+        return has_media_candidate(part, "image_url") || part.get("source").is_some();
+    }
+    has_media_candidate(part, "image_url")
+}
+
+fn part_contains_video_attachment(part: &Value) -> bool {
+    let part_type = read_lower_string(part.get("type")).unwrap_or_default();
+    if part_type.contains("video") {
+        return true;
+    }
+    read_media_url_candidate(part, "image_url")
+        .or_else(|| read_media_url_candidate(part, "video_url"))
+        .map(|url| is_video_url_hint(&url))
+        .unwrap_or(false)
+}
+
+fn has_media_candidate(part: &Value, key: &str) -> bool {
+    read_media_url_candidate(part, key)
+        .map(|value| !value.is_empty())
+        .unwrap_or(false)
+}
+
+fn read_media_url_candidate(part: &Value, key: &str) -> Option<String> {
+    let raw = part.get(key)?;
+    if let Some(value) = read_trimmed_string(Some(raw)) {
+        return Some(value);
+    }
+    raw.as_object()
+        .and_then(|obj| read_trimmed_string(obj.get("url")))
+}
+
+fn is_video_url_hint(url: &str) -> bool {
+    let lowered = url.trim().to_ascii_lowercase();
+    lowered.starts_with("data:video/")
+        || [
+            ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".m3u8", ".flv",
+        ]
+        .iter()
+        .any(|ext| {
+            lowered.ends_with(ext)
+                || lowered.contains(&format!("{ext}?"))
+                || lowered.contains(&format!("{ext}#"))
+        })
+}
+
 fn read_followup_error_code(error: &Value) -> Option<String> {
     read_trimmed_string(error.get("upstreamCode"))
         .or_else(|| {
@@ -1180,6 +1414,78 @@ mod tests {
         .expect("vision backend route plan");
         assert!(!plan.eligible);
         assert_eq!(plan.skip_reason.as_deref(), Some("qwen_image_generation"));
+    }
+
+    #[test]
+    fn vision_eligibility_runs_for_image_without_native_multimodal() {
+        let plan = super::plan_vision_eligibility(super::ServertoolVisionEligibilityInput {
+            adapter_context: json!({
+                "providerProtocol": "openai-chat",
+                "providerType": "openai",
+                "routeHint": "default",
+                "capturedChatRequest": {
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": "describe" },
+                            { "type": "image_url", "image_url": { "url": "https://example.com/a.png" } }
+                        ]
+                    }]
+                }
+            }),
+        });
+        assert!(plan.should_run_vision_flow);
+        assert!(plan.should_bypass_stop_message);
+        assert_eq!(plan.reason, "image_attachment");
+    }
+
+    #[test]
+    fn vision_eligibility_skips_multimodal_video_and_image_generation() {
+        let multimodal = super::plan_vision_eligibility(super::ServertoolVisionEligibilityInput {
+            adapter_context: json!({
+                "supportsMultimodal": true,
+                "capturedChatRequest": {
+                    "messages": [{
+                        "role": "user",
+                        "content": [{ "type": "image_url", "image_url": { "url": "https://example.com/a.png" } }]
+                    }]
+                }
+            }),
+        });
+        assert!(!multimodal.should_run_vision_flow);
+        assert!(multimodal.should_bypass_stop_message);
+        assert_eq!(multimodal.reason, "inline_multimodal");
+
+        let video = super::plan_vision_eligibility(super::ServertoolVisionEligibilityInput {
+            adapter_context: json!({
+                "capturedChatRequest": {
+                    "messages": [{
+                        "role": "user",
+                        "content": [{ "type": "image_url", "image_url": { "url": "https://example.com/a.mp4?token=1" } }]
+                    }]
+                }
+            }),
+        });
+        assert!(!video.should_run_vision_flow);
+        assert!(video.should_bypass_stop_message);
+        assert_eq!(video.reason, "video_attachment");
+
+        let image_generation = super::plan_vision_eligibility(
+            super::ServertoolVisionEligibilityInput {
+                adapter_context: json!({
+                    "tool": "text-to-image",
+                    "capturedChatRequest": {
+                        "messages": [{
+                            "role": "user",
+                            "content": [{ "type": "image_url", "image_url": { "url": "https://example.com/a.png" } }]
+                        }]
+                    }
+                }),
+            },
+        );
+        assert!(!image_generation.should_run_vision_flow);
+        assert!(image_generation.should_bypass_stop_message);
+        assert_eq!(image_generation.reason, "image_generation");
     }
 
     #[test]
