@@ -533,6 +533,25 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     'validate_no_internal_carrier(&value)'
   );
+  for (const privateCarrier of [
+    'reenterPipeline',
+    'providerInvoker',
+    'serverToolFollowup',
+    'serverToolFollowupSource',
+  ]) {
+    assertContains(
+      'cli-projection-private-carrier-contract',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+      rustOutcomeContract,
+      privateCarrier
+    );
+    assertContains(
+      'cli-projection-private-carrier-contract',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+      rustCliContract,
+      privateCarrier
+    );
+  }
   assertContains('cli-projection-thin-wrapper', CLI_PROJECTION, cliProjection, 'buildClientVisibleProjectionShellWithNative');
   if (cliProjection.includes("name: 'exec_command'") || cliProjection.includes('"name": "exec_command"')) {
     fail('cli-projection-command-contract', 'cli-projection.ts must not build exec_command tool call shape in TS');

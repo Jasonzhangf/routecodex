@@ -335,6 +335,10 @@ const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
     "ticket",
     "restorationHandle",
     "restorationStore",
+    "reenterPipeline",
+    "providerInvoker",
+    "serverToolFollowup",
+    "serverToolFollowupSource",
 ];
 
 fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolOutcomeError> {
@@ -794,6 +798,10 @@ mod tests {
             ("ticket", "ticket"),
             ("restorationHandle", "restorationHandle"),
             ("restorationStore", "restorationStore"),
+            ("reenterPipeline", "reenterPipeline"),
+            ("providerInvoker", "providerInvoker"),
+            ("serverToolFollowup", "serverToolFollowup"),
+            ("serverToolFollowupSource", "serverToolFollowupSource"),
         ] {
             let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
                 ServertoolHubRespChatProcess03Input {
