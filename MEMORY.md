@@ -2946,3 +2946,9 @@ Tags: hub-pipeline, sse-sniffer, dead-code, napi-export, residue-gate, 2026-06-0
 - Removed the Rust module and required-export entry. Older closeout plan references now mark it as retired instead of a live Rust owner.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the Rust file and native export name from returning.
 Tags: hub-pipeline, image-attachment-metadata, dead-code, napi-export, residue-gate, 2026-06-09
+
+## 2026-06-09 HubPipeline zero-consumer native exports removed
+- Exact scan found `extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, and `resolveDefaultToolGovernanceRulesJson` only in required native exports / standalone NAPI wrapper surfaces; no TS runtime consumer imported those exact exported names.
+- Removed the standalone web-search hint wrapper, the duplicate OpenAI reasoning alias with uppercase `AI`, the response-only tool-name governance DTO/helper/export/tests, and the default-governance-rules NAPI export. Kept live Rust mainline owners: `analyzeChatWebSearchIntentJson`, the lowercase-ai reasoning wrapper used by TS, request governance, and internal `default_registry()` tests.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those zero-consumer export names from returning.
+Tags: hub-pipeline, dead-code, napi-export, web-search, reasoning, tool-governance, residue-gate, 2026-06-09

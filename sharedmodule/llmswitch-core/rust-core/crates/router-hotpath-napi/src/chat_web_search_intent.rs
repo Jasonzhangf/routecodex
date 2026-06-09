@@ -8,15 +8,6 @@ pub struct ChatWebSearchIntentOutput {
     pub google_preferred: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebSearchSemanticsHintOutput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub force: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disable: Option<bool>,
-}
-
 fn read_role(message: &Value) -> &str {
     message
         .as_object()
@@ -141,36 +132,4 @@ pub fn analyze_chat_web_search_intent(messages: Vec<Value>) -> ChatWebSearchInte
         has_intent: false,
         google_preferred: false,
     }
-}
-
-pub fn extract_web_search_semantics_hint(
-    semantics: &Value,
-) -> Option<WebSearchSemanticsHintOutput> {
-    let extras = semantics
-        .as_object()
-        .and_then(|obj| obj.get("providerExtras"))
-        .and_then(|v| v.as_object())?;
-    let hint = extras.get("webSearch")?;
-
-    if let Some(enabled) = hint.as_bool() {
-        return if enabled {
-            Some(WebSearchSemanticsHintOutput {
-                force: Some(true),
-                disable: None,
-            })
-        } else {
-            Some(WebSearchSemanticsHintOutput {
-                force: None,
-                disable: Some(true),
-            })
-        };
-    }
-
-    let row = hint.as_object()?;
-    let force = row.get("force").and_then(|v| v.as_bool()).filter(|v| *v);
-    let disable = row.get("disable").and_then(|v| v.as_bool()).filter(|v| *v);
-    if force.is_none() && disable.is_none() {
-        return None;
-    }
-    Some(WebSearchSemanticsHintOutput { force, disable })
 }

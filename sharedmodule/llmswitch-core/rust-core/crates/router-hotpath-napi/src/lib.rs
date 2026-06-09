@@ -7,7 +7,7 @@ mod chat_web_search_intent;
 use chat_process_media_semantics::{
     analyze_chat_process_media, strip_chat_process_historical_images,
 };
-use chat_web_search_intent::{analyze_chat_web_search_intent, extract_web_search_semantics_hint};
+use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
 mod anthropic_response_helper;
 mod chat_anthropic_tool_alias;
@@ -854,14 +854,6 @@ pub fn apply_bridge_responses_output_reasoning_json(input_json: String) -> NapiR
 #[napi]
 pub fn run_bridge_action_pipeline_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::run_bridge_action_pipeline_json(input_json)
-}
-
-#[napi]
-pub fn extract_web_search_semantics_hint_json(semantics_json: String) -> NapiResult<String> {
-    let semantics: Value = serde_json::from_str(&semantics_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = extract_web_search_semantics_hint(&semantics);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 fn serialize_instruction_target_for_napi(
@@ -2130,11 +2122,6 @@ pub fn run_gemini_from_openai_chat_codec_json_bridge(
     options_json: Option<String>,
 ) -> NapiResult<String> {
     gemini_openai_codec::run_gemini_from_openai_chat_codec_json(payload_json, options_json)
-}
-
-#[napi(js_name = "normalizeReasoningInOpenAIPayloadJson")]
-pub fn normalizeReasoningInOpenAIPayloadJson(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::normalize_reasoning_in_openai_payload_json(input_json)
 }
 
 #[napi(js_name = "bootstrapVirtualRouterRoutingJson")]

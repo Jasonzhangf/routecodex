@@ -1857,7 +1857,10 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
       expect(source).not.toMatch(/applyTargetMetadataJson|applyTargetToSubjectJson|extractTargetModelIdJson/);
       expect(source).not.toMatch(/buildImageAttachmentMetadataJson/);
+      expect(source).not.toMatch(/extractWebSearchSemanticsHintJson/);
       expect(source).not.toMatch(/inferSseEventTypeFromDataJson|detectSseProtocolKindJson|validateSseEventTypeJson/);
+      expect(source).not.toMatch(/normalizeReasoningInOpenAIPayloadJson/);
+      expect(source).not.toMatch(/governToolNameResponseJson|resolveDefaultToolGovernanceRulesJson/);
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
     }

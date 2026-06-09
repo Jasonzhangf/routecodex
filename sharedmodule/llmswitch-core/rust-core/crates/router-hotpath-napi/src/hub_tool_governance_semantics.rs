@@ -13,14 +13,6 @@ struct GovernRequestInput {
     registry: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GovernResponseInput {
-    payload: Value,
-    protocol: Option<String>,
-    registry: Option<Value>,
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct NativeToolGovernanceRule {
@@ -63,13 +55,6 @@ struct ToolGovernanceSummary {
 #[serde(rename_all = "camelCase")]
 struct GovernRequestOutput {
     request: Value,
-    summary: ToolGovernanceSummary,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GovernResponseOutput {
-    payload: Value,
     summary: ToolGovernanceSummary,
 }
 
@@ -242,21 +227,6 @@ fn resolve_request_rule(
     registry
         .get("openai-chat")
         .and_then(|node| node.request.clone())
-}
-
-fn resolve_response_rule(
-    protocol: &str,
-    registry: &std::collections::BTreeMap<String, NativeToolGovernanceRuleNode>,
-) -> Option<NativeToolGovernanceRule> {
-    if let Some(rule) = registry
-        .get(protocol)
-        .and_then(|node| node.response.clone())
-    {
-        return Some(rule);
-    }
-    registry
-        .get("openai-chat")
-        .and_then(|node| node.response.clone())
 }
 
 fn read_default_name(rule: &NativeToolGovernanceRule) -> String {
@@ -549,117 +519,6 @@ fn govern_request(input: GovernRequestInput) -> Result<GovernRequestOutput, Stri
     })
 }
 
-fn sanitize_response_payload(
-    payload: &mut Map<String, Value>,
-    rule: &NativeToolGovernanceRule,
-    stats: &mut GovernanceStats,
-) -> Result<(), String> {
-    if let Some(Value::Array(choices)) = payload.get_mut("choices") {
-        for choice in choices.iter_mut() {
-            let Some(choice_obj) = choice.as_object_mut() else {
-                continue;
-            };
-            let Some(message) = choice_obj.get_mut("message") else {
-                continue;
-            };
-            let Some(message_obj) = message.as_object_mut() else {
-                continue;
-            };
-
-            if let Some(Value::Array(tool_calls)) = message_obj.get_mut("tool_calls") {
-                for (index, call) in tool_calls.iter_mut().enumerate() {
-                    let field = format!("choices[].message.tool_calls[{}].function.name", index);
-                    sanitize_tool_call_entry(call, rule, stats, field.as_str())?;
-                }
-            }
-
-            if let Some(Value::Object(function_call)) = message_obj.get_mut("function_call") {
-                let next_name = sanitize_name(
-                    function_call.get("name"),
-                    rule,
-                    stats,
-                    "choices[].message.function_call.name",
-                )?;
-                function_call.insert("name".to_string(), Value::String(next_name));
-            }
-
-            let role_is_tool = message_obj
-                .get("role")
-                .and_then(|v| v.as_str())
-                .map(|v| v == "tool")
-                .unwrap_or(false);
-            if role_is_tool || message_obj.get("name").and_then(|v| v.as_str()).is_some() {
-                let next_name = sanitize_name(
-                    message_obj.get("name"),
-                    rule,
-                    stats,
-                    "choices[].message.name",
-                )?;
-                message_obj.insert("name".to_string(), Value::String(next_name));
-            }
-        }
-    }
-
-    if let Some(Value::Array(tool_calls)) = payload.get_mut("tool_calls") {
-        for call in tool_calls.iter_mut() {
-            sanitize_tool_call_entry(call, rule, stats, "tool_calls[].function.name")?;
-        }
-    }
-
-    Ok(())
-}
-
-fn govern_tool_name_response(input: GovernResponseInput) -> Result<GovernResponseOutput, String> {
-    let protocol = normalize_protocol(input.protocol.as_deref());
-    let registry = parse_registry_candidate(input.registry.as_ref());
-    let Some(rule) = resolve_response_rule(&protocol, &registry) else {
-        return Ok(GovernResponseOutput {
-            payload: input.payload,
-            summary: ToolGovernanceSummary {
-                protocol,
-                direction: "response".to_string(),
-                applied: false,
-                sanitized_names: 0,
-                truncated_names: 0,
-                defaulted_names: 0,
-                timestamp: now_millis(),
-            },
-        });
-    };
-
-    let mut payload = match input.payload {
-        Value::Object(row) => row,
-        _ => {
-            return Err("payload must be an object".to_string());
-        }
-    };
-
-    let mut stats = GovernanceStats {
-        protocol: protocol.clone(),
-        applied: false,
-        sanitized_names: 0,
-        truncated_names: 0,
-        defaulted_names: 0,
-    };
-
-    sanitize_response_payload(&mut payload, &rule, &mut stats)?;
-
-    let summary = ToolGovernanceSummary {
-        protocol: stats.protocol.clone(),
-        direction: "response".to_string(),
-        applied: stats.applied,
-        sanitized_names: stats.sanitized_names,
-        truncated_names: stats.truncated_names,
-        defaulted_names: stats.defaulted_names,
-        timestamp: now_millis(),
-    };
-
-    Ok(GovernResponseOutput {
-        payload: Value::Object(payload),
-        summary,
-    })
-}
-
 #[napi]
 pub fn govern_request_json(input_json: String) -> NapiResult<String> {
     if input_json.trim().is_empty() {
@@ -670,24 +529,6 @@ pub fn govern_request_json(input_json: String) -> NapiResult<String> {
     let output = govern_request(input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
-}
-
-#[napi]
-pub fn govern_tool_name_response_json(input_json: String) -> NapiResult<String> {
-    if input_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Input JSON is empty"));
-    }
-    let input: GovernResponseInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = govern_tool_name_response(input).map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
-}
-
-#[napi]
-pub fn resolve_default_tool_governance_rules_json() -> NapiResult<String> {
-    let output = default_registry();
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
@@ -782,93 +623,4 @@ mod tests {
         assert!(error.contains("Tool name exceeds max length"));
     }
 
-    #[test]
-    fn govern_response_sanitizes_names() {
-        let input = GovernResponseInput {
-            payload: serde_json::json!({
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "tool_calls": [
-                                { "function": { "name": "BAD$$NAME", "arguments": "{}" } }
-                            ],
-                            "function_call": { "name": "TOOL_123", "arguments": "{}" },
-                            "name": "mixedCase"
-                        }
-                    }
-                ],
-                "tool_calls": [
-                    { "function": { "name": "ALSO_BAD$$", "arguments": "{}" } }
-                ]
-            }),
-            protocol: Some("openai-chat".to_string()),
-            registry: Some(serde_json::json!({
-                "openai-chat": {
-                    "response": {
-                        "maxNameLength": 5,
-                        "allowedCharacters": "[a-z]",
-                        "defaultName": "tool",
-                        "trimWhitespace": true,
-                        "forceCase": "lower",
-                        "onViolation": "truncate"
-                    }
-                }
-            })),
-        };
-
-        let output = govern_tool_name_response(input).expect("govern response");
-        let payload = output.payload.as_object().expect("payload object");
-        let choices = payload
-            .get("choices")
-            .and_then(|v| v.as_array())
-            .expect("choices");
-        let message = choices[0]
-            .get("message")
-            .and_then(|v| v.as_object())
-            .expect("message");
-        let tool_calls = message
-            .get("tool_calls")
-            .and_then(|v| v.as_array())
-            .expect("tool_calls");
-        let name = tool_calls[0]
-            .get("function")
-            .and_then(|v| v.get("name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert_eq!(name, "badna");
-    }
-
-    #[test]
-    fn govern_response_respects_reject_mode() {
-        let input = GovernResponseInput {
-            payload: serde_json::json!({
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "tool_calls": [
-                                { "function": { "name": "TOO-LONG-NAME", "arguments": "{}" } }
-                            ]
-                        }
-                    }
-                ]
-            }),
-            protocol: Some("openai-chat".to_string()),
-            registry: Some(serde_json::json!({
-                "openai-chat": {
-                    "response": {
-                        "maxNameLength": 2,
-                        "allowedCharacters": "alpha_num",
-                        "defaultName": "tool",
-                        "trimWhitespace": true,
-                        "onViolation": "reject"
-                    }
-                }
-            })),
-        };
-
-        let error = govern_tool_name_response(input).expect_err("expected reject error");
-        assert!(error.contains("Tool name exceeds max length"));
-    }
 }

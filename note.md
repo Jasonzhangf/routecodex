@@ -18754,3 +18754,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Slice: moved stop-message-auto default `enabled/text/maxRepeats` final planning into Rust `servertool-core::stop_message_default_config::plan_stop_message_default_config`.
 - TS still performs config/env IO only; Rust owns tombstone-disable, config-over-env priority, text trimming, maxRepeats positive floor, and built-in default text/repeat policy.
 - Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, native export probe, and `git diff --check`.
+
+2026-06-09 HubPipeline zero-consumer native export cleanup:
+- Exact scan: `extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson` had no TS runtime consumer; lowercase-ai `normalizeReasoningInOpenaiPayloadJson` remains live and retained.
+- Change: removed standalone web-search hint helper/export, uppercase OpenAI alias export, response-only tool-name governance DTO/helper/export/tests, default-rules NAPI export, and added residue/map/memory docs.
+- Verification: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust hub_tool_governance_semantics 3/3; Rust hub_pipeline_contracts 11/11; `git diff --check` PASS.

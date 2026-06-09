@@ -348,6 +348,7 @@ verification:
       - Any provider outbound metadata change must rerun provider metadata boundary suite.
       - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
       - Retired image attachment metadata native export/module must stay deleted; media metadata semantics must use live Hub/Rust mainline owners only.
+      - Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) must stay deleted; do not restore standalone hint/reasoning-alias/response-governance/default-rules control surfaces.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
