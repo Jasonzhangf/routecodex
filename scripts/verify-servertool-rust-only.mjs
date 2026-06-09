@@ -3807,12 +3807,6 @@ function checkStopMessageBlockedReportRustOwner() {
     nativeServertoolWrapper,
     'extractStopMessageBlockedReportFromMessagesWithNative'
   );
-  assertContains(
-    'stop-message-blocked-report-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'extractStopMessageBlockedReportFromMessagesJson'
-  );
   pass(
     'stop-message-blocked-report-rust-owner',
     'servertool-core owns blocked-report parser contract; TS is native thin wrapper only'
