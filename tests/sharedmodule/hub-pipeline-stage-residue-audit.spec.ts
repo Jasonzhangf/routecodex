@@ -2600,6 +2600,8 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
     const forbidden = [
       'ChatRole',
+      'ChatToolCall',
+      'ChatMessage',
       'ChatContinuationScope',
       'ChatContinuationStateOrigin',
       'ChatContinuationPointer',

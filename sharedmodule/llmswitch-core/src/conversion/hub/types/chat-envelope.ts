@@ -10,7 +10,7 @@ export interface ChatMessageContentPart {
   [key: string]: unknown;
 }
 
-export interface ChatToolCall {
+interface ChatToolCall {
   id: string;
   type: 'function';
   function: {
@@ -20,7 +20,7 @@ export interface ChatToolCall {
   [key: string]: unknown;
 }
 
-export interface ChatMessage {
+interface ChatMessage {
   role: ChatRole;
   content?: string | ChatMessageContentPart[] | null;
   tool_calls?: ChatToolCall[];

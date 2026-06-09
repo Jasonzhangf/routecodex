@@ -18702,3 +18702,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 HubPipeline StandardizedRequest ToolCall public surface pruning:
 - Exact scan found `ToolCall` is not imported from `standardized.ts` by active source/tests/docs scripts; it only types `StandardizedMessage.tool_calls` in the same file.
 - Made `ToolCall` module-internal and extended the same residue gate/docs note to block re-export revival.
+
+2026-06-09 HubPipeline ChatEnvelope message public surface pruning:
+- Exact scan found `ChatMessage` and `ChatToolCall` are not imported from `chat-envelope.ts` by active source/tests/docs scripts; they only type `ChatEnvelope.messages` in the same file.
+- Made both module-internal and extended `hub.chat_envelope_type_surface` residue docs/gate to block re-export revival.

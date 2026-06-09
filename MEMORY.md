@@ -2891,6 +2891,7 @@ Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residu
 
 ## 2026-06-09 HubPipeline ChatToolOutput type export narrowed
 - `ChatToolOutput` in `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts` has no external source consumer; it only types the local `ChatEnvelope.toolOutputs` field.
+- Follow-up exact scan confirmed `ChatMessage` and `ChatToolCall` also have no external source consumer; they only type the local `ChatEnvelope.messages` field.
 - `ChatToolOutput` must remain module-internal; do not re-export it as a standalone TS semantic shell.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` includes `ChatToolOutput` in the `hub.chat_envelope_type_surface` forbidden export list.
 Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
