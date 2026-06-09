@@ -87,7 +87,7 @@ async function main() {
       globalThis.__snapshot_calls = [];
       try {
         const { nativeHooks, snapshotUtils, snapshotRecorder } = await loadModules('a');
-        const { SnapshotStageRecorder, createSnapshotRecorder } = snapshotRecorder;
+        const { createSnapshotRecorder } = snapshotRecorder;
 
         assert.equal(nativeHooks.shouldRecordSnapshotsWithNative(), true);
         assert.equal(snapshotUtils.shouldRecordSnapshots(), true);
@@ -118,29 +118,23 @@ async function main() {
           data: { hello: 'world' }
         });
 
-        const recorderWithClientRequest = new SnapshotStageRecorder({
-          context: { requestId: 'req-rec-1', providerId: 'provider-a', clientRequestId: 'client-001' },
-          endpoint: '/v1/chat/completions'
-        });
+        const recorderWithClientRequest = createSnapshotRecorder(
+          { requestId: 'req-rec-1', providerId: 'provider-a', clientRequestId: 'client-001' },
+          '/v1/chat/completions'
+        );
         recorderWithClientRequest.record('annotated', { alpha: 1 });
 
-        const recorderWithGroupRequest = new SnapshotStageRecorder({
-          context: { requestId: 'req-rec-2', providerId: 'provider-b', groupRequestId: 'group-raw-002' },
-          endpoint: '/v1/responses'
-        });
+        const recorderWithGroupRequest = createSnapshotRecorder(
+          { requestId: 'req-rec-2', providerId: 'provider-b', groupRequestId: 'group-raw-002' },
+          '/v1/responses'
+        );
         recorderWithGroupRequest.record('annotated', { beta: 2 });
         recorderWithGroupRequest.record('drop-stage', { ignored: true });
 
-        // Force "writer throws" catch branch.
-        recorderWithGroupRequest.writer = () => {
-          throw new Error('writer failed');
-        };
-        recorderWithGroupRequest.record('annotated', { shouldBeIgnored: true });
-
-        const recorderWithoutStringProvider = new SnapshotStageRecorder({
-          context: { requestId: 'req-rec-3', providerId: 12345 },
-          endpoint: '/v1/chat/completions'
-        });
+        const recorderWithoutStringProvider = createSnapshotRecorder(
+          { requestId: 'req-rec-3', providerId: 12345 },
+          '/v1/chat/completions'
+        );
         recorderWithoutStringProvider.record('annotated', { gamma: 3 });
 
         const recorderApi = createSnapshotRecorder(
@@ -183,10 +177,10 @@ async function main() {
         requestId: 'req-off',
         data: { off: true }
       });
-      const rec = new snapshotRecorder.SnapshotStageRecorder({
-        context: { requestId: 'req-off-rec', providerId: 'provider-off' },
-        endpoint: '/v1/chat/completions'
-      });
+      const rec = snapshotRecorder.createSnapshotRecorder(
+        { requestId: 'req-off-rec', providerId: 'provider-off' },
+        '/v1/chat/completions'
+      );
       rec.record('annotated', { off: true });
     }
   );

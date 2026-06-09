@@ -2862,3 +2862,9 @@ Tags: hub-pipeline, public-surface, type-export, dead-code, residue-gate, thin-s
 - Do not re-export nested policy/tool-surface/request-metadata shells `HubPolicyMode`, `HubPolicyConfig`, `HubShadowCompareRequestConfig`, `HubToolSurfaceMode`, `HubToolSurfaceConfig`, or `HubPipelineRequestMetadata`; they are internal implementation details.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks those nested type exports and barrel re-exports from returning.
 Tags: hub-pipeline, type-barrel, public-surface, dead-code, residue-gate, thin-shell, 2026-06-09
+
+## 2026-06-09 HubPipeline snapshot recorder public API narrowed
+- `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` must only export the live factory bridge `createSnapshotRecorder`; `SnapshotStageRecorderOptions` and `SnapshotStageRecorder` are internal implementation details.
+- Coverage scripts must exercise recorder behavior through the factory API, not instantiate or mutate the internal recorder class for white-box coverage.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks recorder class/options export and coverage-script consumption of `SnapshotStageRecorder`.
+Tags: hub-pipeline, snapshot-recorder, public-surface, dead-code, residue-gate, thin-shell, 2026-06-09

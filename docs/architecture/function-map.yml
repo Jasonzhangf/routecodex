@@ -912,7 +912,8 @@ owners:
     notes:
       - Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch.
       - Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written.
-      - Hub `SnapshotStageRecorder` is TS observation glue only; payload normalization/trimming semantics must remain native-owned.
+      - Hub `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported.
+      - Hub snapshot recorder is TS observation glue only; payload normalization/trimming semantics must remain native-owned.
 
   - feature_id: responses.direct_tool_shape_contract
     status: active

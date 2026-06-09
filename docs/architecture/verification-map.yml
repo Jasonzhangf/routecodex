@@ -508,7 +508,7 @@ verification:
       - npm run build:min
     notes:
       - Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests.
-      - Hub `SnapshotStageRecorder` may only bridge stage payloads into native snapshot normalization/writer IO; TS hotpath trim/sanitize helpers are dead code residue.
+      - Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue.
 
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high

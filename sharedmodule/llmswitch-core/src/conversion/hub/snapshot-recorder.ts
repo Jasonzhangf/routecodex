@@ -5,12 +5,12 @@ import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hot
 
 // feature_id: snapshot.stage_contract
 
-export interface SnapshotStageRecorderOptions {
+interface SnapshotStageRecorderOptions {
   context: AdapterContext;
   endpoint: string;
 }
 
-export class SnapshotStageRecorder implements StageRecorder {
+class SnapshotStageRecorder implements StageRecorder {
   private readonly writer?: SnapshotWriter;
 
   constructor(private readonly options: SnapshotStageRecorderOptions) {

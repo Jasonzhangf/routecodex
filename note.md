@@ -18668,3 +18668,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact source/test/script scan found `HubPolicyMode`, `HubPolicyConfig`, `HubShadowCompareRequestConfig`, `HubToolSurfaceMode`, `HubToolSurfaceConfig`, and `HubPipelineRequestMetadata` only used inside `hub-pipeline-types.ts` and the local `hub-pipeline.ts` type barrel.
 - Made those nested config/metadata type shells internal and removed them from the public barrel. Kept live public bridge types: `HubPipelineConfig`, `HubPipelineNodeResult`, `HubPipelineRequest`, `HubPipelineResult`, `NormalizedRequest`, and `ProviderProtocol`.
 - Added residue gate blocking nested type exports/barrel re-exports from returning.
+
+2026-06-09 HubPipeline snapshot recorder public API pruning:
+- Exact scan found `SnapshotStageRecorderOptions` / `SnapshotStageRecorder` only used inside `snapshot-recorder.ts` plus a coverage script that instantiated the class directly. Production/dynamic bridge consumers only need `createSnapshotRecorder`.
+- Made recorder options/class internal and changed `coverage-hub-snapshot-hooks-utils-recorder.mjs` to exercise the recorder only through `createSnapshotRecorder`. Removed the white-box private `writer` mutation branch from the coverage script.
+- Added residue audit gate blocking recorder class/options export and coverage-script consumption of `SnapshotStageRecorder`; updated `snapshot.stage_contract` maps to mark the public surface as factory-only.

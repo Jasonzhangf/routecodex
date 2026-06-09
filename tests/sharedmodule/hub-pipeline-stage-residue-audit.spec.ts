@@ -1084,6 +1084,28 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('normalizeSnapshotStagePayloadWithNative(stage, payload)');
   });
 
+  it('snapshot stage recorder must only expose factory bridge API', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
+      'utf8',
+    );
+    const coverageScript = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-snapshot-hooks-utils-recorder.mjs'),
+      'utf8',
+    );
+    const findings = collectMatches(source, [
+      { label: 'exports internal recorder options', pattern: /export\s+interface\s+SnapshotStageRecorderOptions\b/ },
+      { label: 'exports internal recorder class', pattern: /export\s+class\s+SnapshotStageRecorder\b/ },
+    ]);
+
+    if (/\bnew\s+SnapshotStageRecorder\b|snapshotRecorder\.SnapshotStageRecorder\b/.test(coverageScript)) {
+      findings.push('coverage script consumes internal SnapshotStageRecorder');
+    }
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export function createSnapshotRecorder');
+  });
+
   it('legacy concrete TS format adapter implementations must be physically removed', () => {
     const adapterRoot = path.join(
       process.cwd(),
