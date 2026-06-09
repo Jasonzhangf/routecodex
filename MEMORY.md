@@ -2889,6 +2889,12 @@ Tags: hub-pipeline, stage-timing, dead-code, public-surface, residue-gate, obser
 - Function/verification map feature: `hub.chat_envelope_type_surface`; gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks nested type export revival.
 Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
 
+## 2026-06-09 HubPipeline ChatToolOutput type export narrowed
+- `ChatToolOutput` in `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts` has no external source consumer; it only types the local `ChatEnvelope.toolOutputs` field.
+- `ChatToolOutput` must remain module-internal; do not re-export it as a standalone TS semantic shell.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` includes `ChatToolOutput` in the `hub.chat_envelope_type_surface` forbidden export list.
+Tags: hub-pipeline, chat-envelope, public-surface, dead-code, type-shell, residue-gate, rust-owned-semantics, 2026-06-09
+
 ## 2026-06-09 HubPipeline provider SSE materializer export narrowed
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` keeps `materializeProviderResponseSsePayload` as an internal IO/native invocation helper only; external public response entry remains `convertProviderResponse`.
 - Rust owner remains `hub.response_provider_sse_materialization`; TS may read Node streams and call native, but must not export a standalone materializer API or restore marker/bodyText classification.

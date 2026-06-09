@@ -50,7 +50,7 @@ export interface ChatToolDefinition {
   [key: string]: unknown;
 }
 
-export interface ChatToolOutput {
+interface ChatToolOutput {
   tool_call_id: string;
   content: string;
   name?: string;

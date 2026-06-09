@@ -383,7 +383,7 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - Public TS ChatEnvelope types are limited to externally consumed bridge declarations.
-      - Zero-consumer nested semantic aliases are residue and must remain module-internal.
+      - Zero-consumer nested semantic aliases and tool-output detail aliases are residue and must remain module-internal.
 
   - feature_id: hub.stage_timing_observation
     change_risk: low

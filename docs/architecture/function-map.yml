@@ -707,7 +707,7 @@ owners:
     migration_target: rust
     notes:
       - ChatEnvelope TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned.
-      - Zero-consumer nested semantic aliases must stay module-internal and absent from the public type surface.
+      - Zero-consumer nested semantic aliases and tool-output detail aliases must stay module-internal and absent from the public type surface.
 
   - feature_id: hub.stage_timing_observation
     status: active

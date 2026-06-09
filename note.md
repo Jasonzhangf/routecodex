@@ -18688,3 +18688,8 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `materializeProviderResponseSsePayload` only called inside `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` by `convertProviderResponse`; external public response entry remains `convertProviderResponse`.
 - Removed the exported standalone materializer API while keeping the same Node stream read + `materializeProviderResponseSsePayloadWithNative` invocation path.
 - Added residue gate blocking `export async function materializeProviderResponseSsePayload` revival under `hub.response_provider_sse_materialization`.
+
+2026-06-09 HubPipeline ChatToolOutput type surface pruning:
+- Exact scan found `ChatToolOutput` only used inside `chat-envelope.ts` as the `ChatEnvelope.toolOutputs` field type; no external source import exists.
+- Made `ChatToolOutput` module-internal while preserving the `ChatEnvelope.toolOutputs` field shape.
+- Extended the `hub.chat_envelope_type_surface` residue gate to block standalone `ChatToolOutput` export revival.
