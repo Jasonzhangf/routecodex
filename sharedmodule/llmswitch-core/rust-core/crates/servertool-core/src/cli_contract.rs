@@ -79,6 +79,23 @@ pub struct StopMessageCliProjectionSeed {
     pub input: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientExecCliProjectionInput {
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default)]
+    pub flow_id: Option<String>,
+    #[serde(default)]
+    pub input: Option<Value>,
+    #[serde(default)]
+    pub repeat_count: Option<u32>,
+    #[serde(default)]
+    pub max_repeats: Option<u32>,
+    #[serde(default)]
+    pub stdout_preview: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServertoolCliError {
     UnsupportedTool(String),
@@ -268,6 +285,23 @@ fn read_optional_non_empty_string(value: &Value, field: &'static str) -> Option<
         .map(str::to_string)
 }
 
+fn read_optional_trimmed(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn normalize_projection_payload(input: Option<Value>) -> Result<Value, ServertoolCliError> {
+    match input {
+        None | Some(Value::Null) => Ok(Value::Object(Map::new())),
+        Some(Value::Object(map)) => Ok(Value::Object(map)),
+        Some(_) => Err(ServertoolCliError::InvalidField("input")),
+    }
+}
+
 fn read_u32(value: &Value, field: &'static str) -> Option<u32> {
     value
         .get(field)
@@ -342,13 +376,25 @@ pub fn build_client_exec_cli_projection_output(
             return Err(ServertoolCliError::InvalidField("flowId"));
         }
         let continuation_prompt = read_non_empty_string(&input, "continuationPrompt")?;
-        let input_json = serde_json::to_string(&serde_json::json!({
-            "flowId": flow_id,
-            "continuationPrompt": continuation_prompt,
-            "repeatCount": repeat_count,
-            "maxRepeats": max_repeats
-        }))
-        .map_err(|_| ServertoolCliError::InvalidField("json"))?;
+        let mut input_payload = Map::new();
+        input_payload.insert("flowId".to_string(), Value::String(flow_id.to_string()));
+        input_payload.insert(
+            "continuationPrompt".to_string(),
+            Value::String(continuation_prompt.clone()),
+        );
+        input_payload.insert(
+            "repeatCount".to_string(),
+            Value::Number(serde_json::Number::from(repeat_count)),
+        );
+        input_payload.insert(
+            "maxRepeats".to_string(),
+            Value::Number(serde_json::Number::from(max_repeats)),
+        );
+        if let Some(stdout_preview) = read_optional_non_empty_string(&input, "stdoutPreview") {
+            input_payload.insert("stdoutPreview".to_string(), Value::String(stdout_preview));
+        }
+        let input_json = serde_json::to_string(&Value::Object(input_payload))
+            .map_err(|_| ServertoolCliError::InvalidField("json"))?;
         let cmd = format!(
             "routecodex servertool run {} --input-json {}",
             tool_name,
@@ -381,6 +427,100 @@ pub fn build_client_exec_cli_projection_output(
         "maxRepeats": max_repeats,
         "execCommand": cmd
     }))
+}
+
+/// feature_id: hub.servertool_cli_projection
+pub fn plan_client_exec_cli_projection_output(
+    input: ClientExecCliProjectionInput,
+) -> Result<Value, ServertoolCliError> {
+    let payload = normalize_projection_payload(input.input)?;
+    let payload_object = payload
+        .as_object()
+        .ok_or(ServertoolCliError::InvalidField("input"))?;
+    let explicit_tool_name = input.tool_name.as_deref().and_then(read_optional_trimmed);
+    let flow_id = input
+        .flow_id
+        .as_deref()
+        .and_then(read_optional_trimmed)
+        .or_else(|| read_optional_non_empty_string(&payload, "flowId"))
+        .or_else(|| {
+            explicit_tool_name
+                .as_ref()
+                .map(|_| "servertool_cli_projection".to_string())
+        })
+        .ok_or(ServertoolCliError::MissingField("flowId"))?;
+    let tool_name = if flow_id == "stop_message_flow" {
+        if let Some(explicit) = explicit_tool_name.as_deref() {
+            if explicit != "stop_message_auto" {
+                return Err(ServertoolCliError::InvalidField("toolName"));
+            }
+        }
+        "stop_message_auto".to_string()
+    } else {
+        explicit_tool_name.unwrap_or_else(|| flow_id.clone())
+    };
+    if tool_name == "stop_message_auto" && flow_id != "stop_message_flow" {
+        return Err(ServertoolCliError::InvalidField("flowId"));
+    }
+
+    if tool_name == "stop_message_auto" {
+        let continuation_prompt = read_non_empty_string(&payload, "continuationPrompt")?;
+        let repeat_count = input
+            .repeat_count
+            .or_else(|| read_u32(&payload, "repeatCount"))
+            .ok_or(ServertoolCliError::MissingField("repeatCount"))?;
+        let max_repeats = input
+            .max_repeats
+            .or_else(|| read_u32(&payload, "maxRepeats"))
+            .ok_or(ServertoolCliError::MissingField("maxRepeats"))?;
+        if max_repeats == 0 || repeat_count > max_repeats {
+            return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
+        }
+        let mut canonical = Map::new();
+        canonical.insert("flowId".to_string(), Value::String(flow_id.clone()));
+        canonical.insert(
+            "continuationPrompt".to_string(),
+            Value::String(continuation_prompt),
+        );
+        canonical.insert(
+            "repeatCount".to_string(),
+            Value::Number(serde_json::Number::from(repeat_count)),
+        );
+        canonical.insert(
+            "maxRepeats".to_string(),
+            Value::Number(serde_json::Number::from(max_repeats)),
+        );
+        if let Some(stdout_preview) = input
+            .stdout_preview
+            .as_deref()
+            .and_then(read_optional_trimmed)
+        {
+            canonical.insert("stdoutPreview".to_string(), Value::String(stdout_preview));
+        }
+        return build_client_exec_cli_projection_output(
+            &tool_name,
+            &flow_id,
+            Value::Object(canonical),
+            repeat_count,
+            max_repeats,
+        );
+    }
+
+    let repeat_count = input
+        .repeat_count
+        .or_else(|| read_u32(&payload, "repeatCount"))
+        .unwrap_or(0);
+    let max_repeats = input
+        .max_repeats
+        .or_else(|| read_u32(&payload, "maxRepeats"))
+        .unwrap_or(0);
+    build_client_exec_cli_projection_output(
+        &tool_name,
+        &flow_id,
+        Value::Object(payload_object.clone()),
+        repeat_count,
+        max_repeats,
+    )
 }
 
 pub fn build_client_visible_projection_shell(
@@ -913,13 +1053,18 @@ mod tests {
 
     #[test]
     fn projection_output_is_rust_owned_schema() {
-        let out = build_client_exec_cli_projection_output(
-            "stop_message_auto",
-            "stop_message_flow",
-            json!({"continuationPrompt":"continue","repeatCount":2,"maxRepeats":5}),
-            2,
-            5,
-        )
+        let out = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+            tool_name: None,
+            flow_id: Some("stop_message_flow".to_string()),
+            input: Some(json!({
+                "continuationPrompt": "continue",
+                "repeatCount": 2,
+                "maxRepeats": 5
+            })),
+            repeat_count: None,
+            max_repeats: None,
+            stdout_preview: Some("preview".to_string()),
+        })
         .expect("projection output");
         assert_eq!(out["toolName"], "stop_message_auto");
         assert_eq!(out["flowId"], "stop_message_flow");
@@ -928,20 +1073,83 @@ mod tests {
         assert_eq!(out["schemaGuidance"]["stopreasonValues"]["finished"], 0);
         let cmd = out["execCommand"].as_str().unwrap();
         assert!(cmd.contains("routecodex servertool run"));
+        assert!(cmd.contains("stdoutPreview"));
         assert!(!cmd.contains("stcli_"), "no old stcli_ marker");
         assert!(!cmd.contains("rcc_cli_"), "no old rcc_cli_ marker");
         assert!(!cmd.contains("--ticket"), "no --ticket marker");
     }
 
     #[test]
+    fn projection_plan_rejects_wrong_explicit_stopless_tool_name() {
+        assert_eq!(
+            plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+                tool_name: Some("servertool_fixture".to_string()),
+                flow_id: Some("stop_message_flow".to_string()),
+                input: Some(json!({
+                    "continuationPrompt": "continue",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                })),
+                repeat_count: None,
+                max_repeats: None,
+                stdout_preview: None,
+            }),
+            Err(ServertoolCliError::InvalidField("toolName"))
+        );
+    }
+
+    #[test]
+    fn projection_plan_rejects_invalid_stopless_repeat_window() {
+        assert_eq!(
+            plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+                tool_name: None,
+                flow_id: Some("stop_message_flow".to_string()),
+                input: Some(json!({
+                    "continuationPrompt": "continue",
+                    "repeatCount": 4,
+                    "maxRepeats": 3
+                })),
+                repeat_count: None,
+                max_repeats: None,
+                stdout_preview: None,
+            }),
+            Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"))
+        );
+    }
+
+    #[test]
+    fn projection_plan_defaults_non_stopless_tool_name_to_flow_id() {
+        let out = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+            tool_name: None,
+            flow_id: Some("servertool_fixture".to_string()),
+            input: Some(json!({"value": 1})),
+            repeat_count: None,
+            max_repeats: None,
+            stdout_preview: None,
+        })
+        .expect("fixture projection");
+        assert_eq!(out["toolName"], "servertool_fixture");
+        assert_eq!(out["flowId"], "servertool_fixture");
+        assert_eq!(
+            out["execCommand"],
+            "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
+        );
+    }
+
+    #[test]
     fn projection_output_quotes_json_apostrophes() {
-        let out = build_client_exec_cli_projection_output(
-            "stop_message_auto",
-            "stop_message_flow",
-            json!({"continuationPrompt":"can't stop","repeatCount":2,"maxRepeats":5}),
-            2,
-            5,
-        )
+        let out = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+            tool_name: None,
+            flow_id: Some("stop_message_flow".to_string()),
+            input: Some(json!({
+                "continuationPrompt": "can't stop",
+                "repeatCount": 2,
+                "maxRepeats": 5
+            })),
+            repeat_count: None,
+            max_repeats: None,
+            stdout_preview: None,
+        })
         .expect("projection output");
         assert_eq!(
             out["execCommand"],

@@ -363,6 +363,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeClientInjectTextJson",
   "compactFollowupErrorReasonJson",
   "resolveAdapterContextProviderKeyJson",
+  "buildClientExecCliProjectionOutputJson",
   "planStopMessageCliProjectionSeedJson",
   "planBudgetStateUpdateJson",
   "planStopMessagePersistedLookupJson",

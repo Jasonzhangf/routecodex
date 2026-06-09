@@ -18526,3 +18526,14 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Added `tests/servertool/server-side-tools.failfast.spec.ts` coverage for fail-fast before handler execution when Rust/native policy detects adapter disconnect.
 - Strengthened `scripts/verify-servertool-rust-only.mjs` so `server-side-tools.ts` must import the native timeout-error shell and must not restore `isClientDisconnected`, local client connection fields, or local string truth parsing.
 - Updated function/verification maps for `hub.servertool_orchestration_policy` to include `server-side-tools.ts` as a consumer shell and `server-side-tools.failfast.spec.ts` as an integration gate.
+
+## 2026-06-09 12:47 servertool CLI projection output slice
+- Confirmed current source still has TS-owned stopless CLI output semantics in sharedmodule/llmswitch-core/src/servertool/cli-projection.ts: toolName mapping stop_message_flow -> stop_message_auto plus repeatCount/maxRepeats extraction.
+- Target slice: move client exec CLI projection output planning to servertool-core::cli_contract::plan_client_exec_cli_projection_output; TS must only pass flowId/input/stdoutPreview and consume native projection.
+- Must ignore unrelated executor/error-action dirty worktree files when staging/committing.
+
+2026-06-09 servertool CLI projection output Rust closeout:
+- Implemented `servertool-core::cli_contract::plan_client_exec_cli_projection_output` as Rust owner for client exec CLI output planning. Rust now owns stopless flowId -> toolName mapping, repeat/max extraction/validation, canonical CLI input, stdoutPreview merge, and command construction.
+- TS `cli-projection.ts` now passes only flowId/input/stdoutPreview to native and consumes native projection; local stopless toolName mapping and repeat/max parsing removed.
+- Strengthened `verify:servertool-rust-only` to require Rust owner/native export/wrapper and ban TS revival of stopless output semantics.
+- Verification PASS: cargo fmt check; servertool-core projection 40/40; router-hotpath bridge 1/1; native build; direct .node stopless projection probe; focused Jest 52 passed/16 skipped; verify:servertool-rust-only; llmswitch-core/root tsc; servertool-core full 194/194; servertool-cli 8/8; verify:function-map-compile-gate; git diff --check.

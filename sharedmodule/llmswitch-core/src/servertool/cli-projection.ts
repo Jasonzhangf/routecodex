@@ -51,19 +51,10 @@ export function buildServertoolCliProjectionForAutoFlow(args: {
   stdoutPreview?: string;
   input?: JsonObject;
 }): ServertoolCliProjectionPlan {
-  const toolName = args.flowId === 'stop_message_flow' ? 'stop_message_auto' : args.flowId;
-  const repeatCount = typeof args.input?.repeatCount === 'number' ? args.input.repeatCount : 0;
-  const maxRepeats = typeof args.input?.maxRepeats === 'number' ? args.input.maxRepeats : 0;
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
-    toolName,
     flowId: args.flowId,
-    input: {
-      flowId: args.flowId,
-      ...(args.input ?? {}),
-      ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
-    },
-    repeatCount,
-    maxRepeats,
+    input: args.input ?? {},
+    ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
   });
   return buildProjectionShell({
     requestId: args.options.requestId,

@@ -197,11 +197,12 @@ export interface EngineSelectionAfterRunPlan {
 }
 
 export interface ClientExecCliProjectionInput {
-  toolName: string;
+  toolName?: string;
   flowId?: string;
   input?: unknown;
   repeatCount?: number;
   maxRepeats?: number;
+  stdoutPreview?: string;
 }
 
 export interface ClientExecCliProjectionOutput {

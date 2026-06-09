@@ -5,11 +5,11 @@ import {
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js', () => ({
   buildClientExecCliProjectionOutputWithNative: (input: any) => {
-    if (input.toolName === 'stop_message_auto') {
+    if (input.flowId === 'stop_message_flow') {
       return {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3}'",
+        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3,\"stdoutPreview\":\"continue\"}'",
         continuationPrompt: '继续执行原任务',
         repeatCount: 2,
         maxRepeats: 3,
@@ -114,7 +114,8 @@ describe('servertool CLI projection', () => {
       flowId: 'stop_message_flow',
       continuationPrompt: '继续执行原任务',
       repeatCount: 2,
-      maxRepeats: 3
+      maxRepeats: 3,
+      stdoutPreview: 'continue'
     });
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));

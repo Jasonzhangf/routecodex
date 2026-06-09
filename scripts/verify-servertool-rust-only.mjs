@@ -345,6 +345,9 @@ function checkServertoolCliProjectionMap() {
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
   assertContains(
     'cli-projection-map',
@@ -449,6 +452,15 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     '"name": "exec_command"'
   );
+  for (const [check, file, content, needle] of [
+    ['cli-projection-output-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn plan_client_exec_cli_projection_output'],
+    ['cli-projection-output-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_client_exec_cli_projection_output'],
+    ['cli-projection-output-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_client_exec_cli_projection_output_json'],
+    ['cli-projection-output-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildClientExecCliProjectionOutputJson'],
+    ['cli-projection-output-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildClientExecCliProjectionOutputWithNative'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
   assertContains(
     'cli-projection-additional-tool-guard',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
@@ -480,6 +492,22 @@ function checkServertoolCliProjectionMap() {
   if (cliProjection.includes('routecodex servertool run')) {
     fail('cli-projection-command-contract', 'cli-projection.ts must not build servertool CLI command strings in TS');
   }
+  for (const keyword of [
+    "args.flowId === 'stop_message_flow'",
+    'const toolName = args.flowId',
+    'typeof args.input?.repeatCount',
+    'typeof args.input?.maxRepeats',
+    'const repeatCount =',
+    'const maxRepeats =',
+  ]) {
+    if (cliProjection.includes(keyword)) {
+      fail(
+        'cli-projection-output-no-ts-owner',
+        `Forbidden TS client exec projection semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`
+      );
+    }
+  }
+  pass('cli-projection-output-rust-owner', 'servertool-core owns client exec CLI projection output planning');
 }
 
 // ── Check 5: Build must run this gate ──────────────────────────

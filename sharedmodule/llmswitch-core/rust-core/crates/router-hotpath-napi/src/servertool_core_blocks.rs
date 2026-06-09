@@ -455,38 +455,10 @@ pub fn resolve_adapter_context_provider_key_json(input_json: &str) -> Result<Str
 }
 
 pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
+    let input: cli_contract::ClientExecCliProjectionInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize projection input: {e}"))?;
-    let tool_name = input
-        .get("toolName")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "missing toolName".to_string())?;
-    let flow_id = input
-        .get("flowId")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("servertool_cli_projection");
-    let payload = input
-        .get("input")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let repeat_count = input
-        .get("repeatCount")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-        .unwrap_or(0);
-    let max_repeats = input
-        .get("maxRepeats")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-        .unwrap_or(0);
-    let output = cli_contract::build_client_exec_cli_projection_output(
-        tool_name,
-        flow_id,
-        payload,
-        repeat_count,
-        max_repeats,
-    )
-    .map_err(|e| e.to_string())?;
+    let output =
+        cli_contract::plan_client_exec_cli_projection_output(input).map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
 }
 
@@ -1681,5 +1653,31 @@ mod tests {
         assert_eq!(plan["repeatCount"], 1);
         assert_eq!(plan["maxRepeats"], 3);
         assert_eq!(plan["input"]["continuationPrompt"], "continue with tools");
+    }
+
+    #[test]
+    fn plans_client_exec_cli_projection_output_via_servertool_core_bridge() {
+        let output = build_client_exec_cli_projection_output_json(
+            &json!({
+                "flowId": "stop_message_flow",
+                "input": {
+                    "continuationPrompt": "continue from bridge",
+                    "repeatCount": 2,
+                    "maxRepeats": 3
+                },
+                "stdoutPreview": "continue from bridge"
+            })
+            .to_string(),
+        )
+        .expect("client exec cli projection output");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("client exec cli projection json");
+        assert_eq!(plan["toolName"], "stop_message_auto");
+        assert_eq!(plan["flowId"], "stop_message_flow");
+        assert_eq!(plan["repeatCount"], 2);
+        assert_eq!(plan["maxRepeats"], 3);
+        let command = plan["execCommand"].as_str().expect("exec command");
+        assert!(command.contains("routecodex servertool run stop_message_auto"));
+        assert!(command.contains("stdoutPreview"));
     }
 }
