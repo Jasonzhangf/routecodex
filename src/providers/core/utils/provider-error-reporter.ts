@@ -4,6 +4,8 @@ import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipe
 import { reportProviderErrorToRouterPolicy } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 
+export const ERROR_PIPELINE_CONTRACT_FEATURE_ID = 'feature_id: error.pipeline_contract';
+
 type ProviderErrorRuntimeMetadata = ProviderErrorEvent['runtime'];
 
 type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {

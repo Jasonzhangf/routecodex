@@ -1985,6 +1985,68 @@ export class RouteCodexHttpServer {
             }
           }
         },
+        onProviderError: async (error, context) => {
+          const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
+          const directRuntimeKey = this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata);
+          const retryError = extractRetryErrorSnapshot(error);
+          const statusCode = typeof retryError.statusCode === 'number'
+            ? retryError.statusCode
+            : extractStatusCodeFromError(error);
+          const publicErrorMessage = mapErrorToPublicLogSummary(error);
+          this.logStage('provider-direct.send.error', input.requestId, {
+            port: context.port,
+            providerKey: context.providerKey,
+            protocol: context.inboundProtocol,
+            providerProtocol: context.providerProtocol,
+            statusCode,
+            errorCode: retryError.errorCode,
+            upstreamCode: retryError.upstreamCode,
+            message: publicErrorMessage,
+          });
+          const runtimeScope = readRuntimeScopeFromMetadata(metadata ?? {});
+          await resolveRequestExecutorProviderFailurePlan({
+            error,
+            retryError,
+            requestId: input.requestId,
+            providerKey: context.providerKey,
+            providerId: handle?.providerId,
+            providerType: handle?.providerType,
+            providerFamily: handle?.providerFamily,
+            providerProtocol: context.providerProtocol,
+            routeName: 'port.provider-direct',
+            runtimeKey: directRuntimeKey,
+            target: {
+              providerKey: context.providerKey,
+              providerType: handle?.providerType,
+              runtimeKey: directRuntimeKey,
+            },
+            dependencies: this.getModuleDependencies(),
+            attempt: 1,
+            maxAttempts: 1,
+            stage: 'provider.send',
+            logicalRequestChainKey: input.requestId,
+            logicalChainRetryLimitStageRequestId: input.requestId,
+            routePool: [context.providerKey],
+            excludedProviderKeys: new Set<string>(),
+            recordAttempt: () => {},
+            logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
+            routeHint: typeof metadata?.routeHint === 'string' ? metadata.routeHint : undefined,
+            logNonBlockingError: logRouterDirectNonBlockingError,
+            metadata: {
+              ...(metadata ?? {}),
+              __rt: {
+                ...(metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+                  ? (metadata.__rt as Record<string, unknown>)
+                  : {}),
+                ...runtimeScope,
+              },
+            },
+            extraDetails: {
+              source: 'provider-direct',
+              ...(typeof statusCode === 'number' ? { statusCode } : {}),
+            },
+          });
+        },
       },
     );
 

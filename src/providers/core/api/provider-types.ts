@@ -167,18 +167,6 @@ export interface ProviderRuntimeProfile {
    * This is a host-side transport concern; may be injected from provider profiles.
    */
   maxRetries?: number;
-  /**
-   * Provider 内部自动重试配置。
-   * 当上游返回的错误码在 codes 列表中且连续失败次数 < threshold 时，
-   * Provider 层直接重试并简单打印日志，不触发 health impact 上报。
-   * 超过 threshold 后正常上报错误。
-   */
-  autoRetry?: {
-    /** 连续自动重试阈值，超过此值才上报 health impact。默认 3 */
-    threshold?: number;
-    /** 要自动重试的错误码列表（全局统一编号 XXXX.YYYY 格式），空数组/不设则不启用 */
-    codes?: string[];
-  };
   transportBackend?: ProviderTransportBackend;
   auth: ProviderRuntimeAuth;
   compatibilityProfile?: string;

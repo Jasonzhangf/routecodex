@@ -142,6 +142,49 @@ describe('provider-direct-pipeline', () => {
     expect(afterSnapshots).toHaveLength(1);
   });
 
+  it('reports provider-mode direct errors through ErrorErr hook and rethrows original error', async () => {
+    const error = Object.assign(new Error('HTTP 503: upstream unavailable'), {
+      statusCode: 503,
+      code: 'HTTP_503',
+    });
+    const { handle, processIncomingDirect } = createHandle('openai-responses');
+    processIncomingDirect.mockRejectedValueOnce(error);
+    const onProviderError = jest.fn(async () => undefined);
+    const requestPayload = {
+      model: 'mimo-v2.5-pro',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+    } as Record<string, unknown>;
+
+    await expect(
+      executeProviderDirectPipeline(
+        requestPayload,
+        { path: '/v1/responses', headers: {} },
+        {
+          portConfig: {
+            port: 5007,
+            host: '127.0.0.1',
+            mode: 'provider',
+            protocolBehavior: 'auto',
+            providerBinding: 'mock.model',
+          },
+          resolveProvider: () => handle,
+          detectInboundProtocol: detectInboundProtocolFromRequest,
+          onProviderError,
+        },
+      ),
+    ).rejects.toBe(error);
+
+    expect(onProviderError).toHaveBeenCalledTimes(1);
+    const [source, ctx] = onProviderError.mock.calls[0] as any[];
+    expect(source).toBe(error);
+    expect(ctx.payload).toBe(requestPayload);
+    expect(ctx.port).toBe(5007);
+    expect(ctx.providerKey).toBe('mock.model');
+    expect(ctx.inboundProtocol).toBe('openai-responses');
+    expect(ctx.providerProtocol).toBe('openai-responses');
+    expect(ctx.actualBehavior).toBe('direct');
+  });
+
   it('passes apply_patch payload through unchanged in provider same-protocol direct mode', async () => {
     const { handle, processIncoming, processIncomingDirect } = createHandle('openai-chat');
     const applyPatchArguments = JSON.stringify({

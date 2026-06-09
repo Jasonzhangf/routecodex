@@ -18797,3 +18797,79 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` had no TS/runtime or required-export consumer after `runHubPipelineStageJson` retirement; active hits were only Rust owner-pair wrappers/functions and tests preserving the old API.
 - Change: removed public NAPI wrappers, internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, legacy DTOs, and tests that existed only for the retired stage API.
 - Verification PASS: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust `hub_pipeline` tests 179/179; `git diff --check` PASS.
+
+## 2026-06-09 provider system architecture audit
+- 审计报告曾生成于未跟踪文件 `docs/reports/provider-system-architecture-audit-2026-06-09.md`，但后续复核发现它只被 `note.md` 自引用，不被主线代码/gate/docs 依赖；按“无悬空文件”规则已删除，不纳入 git。
+- Main evidence:
+  - `BaseProvider` still has provider-local `autoRetry` that calls `sendRequestInternal(processedRequest)` directly before ErrorErr/VR policy reporting (`src/providers/core/runtime/base-provider.ts`).
+  - Provider runtime `BaseProvider` / `ResponsesProvider` / startup init use fire-and-forget `emitProviderError`, while ordinary RequestExecutor uses awaited `emitProviderErrorAndWait`.
+  - Router-direct has explicit `onProviderError -> resolveRequestExecutorProviderFailurePlan`; provider-mode direct does not have an equivalent wrapper and relies on provider internals.
+  - Function-map has provider failure policy and Responses direct anchors, but no top-level provider runtime boundary feature for factory/base/http/direct/auth/metadata lifecycle.
+  - Metadata side-channel has good current guards: non-enumerable runtime symbol, preprocessor deletes top-level `metadata`, outbound body metadata guard exists, and metadata boundary gate passed.
+- Verification:
+  - PASS `npm run verify:function-map-compile-gate`
+  - PASS `npm run verify:architecture-provider-specific-leaks`
+  - PASS `npm run verify:architecture-metadata-leak-boundary`
+  - PASS `npm run verify:architecture-error-chain-bypass`
+  - BLOCKED `npm run verify:provider-failure-ban-blackbox` because local `dist` cannot resolve package `rcc-llmswitch-core`; not a provider policy assertion failure.
+
+## 2026-06-09 Error module function-map closeout plan
+- User requirement: error handling must be incorporated into the Error module, added to function-map gates, with an overall refactor plan and `/goal` prompt.
+- Plan written: `docs/goals/error-module-function-map-closeout-plan.md`.
+- Design direction: do not create a second Error Center. Treat Error as the ErrorErr01-06 contract module; Router policy remains ErrorErr04 truth, RequestExecutor/direct/provider runtime become source/caller or ErrorErr05 consumers only.
+- Planned function-map features:
+  - `error.pipeline_contract`
+  - `error.provider_failure_policy`
+  - `error.backoff_action_queue`
+  - `error.execution_decision_consumer`
+  - `error.client_projection`
+- Key implementation blockers captured:
+  - `verify:provider-failure-ban-blackbox` currently blocked by local `rcc-llmswitch-core` module resolution and must be made runnable before semantic closeout.
+  - `BaseProvider.autoRetry`, fire-and-forget provider reports, and provider-mode direct missing ErrorErr hook are first-class remediation targets.
+
+## 2026-06-09 Error module closeout execution
+- Fixed the local blackbox blocker with the repo-owned command `npm run llmswitch:ensure`; `node_modules/rcc-llmswitch-core` now resolves to `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core` instead of a stale `/private/var/.../routecodex-release-build...` temp symlink.
+- Verification after link repair: `npm run verify:provider-failure-ban-blackbox` PASS with `{ "ok": true }`; observed 503 primary failure entering `[provider-switch]` and rerouting to backup, and the port isolation scenario preserved separate 5555/6666 provider state.
+- Scope decision: keep the provider architecture audit report as a real tracked report because Jason requested the audit and plan to land as `.md`, not as transient note-only evidence.
+- Implemented Error module closeout slice:
+  - Added `scripts/architecture/verify-error-pipeline-contract.mjs` and `npm run verify:error-pipeline-contract`; wired it into `verify:architecture-ci`.
+  - Added function-map/verification-map entries for `error.pipeline_contract`, `error.execution_decision_consumer`, and `error.client_projection`.
+  - Added source anchors in `provider-error-reporter.ts`, `request-executor-retry-execution-plan.ts`, and `http-error-mapper.ts`.
+  - Removed provider-local `BaseProvider.autoRetry` execution and physically deleted `src/providers/core/runtime/auto-retry-error-codes.ts`.
+  - Removed `ProviderRuntimeProfile.autoRetry` / `ProviderProfile.metadata.autoRetry` propagation.
+  - Added provider-direct awaited ErrorErr hook and wired HTTP server provider-direct failures to `resolveRequestExecutorProviderFailurePlan` with `source: 'provider-direct'`, preserving direct payload passthrough and rethrowing original errors.
+- Updated tests:
+  - Provider-direct now verifies provider errors call the ErrorErr hook and rethrow original error.
+  - Old autoRetry business-error tests now assert 2056 enters provider catalog/business-error detection instead of provider-local retry.
+  - Runtime/profile tests assert old `autoRetry` config is not propagated.
+- PASS:
+  - `npm run verify:error-pipeline-contract`
+  - `npm run verify:architecture-error-chain-bypass`
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:provider-failure-ban-blackbox`
+  - Focused Jest 8 suites / 59 tests: provider-direct, router-direct, error-pipeline-contract, provider catalog/business 2056, bootstrap/runtime profile autoRetry non-propagation.
+
+## 2026-06-09 Error module awaited reporting closeout
+- Follow-up fix: production provider/runtime reporting paths no longer use fire-and-forget `emitProviderError`.
+- Code changes:
+  - `BaseProvider.sendRequest` now `await`s `handleRequestError(error, context)` before rethrowing the original provider error.
+  - `BaseProvider.handleRequestError`, `ResponsesProvider.reportResponsesFailureIfNeeded`, and startup provider runtime init now call `emitProviderErrorAndWait`.
+  - `verify:error-pipeline-contract` and `tests/server/runtime/http-server/error-pipeline-contract.spec.ts` now fail if production `src` paths call fire-and-forget `emitProviderError(` outside `provider-error-reporter.ts`.
+  - `src/error-handling/README.md`, the provider architecture report, the closeout plan, `MEMORY.md`, and `rcc-dev-skills` now state awaited request/runtime reporting as the durable rule.
+- Verification PASS:
+  - `npm run verify:error-pipeline-contract`
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-error-chain-bypass`
+  - `npm run verify:architecture-provider-specific-leaks`
+  - `npm run verify:architecture-metadata-leak-boundary`
+  - `npm run verify:architecture-fallback-denylist`
+  - `npm run verify:provider-failure-ban-blackbox` (`ok: true`; 503 primary entered provider-switch/reroute; port isolation preserved)
+  - Focused Jest 8 suites / 60 tests including provider-direct/router-direct/error-pipeline-contract/provider catalog/bootstrap profile gates
+  - Rust `router-hotpath-napi` `failure_policy`, `provider_runtime_ingress`, and `virtual_router_engine::engine::events::tests`
+  - `npx tsc --noEmit --pretty false`
+  - `npm run build:min` (built `0.90.3045`)
+  - `git diff --check`
+- Runtime smoke:
+  - Temporary `dist` server on random port returned `/health` 200 and `/v1/models` 200 with 292 models on `0.90.3045`; minimal config had `pipelineReady=false`, so this is an HTTP entry smoke only.
+  - Existing live ports 5520 and 5555 both returned `/health` 200 with `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3044`; `/v1/models` returned 292 models on both.
+- Boundary: did not install/restart live RouteCodex with `0.90.3045`; current live proof is health of existing installed runtime plus controlled blackbox provider-failure harness.

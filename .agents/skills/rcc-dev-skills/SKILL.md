@@ -181,130 +181,15 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
 4. 任何模块（RequestExecutor / Converter / Followup）发现新错误样本时，只能补“归一映射”，不能新增“该错误独有处理流程”。
 5. 可恢复错误统一遵循：先进入 `request-executor-error-action-queue.ts` 的 blocking backoff 队列，固定 `1s -> 2s -> 3s -> repeat`；provider 冷却/health 仍由统一错误链和 VR policy 投影，禁止调用点恢复 env/exponential/Retry-After 分散 backoff。
 
-### 功能说明
-每个 Provider 可以在内部自动重试某些可恢复错误，不触发 health impact 上报。
-- 错误码匹配 `autoRetry.codes` 列表 → 静默重试 + `console.warn` 打印
-- 连续失败次数 ≥ `threshold` → 放行到正常错误上报（`handleRequestError`）
-- 中间有一次成功 → 连续计数清零
+### Provider autoRetry 已废弃（2026-06-09）
 
-### Provider 配置目录
-所有 Provider 的 `config.v2.toml` 文件存储在 `~/.rcc/provider/<providerId>/config.v2.toml`。
+Provider 内部 `autoRetry` 已从运行时物理移除，禁止恢复：
+- `src/providers/core/runtime/auto-retry-error-codes.ts` 已删除。
+- `ProviderRuntimeProfile.autoRetry` / `ProviderProfile.metadata.autoRetry` 已删除。
+- `BaseProvider` 只允许一次 `sendRequestInternal(processedRequest)`；失败必须 `await handleRequestError -> emitProviderErrorAndWait -> ErrorErr01-06` 后 rethrow 原始错误，不得在 provider runtime 内静默重打或 fire-and-forget 上报。
+- `verify:error-pipeline-contract` 会禁止 provider-local retry、`autoRetry` runtime/config 语义复活、provider-direct bypass ErrorErr hook。
 
-```
-~/.rcc/provider/
-├── mini27/
-│   └── config.v2.toml          # MiniMax 配置（含 autoRetry 示例）
-├── deepseek/
-│   └── config.v2.toml
-└── ...
-```
-
-### TOML 配置格式
-在 `[provider]` 下增加 `[provider.autoRetry]` 段：
-
-```toml
-[provider.autoRetry]
-threshold = 5
-codes = ["429.1000", "500.1000", "503.1000", "0.1000", "0.6000", "0.8200"]
-```
-
-参数说明：
-- `threshold`（可选，默认 3）：连续失败次数阈值。达到此值后才上报 health impact。
-- `codes`（必选，非空数组才生效）：全局统一错误码列表，只有匹配的错误码才参与自动重试。
-
-### 全局错误码表（src/providers/core/runtime/auto-retry-error-codes.ts）
-
-| 错误码 | 常量名 | 语义 |
-|---|---|---|
-| `429.1000` | AUTO_RETRY_429_SHORT_LIVED | 短期 Rate Limit |
-| `429.2000` | AUTO_RETRY_429_DAILY_LIMIT | 日额度耗尽（一般不建议配置） |
-| `429.3000` | AUTO_RETRY_429_SATURATED | 流量饱和 |
-| `408.1000` | AUTO_RETRY_408_TIMEOUT | 请求超时 |
-| `425.1000` | AUTO_RETRY_425_TOO_EARLY | Too Early |
-| `500.1000` | AUTO_RETRY_500_INTERNAL | Internal Server Error |
-| `502.1000` | AUTO_RETRY_502_BAD_GATEWAY | Bad Gateway |
-| `503.1000` | AUTO_RETRY_503_UNAVAILABLE | Service Unavailable |
-| `504.1000` | AUTO_RETRY_504_GATEWAY_TIMEOUT | Gateway Timeout |
-| `520.1000` | AUTO_RETRY_520_UNKNOWN | Cloudflare / upstream unknown error |
-| `0.1000` | AUTO_RETRY_NET_CONNECT | 连接失败 (ECONNRESET/ECONNREFUSED/ENOTFOUND) |
-| `0.2000` | AUTO_RETRY_NET_TIMEOUT | 网络超时 (ETIMEDOUT) |
-| `0.3000` | AUTO_RETRY_NET_PIPE | 管道断开 (EPIPE) |
-| `0.4000` | AUTO_RETRY_NET_DNS | DNS 解析失败 (EAI_AGAIN) |
-| `0.5000` | AUTO_RETRY_NET_ABORT | AbortError（非客户端主动取消） |
-| `0.6000` | AUTO_RETRY_NET_CANCEL | HTTP2 流取消 (ERR_HTTP2_STREAM_CANCEL) |
-| `0.7100` | AUTO_RETRY_PROTO_SSE_DECODE | SSE 解码失败 |
-| `0.7200` | AUTO_RETRY_PROTO_EMPTY_RESPONSE | 上游空响应 |
-| `0.7300` | AUTO_RETRY_PROTO_SSE_TO_JSON | SSE→JSON 转换失败 |
-| `0.8000` | AUTO_RETRY_UPSTREAM_GLM_514 | GLM 业务错误 514 |
-| `0.8100` | AUTO_RETRY_UPSTREAM_STATUS_1000 | 上游状态码 1000 |
-| `0.8200` | AUTO_RETRY_UPSTREAM_STATUS_2056 | 上游状态码 2056（用量超限） |
-
-### 2056 内部消化流程（MiniMax 偶发上游轮询）
-
-2056 不是真正的配额超限，而是 MiniMax 上游偶发轮询切换。必须由 **provider 内部 auto-retry** 吸收，不能暴露到客户端。
-
-完整链路：
-```
-MiniMax 返 base_resp.status_code=2056
-  → resolveProviderBusinessResponseError 抛 MALFORMED_RESPONSE（code=MALFORMED, upstream=PROVIDER_STATUS_2056）
-  → base-provider.ts auto-retry 拦截
-  → resolveAutoRetryErrorCode → '0.8200'
-  → autoRetryConfig.codes.includes('0.8200') → 命中
-  → provider 内部重试（不经过 request 级重试引擎）
-  → 重试成功 → 吸收 | 全部失败 → 自然走 error 上报
-```
-
-关键依赖：
-- `provider-request-shaping-utils.ts:87-99` — `resolveProviderBusinessResponseError` 检测 `base_resp.status_code`
-- `auto-retry-error-codes.ts:128-129` — `resolveAutoRetryErrorCode` 返回 `'0.8200'`（⚠️ 必须在 catalog 之前检查）
-- `base-provider.ts:249-266` — `sendRequest()` catch 块中的 auto-retry 逻辑
-- 该 provider 的 `config.v2.toml` 必须有 `codes = ["0.8200"]`
-
-### 常见场景配置
-
-**MiniMax 用量超限（2056）+ 5 次阈值**（已配置在 mini27）：
-```toml
-[provider.autoRetry]
-threshold = 5
-codes = ["429.1000", "500.1000", "503.1000", "0.1000", "0.6000", "0.8200"]
-```
-
-**通用网络瞬断 + 3 次默认阈值**：
-```toml
-[provider.autoRetry]
-codes = ["0.1000", "0.2000", "0.6000"]
-```
-
-### 调试日志特征
-自动重试命中时打印 `[auto-retry]` 前缀的 warn 日志：
-```
-[auto-retry] provider:openai-responses-mini27 code=0.8200 attempt=1/5 - retrying
-[auto-retry] provider:openai-responses-mini27 code=0.8200 attempt=2/5 - retrying
-```
-超过阈值后不再出现 `[auto-retry]`，转为正常 `request-error` 上报。
-
-### 实现文件
-- `src/providers/core/runtime/auto-retry-error-codes.ts` — 错误码枚举 + `resolveAutoRetryErrorCode()` 映射函数
-- `src/providers/core/api/provider-types.ts` — `ProviderRuntimeProfile.autoRetry` 类型定义
-- `src/providers/core/runtime/base-provider.ts` — `sendRequest()` catch 块中自动重试拦截逻辑
-
-### ⚠️ resolveAutoRetryErrorCode 查找顺序（踩坑记录）
-`resolveAutoRetryErrorCode()` 内部先调 `normalizeKnownProviderError()`（查 error catalog），再走精确匹配。
-**catalog 对 PROVIDER_STATUS_2056 返回 `'429.2056'`**（来自 `provider-error-catalog.ts` 第 23 行）。
-但 auto-retry 配置只认得 `'0.8200'`（`AUTO_RETRY_UPSTREAM_STATUS_2056`）。
-
-**修复**：2026-05-27 将 `PROVIDER_STATUS_2056` 的精确匹配移到 `normalizeKnownProviderError` 之前。
-否则 2056 永远命中 `'429.2056'` → 不在 `autoRetry.codes` 中 → auto-retry 静默失效。
-
-```typescript
-// 正确顺序：先精确匹配 2056，再查 catalog
-if (upstreamCode === 'PROVIDER_STATUS_2056' || code === 'PROVIDER_STATUS_2056') {
-  return AUTO_RETRY_UPSTREAM_STATUS_2056;  // '0.8200'
-}
-const known = normalizeKnownProviderError({...});  // catalog 返回 '429.2056'
-```
-
-同类的 `PROVIDER_STATUS_1000` 也需注意（目前 `0.8100` 不在 catalog 中，无冲突）。
+Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[provider.autoRetry]` 不再是合法运行时语义；发现这类配置时不要按旧 auto-retry 调试。2056 / 429 / 5xx / transport 错误应通过 `provider-error-catalog.ts` / `provider-failure-policy-impl.ts` 分类，再进入 VR policy 与 ErrorErr05 execution decision。
 
 ## 2026-05-27 调试精华（5555 主备/health/stopless）
 

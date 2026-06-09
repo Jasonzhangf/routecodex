@@ -1,44 +1,59 @@
 /**
- * Auto-Retry Business Error Detection — 绿测
+ * Provider business error detection — ErrorErr source input coverage
  *
- * 验证: provider_status_2056 这类业务错误在 provider 层是否被检测并触发自动重试。
- * 修复后: resolveProviderBusinessResponseError 在没有 family profile 时也能检测
- * base_resp.status_code / error.code / error_code 等通用业务错误模式，返回 Error。
- * 错误在 sendRequestInternal 内部被抛出 → BaseProvider.sendRequest() catch 块捕获
- * → 自动重试拦截器生效。
+ * provider_status_2056 must be detected as an explicit provider business error,
+ * then handled by the unified ErrorErr01-06 chain. Provider runtime must not
+ * consume it with local auto-retry.
  */
 
 import { describe, expect, it } from '@jest/globals';
-import { resolveAutoRetryErrorCode } from '../../../../src/providers/core/runtime/auto-retry-error-codes.js';
+import { normalizeKnownProviderError } from '../../../../src/providers/core/runtime/provider-error-catalog.js';
 import { resolveProviderBusinessResponseError } from '../../../../src/providers/core/runtime/provider-request-shaping-utils.js';
 
-describe('Auto-retry business error detection', () => {
-  describe('resolveAutoRetryErrorCode maps provider_status_2056', () => {
-    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to 0.8200', () => {
+describe('Provider business error detection', () => {
+  describe('provider_status_2056 enters unified provider error catalog', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to recoverable catalog code', () => {
       const error = Object.assign(new Error('[hub_response] Upstream provider returned structured business error at chat_process.response.entry: usage limit exceeded'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'provider_status_2056',
       });
-      const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('0.8200');
+      const normalized = normalizeKnownProviderError({
+        code: error.code,
+        upstreamCode: error.upstreamCode,
+        message: error.message,
+        statusCode: 429,
+      });
+      expect(normalized?.code).toBe('429.2056');
+      expect(normalized?.class).toBe('recoverable');
     });
 
-    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to 0.8200', () => {
+    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to recoverable catalog code', () => {
       const error = Object.assign(new Error('business error'), {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'PROVIDER_STATUS_2056',
       });
-      const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('0.8200');
+      const normalized = normalizeKnownProviderError({
+        code: error.code,
+        upstreamCode: error.upstreamCode,
+        message: error.message,
+        statusCode: 429,
+      });
+      expect(normalized?.code).toBe('429.2056');
+      expect(normalized?.class).toBe('recoverable');
     });
 
-    it('maps HTTP_429_2056 to 0.8200 before catalog normalization', () => {
+    it('maps HTTP_429_2056 through the provider catalog', () => {
       const error = Object.assign(new Error('business error'), {
         code: 'HTTP_429_2056',
         upstreamCode: 'provider_status_2056',
       });
-      const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBe('0.8200');
+      const normalized = normalizeKnownProviderError({
+        code: error.code,
+        upstreamCode: error.upstreamCode,
+        message: error.message,
+        statusCode: 429,
+      });
+      expect(normalized?.code).toBe('429.2056');
     });
 
     it('returns undefined for unrelated upstreamCode', () => {
@@ -46,8 +61,12 @@ describe('Auto-retry business error detection', () => {
         code: 'MALFORMED_RESPONSE',
         upstreamCode: 'SOMETHING_ELSE',
       });
-      const code = resolveAutoRetryErrorCode(error);
-      expect(code).toBeUndefined();
+      const normalized = normalizeKnownProviderError({
+        code: error.code,
+        upstreamCode: error.upstreamCode,
+        message: error.message,
+      });
+      expect(normalized).toBeUndefined();
     });
   });
 

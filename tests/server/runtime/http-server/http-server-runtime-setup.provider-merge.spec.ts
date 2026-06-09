@@ -108,7 +108,7 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.openai?.auth?.type).toBe('apiKey');
   });
 
-  it('RED: applies provider profile autoRetry metadata into runtime', async () => {
+  it('does not propagate provider profile autoRetry into runtime', async () => {
     const { applyProviderProfileOverrides } = await import('../../../../src/server/runtime/http-server/http-server-bootstrap.ts');
 
     const server: any = {
@@ -140,10 +140,7 @@ describe('http server runtime setup provider merge', () => {
     };
 
     const patched = applyProviderProfileOverrides(server, runtime);
-    expect(patched.autoRetry).toEqual({
-      threshold: 3,
-      codes: ['0.8200']
-    });
+    expect((patched as Record<string, unknown>).autoRetry).toBeUndefined();
   });
 
   it('preserves already materialized virtualrouter.providers when routingPolicyGroups exist', async () => {

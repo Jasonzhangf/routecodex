@@ -20,6 +20,17 @@ export interface ProviderDirectPipelineOptions {
   ) => void;
   onSnapshotBefore?: (payload: Record<string, unknown>, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
   onSnapshotAfter?: (result: unknown, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
+  /** Called when provider-mode direct transport fails; caller must report through ErrorErr01-06. */
+  onProviderError?: (error: unknown, context: ProviderDirectAuditContext) => Promise<void> | void;
+}
+
+export interface ProviderDirectAuditContext {
+  payload: Record<string, unknown>;
+  port: number;
+  providerKey: string;
+  inboundProtocol: ProviderProtocol;
+  providerProtocol: ProviderProtocol;
+  actualBehavior: 'direct' | 'relay';
 }
 
 export interface ProviderDirectPipelineResult {
@@ -79,9 +90,24 @@ export async function executeProviderDirectPipeline(
     actualBehavior,
   });
 
-  const response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
-    ? await providerHandle.instance.processIncomingDirect(payloadToSend)
-    : await providerHandle.instance.processIncoming(payloadToSend);
+  const auditContext: ProviderDirectAuditContext = {
+    payload: payloadToSend,
+    port: portConfig.port,
+    providerKey: providerBinding,
+    inboundProtocol,
+    providerProtocol: providerHandle.providerProtocol,
+    actualBehavior,
+  };
+
+  let response: unknown;
+  try {
+    response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
+      ? await providerHandle.instance.processIncomingDirect(payloadToSend)
+      : await providerHandle.instance.processIncoming(payloadToSend);
+  } catch (error) {
+    await options.onProviderError?.(error, auditContext);
+    throw error;
+  }
 
   options.onSnapshotAfter?.(response, {
     port: portConfig.port,

@@ -4,7 +4,7 @@ import { ProviderFactory } from '../../../src/providers/core/runtime/provider-fa
 import type { ProviderRuntimeProfile } from '../../../src/providers/core/api/provider-types.js';
 
 describe('http-server bootstrap provider profile overrides', () => {
-  test('RED: propagates profile autoRetry into runtime overrides', () => {
+  test('does not propagate profile autoRetry into runtime overrides', () => {
     const server = {
       providerProfileIndex: new Map<string, unknown>()
     } as any;
@@ -39,10 +39,7 @@ describe('http-server bootstrap provider profile overrides', () => {
     } as unknown as ProviderRuntimeProfile;
 
     const patched = applyProviderProfileOverrides(server, runtime);
-    expect((patched as any).autoRetry).toEqual({
-      threshold: 3,
-      codes: ['0.8200']
-    });
+    expect((patched as any).autoRetry).toBeUndefined();
   });
 
   test('deepseek-web keeps implicit deepseek provider module when profile type is generic openai', () => {

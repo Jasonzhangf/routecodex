@@ -20,6 +20,8 @@ export interface HttpErrorPayload {
   };
 }
 
+export const ERROR_CLIENT_PROJECTION_FEATURE_ID = 'feature_id: error.client_projection';
+
 export type ErrorErr05ExecutionDecision = unknown;
 export type ErrorErr06ClientProjected = HttpErrorPayload;
 

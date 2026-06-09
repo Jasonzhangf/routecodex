@@ -27,6 +27,8 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
+export const ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID = 'feature_id: error.execution_decision_consumer';
+
 export type RequestExecutorErrorErr04RouterPolicyEnvelope = {
   retryExecutionPlan: ProviderRetryExecutionPlan;
 };

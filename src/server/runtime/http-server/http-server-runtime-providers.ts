@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
-import { emitProviderError } from '../../../providers/core/utils/provider-error-reporter.js';
+import { emitProviderErrorAndWait } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
@@ -295,7 +295,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
           continue;
         }
         try {
-          emitProviderError({
+          await emitProviderErrorAndWait({
             error,
             stage: 'provider.runtime.init',
             runtime: {

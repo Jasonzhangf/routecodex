@@ -77,6 +77,16 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('throw error;');
   });
 
+  it('provider-direct reports provider transport errors through caller-owned ErrorErr hook', () => {
+    const filePath = path.join(ROOT, 'src/server/runtime/http-server/provider-direct-pipeline.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    expect(source).toContain('onProviderError?: (error: unknown, context: ProviderDirectAuditContext)');
+    expect(source).toContain('await options.onProviderError?.(error, auditContext);');
+    expect(source).toContain('throw error;');
+    expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).not.toContain('errorClassification:');
+  });
+
   it('router-direct live path relays direct skips but keeps provider transport errors out of standard retry bridge', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
@@ -91,6 +101,16 @@ describe('Error Pipeline contract', () => {
     expect(source).not.toContain('__routecodexProviderFailureAttemptOffset');
     expect(source).not.toContain('__routerDirectFailedProviderKey');
     expect(source).not.toContain('__routerDirectRecoverable');
+  });
+
+  it('provider-direct live path enters ErrorErr05 consumer without rewriting direct payloads', () => {
+    const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    expect(source).toContain('provider-direct.send.error');
+    expect(source).toContain("source: 'provider-direct'");
+    expect(source).toContain('await resolveRequestExecutorProviderFailurePlan({');
+    expect(source).toContain('routeName: \'port.provider-direct\'');
+    expect(source).not.toContain('provider-direct.retry.standard_pipeline');
   });
 
   it('direct retry offset metadata is not consumed or projected by production source', () => {
@@ -120,6 +140,23 @@ describe('Error Pipeline contract', () => {
         && !entry.includes('/tests/');
     });
     expect(offenders).toEqual([]);
+  });
+
+  it('production provider request paths use awaited ErrorErr reporting', () => {
+    const offenders = matches(/\bemitProviderError\s*\(/).filter((entry) => {
+      return !entry.startsWith('src/providers/core/utils/provider-error-reporter.ts:')
+        && !entry.includes('/tests/');
+    });
+    expect(offenders).toEqual([]);
+
+    for (const file of [
+      'src/providers/core/runtime/base-provider.ts',
+      'src/providers/core/runtime/responses-provider.ts',
+      'src/server/runtime/http-server/http-server-runtime-providers.ts',
+    ]) {
+      const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      expect(source).toContain('emitProviderErrorAndWait');
+    }
   });
 
   it('runtime source modules do not mutate Virtual Router health directly', () => {

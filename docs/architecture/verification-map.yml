@@ -961,3 +961,67 @@ verification:
       - npm run build:min
     notes:
       - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners.
+
+  - feature_id: error.pipeline_contract
+    change_risk: high
+    unit:
+      - src/providers/core/utils/provider-error-reporter.ts
+      - src/providers/core/runtime/provider-failure-policy-impl.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+      - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+      - src/server/utils/http-error-mapper.ts
+    contract:
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+      - tests/providers/core/utils/provider-error-reporter.spec.ts
+    integration:
+      - tests/server/runtime/http-server/provider-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    smoke:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:provider-failure-ban-blackbox
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Completion requires provider/runtime/direct/executor errors to enter ErrorErr01-06 and direct passthrough to preserve payload semantics while reporting failures.
+
+  - feature_id: error.execution_decision_consumer
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
+    contract:
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+    integration:
+      - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    smoke:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:provider-failure-ban-blackbox
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Executor/direct code consumes ErrorErr04 policy into ErrorErr05 decisions only; classification stays in Error module/provider policy owners.
+
+  - feature_id: error.client_projection
+    change_risk: medium
+    unit:
+      - src/server/utils/http-error-mapper.ts
+    contract:
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+    integration:
+      - tests/server/utils/http-error-mapper-malformed-request.spec.ts
+      - tests/server/utils/http-error-mapper-public-leak.spec.ts
+      - tests/server/utils/http-error-mapper-tool-validation.spec.ts
+      - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
+    smoke:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy.

@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
 import { normalizeKnownProviderError } from '../../../../src/providers/core/runtime/provider-error-catalog.js';
-import { resolveAutoRetryErrorCode } from '../../../../src/providers/core/runtime/auto-retry-error-codes.js';
 
 describe('provider error catalog normalization', () => {
   it('normalizes provider_status_2056 to unified numeric code', () => {
@@ -15,8 +14,14 @@ describe('provider error catalog normalization', () => {
     expect(normalized?.class).toBe('unrecoverable');
   });
 
-  it('maps through resolveAutoRetryErrorCode via catalog first', () => {
+  it('normalizes daily 429 text through the provider catalog', () => {
     const err = Object.assign(new Error('daily usage limit exceeded'), { statusCode: 429, code: 'HTTP_429' });
-    expect(resolveAutoRetryErrorCode(err)).toBe('429.2000');
+    const normalized = normalizeKnownProviderError({
+      statusCode: err.statusCode,
+      code: err.code,
+      message: err.message
+    });
+    expect(normalized?.code).toBe('429.2000');
+    expect(normalized?.class).toBe('unrecoverable');
   });
 });

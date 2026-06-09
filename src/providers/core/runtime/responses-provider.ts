@@ -24,7 +24,7 @@ import {
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
-import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
+import { emitProviderErrorAndWait, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 import {
   buildSubmitToolOutputsEndpoint,
   buildTargetUrl,
@@ -453,7 +453,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         entryEndpoint
       );
     }
-    this.reportResponsesFailureIfNeeded(json, context);
+    await this.reportResponsesFailureIfNeeded(json, context);
     return {
       data: json,
       status: 200,
@@ -527,7 +527,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: 'application/json'
     });
     await this.snapshotPhase('provider-response', context, response, headers, targetUrl, entryEndpoint);
-    this.reportResponsesFailureIfNeeded(response, context);
+    await this.reportResponsesFailureIfNeeded(response, context);
     return response;
   }
 
@@ -605,14 +605,14 @@ export class ResponsesProvider extends HttpTransportProvider {
     return 300_000;
   }
 
-  private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {
+  private async reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): Promise<void> {
     const failure = detectResponsesFailure(payload);
     if (!failure) {
       return;
     }
     const err = new Error(failure.message) as Error & { code?: string };
     err.code = failure.code ?? 'RESPONSES_FAILED';
-    emitProviderError({
+    await emitProviderErrorAndWait({
       error: err,
       stage: 'provider.responses',
       runtime: buildRuntimeFromProviderContext(context),

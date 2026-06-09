@@ -1688,3 +1688,116 @@ owners:
     migration_target: rust
     notes:
       - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches.
+
+  - feature_id: error.pipeline_contract
+    status: active
+    summary: ErrorErr01-06 provider/runtime error chain contract and architecture gate
+    owner_module: src/providers/core/utils/provider-error-reporter.ts
+    canonical_types:
+      - ErrorErr01SourceRaised
+      - ErrorErr02HostCaptured
+      - ErrorErr03RuntimeClassified
+      - ErrorErr04RouterPolicyApplied
+      - ErrorErr05ExecutionDecision
+      - ErrorErr06ClientProjected
+    canonical_builders:
+      - capture_error_err_02_host_from_error_err_01_source
+      - report_error_err_02_host_to_router_policy_from_error_err_01_source
+      - classify_error_err_03_runtime_from_error_err_02_host
+      - apply_error_err_04_router_policy_from_error_err_03_runtime
+      - consume_error_err_05_execution_decision_from_error_err_04_router_policy
+      - project_error_err_06_client_from_error_err_05_execution_decision
+    allowed_paths:
+      - src/providers/core/utils/provider-error-reporter.ts
+      - src/providers/core/runtime/provider-failure-policy-impl.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs
+      - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+      - src/server/utils/http-error-mapper.ts
+      - docs/reports/provider-system-architecture-audit-2026-06-09.md
+      - docs/goals/error-module-function-map-closeout-plan.md
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+      - src/server/handlers
+    required_tests:
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+      - tests/providers/core/utils/provider-error-reporter.spec.ts
+    required_gates:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:provider-failure-ban-blackbox
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Error is the ErrorErr01-06 contract module, not a second Error Center.
+      - Provider/runtime/direct/executor modules may raise, capture, or consume decisions only; router policy remains ErrorErr04 truth.
+      - Direct passthrough must report errors through ErrorErr hooks and rethrow without rewriting request/response payloads.
+
+  - feature_id: error.execution_decision_consumer
+    status: active
+    summary: Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions
+    owner_module: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+    canonical_types:
+      - RequestExecutorErrorErr04RouterPolicyEnvelope
+      - ErrorErr05ExecutionDecision
+      - ProviderRetryExecutionPlan
+    canonical_builders:
+      - consume_error_err_05_execution_decision_from_error_err_04_router_policy
+      - resolveProviderRetryExecutionPlan
+    allowed_paths:
+      - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-failure.ts
+      - src/server/runtime/http-server/index.ts
+      - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/providers/profile
+      - src/server/handlers
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+    required_gates:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:provider-failure-ban-blackbox
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - Request/direct executor may consume ErrorErr04 policy decisions and execute retry/reroute/fail-fast plans, but must not classify provider errors independently.
+
+  - feature_id: error.client_projection
+    status: active
+    summary: ErrorErr06 client-visible HTTP/SSE error projection
+    owner_module: src/server/utils/http-error-mapper.ts
+    canonical_types:
+      - ErrorErr05ExecutionDecision
+      - ErrorErr06ClientProjected
+      - HttpErrorPayload
+    canonical_builders:
+      - project_error_err_06_client_from_error_err_05_execution_decision
+      - mapErrorToHttp
+    allowed_paths:
+      - src/server/utils/http-error-mapper.ts
+      - src/server/handlers/handler-utils.ts
+      - src/error-handling/route-error-hub.ts
+      - tests/server/utils/http-error-mapper-malformed-request.spec.ts
+      - tests/server/utils/http-error-mapper-public-leak.spec.ts
+      - tests/server/utils/http-error-mapper-tool-validation.spec.ts
+      - tests/server/utils/http-error-mapper-timeout.spec.ts
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/providers/core/utils/provider-error-reporter.ts
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/server/utils/http-error-mapper-malformed-request.spec.ts
+      - tests/server/utils/http-error-mapper-public-leak.spec.ts
+      - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+    required_gates:
+      - npm run verify:error-pipeline-contract
+      - npm run verify:function-map-compile-gate

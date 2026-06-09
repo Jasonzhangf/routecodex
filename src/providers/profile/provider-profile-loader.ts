@@ -22,7 +22,6 @@ type UnknownRecord = Record<string, unknown>;
 type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
 type ConcurrencyMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['concurrency']>;
 type RpmMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['rpm']>;
-type AutoRetryMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['autoRetry']>;
 
 export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCollection {
   const providersNode = collectProviderNodes(config);
@@ -299,9 +298,8 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
   );
   const concurrency = extractConcurrencyMetadata(raw.concurrency ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).concurrency : undefined));
   const rpm = extractRpmMetadata(raw.rpm ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).rpm : undefined));
-  const autoRetry = extractAutoRetryMetadata(raw.autoRetry);
 
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !concurrency && !rpm && !autoRetry) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !concurrency && !rpm) {
     return undefined;
   }
 
@@ -320,9 +318,6 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
   }
   if (rpm) {
     metadata.rpm = rpm;
-  }
-  if (autoRetry) {
-    metadata.autoRetry = autoRetry;
   }
   return Object.keys(metadata).length ? metadata : undefined;
 }
@@ -409,27 +404,6 @@ function extractRpmMetadata(raw: unknown): RpmMetadata | undefined {
   return {
     requestsPerMinute,
     ...(acquireTimeoutMs ? { acquireTimeoutMs } : {})
-  };
-}
-
-function extractAutoRetryMetadata(raw: unknown): AutoRetryMetadata | undefined {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const node = raw as UnknownRecord;
-  const threshold = pickPositiveInt(node.threshold);
-  const codesRaw = node.codes;
-  const codes = Array.isArray(codesRaw)
-    ? codesRaw
-        .map((c: unknown) => pickString(c))
-        .filter((c): c is string => typeof c === 'string')
-    : undefined;
-  if (!codes || codes.length === 0) {
-    return undefined;
-  }
-  return {
-    ...(threshold ? { threshold } : {}),
-    codes
   };
 }
 

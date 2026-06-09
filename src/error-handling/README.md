@@ -14,17 +14,18 @@ Routes errors to appropriate handlers based on error scope (http/server/pipeline
 Processes errors with intelligent filtering to reduce noise while maintaining visibility into critical issues.
 ## Error Flow
 ```
-Provider/Hub Pipeline → emitProviderError() → Virtual Router provider-runtime-ingress → Router Policy / Quota hooks
+Provider/Hub Pipeline → emitProviderErrorAndWait() → Virtual Router provider-runtime-ingress → Router Policy / Quota hooks
 Provider-side HTTP/CLI errors → RouteErrorHub → ErrorHandlerRegistry → HTTP Response
 ```
 ## Do / Don't
 **Do**
-- Use `emitProviderError()` for all provider failures
+- Use awaited `emitProviderErrorAndWait()` for provider request/runtime failures
 - Call `reportRouteError()` when catching exceptions in HTTP/CLI/pipeline
 - Include full context (dependencies, requestId) in error reports
 
 **Don't**
 - Silently swallow errors without reporting
+- Use fire-and-forget `emitProviderError()` from production provider request paths
 - Implement custom fallback logic for provider failures
 - Store sensitive data in error messages
 

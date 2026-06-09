@@ -10,14 +10,13 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import {
-  emitProviderError,
+  emitProviderErrorAndWait,
   buildRuntimeFromProviderContext
 } from '../utils/provider-error-reporter.js';
 import { classifyProviderError } from './provider-error-classifier.js';
 import { getStatsCenterSafe as getStatsCenterSafeFromBridge } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderUsageEvent } from '../../../modules/llmswitch/bridge.js';
 import { RateLimitCooldownError } from './rate-limit-manager.js';
-import { resolveAutoRetryErrorCode } from './auto-retry-error-codes.js';
 import {
   createProviderContext,
   extractUsageTokensFromResponse,
@@ -54,8 +53,6 @@ export abstract class BaseProvider implements IProviderV2 {
   private runtimeProfile?: ProviderRuntimeProfile;
   private static rateLimitFailures: Map<string, number> = new Map();
   private static readonly RATE_LIMIT_THRESHOLD = 4;
-  /** 自动重试连续失败计数器（instance 级别） */
-  private autoRetryCounters: Map<string, number> = new Map();
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     // Internal unique id; do not use it as a log prefix (it's not human-readable).
@@ -189,9 +186,6 @@ export abstract class BaseProvider implements IProviderV2 {
       // 发送请求 (子类实现)
       const response = await this.sendRequestInternal(processedRequest);
 
-      // 请求成功，清除自动重试计数器（连续失败计数归零）
-      this.autoRetryCounters.clear();
-
       // 后处理响应
       const finalResponse = await this.postprocessResponse(response, context);
 
@@ -248,33 +242,7 @@ export abstract class BaseProvider implements IProviderV2 {
         // ignore stats errors
       }
 
-      // === Provider 内部自动重试拦截 ===
-      // 仅当预处理成功（有 processedRequest）时才可能自动重试
-      if (processedRequest) {
-        const autoRetryConfig = this.getRuntimeProfile()?.autoRetry;
-        if (autoRetryConfig?.codes && autoRetryConfig.codes.length > 0) {
-          const autoRetryCode = resolveAutoRetryErrorCode(error);
-          if (autoRetryCode && autoRetryConfig.codes.includes(autoRetryCode)) {
-            const threshold = autoRetryConfig.threshold ?? 3;
-            const counterKey = `${this.getLogId()}::${autoRetryCode}`;
-            const current = this.autoRetryCounters.get(counterKey) ?? 0;
-            if (current < threshold) {
-              this.autoRetryCounters.set(counterKey, current + 1);
-              console.warn(
-                `[auto-retry] ${this.getLogId()} code=${autoRetryCode} attempt=${current + 1}/${threshold} - retrying`
-              );
-              // 直接重试一次，不上报 health impact
-              // 重试仍然可能抛异常，让外层继续到正常错误路径
-              return await this.sendRequestInternal(processedRequest);
-            }
-            // 超过阈值 — 清除计数器，放行到正常错误上报
-            this.autoRetryCounters.delete(counterKey);
-          }
-        }
-      }
-      // === 自动重试拦截结束 ===
-
-      this.handleRequestError(error, context);
+      await this.handleRequestError(error, context);
       throw error;
     }
   }
@@ -361,7 +329,7 @@ export abstract class BaseProvider implements IProviderV2 {
     return context;
   }
 
-  private handleRequestError(error: unknown, _context: ProviderContext): void {
+  private async handleRequestError(error: unknown, _context: ProviderContext): Promise<void> {
     const now = Date.now();
     const runtimeProfile = this.getRuntimeProfile();
     const classification = classifyProviderError({
@@ -451,7 +419,7 @@ export abstract class BaseProvider implements IProviderV2 {
     };
 
     try {
-      emitProviderError({
+      await emitProviderErrorAndWait({
         error: augmentedError,
         stage: 'provider.http',
         runtime: buildRuntimeFromProviderContext(_context),
