@@ -178,6 +178,20 @@ fn non_object_input_json_fails_fast() {
 }
 
 #[test]
+fn malformed_input_json_fails_fast() {
+    let output = Command::new(bin())
+        .args(["run", "stop_message_auto", "--input-json", r#"{"bad":"json""#])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("SERVERTOOL_CLI_INVALID_JSON:"),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
 fn fake_exec_tool_name_fails_fast() {
     let output = Command::new(bin())
         .args(["run", "fake_exec", "--input-json", r#"{"value":1}"#])
