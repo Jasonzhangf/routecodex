@@ -18849,3 +18849,7 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 2026-06-09 Hub bridge policy protocol-spec wrapper deletion:
 - Inventory: `resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, and `resolveHubProtocolAllowlistsJson` had no live runtime consumer. Active bridge-policy consumers use `resolveBridgePolicy*` and `sanitizeProviderOutboundPayloadWithNative`.
 - Change: removed dead TS wrappers/types/parsers, required-export entries, and Rust public NAPI wrappers; kept Rust protocol spec/allowlist builders internal for `sanitizeProviderOutboundPayloadJson`.
+
+2026-06-09 Responses remap public wrapper deletion:
+- Inventory: `remapResponsesToolCallsWithNative` had zero external consumers; `remapResponsesToolCallsJson` was not a required export and only existed as root NAPI -> hub_bridge_actions binding.
+- Change: removed TS wrapper, root NAPI export, hub_bridge_actions re-export, and Rust binding body. Kept `remapChatToolCallsWithNative` because tests/active remap path still consume it.

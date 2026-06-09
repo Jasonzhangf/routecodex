@@ -627,25 +627,3 @@ export function remapChatToolCallsWithNative(payload: unknown, clientToolsRaw?: 
     throw new Error(`remapChatToolCalls: ${reason}`);
   }
 }
-
-export function remapResponsesToolCallsWithNative(payload: unknown, clientToolsRaw?: unknown[]): RemapChatResult {
-  const fail = (reason?: string) => {
-    const err = new Error(reason ? `remapResponsesToolCalls: ${reason}` : 'remapResponsesToolCalls failed');
-    (err as any).code = 'NATIVE_REQUIRED';
-    throw err;
-  };
-  if (isNativeDisabledByEnv()) return fail('native disabled');
-  const fn = readNativeFunction('remap_responses_tool_calls_json');
-  if (!fn) return fail();
-  try {
-    const result = fn(JSON.stringify({ payload, client_tools_raw: clientToolsRaw }));
-    const parsed = JSON.parse(result as string);
-    return {
-      payload: parsed.payload,
-      unknownNames: parsed.unknown_names,
-    };
-  } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    throw new Error(`remapResponsesToolCalls: ${reason}`);
-  }
-}

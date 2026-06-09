@@ -804,10 +804,6 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::remap_chat_tool_calls_json(input_json)
 }
 
-#[napi(js_name = "remapResponsesToolCallsJson")]
-pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::remap_responses_tool_calls_json(input_json)
-}
 #[napi]
 pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_resp_inbound_reasoning_payload_json(input_json)

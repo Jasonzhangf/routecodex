@@ -3047,3 +3047,9 @@ Tags: virtual-router, routing-instructions, dead-code, napi-export, rust-only, r
 - Removed the zero-consumer TS protocol-spec/allowlist wrappers, TS-only protocol spec parser/types, required-export entries, and Rust public NAPI wrappers. Kept Rust protocol spec/allowlist builders internal because `sanitizeProviderOutboundPayloadJson` still uses them.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired Hub protocol spec wrapper/export names from returning.
 Tags: hub-pipeline, bridge-policy, provider-outbound, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 Responses tool-call remap public wrapper removed
+- Exact scan found `remapResponsesToolCallsWithNative` / `remapResponsesToolCallsJson` had no live runtime consumer. The active client remap path uses `remapChatToolCallsWithNative` / `remapChatToolCallsJson`.
+- Removed the zero-consumer TS wrapper, root Rust NAPI export, hub_bridge_actions re-export, and Rust binding function body.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired responses remap wrapper/export names from returning.
+Tags: hub-pipeline, compat-action, bridge-actions, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
