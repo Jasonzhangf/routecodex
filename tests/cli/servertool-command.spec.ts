@@ -288,6 +288,41 @@ describe('servertool CLI command', () => {
     expect(exits).toEqual([1]);
   });
 
+  it.each([
+    ['restorationHandle', { restorationHandle: 'legacy_handle' }],
+    ['restorationStore', { restorationStore: { id: 'legacy_store' } }]
+  ])('fails fast when CLI input contains restoration carrier %s', async (carrier, payload) => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        exits.push(code);
+        throw new Error(`exit ${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync([
+        'node',
+        'routecodex',
+        'servertool',
+        'run',
+        'servertool_fixture',
+        '--input-json',
+        JSON.stringify(payload)
+      ])
+    ).rejects.toThrow('exit 1');
+
+    expect(output).toEqual([]);
+    expect(errors[0]).toContain(`SERVERTOOL_DENIED_INTERNAL_CARRIER: ${carrier}`);
+    expect(exits).toEqual([1]);
+  });
+
   it('fails fast for non-object input JSON without client stdout', async () => {
     const output: string[] = [];
     const errors: string[] = [];
