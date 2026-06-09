@@ -7,7 +7,7 @@ import {
   applyClientInjectOnlyMetadata,
   applyFollowupRuntimeMetadata,
   assertAutoLimitNotExceeded,
-  materializeFollowupPayload,
+  materializeFollowupInjectionPayload,
   planFollowupMaterialization,
   resolveFollowupRuntimeActionPlan,
   resolveFollowupExecutionMode,
@@ -298,8 +298,8 @@ export async function runFollowupMainline(args: {
     readClientInjectOnly
   });
   if (followupInjectionPlan && executionMode === 'client_inject_only' && !followupPayloadRaw) {
-    followupPayloadRaw = materializeFollowupPayload({
-      materializationPlan: followupMaterialization,
+    followupPayloadRaw = materializeFollowupInjectionPayload({
+      injection: followupInjectionPlan,
       buildInjectionPayload: (injection) => {
         const seed = loadFollowupOriginSeed(args.adapterContext);
         if (!seed) {
@@ -312,7 +312,7 @@ export async function runFollowupMainline(args: {
           injection: injection as any
         });
       }
-    }).payload;
+    });
   }
   if (followupInjectionPlan && executionMode === 'reenter') {
     const seed = loadFollowupOriginSeed(args.adapterContext);

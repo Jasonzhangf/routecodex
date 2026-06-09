@@ -25,9 +25,9 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     toolName: 'vision_auto',
     flowId: FLOW_ID,
     input: {
-      adapterContext: ctx.adapterContext,
       capturedChatRequest: getCapturedRequest(ctx.adapterContext)
     },
+    adapterContext: ctx.adapterContext,
     entryEndpoint: ctx.entryEndpoint
   });
   if (backendRoutePolicy.eligible === false) {

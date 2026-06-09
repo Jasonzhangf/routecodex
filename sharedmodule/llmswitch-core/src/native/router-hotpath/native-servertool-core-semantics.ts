@@ -284,6 +284,7 @@ export interface ServertoolBackendRoutePolicyInput {
   flowId?: string;
   input?: unknown;
   entryEndpoint?: string;
+  adapterContext?: unknown;
 }
 
 export interface ServertoolBackendRoutePolicyOutput {

@@ -28,8 +28,6 @@ export type ServerToolLoopStateLike = {
   stopPairWarned?: boolean;
 };
 
-export type FollowupPayloadSource = 'payload' | 'injection' | 'none';
-
 export type FollowupMaterializationPlan = ServertoolFollowupMaterializationPlan;
 
 export function resolveFollowupRuntimeActionPlan(args: {
@@ -68,25 +66,11 @@ export function planFollowupMaterialization(args: {
   });
 }
 
-export function materializeFollowupPayload(args: {
-  materializationPlan: FollowupMaterializationPlan;
+export function materializeFollowupInjectionPayload(args: {
+  injection: Record<string, unknown>;
   buildInjectionPayload: (injection: JsonObject) => JsonObject | null;
-}): { source: FollowupPayloadSource; payload: JsonObject | null } {
-  const source = args.materializationPlan.payloadSource;
-  if (source === 'payload') {
-    return {
-      source,
-      payload: (args.materializationPlan.payload ?? null) as JsonObject | null
-    };
-  }
-  if (source === 'injection') {
-    const injection = args.materializationPlan.injection;
-    return {
-      source,
-      payload: injection ? args.buildInjectionPayload(injection as JsonObject) : null
-    };
-  }
-  return { source, payload: null };
+}): JsonObject | null {
+  return args.buildInjectionPayload(args.injection as JsonObject);
 }
 
 export function resolveFollowupExecutionMode(args: {
@@ -126,10 +110,10 @@ export function resolveLoopPayload(args: {
     hasFollowupPayloadRaw: Boolean(args.followupPayloadRaw)
   });
   if (plan.loopPayloadSource === 'payload') {
-    return args.followupPayloadRaw;
+    return args.followupPayloadRaw as JsonObject | null;
   }
   if (plan.loopPayloadSource === 'seed_loop_payload') {
-    return args.buildSeedLoopPayload();
+    return args.buildSeedLoopPayload() as JsonObject | null;
   }
   return null;
 }
