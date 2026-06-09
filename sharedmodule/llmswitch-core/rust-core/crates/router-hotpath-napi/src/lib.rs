@@ -2065,21 +2065,6 @@ pub fn run_gemini_from_openai_chat_codec_json_bridge(
     gemini_openai_codec::run_gemini_from_openai_chat_codec_json(payload_json, options_json)
 }
 
-#[napi(js_name = "bootstrapVirtualRouterRoutingJson")]
-pub fn bootstrap_virtual_router_routing_json_bridge(
-    routing_json: String,
-    alias_index_json: String,
-    model_index_json: String,
-    forwarder_ids_json: Option<String>,
-) -> NapiResult<String> {
-    virtual_router_engine::routing::bootstrap_virtual_router_routing_json(
-        routing_json,
-        alias_index_json,
-        model_index_json,
-        forwarder_ids_json,
-    )
-}
-
 #[napi(js_name = "bootstrapVirtualRouterConfigJson")]
 pub fn bootstrap_virtual_router_config_json_bridge(input_json: String) -> NapiResult<String> {
     virtual_router_engine::bootstrap::bootstrap_virtual_router_config_json(input_json)
@@ -2091,17 +2076,6 @@ pub fn bootstrap_virtual_router_providers_json_bridge(
 ) -> NapiResult<String> {
     virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_providers_json(
         providers_json,
-    )
-}
-
-#[napi(js_name = "bootstrapVirtualRouterConfigMetaJson")]
-pub fn bootstrap_virtual_router_config_meta_json_bridge(
-    section_json: String,
-    routing_source_json: String,
-) -> NapiResult<String> {
-    virtual_router_engine::config_bootstrap::bootstrap_virtual_router_config_meta_json(
-        section_json,
-        routing_source_json,
     )
 }
 

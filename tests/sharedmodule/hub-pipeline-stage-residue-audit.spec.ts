@@ -2548,16 +2548,23 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_instruction.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs',
     ];
     const retiredSymbols = [
       'bootstrapProviderProfilesWithNative',
       'bootstrapVirtualRouterProviderProfilesJson',
       'bootstrap_virtual_router_provider_profiles_json_bridge',
+      'bootstrapVirtualRouterRoutingJson',
+      'bootstrap_virtual_router_routing_json_bridge',
+      'bootstrapVirtualRouterConfigMetaJson',
+      'bootstrap_virtual_router_config_meta_json_bridge',
       'parseStopMessageInstructionWithNative',
       'StopMessageNativeParseOutput',
       'parseStopMessageInstructionJson',
+      'applyStopMessageInstructionJson',
       '#[napi]\npub(crate) fn parse_stop_message_instruction_json',
       '#[napi]\npub fn parse_stop_message_instruction_json',
+      '#[napi]\npub fn apply_stop_message_instruction_json',
     ];
     const findings: string[] = [];
 

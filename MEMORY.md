@@ -3101,3 +3101,10 @@ Tags: hub-pipeline, request-governance, dead-code, napi-export, rust-only, resid
 - Removed those TS wrappers/parsers/types, required-export entry for web_search append, Rust public NAPI wrappers for web_search append / prepare payload / requested tool names / executed servertool strip, the now-dead requested-tool collector chain, and old `servertool_skeleton/finalize_strip.rs` Rust bridge module. Rust req-process servertool injection now calls the Rust web_search append helper directly.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired response-governance utility public bridges and old finalize_strip Rust bridge from returning while allowing Rust-internal web_search append operations inside req-process servertool injection.
 Tags: hub-pipeline, response-governance, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-09 VR bootstrap/stop-message follow-on public bridges removed
+- Exact scan found `bootstrapVirtualRouterRoutingJson`, `bootstrapVirtualRouterConfigMetaJson`, and `applyStopMessageInstructionJson` had no live TS/runtime consumer. Their Rust helpers remain internal to total `bootstrapVirtualRouterConfigJson` and routing-instruction state application.
+- This supersedes the 2026-06-07 public-entry wording for `bootstrapVirtualRouterConfigMetaJson`: current public native bootstrap entries are total `bootstrapVirtualRouterConfigJson` plus provider bootstrap `bootstrapVirtualRouterProvidersJson`; routing/meta bootstrap helpers are Rust-internal only.
+- Removed those public NAPI exports from `lib.rs` / required-export gate and removed `#[napi]` from stop-message action apply; no Rust semantic owner was deleted.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these public bridge names and NAPI bridge functions from returning.
+Tags: virtual-router, stop-message, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
