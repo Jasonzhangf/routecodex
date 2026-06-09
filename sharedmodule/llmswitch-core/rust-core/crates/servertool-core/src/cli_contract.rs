@@ -1251,6 +1251,23 @@ mod tests {
             shell["__servertool_cli_projection"]["requestId"],
             "req_stop_projection"
         );
+        let serialized = serde_json::to_string(&shell).expect("serialize shell");
+        for denied in [
+            "reenterPipeline",
+            "providerInvoker",
+            "serverToolFollowup",
+            "serverToolFollowupSource",
+            "restorationHandle",
+            "restorationStore",
+            "ticket",
+            "__rt",
+            "metadata",
+        ] {
+            assert!(
+                !serialized.contains(denied),
+                "client-visible stopless CLI shell leaked private carrier {denied}"
+            );
+        }
     }
 
     #[test]

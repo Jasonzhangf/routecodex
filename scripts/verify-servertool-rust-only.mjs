@@ -133,6 +133,7 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_cli_projection': [
     'tests/cli/servertool-command.spec.ts',
     'tests/servertool/servertool-cli-projection.spec.ts',
+    'tests/servertool/servertool-cli-native-bridge.spec.ts',
     'tests/servertool/servertool-cli-result-restore.spec.ts',
     'tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts',
     'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
@@ -486,6 +487,12 @@ function checkServertoolCliProjectionMap() {
     `${ROOT}/tests/servertool/servertool-cli-native-bridge.spec.ts`,
     readRequired(`${ROOT}/tests/servertool/servertool-cli-native-bridge.spec.ts`),
     'keeps the raw NAPI projection shell contract as JSON string'
+  );
+  assertContains(
+    'cli-projection-private-carrier-contract',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+    rustCliContract,
+    'client-visible stopless CLI shell leaked private carrier'
   );
   assertContains(
     'cli-projection-command-contract',
