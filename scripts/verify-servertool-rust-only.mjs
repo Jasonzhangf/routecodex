@@ -3303,6 +3303,54 @@ function checkBackendRoutePolicyRustOwner() {
     extractFunctionBlock(responseShell, 'hasRequiresActionShape'),
     'isToolCallContinuationResponseWithNative'
   );
+  assertContains(
+    'backend-route-response-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_followup_append_user_text'
+  );
+  assertContains(
+    'backend-route-response-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_preferred_final_response'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
+    'plan_followup_append_user_text_json'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
+    'plan_preferred_final_response_json'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
+    'pub fn plan_followup_append_user_text_json'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
+    'pub fn plan_preferred_final_response_json'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
+    'planFollowupAppendUserTextJson'
+  );
+  assertContains(
+    'backend-route-response-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
+    'planPreferredFinalResponseJson'
+  );
   for (const keyword of [
     'function cloneJson',
     'JSON.parse(JSON.stringify',

@@ -403,6 +403,20 @@ export interface ServertoolFollowupMaterializationPlan {
   injection?: Record<string, unknown> | null;
 }
 
+export interface ServertoolFollowupAppendUserTextPlan {
+  text?: string | null;
+}
+
+export interface ServertoolPreferredFinalResponseInput {
+  hasFollowupBody: boolean;
+  hasRequiresActionShape: boolean;
+  isEmptyClientResponsePayload: boolean;
+}
+
+export interface ServertoolPreferredFinalResponsePlan {
+  source: 'followup_body' | 'final_chat_response';
+}
+
 export interface ServertoolFollowupErrorEnvelopePlan {
   upstreamStatus?: number;
   upstreamCode?: string;
@@ -2767,6 +2781,50 @@ export function planFollowupMaterializationWithNative(
     payload: (payload ?? null) as Record<string, unknown> | null,
     injection: (injection ?? null) as Record<string, unknown> | null
   };
+}
+
+export function planFollowupAppendUserTextWithNative(followupPlan: unknown): ServertoolFollowupAppendUserTextPlan {
+  const capability = 'planFollowupAppendUserTextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupAppendUserTextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ followupPlan }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupAppendUserTextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupAppendUserTextJson native returned invalid payload');
+  }
+  const text = (parsed as Record<string, unknown>).text;
+  if (text !== null && text !== undefined && typeof text !== 'string') {
+    throw new Error('planFollowupAppendUserTextJson native returned invalid text');
+  }
+  return { text: typeof text === 'string' && text.trim() ? text : undefined };
+}
+
+export function planPreferredFinalResponseWithNative(
+  input: ServertoolPreferredFinalResponseInput,
+): ServertoolPreferredFinalResponsePlan {
+  const capability = 'planPreferredFinalResponseJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreferredFinalResponseJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreferredFinalResponseJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planPreferredFinalResponseJson native returned invalid payload');
+  }
+  const source = (parsed as Record<string, unknown>).source;
+  if (source !== 'followup_body' && source !== 'final_chat_response') {
+    throw new Error('planPreferredFinalResponseJson native returned invalid source');
+  }
+  return { source };
 }
 
 function serializeUnknownErrorForNative(error: unknown): unknown {

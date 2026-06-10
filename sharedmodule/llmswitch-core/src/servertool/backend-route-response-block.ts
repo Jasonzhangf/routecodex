@@ -5,30 +5,14 @@ import {
   isEmptyClientResponsePayloadWithNative,
   isToolCallContinuationResponseWithNative
 } from '../native/router-hotpath/native-chat-process-node-result-semantics.js';
+import {
+  planFollowupAppendUserTextWithNative,
+  planPreferredFinalResponseWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
-  if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {
-    return undefined;
-  }
-  const injection = (followupPlan as { injection?: unknown }).injection;
-  if (!injection || typeof injection !== 'object' || Array.isArray(injection)) {
-    return undefined;
-  }
-  const ops = Array.isArray((injection as { ops?: unknown }).ops) ? ((injection as { ops: unknown[] }).ops as unknown[]) : [];
-  for (const op of ops) {
-    if (!op || typeof op !== 'object' || Array.isArray(op)) {
-      continue;
-    }
-    const record = op as Record<string, unknown>;
-    if (record.op !== 'append_user_text') {
-      continue;
-    }
-    if (typeof record.text === 'string' && record.text.trim().length > 0) {
-      return record.text.trim();
-    }
-  }
-  return undefined;
+  return planFollowupAppendUserTextWithNative(followupPlan).text ?? undefined;
 }
 
 export function coerceFollowupPayloadStream(payload: JsonObject, stream: boolean): JsonObject {
@@ -54,19 +38,12 @@ export function choosePreferredFinalChatResponse(args: {
   finalChatResponse: JsonObject;
 }): JsonObject {
   const followupBody = args.followupBody;
-  if (!followupBody || typeof followupBody !== 'object') {
-    return args.finalChatResponse;
-  }
-
-  if (hasRequiresActionShape(followupBody)) {
-    return followupBody;
-  }
-
-  if (!isEmptyClientResponsePayload(followupBody)) {
-    return followupBody;
-  }
-
-  return args.finalChatResponse;
+  const plan = planPreferredFinalResponseWithNative({
+    hasFollowupBody: Boolean(followupBody && typeof followupBody === 'object'),
+    hasRequiresActionShape: Boolean(followupBody && hasRequiresActionShape(followupBody)),
+    isEmptyClientResponsePayload: Boolean(followupBody && isEmptyClientResponsePayload(followupBody))
+  });
+  return plan.source === 'followup_body' && followupBody ? followupBody : args.finalChatResponse;
 }
 
 export function createEmptyFollowupError(args: {

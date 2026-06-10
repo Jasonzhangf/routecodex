@@ -1736,6 +1736,18 @@ pub fn plan_followup_materialization_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_followup_append_user_text_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_append_user_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_preferred_final_response_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_preferred_final_response_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_followup_error_envelope_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_error_envelope_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
