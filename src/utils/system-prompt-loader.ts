@@ -4,8 +4,23 @@ import { fileURLToPath } from 'node:url';
 
 export type Source = 'codex' | 'claude';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROMPT_DIR = path.resolve(__dirname, '../config/system-prompts');
+function resolveModuleDir(): string {
+  try {
+    const metaUrl = Function('return import.meta.url')() as string | undefined;
+    if (typeof metaUrl === 'string' && metaUrl.startsWith('file:')) {
+      return path.dirname(fileURLToPath(metaUrl));
+    }
+  } catch {
+    // Jest/CJS transforms may not expose import.meta.
+  }
+  if (typeof __dirname === 'string' && __dirname.length > 0) {
+    return __dirname;
+  }
+  return path.resolve(process.cwd(), 'src/utils');
+}
+
+const moduleDir = resolveModuleDir();
+const PROMPT_DIR = path.resolve(moduleDir, '../config/system-prompts');
 const PROMPT_FILES: Record<Source, string> = {
   codex: path.join(PROMPT_DIR, 'codex-cli.txt'),
   claude: path.join(PROMPT_DIR, 'claude-cli.txt')

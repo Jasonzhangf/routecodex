@@ -38,7 +38,20 @@ function deriveFinishReasonFromMockBody(body: unknown): string | undefined {
 
 export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMock {
   return {
-    importCoreDist: async () => ({}),
+    importCoreDist: async (subpath?: string) => {
+      if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+        return {
+          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+            emit: true,
+            frame: input.frame,
+            state: input.state,
+          }),
+          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+          projectResponsesClientBodyForClientWithNative: (payload: unknown) => payload,
+        };
+      }
+      return {};
+    },
     requireCoreDist: () => ({}),
     resolveImplForSubpath: () => null,
     resolveBaseDir: () => process.cwd(),

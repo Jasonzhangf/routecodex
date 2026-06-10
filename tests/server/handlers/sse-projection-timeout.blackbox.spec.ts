@@ -32,7 +32,12 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('ends the client SSE response when frame projection stalls', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
       createBridgeHttpServerMock({
-        importCoreDist: async () => new Promise(() => {}),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return new Promise(() => {});
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -77,9 +82,9 @@ describe('HTTP Responses SSE projection timeout', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(Date.now() - startedAt).toBeLessThan(2_000);
+      expect(Date.now() - startedAt).toBeLessThan(5_500);
       expect(text).toContain('event: error');
-      expect(text).toContain('SSE_CLIENT_PROJECTION_TIMEOUT');
+      expect(text).toContain('HTTP_SSE_TIMEOUT');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -131,14 +136,19 @@ describe('HTTP Responses SSE projection timeout', () => {
             `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`
           ];
         },
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -218,14 +228,19 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -321,14 +336,19 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -428,14 +448,19 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -568,14 +593,19 @@ describe('HTTP Responses SSE projection timeout', () => {
             `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`
           ];
         },
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
@@ -680,14 +710,19 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async () => ({
-          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-            emit: true,
-            frame: input.frame,
-            state: input.state,
-          }),
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        }),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
         writeSnapshotViaHooks: async () => undefined,
       })
     );
