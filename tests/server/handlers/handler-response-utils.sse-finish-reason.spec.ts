@@ -26,6 +26,17 @@ class MockResponse extends PassThrough {
   }
 }
 
+function createMockCoreDistProjectionModule() {
+  return {
+    projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+      emit: true,
+      frame: input.frame,
+      state: input.state,
+    }),
+    projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+  };
+}
+
 describe('sendPipelineResponse SSE completion logging', () => {
   const mockResponsesJsonToSseConverter = () => ({
     convertResponseToJsonToSse: async () => {
@@ -139,7 +150,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -204,7 +215,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       isToolCallContinuationResponseNative: () => false,
       updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -296,7 +307,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -352,7 +363,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       isToolCallContinuationResponseNative: () => false,
       updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -399,6 +410,79 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect((destroyReason as Error | undefined)?.message).toBe('CLIENT_RESPONSE_CLOSED');
   });
 
+  it('destroys upstream immediately on client close even when response projection is still pending', async () => {
+    let releaseProjection: (() => void) | undefined;
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => {
+        await new Promise<void>((resolve) => {
+          releaseProjection = resolve;
+        });
+        return {
+          projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+            emit: true,
+            frame: input.frame,
+            state: input.state,
+          }),
+        };
+      },
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    res.on('error', () => {});
+    const upstream = new PassThrough();
+    let destroyReason: unknown;
+    const originalDestroy = upstream.destroy.bind(upstream);
+    const destroySpy = jest.spyOn(upstream, 'destroy').mockImplementation((error?: Error) => {
+      destroyReason = error;
+      return originalDestroy(error);
+    });
+
+    const closed = new Promise<void>((resolve) => {
+      res.on('close', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: upstream
+        }
+      } as any,
+      'req-stream-client-close-projection-pending',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    upstream.write('event: response.output_text.delta\n');
+    upstream.write('data: {"type":"response.output_text.delta","delta":"hi"}\n\n');
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    res.destroy();
+
+    await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+    expect(destroySpy).toHaveBeenCalled();
+    expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
+    releaseProjection?.();
+  });
+
   it('persists required_action continuation instead of clearing store when client closes before response.done', async () => {
     const captureResponsesRequestContextForRequest = jest.fn(async () => undefined);
     const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
@@ -436,7 +520,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         return next;
       },
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -565,7 +649,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -659,7 +743,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -739,7 +823,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -816,7 +900,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -895,7 +979,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -979,7 +1063,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1097,7 +1181,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           ...(probe.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1170,7 +1254,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       isToolCallContinuationResponseNative: () => false,
       updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1249,7 +1333,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
           'data: [DONE]\n\n'
         ];
       },
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1306,7 +1390,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       isToolCallContinuationResponseNative: () => false,
       updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1378,7 +1462,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         isToolCallContinuationResponseNative: () => false,
         updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async () => ({}),
+        importCoreDist: async () => createMockCoreDistProjectionModule(),
         requireCoreDist: () => ({})
       }));
       jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1456,7 +1540,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         ]),
         ...(probe?.__seen_done_chunk ? [] : ['data: [DONE]\n\n'])
       ],
-      importCoreDist: async () => ({}),
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

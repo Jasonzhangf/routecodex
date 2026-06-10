@@ -116,7 +116,6 @@ import {
   registerRequestLogContext
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
-import { extractClientModelId } from '../runtime/http-server/executor/provider-response-utils.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
 import { buildResponsesTerminalSseFramesFromProbeNative, captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, createResponsesJsonToSseConverter, finalizeResponsesConversationRequestRetention, importCoreDist, isToolCallContinuationResponseNative, recordResponsesResponseForRequest, rebindResponsesConversationRequestId, requireCoreDist, updateResponsesContractProbeFromSseChunkNative } from '../../modules/llmswitch/bridge.js';
 
@@ -195,6 +194,17 @@ function buildResponsesTerminalSseFramesFromProbe(
   requestLabel: string,
 ): string[] {
   return buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel);
+}
+
+function buildClientSseKeepaliveFrame(entryEndpoint?: string): string {
+  const commentFrame = ': keepalive\n\n';
+  if (
+    entryEndpoint === '/v1/responses'
+    || entryEndpoint === '/v1/responses.submit_tool_outputs'
+  ) {
+    return `${commentFrame}event: ping\ndata: {"type":"ping"}\n\n`;
+  }
+  return commentFrame;
 }
 
 function shouldDropClientSseFrame(frame: string, entryEndpoint?: string): boolean {
@@ -288,14 +298,9 @@ type ChatUsageNormalizationResult = {
 };
 
 
-type ClientVisibleResponseRestoreContext = {
-  model?: string;
-  reasoningEffort?: string;
-  requestId?: string;
-};
-
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
+const DEFAULT_SSE_TOTAL_TIMEOUT_MS = 300_000;
 
 function logResponseNonBlockingError(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
@@ -835,78 +840,9 @@ export function normalizeResponsesJsonBody(
 }
 
 
-function readReasoningEffortCandidate(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const effort = (value as Record<string, unknown>).effort;
-  return typeof effort === 'string' && effort.trim() ? effort.trim() : undefined;
-}
-
-function buildClientVisibleResponseRestoreContext(
-  metadata: Record<string, unknown> | undefined
-): ClientVisibleResponseRestoreContext | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  const clientModelId = extractClientModelId(metadata);
-  const reasoningEffort =
-    readReasoningEffortCandidate(metadata.reasoning)
-    ?? (metadata.target && typeof metadata.target === 'object' && !Array.isArray(metadata.target)
-      ? readReasoningEffortCandidate((metadata.target as Record<string, unknown>).reasoning)
-      : undefined)
-    ?? (metadata.originalRequest && typeof metadata.originalRequest === 'object' && !Array.isArray(metadata.originalRequest)
-      ? readReasoningEffortCandidate((metadata.originalRequest as Record<string, unknown>).reasoning)
-      : undefined)
-  if (!clientModelId && !reasoningEffort) {
-    return undefined;
-  }
-  return {
-    ...(clientModelId ? { model: clientModelId } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {})
-  };
-}
-
-function restoreClientVisibleResponsePayload(
-  payload: unknown,
-  restore: ClientVisibleResponseRestoreContext | undefined
-): unknown {
-  if (!restore || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return payload;
-  }
-  const record = payload as Record<string, unknown>;
-  const response =
-    record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-      ? (record.response as Record<string, unknown>)
-      : undefined;
-  if (!response) {
-    return payload;
-  }
-  const nextResponse: Record<string, unknown> = { ...response };
-  let changed = false;
-  if (restore.model && nextResponse.model !== restore.model) {
-    nextResponse.model = restore.model;
-    changed = true;
-  }
-  if (restore.reasoningEffort) {
-    const currentReasoning =
-      nextResponse.reasoning && typeof nextResponse.reasoning === 'object' && !Array.isArray(nextResponse.reasoning)
-        ? (nextResponse.reasoning as Record<string, unknown>)
-        : {};
-    if (currentReasoning.effort !== restore.reasoningEffort) {
-      nextResponse.reasoning = {
-        ...currentReasoning,
-        effort: restore.reasoningEffort
-      };
-      changed = true;
-    }
-  }
-  return changed ? { ...record, response: nextResponse } : payload;
-}
-
-function createClientVisibleSseRestoreStream(
+function createClientVisibleSseProjectionStream(
   stream: Readable,
-  restore: ClientVisibleResponseRestoreContext | undefined
+  requestId: string
 ): Readable {
   let pending = '';
   const transform = new Transform({
@@ -939,15 +875,8 @@ function createClientVisibleSseRestoreStream(
             this.push(frame);
             continue;
           }
-          assertClientResponseHasNoInternalCarriers(parsed, restore?.requestId ?? 'sse-frame');
-          const restored = restoreClientVisibleResponsePayload(parsed, restore);
-          if (restored === parsed) {
-            this.push(frame);
-            continue;
-          }
-          assertClientResponseHasNoInternalCarriers(restored, restore?.requestId ?? 'sse-frame');
-          lines[dataLineIndex] = `data: ${JSON.stringify(restored)}`;
-          this.push(`${lines.join('\n')}\n\n`);
+          assertClientResponseHasNoInternalCarriers(parsed, requestId);
+          this.push(frame);
         }
         callback();
       } catch (error) {
@@ -1245,7 +1174,8 @@ function readResponsesClientToolsRaw(requestContext?: DispatchOptions['responses
 async function normalizeResponsesToolCallsForClientBody(
   body: unknown,
   entryEndpoint?: string,
-  requestContext?: DispatchOptions['responsesRequestContext']
+  requestContext?: DispatchOptions['responsesRequestContext'],
+  metadata?: Record<string, unknown>
 ): Promise<unknown> {
   if (
     entryEndpoint !== '/v1/responses'
@@ -1256,19 +1186,20 @@ async function normalizeResponsesToolCallsForClientBody(
   if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
     return body;
   }
-  const mod = await importCoreDist<{ projectResponsesClientBodyForClientWithNative?: (payload: unknown, toolsRaw: unknown[]) => Record<string, unknown> }>(
+  const mod = await importCoreDist<{ projectResponsesClientPayloadForClientWithNative?: (payload: unknown, toolsRaw: unknown[], metadata?: Record<string, unknown>) => Record<string, unknown> }>(
     'native/router-hotpath/native-hub-pipeline-resp-semantics'
   );
-  if (typeof mod.projectResponsesClientBodyForClientWithNative !== 'function') {
-    throw new Error('[handler-response] projectResponsesClientBodyForClientWithNative not available');
+  if (typeof mod.projectResponsesClientPayloadForClientWithNative !== 'function') {
+    throw new Error('[handler-response] projectResponsesClientPayloadForClientWithNative not available');
   }
-  return mod.projectResponsesClientBodyForClientWithNative(body, readResponsesClientToolsRaw(requestContext));
+  return mod.projectResponsesClientPayloadForClientWithNative(body, readResponsesClientToolsRaw(requestContext), metadata);
 }
 
 async function normalizeResponsesSseFrameForClient(
   frame: string,
   entryEndpoint?: string,
   requestContext?: DispatchOptions['responsesRequestContext'],
+  metadata?: Record<string, unknown>,
   projectionState?: ResponsesSseClientProjectionState
 ): Promise<string> {
   if (
@@ -1308,6 +1239,7 @@ async function normalizeResponsesSseFrameForClient(
       eventName?: string;
       data: Record<string, unknown>;
       toolsRaw: unknown[];
+      metadata?: Record<string, unknown>;
       state: ResponsesSseClientProjectionState;
     }) => { emit: boolean; frame: string; state: ResponsesSseClientProjectionState };
   }>('native/router-hotpath/native-hub-pipeline-resp-semantics');
@@ -1319,6 +1251,7 @@ async function normalizeResponsesSseFrameForClient(
     eventName,
     data,
     toolsRaw: readResponsesClientToolsRaw(requestContext),
+    metadata,
     state: projectionState ?? {
       pendingApplyPatchArgumentDeltas: {},
       applyPatchCallIds: [],
@@ -1398,7 +1331,8 @@ function streamResponsesJsonAsSse(args: {
         responsesPayload,
         args.entryEndpoint,
         args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
-          ?? args.responsesRequestContext
+          ?? args.responsesRequestContext,
+        args.result.metadata
       ) as Record<string, unknown>;
       const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
       const conversationProviderKey = deriveResponsesConversationProviderKey(args.result.usageLogInfo);
@@ -1534,6 +1468,16 @@ export async function sendPipelineResponse(
           ? details.finishReason.trim()
           : undefined;
       const resolvedFinishReason = finishReasonFromDetails || usageLogInfo.finishReason;
+      const externalLatencyStartedAtMs = usageLogInfo.externalLatencyStartedAtMs;
+      const shouldUseExternalLatencyStartedAt =
+        details?.mode === 'sse'
+        && typeof externalLatencyStartedAtMs === 'number'
+        && Number.isFinite(externalLatencyStartedAtMs)
+        && externalLatencyStartedAtMs > 0;
+      const externalLatencyMs =
+        shouldUseExternalLatencyStartedAt
+          ? Math.max(0, Date.now() - externalLatencyStartedAtMs)
+          : usageLogInfo.externalLatencyMs;
       logPipelineStage('request.usage_log.start', requestLabel, {
         providerKey: usageLogInfo.providerKey
       });
@@ -1544,7 +1488,7 @@ export async function sendPipelineResponse(
         poolId: usageLogInfo.poolId,
         finishReason: resolvedFinishReason,
         usage: usageLogInfo.usage as any,
-        externalLatencyMs: usageLogInfo.externalLatencyMs,
+        externalLatencyMs,
         trafficWaitMs: usageLogInfo.trafficWaitMs,
         clientInjectWaitMs: usageLogInfo.clientInjectWaitMs,
         sseDecodeMs: usageLogInfo.sseDecodeMs,
@@ -1627,8 +1571,7 @@ export async function sendPipelineResponse(
     const streamSource = sseBody.__sse_responses;
     const stream = toNodeReadable(streamSource);
     const isDirectPassthrough = result.metadata?.__routecodexDirectPassthrough === true;
-    const restoreContext = buildClientVisibleResponseRestoreContext({ ...result.metadata, requestId: requestLabel })
-      ?? { requestId: requestLabel };
+    const responseProjectionMetadata = { ...(result.metadata ?? {}), requestId: requestLabel };
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
       logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
@@ -1655,7 +1598,7 @@ export async function sendPipelineResponse(
     }
     const restoredStream = isDirectPassthrough
       ? createDirectPassthroughSseGuardStream(stream, requestLabel)
-      : createClientVisibleSseRestoreStream(stream, restoreContext);
+      : createClientVisibleSseProjectionStream(stream, requestLabel);
     const clientSseSnapshotRecorder = captureClientResponse
       ? createClientSseSnapshotRecorder(restoredStream, res, {
         requestId: requestLabel,
@@ -1813,6 +1756,9 @@ export async function sendPipelineResponse(
         ? overrideSseTotalTimeoutMs
         : Math.max(totalTimeoutMs, overrideSseTotalTimeoutMs);
     }
+    if (totalTimeoutMs === undefined) {
+      totalTimeoutMs = DEFAULT_SSE_TOTAL_TIMEOUT_MS;
+    }
 
     const keepaliveMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
@@ -1840,13 +1786,19 @@ export async function sendPipelineResponse(
         logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, destroyError);
       }
     };
-    const scheduleClientCloseAbort = () => {
+    let clientCloseAbortScheduled = false;
+    const abortSourceStreamForClientClose = () => {
+      if (clientCloseAbortScheduled) {
+        return;
+      }
+      clientCloseAbortScheduled = true;
       const abortError = createSseClientResponseClosedError();
       setImmediate(() => {
         destroySourceStream(abortError);
       });
     };
     const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
+      abortSourceStreamForClientClose();
       void (async () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
         try {
@@ -1870,10 +1822,8 @@ export async function sendPipelineResponse(
             timingRequestIds: result.usageLogInfo?.timingRequestIds
           });
         }
-        scheduleClientCloseAbort();
       })().catch((error) => {
         logResponseNonBlockingError(`response.sse.client_close.cleanup:${requestLabel}`, error);
-        scheduleClientCloseAbort();
       });
     };
 
@@ -1927,17 +1877,18 @@ export async function sendPipelineResponse(
     }
 
     // Keep-alive: send SSE comments periodically so clients don't treat long servertool holds as a dead connection.
-    // Comment frames (": ...") are ignored by SSE parsers and safe across OpenAI/Anthropic streams.
     // Emit one frame immediately so short client read deadlines are refreshed before first upstream token arrives.
+    // Responses clients may not count SSE comments as activity for idle timers, so add an explicit ping event there.
+    const keepaliveFrame = buildClientSseKeepaliveFrame(entryEndpoint);
     if (!ended) {
-      writeClientSseFrame(`: keepalive\n\n`, 'response.sse.keepalive.initial_write');
+      writeClientSseFrame(keepaliveFrame, 'response.sse.keepalive.initial_write');
     }
     if (Number.isFinite(keepaliveMs) && keepaliveMs > 0) {
       keepaliveTimer = setInterval(() => {
         if (ended) {
           return;
         }
-        writeClientSseFrame(`: keepalive\n\n`, 'response.sse.keepalive.write');
+        writeClientSseFrame(keepaliveFrame, 'response.sse.keepalive.write');
       }, keepaliveMs);
       keepaliveTimer.unref?.();
     }
@@ -1990,6 +1941,7 @@ export async function sendPipelineResponse(
           frame,
           entryEndpoint,
           effectiveResponsesRequestContext,
+          responseProjectionMetadata,
           responsesSseProjectionState
         ))
         .then((normalizedFrame) => {
@@ -2055,6 +2007,7 @@ export async function sendPipelineResponse(
                     frame,
                     entryEndpoint,
                     effectiveResponsesRequestContext,
+                    responseProjectionMetadata,
                     responsesSseProjectionState
                   );
                   if (normalizedFrame) {
@@ -2181,6 +2134,7 @@ export async function sendPipelineResponse(
               frame,
               entryEndpoint,
               effectiveResponsesRequestContext,
+              responseProjectionMetadata,
               responsesSseProjectionState
             );
             if (normalizedFrame) {
@@ -2297,7 +2251,8 @@ export async function sendPipelineResponse(
     normalizeResponsesJsonBody(body, entryEndpoint, requestLabel),
     entryEndpoint,
     result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
-      ?? options?.responsesRequestContext
+      ?? options?.responsesRequestContext,
+    result.metadata
   );
   const usageNormalized = normalizeChatUsagePayload(normalizedJsonBody, {
     entryEndpoint,
