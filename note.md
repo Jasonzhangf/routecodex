@@ -1,5 +1,44 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-10 SSE reset 回归二次定位
+
+- 对比 2026-06-09/06-10 SSE 提交，真正的回归点不是 keepalive/ping 本身，而是 `d5c0f40a5 fix: harden responses SSE close handling` 新增的 pre-start short-circuit：`preStartClientClosed = res.destroyed || writableEnded || writableFinished || clientConnectionState.disconnected`。
+- `clientConnectionState.disconnected` 不是物理 socket 已关真相；它还会被 `trackClientConnectionState()` 的 `x-stainless-timeout` / `x-request-timeout-ms` 提示超时置为 true。把它等价成“开流前已关闭”会导致 `detectedBeforeStreamStart:true` 提前短路，出现客户端 reset/静默停而服务端不再写任何 SSE 帧。
+- 修复方向应是：pre-start close 只信 `res.destroyed/writableEnded/writableFinished` 这类真实 writer 状态；`clientConnectionState.disconnected` 仅保留给后续 abort/cleanup/followup stop 判断，不能作为开流前短路条件。
+
+## 2026-06-10 SSE 投影定位日志补充
+
+- 现有 live 日志已证明 provider 不是主问题：同一批请求能看到 `finish_reason=tool_calls`、`[servertool] ... eligible=true`，但客户端侧收尾仍是 `response.sse.client_close ... sawTerminalEvent=false`。
+- 新增定位日志已落在 `src/server/handlers/handler-response-utils.ts`，覆盖：
+  - `response.sse.project_frame`: 原始 SSE frame 与投影后 frame 的摘要（event/type/status/finishReason/required_action/function_call 数量）
+  - `response.sse.write_frame`: 实际写给客户端前的 frame 摘要
+  - `response.sse.client_close`: 额外带上 `lastRawFrame`、`lastProjectedFrame`、`probe`
+- 目标：确认问题到底在
+  1) Rust/TS SSE 投影把 `required_action` / terminal event 吃掉了，
+  2) 写出前被过滤掉了，
+  3) 还是写出了但客户端在 `response.completed/response.done` 前就断了。
+
+## 2026-06-10 tool-call 客户端契约回归
+
+- 最新 5520 真样本 `req_1781073202473_988651af` 的 `provider-response.json` 已显示：client-visible body 在进入 JSON->SSE 前就是 `status:"completed"`，`output` 里有 `exec_command` function_call，但没有 `required_action`。
+- 这会把客户端可见终态投成“completed answered”而不是“requires_action waiting for tool output”；即使前面有 function_call item，terminal response.status 也会误导客户端不继续提交工具结果。
+- 修复 owner 应落在 Rust client projection：对 `output=function_call` 且无已执行 `tool_outputs` / `function_call_output`、无现成 `required_action` 的 payload，合成 `required_action.submit_tool_outputs.tool_calls` 并把 client-visible status 改为 `requires_action`；已解析完成的 tool output 维持 `completed`。
+
+## 2026-06-10 Codex 客户端 provider 会话真相
+
+- `~/.codex/config.toml` 曾出现 `model_provider = "1token"`，但不存在 `[model_providers.1token]`，只有 `[model_providers.tt]` 指向 `https://one.1token.xyz/v1`。
+- 已修正为 `model_provider = "tt"`。
+- 但当前运行中的 Codex 会话真相来自 `~/.codex/sessions/2026/06/10/rollout-2026-06-10T11-27-20-019eaf91-fb6f-7ba3-b21f-ad0a92952a2a.jsonl`：`session_meta.model_provider="asxs"`。
+- 结论：修改 `~/.codex/config.toml` 只影响新会话，不会把已运行会话从 `asxs` 热切到 `tt`；“客户端没更新”不能再归因到 server-only。
+
+## 2026-06-10 5520/5555 移除 fwd 路由
+
+- 配置真源仍是 `~/.rcc/config.toml`。
+- Jason 新要求已落到真源配置：
+  - `gateway_priority_5520`: 移除全部 `fwd.*` target；`thinking/default` 固定 `asxs.gpt-5.5`，`coding/tools/search/web_search/multimodal/longcontext` 固定 `asxs.gpt-5.4-mini`；全部 `thinking = "low"`。
+  - `gateway_priority_5555`: 移除全部 `fwd.*` target；`thinking/longcontext/default` 固定 `asxs.gpt-5.5`；`coding` 改为 `asxs.gpt-5.4-mini` 与 `minimax.MiniMax-M3` 显式 `round-robin`；其余 `tools/search/web_search/multimodal` 暂保持现有 MiniMax/M2.7 weighted 池不变。
+- 修改后先用 `python3 tomllib` 校验 TOML；restart/live health 证据待下一步执行。
+
 ## 2026-06-10 5520 tools/search/multimodal 轮询配置
 
 - 配置真源是 `~/.rcc/config.toml`；5520 使用 `virtualrouter.routingPolicyGroups."gateway_priority_5520"`。
@@ -12,6 +51,24 @@
 - 真实日志证据显示两个端口都有 `response.sse.client_close` 且 `streamEnded=false/sawTerminalEvent=false/closeBeforeStreamEnd=true`；5520 最新样本 `openai-responses-router-gpt-5.5-20260610T080516658-332110-5454`，5555 历史样本包含 `...T010621250-332060-5404` 与多条 MiniMax tool_calls close-before-terminal。
 - `handler-response-utils.ts` 当前 close-before-terminal cleanup 先 `await clientWriteQueue`，再调用 `scheduleClientCloseAbort()`；若 projection/write queue 卡住，upstream stream 不会被立即 destroy，外层 session 观测会停留在 Working/keepalive。
 - 另一个缺口是普通 SSE 总时限没有默认值，仅在 `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS` 或视频 request option 存在时生效；无配置时 upstream/SSE 可无限保活。
+
+## 2026-06-10 5520 direct/servertool 边界与 SSE 状态机收口
+
+- 请求侧 direct 真根因已补齐：Rust `evaluate_responses_direct_route_decision` 新增 `stopMessageEnabled + stopMessageExcludeDirect + client tools => requiresHubRelay(reason=stopless_servertool_requires_hub_relay)`；`cargo test -p router-hotpath-napi responses_direct_route_decision --lib` 8/8 通过。
+- 响应侧 direct 真根因也补齐：`src/server/handlers/handler-response-utils.ts` 对 `__routecodexDirectPassthrough=true` 禁用 relay 专属 continuation probe / terminal auto-close / conversation persist on client-close，避免 direct SSE 误进 stopless/servertool 状态机；黑盒 `tests/server/handlers/sse-projection-timeout.blackbox.spec.ts` 证明 direct probe 不会提前 auto-close，非 terminal stream 不会误结束，projection timeout 也会显式 error 收口。
+- live 证据（安装后版本 `0.90.3053`，5520/5555 health 均 `ok/ready/pipelineReady`）：5520 发送带 `exec_command` client tool 的 `/v1/responses` 请求后，日志不再是 `route=router-direct:tools/-`，而是 `route=tools/gateway-priority-5520-round-robin-tools -> provider=asxs.crsa.gpt-5.4-mini`；同一 requestId `openai-responses-asxs.crsa-gpt-5.4-mini-20260610T113359283-333716-7060` 出现 `tool=stop_message_auto ... eligible=true`，说明 stopless 仅在 relay 链生效，不是 direct 串线。
+
+## 2026-06-10 SSE 提前断开 pre-start close 收口
+
+- 新复现真相：客户端如果在 `executePipeline()` 期间就断开，`sendPipelineResponse()` 原先是事后才挂 `res.on('close')`，会错过这次 close；日志会只剩 `started -> virtual-router-hit -> [servertool]`，没有 `response.sse.client_close` / `completed`，表现成客户端静默停住或 reset。
+- 修复点：`src/server/handlers/handler-response-utils.ts` 在 SSE wiring 前先检查 `res.destroyed/writableEnded/writableFinished` 与 `metadata.clientConnectionState.disconnected`；若已断开，立即记录 `response.sse.client_close`（新增 `detectedBeforeStreamStart:true`）、清理 Responses conversation，并 destroy upstream stream，不再继续 response wiring。
+- 黑盒新增：`tests/server/handlers/sse-projection-timeout.blackbox.spec.ts` 新增 “client already disconnected before SSE response wiring starts” 覆盖，锁住不会再等到 late close listener。
+- 验证 PASS：
+  - focused Jest：`tests/server/handlers/sse-projection-timeout.blackbox.spec.ts` + `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts`
+  - `npx tsc --noEmit --pretty false`
+  - live 5520 direct probe：`openai-responses-router-gpt-5.5-20260610T120448011-333735-1` 走 `router-direct:default/- -> asxs.crsa.gpt-5.5`，正常 completed。
+  - live 5520 relay + early-disconnect probe：`openai-responses-asxs.crsa-gpt-5.5-20260610T120709353-333737-3` 出现 `[servertool] ... eligible=true`，随后 `[handler-response] response.sse.client_close ... "detectedBeforeStreamStart":true`；说明 5520 在 relay/servertool 路径上也已显式收口，不再静默停住。
+  - live 5555 early-disconnect probe：`openai-responses-asxs.crsa-gpt-5.5-20260610T120448105-333736-2` 触发 `[handler-response] response.sse.client_close ... "detectedBeforeStreamStart":true`，不再是无后续挂住。
 
 ## 2026-06-10 servertool learned-note Rust closeout slice
 
@@ -19436,3 +19493,44 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Inventory: continuation helpers (`buildContinueExecutionOperationsWithNative`, `planContinueExecutionOperationsWithNative`, `injectContinueExecutionDirectiveWithNative`, `isStopMessageStateActiveWithNative`, `resolveHasActiveStopMessageForContinueExecutionWithNative`, `isCanonicalChatCompletionPayloadWithNative`) had no live TS/runtime consumer; remaining active hits were required-export entries, standalone Rust NAPI functions/module, old docs, and residue tests.
 - Change: removed the TS wrappers, required-export entries, standalone NAPI functions, deleted `chat_continue_execution_directive_injection.rs`, and removed now-dead private stop-message-state active helpers. Kept Rust-internal `build_continue_execution_operations` / `resolve_continue_execution_plan` / response-stage `is_canonical_chat_completion_payload` because active Rust mainline still calls them.
 - Guard: servertool utility residue audit now blocks the continuation wrapper/export/module names from returning; required-export negative test now asserts continuation exports stay absent.
+
+2026-06-10 Provider SSE intent + Responses SSE hang fix:
+- Evidence: live samples showed `/v1/responses stream=true acceptsSse=true` could reach generic OpenAI-chat provider as `stream:false` with `Accept: application/json`; response-side projection stalls logged `response.sse.projection.error` but previously still waited for total SSE timeout.
+- Root cause: `ProviderRequestPreprocessor` and generic shaping let generated payload `stream:false` override positive metadata `outboundStream/inboundStream`; `handler-response-utils.ts` depended on source stream error after projection failure instead of directly ending client SSE.
+- Change: positive metadata/client SSE intent now wins over generated provider payload false; Responses SSE client projection has a bounded timeout and writes explicit `event:error` with `SSE_CLIENT_PROJECTION_TIMEOUT` before ending the response.
+- Verification so far: focused HTTP blackbox/Jest suites passed, root tsc passed, llmswitch-core tsc passed, `git diff --check` passed.
+
+2026-06-10 request/response/usage log color:
+- Root cause: response completed and `[usage]` paths narrowed color context to `logSessionColorKey/sessionId/conversationId`, so tmux/client session color keys captured on request could be lost before usage/response logs.
+- Fix direction: keep full color carrier (`clientTmuxSessionId` / snake_case tmux fields / RCC tmux aliases / session/conversation aliases) through `usageLogInfo`, `sendPipelineResponse`, and `logUsageSummary`; tests should assert tmux color wins over per-request session id.
+2026-06-10 SSE tool-call terminal hang:
+- Live 5555 tools route sample `req_1781057122738_d1843508` proved provider outbound was already SSE (`Accept: text/event-stream`, body `stream:true`), while server timing showed `provider.send=5301ms`, `hub.response=3070ms`, `response=300052ms`; root cause is `ServerRespOutbound05ClientFrame` SSE writer state machine, not request/provider SSE intent.
+- Added HTTP blackbox repro for a `/v1/responses` stream with tool-call continuation probe where upstream never ends. Red state waited for total timeout; fix adds a bounded terminal-close guard driven by native `isToolCallContinuationResponse` probe and native terminal frame builder. If Rust probe can build `required_action/completed/done`, client SSE writes them and ends; if terminal state cannot build frames, client gets explicit `event:error` instead of a hang.
+- Added reverse HTTP blackbox coverage: non-terminal text streams are not closed early by the guard, and a real terminal event with an empty repair probe closes successfully without converting to `event:error`.
+
+## 2026-06-10 客户端红测补强（SSE 缺失/乱序/挂起）
+- 已新增客户端视角黑盒原型：`tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts` 增加 `collectSseEvents(...)`，按流式读取 + deadline 方式抓 `response.required_action -> response.completed -> response.done` 的缺失、顺序错误和未终止挂起，而不是只在 `response.text()` 后验全文。
+- 当前 first red 还未转成有效业务红，先暴露了两层测试环境问题：
+  1. 现有 `responses-handler` 黑盒入口被仓库既有 Jest/ESM 问题挡住：`src/utils/system-prompt-loader.ts` 出现 `__dirname` 重声明；
+  2. 现有 `sse-projection-timeout.blackbox` 的 bridge mock 把 `importCoreDist` 整体打断，导致 `native-hub-pipeline-resp-semantics` 缺失，属于 harness 假红，不是线上 SSE 状态机真红。
+- 已开始修 harness：把 `sse-projection-timeout.blackbox` 的 `importCoreDist` override 改为按 `subpath === native/router-hotpath/native-hub-pipeline-resp-semantics` 精准 mock，避免把整个 bridge/core loader 一锅端。下一步要继续把这层 mock 接通，拿到真实客户端红，再定位事件丢失/错误收口的唯一状态机节点。
+- 已补可执行黑盒与反向锁定：
+  - `responses-sse-client-contract.blackbox.spec.ts`：锁住 tool-call continuation 必须发出 `response.required_action -> response.completed -> response.done`，非 terminal 文本流不会提前结束，upstream 早关会显式 `event:error` 而不是挂死。
+  - `responses-client-tool-contract.blackbox.spec.ts`：锁住 pending function_call 必须对客户端投影 `required_action`，resolved tool output 不得错误合成 `required_action`。
+  - `handler-response-utils.prestart-client-close-guard.spec.ts`：锁住 `clientConnectionState.disconnected` 不能被误当成 pre-start socket close，否则会复现静默停住。
+- 为让这批黑盒在 Jest 下可跑，补了两处 loader/harness 收口：
+  - `src/modules/llmswitch/core-loader.ts`：Jest 下 file-URL 动态 import 失败时，回退到 sharedmodule source `.ts` 真路径加载。
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`：忽略 `[eval]` 和非绝对 `__filename`，避免 Jest/ts-jest 伪路径污染 native loader。
+- 当前可用验证：
+  - `pnpm jest tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts --runInBand`
+  - `pnpm jest tests/server/handlers/responses-client-tool-contract.blackbox.spec.ts --runInBand`
+  - `pnpm jest tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts --runInBand`
+  - `pnpm jest tests/server/handlers/handler-response-utils.responses-keepalive-ping.spec.ts --runInBand`
+  - `pnpm jest tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts --runInBand`
+  - `npx tsc --noEmit --pretty false`
+
+2026-06-10 live verification for Responses tool-call client contract:
+- Global install/restart finished on `0.90.3054`; `routecodex --version` and `rcc --version` both report `0.90.3054`; `/health` on `127.0.0.1:5520` and `127.0.0.1:5555` returned `status=ok ready=true pipelineReady=true`.
+- Real `/v1/responses` tool-call probe on 5520 and 5555 now emits `response.required_action` before terminal frames. Captured first-leg SSE shows `response.required_action` + `response.completed` + `response.done`, with final response `status:"requires_action"` instead of the old wrong `status:"completed"`-without-required_action shape.
+- Server runtime evidence: 5555 request `openai-responses-asxs.crsa-gpt-5.5-20260610T151840493-333767-33` and 5520 request `openai-responses-asxs.crsa-gpt-5.5-20260610T152118147-333769-35` both completed with `finish_reason=tool_calls`; no post-tool-call silent reset pattern was reproduced in this pass.
+- Followup probes did not show the old client-contract regression. Wrongly-formed continuation or expired `previous_response_id` now fails explicitly with upstream 400 (`previous_response_not_found`) instead of hanging or silently resetting. One unconstrained continuation stayed active and was cut by local `curl --max-time`; that was a test harness prompt/tool-constraint issue, not the prior missing-required_action bug.

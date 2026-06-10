@@ -3155,3 +3155,8 @@ Tags: hub-pipeline, req-inbound, dead-code, napi-export, rust-only, residue-gate
 - Removed the zero-consumer TS wrappers, required-export entries, standalone Rust NAPI JSON functions, and deleted the NAPI-only `chat_continue_execution_directive_injection.rs` module. Kept live Rust-internal helpers that the current mainline still calls; removed the now-dead private stop-message-state active helpers.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` and `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` block the retired continuation wrapper/export/module names from returning.
 Tags: hub-pipeline, servertool, continuation, dead-code, napi-export, rust-only, residue-gate, 2026-06-09
+
+## 2026-06-10 Responses SSE tool-call terminal state machine
+- Live 5555 sample `req_1781057122738_d1843508` showed provider outbound already had `Accept:text/event-stream` and `stream:true`, but `provider.send` / `hub.response` stayed short while `response=300052ms`; root cause is `src/server/handlers/handler-response-utils.ts` SSE terminal-close state machine, not provider/router SSE intent.
+- Fix rule: `/v1/responses` tool-call continuation may wait for native terminal probe/repair frames, but non-terminal stream close and already-terminal empty repair probe must never hang or silently fail; if terminal repair cannot be materialized, emit explicit SSE `event:error` and end.
+- Verification pattern: always run paired positive/negative HTTP blackbox tests for terminal close, non-terminal no-early-close, and already-terminal empty-probe close; do not claim closure from happy path alone.

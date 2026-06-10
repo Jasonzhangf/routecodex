@@ -1794,3 +1794,9 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
 
 - `/v1/responses` provider 已 completed 但客户端 session 挂起时，先查 JSON-to-SSE terminal projection 和 shared writer 背压，不要先改 provider/router。`StreamWriter.handleBackpressure()` 必须注册 `drain/close/error` 后立即同步 recheck `writableLength < maxBufferSize`；只等未来 `drain` 会在 `PassThrough({ objectMode: true })` 下卡住并丢 `response.completed/response.done`。
 - 完成验证必须包含 live SSE：build/install/restart 后对真实端口 `/v1/responses` stream=true 断言 `response.completed` + `response.done` 且无 `event: error`；`/health` 和单测只能算门禁。
+
+## 2026-06-10 Responses SSE terminal state machine / 正反测
+
+- 当 live 样本显示 provider outbound 已经是 `Accept:text/event-stream` + `stream:true`，但 `provider.send` / `hub.response` 很短而 `response=` 超长时，优先查 `src/server/handlers/handler-response-utils.ts` 的 SSE terminal-close state machine；这类挂起不是 provider/router SSE 意图问题。
+- `/v1/responses` tool-call continuation 可以等 native terminal probe / repair frames，但必须成对验证：正向证明 terminal 会收口，反向证明 non-terminal 不会被提前关闭、already-terminal 空 repair probe 不会卡死或静默失败。
+- 若 terminal repair 无法 materialize，必须显式 SSE `event:error` 并结束；不要用静默等待、空 reply、或改 provider intent 来绕过。
