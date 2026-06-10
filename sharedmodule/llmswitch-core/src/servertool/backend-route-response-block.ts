@@ -12,6 +12,7 @@ import {
 import {
   planEmptyFollowupErrorWithNative,
   planFollowupAppendUserTextWithNative,
+  planFollowupPayloadStreamWithNative,
   planMissingFollowupPayloadErrorWithNative,
   planPreferredFinalResponseWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -24,7 +25,8 @@ export function coerceFollowupPayloadStream(payload: JsonObject, stream: boolean
   if (!payload || typeof payload !== 'object') {
     return payload;
   }
-  if (stream === false) {
+  const plan = planFollowupPayloadStreamWithNative(stream);
+  if (plan.stream === false) {
     (payload as Record<string, unknown>).stream = false;
   }
   return payload;

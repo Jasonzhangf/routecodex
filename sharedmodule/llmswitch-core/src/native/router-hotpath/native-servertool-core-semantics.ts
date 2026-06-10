@@ -407,6 +407,10 @@ export interface ServertoolFollowupAppendUserTextPlan {
   text?: string | null;
 }
 
+export interface ServertoolFollowupPayloadStreamPlan {
+  stream: boolean;
+}
+
 export interface ServertoolPreferredFinalResponseInput {
   hasFollowupBody: boolean;
   hasRequiresActionShape: boolean;
@@ -2810,6 +2814,27 @@ export function planFollowupAppendUserTextWithNative(followupPlan: unknown): Ser
     throw new Error('planFollowupAppendUserTextJson native returned invalid text');
   }
   return { text: typeof text === 'string' && text.trim() ? text : undefined };
+}
+
+export function planFollowupPayloadStreamWithNative(stream: boolean): ServertoolFollowupPayloadStreamPlan {
+  const capability = 'planFollowupPayloadStreamJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupPayloadStreamJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ stream }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupPayloadStreamJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupPayloadStreamJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.stream !== 'boolean') {
+    throw new Error('planFollowupPayloadStreamJson native returned invalid stream');
+  }
+  return { stream: record.stream };
 }
 
 export function planPreferredFinalResponseWithNative(

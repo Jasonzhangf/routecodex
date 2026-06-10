@@ -3,7 +3,7 @@
 use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
     plan_empty_followup_error, plan_followup_error_envelope, plan_followup_execution_mode,
-    plan_followup_materialization, plan_followup_append_user_text,
+    plan_followup_materialization, plan_followup_append_user_text, plan_followup_payload_stream,
     plan_followup_runtime_action, plan_followup_runtime_metadata,
     plan_missing_followup_payload_error, plan_preferred_final_response,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
@@ -12,6 +12,7 @@ use servertool_core::backend_route_contract::{
     ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
     ServertoolFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
+    ServertoolFollowupPayloadStreamPlanInput,
     ServertoolMissingFollowupPayloadErrorPlanInput,
     ServertoolPreferredFinalResponseInput,
     ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
@@ -708,6 +709,13 @@ pub fn plan_followup_materialization_json(input_json: &str) -> Result<String, St
         .map_err(|e| format!("deserialize followup materialization input: {e}"))?;
     let output = plan_followup_materialization(input);
     serde_json::to_string(&output).map_err(|e| format!("serialize materialization plan: {e}"))
+}
+
+pub fn plan_followup_payload_stream_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupPayloadStreamPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup payload stream input: {e}"))?;
+    let output = plan_followup_payload_stream(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize followup payload stream plan: {e}"))
 }
 
 pub fn plan_followup_append_user_text_json(input_json: &str) -> Result<String, String> {

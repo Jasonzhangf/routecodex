@@ -229,6 +229,18 @@ pub struct ServertoolFollowupMaterializationPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupPayloadStreamPlanInput {
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupPayloadStreamPlan {
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolFollowupAppendUserTextInput {
     pub followup_plan: Value,
 }
@@ -802,6 +814,14 @@ pub fn plan_followup_materialization(
         payload_source: ServertoolFollowupPayloadSource::None,
         payload: None,
         injection: None,
+    }
+}
+
+pub fn plan_followup_payload_stream(
+    input: ServertoolFollowupPayloadStreamPlanInput,
+) -> ServertoolFollowupPayloadStreamPlan {
+    ServertoolFollowupPayloadStreamPlan {
+        stream: input.stream,
     }
 }
 
@@ -2242,6 +2262,19 @@ mod tests {
             followup_plan: json!({ "payload": { "input": "hello" } }),
         });
         assert_eq!(missing.text, None);
+    }
+
+    #[test]
+    fn followup_payload_stream_plan_preserves_requested_stream_flag() {
+        let streaming = plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput {
+            stream: true,
+        });
+        assert!(streaming.stream);
+
+        let non_streaming = plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput {
+            stream: false,
+        });
+        assert!(!non_streaming.stream);
     }
 
     #[test]
