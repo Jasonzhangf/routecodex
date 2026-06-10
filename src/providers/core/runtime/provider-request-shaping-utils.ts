@@ -21,7 +21,14 @@ function readStreamIntentFromMetadata(value: unknown): boolean | undefined {
     ?? readBoolean(value.inboundStream);
 }
 
-function readStreamIntentFromRequest(request: UnknownObject): boolean | undefined {
+function readStreamIntentFromRequestMetadata(request: UnknownObject): boolean | undefined {
+  if (!isRecord(request)) {
+    return undefined;
+  }
+  return readStreamIntentFromMetadata(request.metadata);
+}
+
+function readStreamIntentFromRequestPayload(request: UnknownObject): boolean | undefined {
   if (!isRecord(request)) {
     return undefined;
   }
@@ -35,7 +42,7 @@ function readStreamIntentFromRequest(request: UnknownObject): boolean | undefine
       return dataStream;
     }
   }
-  return readStreamIntentFromMetadata(request.metadata);
+  return undefined;
 }
 
 function resolveGenericStreamIntent(args: {
@@ -43,9 +50,20 @@ function resolveGenericStreamIntent(args: {
   context?: ProviderContext;
   runtimeMetadata?: ProviderRuntimeMetadata;
 }): boolean | undefined {
-  return readStreamIntentFromRequest(args.request)
-    ?? readStreamIntentFromMetadata(args.context?.metadata)
-    ?? readStreamIntentFromMetadata(args.runtimeMetadata?.metadata);
+  const requestMetadataIntent = readStreamIntentFromRequestMetadata(args.request);
+  const contextMetadataIntent = readStreamIntentFromMetadata(args.context?.metadata);
+  const runtimeMetadataIntent = readStreamIntentFromMetadata(args.runtimeMetadata?.metadata);
+  if (
+    requestMetadataIntent === true
+    || contextMetadataIntent === true
+    || runtimeMetadataIntent === true
+  ) {
+    return true;
+  }
+  return readStreamIntentFromRequestPayload(args.request)
+    ?? requestMetadataIntent
+    ?? contextMetadataIntent
+    ?? runtimeMetadataIntent;
 }
 
 function assertProviderOutboundBodyHasNoMetadata(body: UnknownObject, source: string): void {

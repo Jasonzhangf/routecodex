@@ -110,8 +110,16 @@ export function buildProviderExecutionSuccessResult(args: {
         new Set([args.providerRequestId, args.inputRequestId].filter((value): value is string => Boolean(value)))
       ),
       logSessionColorKey: resolveSessionLogColorKey(args.mergedMetadata),
+      clientTmuxSessionId: args.mergedMetadata.clientTmuxSessionId,
+      client_tmux_session_id: args.mergedMetadata.client_tmux_session_id,
+      tmuxSessionId: args.mergedMetadata.tmuxSessionId,
+      tmux_session_id: args.mergedMetadata.tmux_session_id,
+      rccSessionClientTmuxSessionId: args.mergedMetadata.rccSessionClientTmuxSessionId,
+      rcc_session_client_tmux_session_id: args.mergedMetadata.rcc_session_client_tmux_session_id,
       sessionId: args.mergedMetadata.sessionId,
+      session_id: args.mergedMetadata.session_id,
       conversationId: args.mergedMetadata.conversationId,
+      conversation_id: args.mergedMetadata.conversation_id,
       projectPath:
         args.readString(args.mergedMetadata.clientWorkdir)
         ?? args.readString(args.mergedMetadata.client_workdir)

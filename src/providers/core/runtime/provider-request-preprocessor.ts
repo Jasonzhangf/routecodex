@@ -10,6 +10,19 @@ type MetadataContainer = {
   stream?: boolean;
 };
 
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readStreamIntentFromMetadata(metadata: Record<string, unknown> | undefined): boolean | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  return readBoolean(metadata.stream)
+    ?? readBoolean(metadata.outboundStream)
+    ?? readBoolean(metadata.inboundStream);
+}
+
 function readHeaderCaseInsensitive(
   headers: Record<string, string> | undefined,
   target: string
@@ -74,13 +87,11 @@ export class ProviderRequestPreprocessor {
       typeof acceptHeader === 'string' && acceptHeader.toLowerCase().includes('text/event-stream')
         ? true
         : undefined;
-    const streamFlag = typeof streamFromAcceptHeader === 'boolean'
-      ? streamFromAcceptHeader
-      : typeof requestCarrier?.stream === 'boolean'
-        ? requestCarrier.stream
-        : typeof requestMetadata?.stream === 'boolean'
-          ? requestMetadata.stream
-          : undefined;
+    const metadataStreamIntent = readStreamIntentFromMetadata(requestMetadata);
+    const requestStreamIntent = readBoolean(requestCarrier?.stream);
+    const streamFlag = streamFromAcceptHeader === true || metadataStreamIntent === true
+      ? true
+      : requestStreamIntent ?? metadataStreamIntent;
     if (runtimeMetadata) {
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
         runtimeMetadata.metadata = {};

@@ -977,6 +977,134 @@ fn project_responses_client_payload_for_client_restores_client_visible_response_
 }
 
 #[test]
+fn project_responses_client_payload_for_client_synthesizes_required_action_for_pending_function_calls() {
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_pending_exec",
+            "object": "response",
+            "status": "completed",
+            "model": "provider-internal-model",
+            "output": [{
+                "id": "fc_call_exec_1",
+                "type": "function_call",
+                "status": "completed",
+                "name": "exec_command",
+                "call_id": "call_exec_1",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            }]
+        }
+    });
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+
+    assert_eq!(output["response"]["status"], "requires_action");
+    assert_eq!(
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["id"],
+        "call_exec_1"
+    );
+    assert_eq!(
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert_eq!(
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["arguments"],
+        "{\"cmd\":\"pwd\"}"
+    );
+}
+
+#[test]
+fn project_responses_client_payload_for_client_keeps_completed_when_tool_output_already_present() {
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_completed_exec",
+            "object": "response",
+            "status": "completed",
+            "model": "provider-internal-model",
+            "tool_outputs": [{
+                "tool_call_id": "call_exec_1",
+                "output": "/tmp/ws"
+            }],
+            "output": [{
+                "id": "fc_call_exec_1",
+                "type": "function_call",
+                "status": "completed",
+                "name": "exec_command",
+                "call_id": "call_exec_1",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            }]
+        }
+    });
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+
+    assert_eq!(output["response"]["status"], "completed");
+    assert!(output["response"].get("required_action").is_none());
+}
+
+#[test]
+fn project_responses_client_payload_for_client_mixed_message_and_function_calls_uses_standard_requires_action() {
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_mixed_pending",
+            "object": "response",
+            "status": "completed",
+            "model": "provider-internal-model",
+            "output_text": "must not be client-visible before tool outputs",
+            "output": [
+                {
+                    "id": "msg_mixed_1",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "must not be client-visible before tool outputs"
+                        }
+                    ]
+                },
+                {
+                    "id": "fc_call_exec_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                },
+                {
+                    "id": "fc_call_exec_2",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_2",
+                    "arguments": "{\"cmd\":\"ls\"}"
+                }
+            ]
+        }
+    });
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+
+    assert_eq!(output["response"]["status"], "requires_action");
+    assert_eq!(output["response"]["output_text"], Value::Null);
+    assert_eq!(
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["id"],
+        "call_exec_1"
+    );
+    assert_eq!(
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][1]["id"],
+        "call_exec_2"
+    );
+    let output_items = output["response"]["output"]
+        .as_array()
+        .cloned()
+        .expect("output array");
+    assert!(output_items
+        .iter()
+        .all(|item| item["type"] != Value::String("message".to_string())));
+}
+
+#[test]
 fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_projects_done() {
     let patch =
         "*** Begin Patch\n*** Add File: tmp/apft/01-sse.txt\n+hello from sse\n*** End Patch";

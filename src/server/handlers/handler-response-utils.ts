@@ -645,6 +645,98 @@ function logSseClientCloseDiagnosis(
   }
 }
 
+function summarizeSseFrameForLog(frame: string): Record<string, unknown> | null {
+  const lines = frame.split(/\r?\n/);
+  const eventName = lines.find((line) => line.startsWith('event:'))?.slice('event:'.length).trim();
+  const dataText = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trim())
+    .join('\n');
+  const summary: Record<string, unknown> = {};
+  if (eventName) {
+    summary.event = eventName;
+  }
+  if (!dataText || dataText === '[DONE]') {
+    if (dataText === '[DONE]') {
+      summary.done = true;
+    }
+    return Object.keys(summary).length > 0 ? summary : null;
+  }
+  try {
+    const parsed = JSON.parse(dataText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      summary.dataKind = typeof parsed;
+      return summary;
+    }
+    const record = parsed as Record<string, unknown>;
+    const response =
+      record.response && typeof record.response === 'object' && !Array.isArray(record.response)
+        ? (record.response as Record<string, unknown>)
+        : undefined;
+    const requiredAction =
+      (record.required_action && typeof record.required_action === 'object' && !Array.isArray(record.required_action)
+        ? record.required_action
+        : undefined)
+      ?? (response?.required_action && typeof response.required_action === 'object' && !Array.isArray(response.required_action)
+        ? response.required_action
+        : undefined);
+    const output =
+      Array.isArray(record.output) ? record.output
+      : Array.isArray(response?.output) ? response.output
+      : [];
+    const functionCallCount = output.filter((item) => {
+      return item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call';
+    }).length;
+    const requiredToolCalls =
+      requiredAction
+      && typeof requiredAction === 'object'
+      && !Array.isArray(requiredAction)
+      && typeof (requiredAction as Record<string, unknown>).submit_tool_outputs === 'object'
+      && !Array.isArray((requiredAction as Record<string, unknown>).submit_tool_outputs)
+      && Array.isArray(((requiredAction as Record<string, unknown>).submit_tool_outputs as Record<string, unknown>).tool_calls)
+        ? (((requiredAction as Record<string, unknown>).submit_tool_outputs as Record<string, unknown>).tool_calls as unknown[]).length
+        : undefined;
+    if (typeof record.type === 'string') {
+      summary.type = record.type;
+    }
+    if (typeof record.status === 'string') {
+      summary.status = record.status;
+    } else if (typeof response?.status === 'string') {
+      summary.status = response.status;
+    }
+    if (typeof record.finish_reason === 'string') {
+      summary.finishReason = record.finish_reason;
+    } else if (typeof response?.finish_reason === 'string') {
+      summary.finishReason = response.finish_reason;
+    }
+    if (requiredAction) {
+      summary.hasRequiredAction = true;
+    }
+    if (requiredToolCalls !== undefined) {
+      summary.requiredToolCalls = requiredToolCalls;
+    }
+    if (functionCallCount > 0) {
+      summary.outputFunctionCalls = functionCallCount;
+    }
+    return Object.keys(summary).length > 0 ? summary : null;
+  } catch {
+    summary.dataParse = 'non_json';
+    return summary;
+  }
+}
+
+function logSseFrameProjection(
+  requestLabel: string,
+  stage: string,
+  frame: string
+): void {
+  const summary = summarizeSseFrameForLog(frame);
+  if (!summary) {
+    return;
+  }
+  logPipelineStage(stage, requestLabel, summary);
+}
+
 function createSseClientResponseClosedError(): Error & { code: string; name: string; retryable: boolean } {
   return Object.assign(new Error('CLIENT_RESPONSE_CLOSED'), {
     code: 'CLIENT_DISCONNECTED',
@@ -1694,8 +1786,7 @@ export async function sendPipelineResponse(
     const preStartClientClosed =
       res.destroyed
       || (res as unknown as { writableEnded?: boolean }).writableEnded === true
-      || (res as unknown as { writableFinished?: boolean }).writableFinished === true
-      || clientConnectionState?.disconnected === true;
+      || (res as unknown as { writableFinished?: boolean }).writableFinished === true;
     if (preStartClientClosed) {
       const details = {
         status,
@@ -1775,6 +1866,7 @@ export async function sendPipelineResponse(
       if (options?.recordSnapshot !== false) {
         clientSseSnapshotRecorder?.record(frame);
       }
+      logSseFrameProjection(requestLabel, 'response.sse.write_frame', frame);
       try {
         res.write(frame);
       } catch (error) {
@@ -2034,7 +2126,10 @@ export async function sendPipelineResponse(
         trigger,
         streamEnded,
         sawTerminalEvent: finishTracker.seenTerminalEvent,
-        finishReason: finishTracker.finishReason
+        finishReason: finishTracker.finishReason,
+        lastRawFrame: lastRawClientFrameSummary ?? undefined,
+        lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+        probe: contractProbe.probe ?? undefined
       };
       if (closeBeforeStreamEnd) {
         logSseClientCloseDiagnosis(requestLabel, {
@@ -2057,6 +2152,8 @@ export async function sendPipelineResponse(
     };
     let ssePending = '';
     let clientWriteQueue = Promise.resolve();
+    let lastProjectedClientFrameSummary: Record<string, unknown> | null = null;
+    let lastRawClientFrameSummary: Record<string, unknown> | null = null;
     const responsesSseProjectionState: ResponsesSseClientProjectionState = {
       pendingApplyPatchArgumentDeltas: {},
       applyPatchCallIds: [],
@@ -2081,8 +2178,19 @@ export async function sendPipelineResponse(
         .then(async () => projectClientSseFrame(frame, errorLabel))
         .then((normalizedFrame) => {
           if (!normalizedFrame) {
+            logPipelineStage('response.sse.project_frame', requestLabel, {
+              emit: false,
+              raw: summarizeSseFrameForLog(frame) ?? undefined
+            });
             return;
           }
+          lastRawClientFrameSummary = summarizeSseFrameForLog(frame);
+          lastProjectedClientFrameSummary = summarizeSseFrameForLog(normalizedFrame);
+          logPipelineStage('response.sse.project_frame', requestLabel, {
+            emit: true,
+            raw: lastRawClientFrameSummary ?? undefined,
+            projected: lastProjectedClientFrameSummary ?? undefined
+          });
           writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
         })
         .catch((error) => {

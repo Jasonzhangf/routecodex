@@ -134,6 +134,35 @@ describe('request log color registry', () => {
     })).toBe(expectedColor);
   });
 
+  it('uses one registered tmux color for request, response, and usage lines', () => {
+    const tmuxSessionId = 'tmux-same-color-log-family';
+    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    let requestSessionId = 'request-specific-session';
+    for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === expectedColor; index += 1) {
+      requestSessionId = `request-specific-session-${index}`;
+    }
+    const requestSessionColor = resolveSessionAnsiColor(requestSessionId);
+
+    registerRequestLogContext('req-same-color', {
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: requestSessionId
+    });
+
+    const requestLine = colorizeRequestLog('▶ [/v1/responses] request req-same-color started', 'req-same-color');
+    const responseLine = colorizeRequestLog('✅ [/v1/responses] request req-same-color completed', 'req-same-color');
+    const usageLine = colorizeRequestLog('[usage] req=req-same-color', 'req-same-color');
+
+    expect(expectedColor).toBeDefined();
+    expect(requestSessionColor).toBeDefined();
+    expect(requestSessionColor).not.toBe(expectedColor);
+    expect(requestLine.startsWith(String(expectedColor))).toBe(true);
+    expect(responseLine.startsWith(String(expectedColor))).toBe(true);
+    expect(usageLine.startsWith(String(expectedColor))).toBe(true);
+    expect(requestLine.startsWith(String(requestSessionColor))).toBe(false);
+    expect(responseLine.startsWith(String(requestSessionColor))).toBe(false);
+    expect(usageLine.startsWith(String(requestSessionColor))).toBe(false);
+  });
+
   it('colors virtual-router-hit lines from sid without request context', () => {
     const sessionId = 'session-vr-hit-direct-sid';
     const expectedColor = resolveSessionAnsiColor(sessionId);

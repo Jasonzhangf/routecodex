@@ -170,8 +170,16 @@ export function logUsageSummary(
     latencyMs: number;
     timingRequestIds?: string[];
     logSessionColorKey?: unknown;
+    clientTmuxSessionId?: unknown;
+    client_tmux_session_id?: unknown;
+    tmuxSessionId?: unknown;
+    tmux_session_id?: unknown;
+    rccSessionClientTmuxSessionId?: unknown;
+    rcc_session_client_tmux_session_id?: unknown;
     sessionId?: unknown;
+    session_id?: unknown;
     conversationId?: unknown;
+    conversation_id?: unknown;
     projectPath?: unknown;
     firstContentAtMs?: number;
     lastContentAtMs?: number;
@@ -191,11 +199,20 @@ export function logUsageSummary(
   }
   const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
   const latency = info.latencyMs.toFixed(1);
-  registerRequestLogContext(requestId, {
+  const requestLogContext = {
     logSessionColorKey: info.logSessionColorKey,
+    clientTmuxSessionId: info.clientTmuxSessionId,
+    client_tmux_session_id: info.client_tmux_session_id,
+    tmuxSessionId: info.tmuxSessionId,
+    tmux_session_id: info.tmux_session_id,
+    rccSessionClientTmuxSessionId: info.rccSessionClientTmuxSessionId,
+    rcc_session_client_tmux_session_id: info.rcc_session_client_tmux_session_id,
     sessionId: info.sessionId,
-    conversationId: info.conversationId
-  });
+    session_id: info.session_id,
+    conversationId: info.conversationId,
+    conversation_id: info.conversation_id
+  };
+  registerRequestLogContext(requestId, requestLogContext);
   const timingSuffix = formatRequestTimingSummary(requestId, {
     latencyMs: info.latencyMs,
     requestIds: info.timingRequestIds,
@@ -290,11 +307,7 @@ export function logUsageSummary(
   const tokenSuffix = cumulativeTotals.alltimeTokens > 0
     ? ` ${ANSI_WHITE}tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}${ANSI_RESET}`
     : '';
-  const requestColor = resolveRequestLogColorToken(requestId, {
-    logSessionColorKey: info.logSessionColorKey,
-    sessionId: info.sessionId,
-    conversationId: info.conversationId
-  }) ?? '';
+  const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
   const usage = info.usage;
   const inputTokens = usage?.prompt_tokens ?? 'n/a';

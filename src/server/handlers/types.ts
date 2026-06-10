@@ -48,8 +48,16 @@ export interface PipelineExecutionResult {
     requestStartedAtMs: number;
     timingRequestIds?: string[];
     logSessionColorKey?: unknown;
+    clientTmuxSessionId?: unknown;
+    client_tmux_session_id?: unknown;
+    tmuxSessionId?: unknown;
+    tmux_session_id?: unknown;
+    rccSessionClientTmuxSessionId?: unknown;
+    rcc_session_client_tmux_session_id?: unknown;
     sessionId?: unknown;
+    session_id?: unknown;
     conversationId?: unknown;
+    conversation_id?: unknown;
     projectPath?: unknown;
     firstContentAtMs?: number;
     lastContentAtMs?: number;

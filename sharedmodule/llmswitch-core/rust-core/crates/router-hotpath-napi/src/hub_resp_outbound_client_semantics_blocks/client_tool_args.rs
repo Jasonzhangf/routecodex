@@ -908,12 +908,204 @@ fn project_responses_client_body_for_client_core(
     responses_payload: &Value,
     tools_raw: &Value,
 ) -> Value {
-    let normalized = normalize_responses_tool_call_arguments_for_client(responses_payload, tools_raw);
+    let normalized =
+        normalize_responses_tool_call_arguments_for_client(responses_payload, tools_raw);
     if has_responses_freeform_apply_patch_tool(tools_raw) {
         convert_apply_patch_function_calls_to_custom_tool_calls(&normalized)
     } else {
         normalized
     }
+}
+
+fn collect_client_visible_resolved_tool_ids(payload: &Map<String, Value>) -> HashSet<String> {
+    let mut resolved = HashSet::<String>::new();
+    if let Some(outputs) = payload.get("tool_outputs").and_then(Value::as_array) {
+        for entry in outputs {
+            let Some(row) = entry.as_object() else {
+                continue;
+            };
+            for key in ["tool_call_id", "call_id", "id"] {
+                if let Some(tool_id) = row.get(key).and_then(Value::as_str) {
+                    let trimmed = tool_id.trim();
+                    if !trimmed.is_empty() {
+                        resolved.insert(trimmed.to_string());
+                        if let Some(stripped) = trimmed.strip_prefix("fc_") {
+                            if !stripped.is_empty() {
+                                resolved.insert(stripped.to_string());
+                            }
+                        }
+                        resolved.insert(format!("fc_{}", trimmed));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for entry in output {
+            let Some(row) = entry.as_object() else {
+                continue;
+            };
+            if row.get("type").and_then(Value::as_str) != Some("function_call_output") {
+                continue;
+            }
+            for key in ["tool_call_id", "call_id", "id"] {
+                if let Some(tool_id) = row.get(key).and_then(Value::as_str) {
+                    let trimmed = tool_id.trim();
+                    if !trimmed.is_empty() {
+                        resolved.insert(trimmed.to_string());
+                        if let Some(stripped) = trimmed.strip_prefix("fc_") {
+                            if !stripped.is_empty() {
+                                resolved.insert(stripped.to_string());
+                            }
+                        }
+                        resolved.insert(format!("fc_{}", trimmed));
+                    }
+                }
+            }
+        }
+    }
+    resolved
+}
+
+fn synthesize_required_action_for_pending_tool_calls(payload: &Value) -> Value {
+    let Some(record) = payload.as_object() else {
+        return payload.clone();
+    };
+    let has_required_action = record
+        .get("required_action")
+        .and_then(Value::as_object)
+        .and_then(|required_action| {
+            required_action
+                .get("submit_tool_outputs")
+                .and_then(Value::as_object)
+                .and_then(|submit| submit.get("tool_calls"))
+                .and_then(Value::as_array)
+        })
+        .map(|calls| !calls.is_empty())
+        .unwrap_or(false);
+    if has_required_action {
+        return payload.clone();
+    }
+
+    let resolved_tool_ids = collect_client_visible_resolved_tool_ids(record);
+    let mut pending_calls = Vec::<Value>::new();
+    let mut has_visible_message_output = false;
+    if let Some(output) = record.get("output").and_then(Value::as_array) {
+        for entry in output {
+            let Some(row) = entry.as_object() else {
+                continue;
+            };
+            if row.get("type").and_then(Value::as_str) == Some("message") {
+                let message_has_visible_text = row
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items.iter().any(|item| {
+                            item.as_object()
+                                .and_then(|content| content.get("type"))
+                                .and_then(Value::as_str)
+                                == Some("output_text")
+                                && item
+                                    .as_object()
+                                    .and_then(|content| content.get("text"))
+                                    .and_then(Value::as_str)
+                                    .map(str::trim)
+                                    .map(|value| !value.is_empty())
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+                if message_has_visible_text {
+                    has_visible_message_output = true;
+                }
+            }
+            if row.get("type").and_then(Value::as_str) != Some("function_call") {
+                continue;
+            }
+            let call_id = row
+                .get("call_id")
+                .or_else(|| row.get("id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let name = row
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let arguments = row
+                .get("arguments")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "{}".to_string());
+            let (Some(call_id), Some(name)) = (call_id, name) else {
+                continue;
+            };
+            if resolved_tool_ids.contains(call_id) || resolved_tool_ids.contains(&format!("fc_{}", call_id)) {
+                continue;
+            }
+            pending_calls.push(serde_json::json!({
+                "id": call_id,
+                "type": "function",
+                "name": name,
+                "arguments": arguments,
+                "function": {
+                    "name": name,
+                    "arguments": arguments,
+                }
+            }));
+        }
+    }
+
+    if pending_calls.is_empty() {
+        return payload.clone();
+    }
+
+    let mut out = record.clone();
+    out.insert(
+        "status".to_string(),
+        Value::String("requires_action".to_string()),
+    );
+    out.insert(
+        "required_action".to_string(),
+        serde_json::json!({
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": pending_calls
+            }
+        }),
+    );
+    if has_visible_message_output {
+        if let Some(output_items) = out.get_mut("output").and_then(Value::as_array_mut) {
+            output_items.retain(|entry| {
+                entry.as_object()
+                    .and_then(|row| row.get("type"))
+                    .and_then(Value::as_str)
+                    != Some("message")
+            });
+        }
+        out.insert("output_text".to_string(), Value::Null);
+    }
+    Value::Object(out)
+}
+
+fn restore_pending_tool_contract(payload: &Value) -> Value {
+    let Some(record) = payload.as_object() else {
+        return payload.clone();
+    };
+    if record.get("output").is_some() {
+        return synthesize_required_action_for_pending_tool_calls(payload);
+    }
+    let Some(response) = record.get("response") else {
+        return payload.clone();
+    };
+    let next_response = synthesize_required_action_for_pending_tool_calls(response);
+    if next_response == *response {
+        return payload.clone();
+    }
+    let mut out = record.clone();
+    out.insert("response".to_string(), next_response);
+    Value::Object(out)
 }
 
 pub(crate) fn project_responses_client_payload_for_client(
@@ -922,7 +1114,8 @@ pub(crate) fn project_responses_client_payload_for_client(
     metadata: &Value,
 ) -> Value {
     let projected = project_responses_client_body_for_client_core(responses_payload, tools_raw);
-    restore_client_visible_response_payload(&projected, metadata)
+    let restored_tool_contract = restore_pending_tool_contract(&projected);
+    restore_client_visible_response_payload(&restored_tool_contract, metadata)
 }
 
 pub(crate) fn project_responses_client_body_for_client(

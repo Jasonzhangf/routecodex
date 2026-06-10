@@ -117,6 +117,43 @@ describe('usage logger timing summary', () => {
     homedirSpy.mockRestore();
   });
 
+  it('uses tmux session color for every usage line before request session id', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+    const { resolveSessionAnsiColor } = await import('../../../../../src/utils/session-log-color.js');
+
+    const tmuxSessionId = 'tmux-usage-color-stable';
+    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    let requestSessionId = 'usage-per-request-session';
+    for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === expectedColor; index += 1) {
+      requestSessionId = `usage-per-request-session-${index}`;
+    }
+    const requestSessionColor = resolveSessionAnsiColor(requestSessionId);
+
+    logUsageSummary('req_usage_color', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      routeName: 'tools',
+      poolId: 'tools-primary',
+      finishReason: 'stop',
+      latencyMs: 120,
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: requestSessionId,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const renderedLines = rendered.split('\n');
+    expect(expectedColor).toBeDefined();
+    expect(requestSessionColor).toBeDefined();
+    expect(requestSessionColor).not.toBe(expectedColor);
+    expect(renderedLines.length).toBeGreaterThan(0);
+    for (const line of renderedLines) {
+      expect(line.startsWith(String(expectedColor))).toBe(true);
+      expect(line.startsWith(String(requestSessionColor))).toBe(false);
+    }
+  });
+
   it('prints cache read and cache write metrics in realtime session token line', async () => {
     process.env.ROUTECODEX_LOG_ROLLUP = '1';
     process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
