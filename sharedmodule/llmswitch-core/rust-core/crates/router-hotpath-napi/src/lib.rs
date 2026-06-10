@@ -709,21 +709,6 @@ pub fn normalize_reasoning_in_anthropic_payload_json(input_json: String) -> Napi
 }
 
 #[napi]
-pub fn normalize_req_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::normalize_req_inbound_reasoning_payload_json(input_json)
-}
-
-#[napi]
-pub fn should_normalize_reasoning_payload_json(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::should_normalize_reasoning_payload_json(input_json)
-}
-
-#[napi]
-pub fn normalize_reasoning_payload_v2_json(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::normalize_reasoning_payload_v2_json(input_json)
-}
-
-#[napi]
 pub fn build_slim_responses_context_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::build_slim_responses_context_json(input_json)
 }

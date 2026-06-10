@@ -52,6 +52,10 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveServerToolFollowupSnapshotJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentContextSnapshotJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeToolCallIdStyleCandidateJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeReqInboundReasoningPayloadJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('shouldNormalizeReasoningPayloadJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeReasoningPayloadV2Json');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('applyReqInboundSemanticLiftJson');
   });
 
   test('does not require retired servertool continuation helper exports', () => {

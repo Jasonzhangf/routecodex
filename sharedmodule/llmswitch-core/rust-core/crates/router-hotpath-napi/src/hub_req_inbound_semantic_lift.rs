@@ -437,11 +437,3 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
 
     chat_envelope
 }
-
-#[napi]
-pub fn apply_req_inbound_semantic_lift_json(input_json: String) -> NapiResult<String> {
-    let input: ReqInboundSemanticLiftApplyInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = apply_req_inbound_semantic_lift(input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}

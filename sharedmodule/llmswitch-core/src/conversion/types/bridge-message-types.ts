@@ -1,5 +1,3 @@
-import type { NativeReqInboundSemanticLiftApplyInput } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
-
 export type BridgeContentPart = {
   type: string;
   text?: string;
@@ -51,4 +49,4 @@ export type BridgeToolDefinition = {
   };
 };
 
-export type BridgeNativeEnvelope = NativeReqInboundSemanticLiftApplyInput['chatEnvelope'];
+export type BridgeNativeEnvelope = Record<string, unknown>;
