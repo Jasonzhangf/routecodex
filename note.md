@@ -1,5 +1,23 @@
 # Provider 模块瘦身 - 探索发现
 
+## 2026-06-10 5520 tools/search/multimodal 轮询配置
+
+- 配置真源是 `~/.rcc/config.toml`；5520 使用 `virtualrouter.routingPolicyGroups."gateway_priority_5520"`。
+- 本次按 Jason 指定只改 `tools` / `search` / `multimodal` 三个 route：保留目标 `fwd.gpt.gpt-5.4-mini`、`asxs.gpt-5.4-mini`、`cc.gpt-5.4-mini`，从 priority 改为显式 round-robin；`web_search` 未改。
+
+## 2026-06-10 双端口 SSE 请求挂起取证
+
+- 运行态 0.90.3053 在 5555/5520 health 均为 `ok/ready/pipelineReady` 时仍出现请求长时间 Working；当前主进程 PID 56257 使用 Node 26 执行全局安装包，日志集中写入 `~/.rcc/logs/server-5520.log`。
+- 真实日志证据显示两个端口都有 `response.sse.client_close` 且 `streamEnded=false/sawTerminalEvent=false/closeBeforeStreamEnd=true`；5520 最新样本 `openai-responses-router-gpt-5.5-20260610T080516658-332110-5454`，5555 历史样本包含 `...T010621250-332060-5404` 与多条 MiniMax tool_calls close-before-terminal。
+- `handler-response-utils.ts` 当前 close-before-terminal cleanup 先 `await clientWriteQueue`，再调用 `scheduleClientCloseAbort()`；若 projection/write queue 卡住，upstream stream 不会被立即 destroy，外层 session 观测会停留在 Working/keepalive。
+- 另一个缺口是普通 SSE 总时限没有默认值，仅在 `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS` 或视频 request option 存在时生效；无配置时 upstream/SSE 可无限保活。
+
+## 2026-06-10 servertool learned-note Rust closeout slice
+
+- Current servertool Rustification resume found remaining verifier warnings for `stop-message-blocked-report-ts-migration-pending` and `stopless-learned-note-ts-migration-pending`.
+- NAPI/native export files are dirty from other workers, so this slice avoids bridge wiring and focuses on `servertool-core` contract hardening.
+- `stopless_learned_note_contract.rs` already owns learned-note write planning; next lock is to add Rust tests for missing/invalid schema, negative timestamps, and workdir precedence so TS `readNonEmptyString` / `persistStoplessLearnedNoteOnAllowStop` cannot remain the semantic truth when bridge wiring becomes safe.
+
 ## 2026-06-09 stopless router-direct one-shot root cause
 
 - Live symptom reviewed: stopless looked like it ran once then stopped while request usage/log showed `router-direct:*`. Direct/router-direct by contract does not enter Hub response chatprocess/servertool, so stopless continuation cannot trigger after direct send.
@@ -7,6 +25,108 @@
 - TS changes are bridge/IO only: native direct decision receives metadata; router-mode entry precheck relays to Hub before `executeRouterDirectPipelineForPort`; provider-direct remains direct.
 - Verification PASS: `cargo fmt --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi --check`; `cargo test -p router-hotpath-napi responses_direct_route_decision_tests --lib` 7/7; `npm run verify:responses-direct-tool-shape-contract`; direct payload Jest 14/14; route-level focused Jest 3/3; `npm run verify:servertool-rust-only`; root `npx tsc --noEmit --pretty false`; scoped `git diff --check`.
 - Deployment blocked by unrelated dirty-worktree gates: `npm run install:global` fails at `verify:architecture-feature-map-growth-discipline` because config `feature_id` anchors lack function/verification-map entries; `node scripts/build-core.mjs` / llmswitch-core `tsc` fail because HubPipeline orchestration re-exports reference removed NAPI builder/metadata-policy exports. No restart/live smoke was performed after this fix.
+
+## 2026-06-09 配置模块 review 证据
+
+- `docs/architecture/function-map.yml` / `verification-map.yml` 当前 active feature 共 44 个；`manager.* / daemon_admin.* / server.* / cli.*` 有登记，但 `loadRouteCodexConfig` / `UnifiedConfigPathResolver` / `materializeRouteCodexConfig` / `buildVirtualRouterInputV2` / `loadProviderConfigsV2` 在 function-map / verification-map 中无条目，配置核心区未进入 feature-map 锁。
+- 证据：`src/config` + `src/providers/core/config` + `src/cli/config` 共扫 36 个文件，`feature_id:` anchor 命中 0；`npm run verify:function-map-compile-gate` PASS 仅说明已登记的 44 个 feature 自洽，不代表 config core 已被覆盖。
+- `src/config/routecodex-config-loader.ts` 是 runtime 主入口之一，但 `src/server/handlers/config-admin-handler.ts`、`src/server/runtime/http-server/daemon-admin/providers-handler.ts`、`src/cli/commands/config.ts`、`src/commands/provider-update.ts` 仍存在散点 parse/write，未形成全局唯一 reader/writer。
+- `src/config/unified-config-paths.ts` 仍返回 `source: 'fallback'` 且 warning 文案为 `using fallback path`；同时保留 legacy filename preference（`default.json` / `routecodex.json` / `config.json`）。这与项目 no-fallback 规则和配置唯一真源收口方向存在张力。
+- `config/modules.json` / `config/semantic-map.json` 更像旧模块清单与字段索引，不是项目级 function map：缺 `feature_id`、`owner_module`、`allowed_paths`、`forbidden_paths`、`required_tests`、`required_gates`。
+
+## 2026-06-09 配置模块改造计划文档
+
+- 新增实现文档：`docs/goals/config-ssot-function-map-closeout-plan.md`
+- 计划主轴：`config.path_resolution_surface` / `config.user_config_codec` / `config.provider_config_codec` / `config.user_config_materialization` / `config.user_config_write_surface` / `config.provider_config_write_surface`
+- phase 顺序：先补 function-map 和 red test，再收口 reader，再收口 writer，再删 fallback，最后加 gate 并物理删重。
+
+## 2026-06-09 release/install 收口 goal 文档
+
+- 新增实现文档：`docs/goals/release-install-closeout-plan.md`
+- 当前 `/goal` 目标不再只是配置模块，而是收口 release/install 真源：
+  - 纳入所有已被主线引用的未跟踪文件
+  - 改造 `scripts/install-release.sh` 为独立安装器
+  - 审计并删除/废弃 `scripts/install.sh`、`scripts/quick-install.sh`
+  - 对齐 Node 版本与 README 口径
+  - 真实执行安装、重启、`/health` 验证
+- 成功标准明确要求 live 证据，不能只看 CLI 文件落地或 `npm run install:global` 成功。
+
+## 2026-06-09 direct/relay session hang root cause
+
+- 当前“请求挂死 20+ 分钟、SSE 还在心跳”的共性症状，已收敛到 `src/server/runtime/http-server/executor/servertool-followup-fail-fast.ts`。
+- 真根因不是 SSE 心跳本身，而是 nested servertool followup 的 host-side fail-fast 默认值被硬编码成 `900_000ms`；当 client-inject / reenter promise 不返回时，外层 SSE 只能持续保活，看起来像“乱发心跳 + session 卡死”。
+- direct/relay 两侧都能复现，是因为它们共享 `executeServerToolReenterPipeline()` / `executeServerToolClientInjectDispatch()` 的 nested wait helper，而不是各自独立的 provider transport 问题。
+- 本轮修复方向：把 nested followup timeout 收紧为 fail-fast ceiling，并用单测锁死，防止默认值再次漂回 15 分钟级。
+- Jason 进一步纠正后，确认更上游的 direct 边界也有缺口：Rust `evaluate_responses_direct_route_decision` 之前只把 `stop_message_*` followup 送回 Hub relay，却明确允许 generic `serverToolFollowup=true` 留在 direct。该分支与“direct 不需要也不允许触发 followup”冲突，现已改成任何 servertool followup marker 都必须 relay，避免 direct 进入 followup 相关挂死链路。
+
+## 2026-06-09 release/install 脚本收口
+
+- `scripts/install-release.sh` 原状态已确认不合格：
+  - 只在仓库根直接 `npm run build:min`
+  - 不会自动准备依赖
+  - 不做隔离构建目录
+  - 成功判定只看 `routecodex/rcc` 命令是否存在，不做 runtime `/health`
+- 已改为：
+  - 隔离构建目录复制必要源码/脚本/sharedmodule
+  - 若依赖缺失自动 `npm ci` / `npm install`
+  - 严格 Node 版本 `>=20 <26`
+  - 显式检查 `tmux`、`cargo`、`curl`
+  - 构建后安装 release snapshot 到 `~/.rcc/install/current`
+  - 安装后执行 `rcc restart --port ${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}` 并轮询 `/health`
+- 旧 `scripts/install.sh`、`scripts/quick-install.sh` 已物理删除；`scripts/ci/repo-sanity.mjs` 新增 gate，禁止旧安装脚本复活。
+- 文档口径已同步到 `README.md`、`docs/INSTALLATION_AND_QUICKSTART.md`、`scripts/README.md`、`docs/agent-routing/20-build-test-release-routing.md`。
+- 后续产物复核发现 manifest 元数据有两个审计风险：
+  - `install-manifest.json` 原先不含 `releaseId/installRoot/distCli`，不利于审计当前 snapshot 真身。
+  - `sourceRepoRoot` 原先会写成隔离构建临时目录，安装完成后该目录被清理，属于悬空值。
+- 已修复：
+  - `scripts/install-release-snapshot.mjs` 现在写入 `releaseId/sourceRepoRoot/buildRepoRoot/installRoot/distCli`
+  - `scripts/install-release.sh` 在调用 snapshot installer 时显式传 `ROUTECODEX_RELEASE_SOURCE_ROOT=$SOURCE_ROOT`
+- 真实复核结果：
+  - 当前 snapshot: `routecodex-0.90.3044-2026-06-09T143731Z`
+  - `~/.rcc/install/current/install-manifest.json` 已显示真实 repo root `/Users/fanzhang/Documents/github/routecodex`
+  - `routecodex restart --port 5520` 最终成功，`/health` -> `{"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3044"}`
+  - 重启窗口内 health probe 会经历 `network_error -> starting -> timeout -> ok`，属等待中的正常阶段，不是最终失败。
+
+## 2026-06-09 配置模块 SSOT 收口已完成切面
+
+- 新增 shared writer owner：`src/config/user-config-writer.ts`、`src/config/provider-config-writer.ts`
+- 新增 feature anchor：`src/config/unified-config-paths.ts`、`user-config-codec.ts`、`provider-config-codec.ts`、`routecodex-config-loader.ts`、`user-config-loader.ts`、writer files
+- `UnifiedConfigPathResolver` 已删除 fallback path result；`resolveRouteCodexConfigPath()` 改为 strict fail-fast；`routecodex-config-loader.ts` 不再回退 `resolveRccConfigFile()`
+- 已切 shared codec/writer：
+  - `src/server/handlers/config-admin-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/providers-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/routing-policy.ts`
+  - `src/server/runtime/http-server/daemon-admin/control-handler.ts`
+  - `src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts`
+  - `src/commands/provider-update.ts`
+  - `src/commands/provider-update-maintenance.ts`
+  - `src/cli/commands/config.ts`（switch-group 写回）
+- 新增测试：
+  - `tests/config/unified-config-paths.spec.ts`
+  - `tests/config/config-writer.spec.ts`
+- 新增 gate script：`package.json -> verify:config-ssot`
+- 验证通过：
+  - `npm run verify:config-ssot`
+  - `npm run verify:function-map-compile-gate`
+  - `npx tsc --noEmit --pretty false`
+  - `git diff --check`
+  - real smoke：tmp `config.toml` + `provider/config.v2.toml` 下 `loadRouteCodexConfig()` 读取成功；`decodeUserConfigFile + writeUserConfigFile` 改 `httpserver.host` 后再次 `loadRouteCodexConfig()` 成功
+
+## 2026-06-09 配置模块 SSOT 收口剩余散点
+
+- CLI 仍有旧配置读取/写回：`src/cli/commands/start.ts`、`stop.ts`、`restart.ts`、`env.ts`、`init/basic.ts`、`launcher/utils.ts`、`port-group-resolver.ts`
+- daemon-admin 仍有配置相关旁路：`credentials-handler.ts`（`config.json` read fallback 文案/路径）
+- command 仍有旧配置旁路：`src/commands/validate.ts`
+- 文案/legacy 路径残留仍多：`config.json` / `config.v2.json` 帮助文本、注释、迁移脚本、README
+- `oauthBrowser` top-level 通过 `updateUserConfigStringScalar` 可写入，但当前 `loadRouteCodexConfig()` 的 v2 single-source 校验不接受该字段；这是现存 schema/setting 边界问题，尚未在本轮扩 scope 修复
+
+## 2026-06-09 direct passthrough timing 口径问题
+
+- 现象已用真实日志复现：5520/5555 `router-direct:*` 多条 usage 显示 `total=几秒到几十秒 internal=同值 external=0ms`，但同时间 5555 managed/relay MiniMax 样本显示 `provider.send=56292ms external=56292ms internal=1091ms`。
+- 根因收敛到 direct passthrough 观测链：`executeRouterDirectPipeline` / `executeProviderDirectPipeline` 包住真实 provider `processIncomingDirect/processIncoming` 调用，但结果没有返回 provider elapsed；`buildRouterDirectResult` / `buildProviderDirectResult` 只设置 `requestStartedAtMs=Date.now()`，handler usage 端缺 `externalLatencyMs` 后默认 0，并把总耗时归入 internal。
+- 唯一修复点：direct passthrough pipeline 返回 provider 外部耗时，direct result projection 写入 `usageLogInfo.externalLatencyMs`；禁止改 `usage-logger` fallback 口径来掩盖缺字段。
+- 修复已落地：direct pipeline 现在返回 `externalLatencyStartedAtMs` 和 `externalLatencyMs`；JSON direct usage 使用 provider call elapsed，SSE direct usage 在 stream completion 时按 `Date.now() - externalLatencyStartedAtMs` 统计完整外部流耗时，避免 upstream stream 长耗时继续落到 internal。
+- 验证已通过：`git diff --check`；`npx tsc --noEmit --pretty false`；direct pipeline Jest 25/25；direct metadata + SSE usage + JSON usage ESM Jest 14/14（handler ESM 组用 `--forceExit` 收 open handle）。
 
 ## 2026-06-09 servertool skeleton-config Rust slice
 
@@ -218,6 +338,15 @@
   6. 仍缺“同一路径第三轮 allow-stop 成功闭环”或“budget exhausted live 闭环”，当前被 provider `mini27` 的上游业务错误阻断。
 
 ## 2026-06-09 stopless live matrix continued: needs_user_input / stream ok, budget exhausted still blocked
+
+## 2026-06-09 5555 config remove mimo
+
+- 用户要求：从 `~/.rcc/config.toml` 的 `gateway_priority_5555` 路由组移除 `mimo`，然后按项目规范重启 5555。
+- 已修改真源：`gateway_priority_5555` 的 `coding/thinking/tools/search/web_search/multimodal/longcontext/default` target 列表已删除 `mimo.mimo-v2.5`；对应 weighted `weights` 也同步删除 `mimo`。
+- 已验证：
+  - `routecodex restart --port 5555` 返回 `✔ RouteCodex server restarted: localhost:5555`
+  - `curl http://127.0.0.1:5555/health` 返回 `status=ok ready=true pipelineReady=true version=0.90.3039`
+  - `curl http://127.0.0.1:5555/v1/responses` 最小请求返回 `pong`
 
 - 新增 `needs_user_input=true` 的 5555 live 证据：
   - `request_id=openai-responses-minimonth.key1-MiniMax-M2.7-20260609T034903270-322859-4742`
@@ -18715,6 +18844,69 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `ChatMessage` and `ChatToolCall` are not imported from `chat-envelope.ts` by active source/tests/docs scripts; they only type `ChatEnvelope.messages` in the same file.
 - Made both module-internal and extended `hub.chat_envelope_type_surface` residue docs/gate to block re-export revival.
 
+## 2026-06-09 stopless prebuilt SSE triage
+- Live symptom: /v1/responses stream on port 5555 completed with finish_reason=stop but no stopless exec_command projection.
+- Verified red test: openai-responses prebuilt SSE with finish_reason=stop and no goal state bypassed bridge; convertProviderResponse was not called, so stopless gate could not run.
+- Fix direction: provider-response-converter prebuilt SSE branch must enter bridge for servertools-enabled stop/unknown finish, regardless of goal state; goal state is only logging/ledger context, not default stopless activation gate.
+
+2026-06-09 5555 repeated-send triage:
+- User requirement clarified: internal concurrency saturation must not queue/wait first; if alternatives exist, switch immediately. Waiting/backoff only allowed when no alternative provider remains.
+- Request `req_1780990870201_d0d96b20` on port 5555 was not a hang: `15:41:10` VR hit `1token.key1.gpt-5.5`, `15:41:13` completed, `total=667ms attempts=1 fail=0`, no provider-switch/backoff line.
+- Request `req_1780991008314_5449794b` did repeat internally: `15:43:28` hit `sdfv.key1.gpt-5.5` -> upstream `HTTP_429` -> `[provider-switch] decision=provider_backoff_then_reroute backoff=1000ms` -> `15:43:36` second VR hit to `1token.key1.gpt-5.5` -> `15:43:42` completed.
+- Separate same-provider retry evidence still present on 5555: request `openai-responses-router-gpt-5.5-20260609T153914091-328150-1494` logged `UPSTREAM_STREAM_TIMEOUT` then `decision=recoverable_backoff_same_provider backoff=1000ms`.
+- Current live behavior therefore still violates the clarified rule: direct path can wait/backoff and can retry same provider before exhausting alternative providers.
+- Fix applied: `resolveProviderRetryExecutionPlan` now sets `skipBackoffWait` for `HTTP_429` when current provider is excluded and alternative route candidate exists; `resolveProviderRetryBackoffPlan` returns zero wait in that case, preserving reroute decision but removing internal 1s pause.
+- Verification: `pnpm jest tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts --runInBand` PASS including new assertions `retryBackoffMs=0` / `recoverableBackoffMs=0` for 429 reroute.
+- Residual verification gap: full `tests/server/runtime/http-server/request-executor.spec.ts` currently fails in repo due missing `sharedmodule/llmswitch-core/dist/...native-chat-process-node-result-semantics.js` and related dist imports, so it cannot currently serve as clean gate for this change.
+
+2026-06-09 retry/reroute immediate alternative policy
+- changed executor policy: recoverable failure + route-pool alternative => exclude current provider immediately, skip same-provider retry, skip internal backoff wait (0ms), including priority mode.
+- live evidence baseline before fix: 5555 req_1780991008314_5449794b showed HTTP_429 then decision=provider_backoff_then_reroute backoff=1000ms before switching provider; another request showed recoverable_backoff_same_provider.
+- pending verification: rebuild core dist, rerun focused executor tests, build/install/restart 5555, then live probe for no same-provider retry/backoff when alternative exists.
+
+2026-06-09 session log color stability fix:
+- User clarified same session must keep the same color across requests; different sessions should be visually distinguishable.
+- Root cause risk: host/VR log color could prioritize per-request `sessionId` or recolor `[virtual-router-hit]` from request registry when the line lacked explicit `sid=...`, causing request-shaped color changes.
+- Fix: centralized color owner remains `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`; added `resolveSessionLogColorKey` with priority `logSessionColorKey -> clientTmuxSessionId/tmuxSessionId -> sessionId -> conversationId`.
+- Host request/usage/completed logs now carry `usageLogInfo.logSessionColorKey`; business `sessionId` / `conversationId` recording is unchanged. VR hit recoloring no longer falls back from `req=` to request registry; it only recolors when the line has explicit `sid=` or bracket session.
+- Verification so far: sharedmodule build PASS; focused Jest `virtual-router-hit-log` + `request-log-color` PASS 25/25; root/sharedmodule tsc PASS; package import probe proved `tmux-live-stable` keeps same ANSI color across two request session ids and differs from `tmux-live-other`.
+2026-06-09 stopless live regression: user log shows [port:5555] /v1/responses openai-responses-minimax.key1-MiniMax-M3-20260609T152336877-328058-1402 completed status=200 finish_reason=stop without visible requires_action/stop_message_auto. Need trace prebuilt SSE bridge/gate; 5520 VR hit in same pasted block is separate concurrent request, not evidence for 5555 stopless.
+
+2026-06-09 stopless Rust stop-gateway carrier closeout:
+- User corrected invariant: global finish_reason truth must have one owner: chat process stop-gateway. TS must not collect or reinterpret finish_reason for stopless decisions.
+- Fix slice: removed TS `collectFinishReasonsFromCurrentPayload` and `finish_reasons` bridge field from stop-message-auto handler/native TS type/tests; Rust `stop-message-core` keeps deprecated `finish_reasons` only as compatibility input and ignores it.
+- Rust HubPipeline effect plan now fail-fast normalizes `servertoolRuntimeAction.stopGateway` and carries it into execution plans; provider-response TS only writes that Rust plan into `__rt.stopGatewayContext` before running servertool shell.
+- Verification PASS: `cargo test -p stop-message-core --lib`; `cargo test -p servertool-core`; `cargo test -p servertool-cli`; `cargo test -p router-hotpath-napi hub_pipeline_lib::effect_plan --lib -- --nocapture`; provider-response/native-decision/servertool CLI focused Jest; `npm run verify:servertool-rust-only`; root and llmswitch-core `tsc`; `node scripts/build-core.mjs`.
+## 2026-06-09 5555 hanging session audit
+
+- Live process is healthy, not a dead/hung server: `curl http://127.0.0.1:5555/health` returned `{"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3039"}` at `2026-06-09 16:26:01 CST`.
+- Active runtime process chain:
+  - PID `87705`: `/opt/homebrew/lib/node_modules/routecodex/dist/index.js /opt/homebrew/lib/node_modules/routecodex/config/modules.json`
+  - parent PID `84461`: `node /opt/homebrew/bin/routecodex start --snap`
+  - parent shell PID `51649`: `-zsh`
+  - tmux pane owner from `tmux list-panes -a`: session `tcm` pane `0.0` pid `51649`
+- No blocked app-level session was found in 5555 logs; request summaries show `session=unknown`, so the observed delay is request-level provider latency/reroute rather than one stuck RouteCodex conversation session.
+- Key slow 5555 request evidence from `~/.rcc/log/config.toml/ports/5555/server-5555.log`:
+  - line `395365`: request `openai-responses-router-gpt-5.5-20260609T161836794-328327-1671` started at `16:18:36`
+  - line `395366`: VR selected `sdfv.key1.gpt-5.5`
+  - line `395368`: first failure rerouted immediately with `backoff=0ms`
+  - line `395369`: rerouted at `16:18:48` to `1token.key1.gpt-5.5`
+  - line `395387`: second failure `UPSTREAM_STREAM_TIMEOUT`, again `backoff=0ms`
+  - lines `395388-395389`: VR searched next alternatives at `16:22:48`
+  - lines `395391-395395`: request completed at `16:24:53`, `total=125081ms`, `internal=989ms`, `external=124090ms`, `provider.send=124090ms`
+- Another slow sample on 5555 confirms the same shape:
+  - line `395360`: request total `57383ms`, `internal=1091ms`, `external=56292ms`
+- Conclusion for this audit only: 5555 was not hanging because of internal queue/session stall; the long wait was dominated by upstream/provider time on the live request path, while the new reroute behavior was active (`exclude_and_reroute`, `backoff=0ms`).
+
+## 2026-06-09 stopless Rust-only terminal payload slice
+- Current slice: move stop-message-auto assistant stop text extraction and terminal visible payload prefix/replace/strip-reasoning planning from TS helper logic into Rust servertool-core stop_visible_text, then keep TS as native-call shell only.
+- Reason: stopless finish/visibility semantics must have one Rust owner; TS must not walk choices/output or mutate terminal payload semantics locally.
+
+## 2026-06-09 stopless orchestration action rustification
+- Slice: moved stop_message_flow CLI/terminal/followup action decision from TS engine branch to Rust servertool-core::stopless_orchestration_contract::plan_stopless_orchestration_action. TS engine now only calls planStoplessOrchestrationActionWithNative and executes returned action.
+- Guard: verify-servertool-rust-only now requires Rust owner/native export/wrapper and forbids engine.ts local flowId === stop_message_flow / stopMessageTerminalFinal branch semantics.
+- Verified so far: cargo test -p servertool-core stopless_orchestration --lib; cargo test -p servertool-core --lib; cargo test -p router-hotpath-napi servertool_core_blocks --lib; npm run verify:servertool-rust-only; llmswitch-core tsc; focused Jest servertool stopless suites.
+
 2026-06-09 HubPipeline provider response conversion type surface pruning:
 - Exact scan found `ProviderResponseConversionOptions` and `ProviderResponseConversionResult` have no external source import; they only name `convertProviderResponse` parameter/return/callback shapes in `provider-response.ts`.
 - Made both module-internal while keeping `convertProviderResponse` exported; added residue gate to block re-export revival.
@@ -18731,42 +18923,21 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan found `parseProviderKeyJson` only fed TS `analyzeProviderKey`, `parseProviderKeyPayload`, the required-export list, and `virtual_router_provider_key.rs`; no runtime consumer imported the wrapper.
 - Removed the Rust module, NAPI required export, TS wrapper/parser/type; added residue gate to block `parseProviderKeyJson` / `analyzeProviderKey` / parser/type/module revival.
 
-2026-06-09 HubPipeline stop-message state codec dead export removal:
-- Exact scan found `virtual_router_stop_message_state_codec.rs` only had Rust module/required-export wiring and no TS wrapper/runtime consumer.
-- Removed the Rust module plus `serializeStopMessageStateJson` / `deserializeStopMessageStateJson` required exports; shared helper tests now scan live files only.
-- Active architecture docs now point stopless state shape/lookup/transition to servertool-core contracts instead of the retired standalone VR codec.
-- Verified focused residue Jest, llmswitch-core tsc, function-map gate, Rust shared helper gates, and Rust Hub control/data contract tests.
-
-2026-06-09 HubPipeline target-utils dead export removal:
-- Exact scan found `hub_pipeline_target_utils.rs` only had Rust module/required-export wiring for `applyTargetMetadataJson`, `applyTargetToSubjectJson`, and `extractTargetModelIdJson`; no TS wrapper/runtime consumer.
-- Removed the Rust module and required exports; shared helper tests now scan live files only.
-- Target metadata/application semantics remain in Rust `req_process_stage2_route_select.rs` mainline.
-- Verified focused residue Jest, llmswitch-core tsc, function-map gate, Rust shared helper gate, and Rust Hub control/data contract tests.
+## 2026-06-09 stopless goal-state Rust sync closeout
+- Slice: moved stopless RCC fence consumption / directive type collection / body-forward vs private-only rewrite / next goal-state planning into Rust `servertool-core::stopless_goal_state_contract::plan_stopless_goal_state_sync`.
+- TS `handlers/stopless-goal-state.ts` now only locates the mutable text holder and performs routing-state IO; Rust native plan owns directive transition semantics and rewritten text.
+- Jest failure root cause: tests reused real `~/.rcc/state/routing/session-goal-sync*.json`; setting only `RCC_HOME`/`ROUTECODEX_HOME` was insufficient in this native/Jest path. Focused test now sets `ROUTECODEX_SESSION_DIR` to a temp dir.
+- Verification PASS: servertool-core Rust test, router-hotpath NAPI bridge test, focused Jest `tests/sharedmodule/stopless-goal-state.spec.ts`, `npm run verify:servertool-rust-only`, llmswitch-core tsc, `node scripts/build-core.mjs`, `git diff --check`.
 
 ## 2026-06-09 stopless decision-context signal Rust slice
 - Slice: moved stop-message-auto decision-context signal parsing into Rust `servertool-core::stopless_decision_context_signals::plan_stopless_decision_context_signals`.
 - Rust now owns port stopMessage disabled detection, Responses submit_tool_outputs resume detection, and captured request Plan-mode detection; TS handler/runtime-utils only pass `adapterContext` / runtime metadata / captured request into native and consume the three booleans.
 - Verification PASS: `cargo fmt` for servertool-core/router-hotpath-napi, servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, native export probe, and `git diff --check`.
 
-2026-06-09 HubPipeline SSE sniffer standalone helper export removal:
-- Exact scan found `inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, and `validateSseEventTypeJson` had no TS wrapper/runtime consumer outside required exports.
-- Removed standalone NAPI wrappers and required exports; internal Rust helper functions remain used by `parseSseEventWithConfigJson` / stream parser exports.
-- Verified focused residue/native-required Jest, llmswitch-core tsc, function-map gate, Rust SSE sniffer tests, Rust Hub control/data contract tests, and diff check.
-
-2026-06-09 HubPipeline image attachment metadata dead export deletion:
-- Exact scan: `chat_post_governed_normalization_semantics.rs` only fed required native export `buildImageAttachmentMetadataJson`; no TS wrapper/runtime consumer.
-- Change: removed the Rust module, module declaration, required native export, and added residue gate/docs/function-map/verification-map/MEMORY entries.
-- Verification: residue scan only docs/gate/memory refs; hub-pipeline residue Jest + SSE required-export Jest, llmswitch-core tsc, function-map compile gate, Rust hub_pipeline_contracts, and `git diff --check` passed before staging.
-
 ## 2026-06-09 stop-message default config Rust slice
 - Slice: moved stop-message-auto default `enabled/text/maxRepeats` final planning into Rust `servertool-core::stop_message_default_config::plan_stop_message_default_config`.
 - TS still performs config/env IO only; Rust owns tombstone-disable, config-over-env priority, text trimming, maxRepeats positive floor, and built-in default text/repeat policy.
 - Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, native export probe, and `git diff --check`.
-
-2026-06-09 HubPipeline zero-consumer native export cleanup:
-- Exact scan: `extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson` had no TS runtime consumer; lowercase-ai `normalizeReasoningInOpenaiPayloadJson` remains live and retained.
-- Change: removed standalone web-search hint helper/export, uppercase OpenAI alias export, response-only tool-name governance DTO/helper/export/tests, default-rules NAPI export, and added residue/map/memory docs.
-- Verification: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust hub_tool_governance_semantics 3/3; Rust hub_pipeline_contracts 11/11; `git diff --check` PASS.
 
 ## 2026-06-09 stopless decision context goal Rust slice
 - Slice: moved request-scoped/persisted stopless goal status normalization from `stop-message-auto.ts` into Rust `servertool-core::stopless_decision_context_goal::plan_stopless_decision_context_goal_status`.
@@ -18797,6 +18968,170 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Exact scan: `runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` had no TS/runtime or required-export consumer after `runHubPipelineStageJson` retirement; active hits were only Rust owner-pair wrappers/functions and tests preserving the old API.
 - Change: removed public NAPI wrappers, internal `run_req_inbound_pipeline` / `run_req_process_pipeline` / `run_resp_outbound_pipeline` stage functions, legacy DTOs, and tests that existed only for the retired stage API.
 - Verification PASS: residue scan only docs/gate/memory refs; residue Jest 124/124; llmswitch-core tsc PASS; function-map compile gate PASS; Rust `hub_pipeline` tests 179/179; `git diff --check` PASS.
+
+2026-06-09 HubPipeline orchestration public wrapper surface deletion:
+- Exact scan: standalone Hub orchestration TS wrappers for metadata/protocol/node-result/web-search/resume had no runtime consumer after excluding their source files, aggregate re-export, required-export gate, docs, and memory. Remaining Rust helper functions are still private/internal and covered by Rust Hub tests.
+- Change: removed `native-hub-pipeline-orchestration-semantics-search-resume.ts`; removed zero-consumer TS `*WithNative` exports, Rust NAPI JSON wrappers/re-exports, and required-export entries for standalone metadata/protocol/node-result/web-search/resume surfaces. Kept active wrappers: `executeHubPipelineWithNative`, `runHubPipelineLibWithNative`, provider-response effect/servertool planners, `normalizeHubEndpointWithNative`, `extractModelHintFromMetadataWithNative`, `resolveSseProtocolWithNative`, `resolveStopMessageRouterMetadataWithNative`, `buildRouterMetadataInputWithNative`, and `coerceStandardizedRequestFromPayloadWithNative`.
+- Guard: added residue gate for the retired wrapper/export symbol set and updated function-map/verification-map retired-surface notes.
+- Verification in progress: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS before map/doc finalization; remaining gates pending.
+
+## 2026-06-09 stop-message persist plan Rust slice
+- Slice: moved schema-gate compare budget, next max/used, and persisted snapshot default/source/stage planning from `stop-message-auto.ts` into Rust `servertool-core::stop_message_persist_plan::plan_stop_message_persist_snapshot`.
+- TS now only calls native plan and performs metadata/state IO; Rust owns budget floor/fallback and snapshot normalization.
+- Verification PASS: servertool-core Rust tests, router-hotpath NAPI bridge test, llmswitch-core tsc, `npm run verify:servertool-rust-only`, `node scripts/build-core.mjs`, focused stop-message Jest suites, and scoped `git diff --check`.
+
+## 2026-06-09 /v1/models gpt-5.5 capability contract closeout
+- Root cause: `src/server/runtime/http-server/routes.ts` still hardcoded an older Codex metadata preset. Bare `gpt-5.5` lacked `context_window/max_context_window` and exposed stale `prefer_websockets=false` / `minimal_client_version=0.98.0` compared with current Codex `models-manager/models.json`.
+- Fix: added `feature_id: server.models_capability_contract`; updated bare `gpt-5.5` preset to `description=Frontier model for complex coding, research, and real-world work.`, `prefer_websockets=true`, `minimal_client_version=0.124.0`, `context_window=max_context_window=272000`; provider-prefixed aliases now keep the same capability fields while still overriding runtime `context_window/max_context_window`.
+- Docs/gates: added `docs/design/codex-model-capability-contract.md`; added `npm run verify:models-capability-contract`; wired it into `build`, `build:min`, and `verify:architecture-ci`; added function-map + verification-map entries for `server.models_capability_contract`.
+- Verification PASS:
+  - `npm run verify:models-capability-contract`
+  - `npm run verify:function-map-compile-gate`
+  - `npm run build:min`
+  - `npm run install:global`
+  - `routecodex restart --port 5555`
+  - `routecodex --version` -> `0.90.3043`
+  - `rcc --version` -> `0.90.3043`
+  - `curl http://127.0.0.1:5555/health` -> `version=0.90.3043 ready=true`
+  - `curl http://127.0.0.1:5555/v1/models` live evidence:
+    - bare `gpt-5.5`: `prefer_websockets=true minimal_client_version=0.124.0 context_window=272000 max_context_window=272000`
+    - `1token.gpt-5.5`: `prefer_websockets=true minimal_client_version=0.124.0 context_window=900000 max_context_window=900000`
+    - `windsurf.gpt-5.5`: `prefer_websockets=true minimal_client_version=0.124.0 context_window=200000 max_context_window=200000`
+  - `curl http://127.0.0.1:5555/v1/responses -d '{"model":"gpt-5.5","input":"ping"}'` -> `status=completed model=gpt-5.5`
+
+## 2026-06-09 function-map gate gap audit
+- Current function-map has 50 feature rows and verification-map has matching feature coverage; compile gate design validates registered feature map/anchor/test/gate consistency, but does not require every large source directory to be registered.
+- Large areas with no direct directory-level function-map reference in current map scan: `src/tools`, `src/debug`, `src/provider-sdk`, `src/monitoring`, `src/message-center`, `sharedmodule/llmswitch-core/src/sse`, `sharedmodule/llmswitch-core/src/conversion/compat`, `sharedmodule/llmswitch-core/src/tools`.
+- Large areas only partially covered by broad or adjacent entries: `src/providers` (error policy / responses direct / metadata references only; auth/profile/provider runtime families mostly uncovered), `src/server/runtime/http-server` (entry/direct/models/daemon-admin covered; executor/direct pipeline details still partially uncovered), and `sharedmodule/llmswitch-core/src/native/router-hotpath` (many wrapper files covered by broad Hub/VR features, but not all wrapper families have feature-specific gates).
+
+## 2026-06-09 SSE function-map closeout research
+- SSE is live runtime surface, not dead experimental code: Hub inbound uses `defaultSseCodecRegistry.convertSseToJson`, Hub response outbound uses `convertJsonToSse`, Responses provider decodes upstream SSE, and HTTP handlers emit client SSE.
+- Current SSE source scale: 36 TS files / about 12,182 lines. `sse-to-json` is about 5,070 lines; `json-to-sse` about 3,570; `types` about 1,910; `shared` about 1,265.
+- Current project map has only `hub.response_provider_sse_materialization` for one SSE edge; missing owners for registry, stream parse boundary, Responses encode/decode, Chat projection, and Anthropic/Gemini projection.
+- Design plan written: `docs/goals/sse-function-map-architecture-closeout-plan.md`.
+- First-stage SSE map/gate wiring added 6 SSE features, source anchors, `verify:sse-architecture-boundary`, and architecture-ci wiring. PASS: `npm run verify:sse-architecture-boundary`; Rust provider_sse gate 4/4 passed. `verify:function-map-compile-gate` now passes SSE anchor/builder stages but is blocked by unrelated current config.* forbidden mentions in `src/commands/validate.ts` and `src/cli/commands/init/basic.ts`.
+- Focused SSE behavior tests show next整改 scope: Chat SSE still emits named `event:` frames where data-only is expected; native stream-mode tests fail on current native invalid-payload/unknown-protocol contract; handler SSE metadata guard can emit a metadata frame before terminal error. These are runtime behavior closeout items, not solved by first-stage function-map gate.
+
+## 2026-06-09 SSE function-map closeout final evidence
+- First-stage SSE ownership/gate closeout is now green: 6 SSE features are in `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml`, owner source files carry `feature_id:` anchors, and `verify:sse-architecture-boundary` is wired into `verify:architecture-ci`.
+- The earlier focused failures were fixed as boundary behavior, not a broad runtime rewrite: Chat SSE emits data-only frames, Responses writer no longer has fallback serialization, client SSE frames reject internal metadata controls/carriers while direct passthrough preserves plain provider `metadata`, unknown SSE protocols preserve payload with `should_stream=false`, and empty client protocol still fail-fast.
+- Follow-up correction after user repair: direct passthrough SSE guard must buffer until a complete SSE frame before emitting, otherwise split `data:` chunks can leak internal metadata before the second chunk fails. The guard now supports both LF and CRLF frame boundaries while preserving ordinary provider `metadata` bytes.
+- Latest PASS evidence recorded for this slice: `npm run verify:sse-architecture-boundary`; `npm run verify:function-map-compile-gate`; focused SSE Jest 8 suites / 45 tests with `--forceExit`; Rust `cargo test -p router-hotpath-napi provider_sse --lib -- --nocapture`; Rust `cargo test -p router-hotpath-napi sse_stream --lib -- --nocapture`; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `node scripts/build-core.mjs`; `git diff --check`.
+- Scope note: no live `/v1/responses` stream smoke was claimed for this first-stage architecture gate closeout.
+
+## 2026-06-09 配置模块 SSOT 收口继续推进（CLI/daemon-admin 残留切面）
+
+- 本轮已把以下 live 入口从 `resolveRccConfigFile/resolveRccPathForRead + JSON.parse` 收口到 shared config 真源：
+  - `src/cli/commands/start.ts`
+  - `src/cli/commands/stop.ts`
+  - `src/cli/commands/restart.ts`
+  - `src/cli/commands/env.ts`
+  - `src/cli/commands/port-group-resolver.ts`
+  - `src/commands/validate.ts`
+  - `src/server/runtime/http-server/daemon-admin/credentials-handler.ts`
+  - `src/cli/commands/init.ts`
+  - `src/cli/commands/init/basic.ts`
+  - `src/cli/commands/launcher/utils.ts`
+- 路径解析统一口径：
+  - 读取 existing config 的命令入口改走 `resolveRouteCodexConfigPath()`
+  - init/create 入口默认写 `~/.rcc/config.toml`，显式 `--config` 允许新文件路径，不走 strict existing-file resolver
+- 新增 shared provider sync codec/writer：
+  - `src/config/provider-config-codec.ts` 增加 `decodeProviderConfigFileSync`
+  - `src/config/provider-config-writer.ts` 增加 `writeProviderConfigFileSync`
+  - `init/basic.ts` 不再本地 `JSON.parse` / `writeFileSync(JSON.stringify(...))` 处理 provider v2 config
+- `oauthBrowser` 边界已收口：
+  - `src/config/user-config-loader.ts` 允许 top-level `oauthBrowser`
+  - `credentials-handler.ts` 改为 `resolveRouteCodexConfigPath + decodeUserConfigFile`
+  - 这消除了“可写但 loadRouteCodexConfig 校验失败”的 schema 不一致
+- routing source 列表文案已不再只认 `Default config.json`；现在同时列 `config.toml` / `config.json`
+
+## 2026-06-09 配置模块 SSOT 本轮验证证据
+
+- PASS: `npx tsc --noEmit --pretty false`
+- PASS: `git diff --check`
+- PASS: `npm run verify:config-ssot`
+- Real smoke PASS:
+  - 临时 `config.toml` + `provider/config.v2.toml`，初始 `oauthBrowser=camoufox`
+  - `updateUserConfigStringScalar(... key=oauthBrowser, value=firefox)` 后再次 `decodeUserConfigFile` 与 `loadRouteCodexConfig`
+  - 结果：`beforeOauthBrowser=camoufox`，`updatedOauthBrowser=firefox`，`afterOauthBrowser=firefox`，`providerIds=[demo]`
+- 当前非 config blocker：
+  - `npm run verify:function-map-compile-gate` 失败于现有 SSE gate：`sse.codec_registry_surface: needs canonical builder hits in at least 2 files, got 1`
+  - 这不是本轮 config 改动引入的失败，但在整个 goal 完成前仍需要处理或绕开为已知外部 blocker
+
+## 2026-06-09 配置模块 SSOT 剩余扫尾
+
+- 仍有 legacy 文案/帮助文本残留：
+  - `src/cli/commands/port.ts`
+  - `src/commands/provider-update.ts`
+  - `src/commands/provider-update-maintenance.ts`
+  - `src/config/README.md`
+  - `src/commands/migrate-user-config.ts`
+- 仍有少量非主链但与配置相关的 JSON deep-clone/legacy 表述：
+  - `src/cli/commands/init.ts` / `src/cli/commands/init/workflows.ts` 的 `JSON.parse(JSON.stringify(...))` 目前是模板 clone，不是 config parse 真源，但后续可继续去掉
+- `UnifiedConfigPathResolver` 仍保留 `config.json` / `default.json` / `routecodex.json` preference 列表与扫描逻辑；fallback result 已删，但 legacy filename 口径尚未完全物理收缩
+
+## 2026-06-09 配置模块 SSOT 收尾完成证据
+
+- 已继续物理删除/收口：
+  - `src/index.ts` 删除 `resolveRccPathForRead('config.json')` 默认配置旁路
+  - `src/token-daemon/server-utils.ts` 改走 `resolveRouteCodexConfigPath`
+  - `src/cli/commands/launcher-kernel.ts` 不再走 `resolveRccConfigFileForRead`
+  - `src/config/user-data-paths.ts` 删除未再使用的 `resolveRccConfigFile` / `resolveRccConfigFileForRead`
+  - `src/config/unified-config-paths.ts` 自动解析收紧为 strict TOML-first；不再自动扫 `routecodex.json/default.json/config.json`
+  - `src/commands/provider-update.ts` / `provider-update-maintenance.ts` / `src/cli/commands/port.ts` / `src/config/README.md` 同步 TOML-first 文案
+- 新增/更新测试：
+  - `tests/config/unified-config-paths.spec.ts` 新增“仅有 config.json 时 auto-resolve 必须失败”
+  - `tests/config/routecodex-config-loader.v2-single-source.spec.ts` auto-resolve 路径切换用例改为 `config.toml`
+  - `tests/commands/provider-update.command-core.spec.ts`
+  - `tests/commands/provider-update.command-maintenance.spec.ts`
+  - `tests/config/user-data-paths.spec.ts`
+- 最新验证 PASS：
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:config-ssot`
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/config/unified-config-paths.spec.ts tests/commands/provider-update.command-core.spec.ts tests/commands/provider-update.command-maintenance.spec.ts`
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/config/user-data-paths.spec.ts tests/config/unified-config-paths.spec.ts tests/config/routecodex-config-loader.v2-single-source.spec.ts`
+  - `npx tsc --noEmit --pretty false`
+  - `git diff --check`
+- 最新真实 smoke PASS：
+  - tmp `config.toml` + `provider/config.v2.toml`
+  - `loadRouteCodexConfig()` 初始读到 `oauthBrowser=camoufox`
+  - `updateUserConfigStringScalar(... oauthBrowser=firefox)` 后再次 `decodeUserConfigFile()` 与 `loadRouteCodexConfig()` 均读到 `firefox`
+  - `providerIds=[demo]`
+- 当前 completion audit 结果：
+  - config feature 已入 function-map / verification-map 且源码 anchor 齐全
+  - `verify:function-map-compile-gate` 与 `verify:config-ssot` 都已绿
+  - 配置主链 auto path 不再保留 fallback result，也不再自动扫 legacy `config.json/routecodex.json/default.json`
+  - grep 剩余的 `*-default.json` 仅为 auth token 文件命名，不属于 user/provider config 主链
+
+## 2026-06-09 stopless terminal schema allow-stop audit
+- Symptom under investigation: latest stopless appeared to execute one continuation and then stop.
+- Rust `stop-message-core::evaluate_stop_schema_gate` currently allows `stopreason=0|1` when only `reason` is non-empty; it does not require `has_evidence=1`, `evidence`, `done_steps`, `issue_cause`, `excluded_factors`, or `diagnostic_order`.
+- This can explain one-shot stopless: first followup asks for schema, model returns a shallow terminal schema, Rust accepts terminal stop before the intended multi-round evidence/root-cause/exclusion/order check is satisfied.
+- 2026-06-09 20:21 CST follow-up: repo HEAD `210c06239` already fixes this gate, but global `/opt/homebrew/lib/node_modules/routecodex` still had old native before reinstall. Probe on old global returned `allow_stop` for shallow blocked schema; repo dist returned `followup`.
+- Installed clean HEAD from `/private/tmp/routecodex-stopless-head-install.1781007235` to avoid packaging unrelated dirty worktree changes. `npm run install:global` build/install succeeded and refreshed `/Users/fanzhang/.rcc/install/current`; final dev-link step failed because clean worktree lacked local `sharedmodule/llmswitch-core/dist`, but global npm package and snapshot were already refreshed.
+- Post-install probes: both `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/.../native-stop-message-auto-semantics.js` and `/Users/fanzhang/.rcc/install/current/sharedmodule/llmswitch-core/dist/...` return `followup` + `stop_schema_has_evidence_missing` for shallow terminal blocked schema. `routecodex restart --port 5520` completed; `/v1/models` on 5520 returned 292 models; listener PID 24661 runs `/opt/homebrew/lib/node_modules/routecodex/dist/index.js`.
+
+## 2026-06-09 metadata leak runtime follow-up
+- Triggered by live 5520 SSE error after config SSOT install/start verify: client response contains internal carrier field \"metadata\" in response projection.
+- Next step: trace unique owner for response projection metadata leak and fix at source, not by filter/fallback.
+
+## 2026-06-09 1token 502 repro check
+- Trigger: 5520 thinking route hit 1token.key1.gpt-5.5 then provider-switch on HTTP_502 for request openai-responses-token.key1-gpt-5.5-20260609T205035126-330941-4285.
+- Goal: verify repro and determine whether outbound request shape caused 502 or upstream instability.
+- Runtime truth from `~/.rcc/provider/1token/config.v2.toml`: provider `1token` uses `baseURL = "https://one.1token.xyz"` with `type = "responses"`; current RouteCodex runtime therefore sends Responses traffic to `https://one.1token.xyz/responses`.
+- Sample truth: `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.5/req_1781009435126_cf33454f/provider-request.json` and the matching `sdfv` sample have identical `body` (`input/model/stream/tool_choice/tools`, `inputCount=131`, `model=gpt-5.5`, `stream=true`, `tools=12`). Difference is only URL/Authorization target, so this request does not show a 1token-only shape mutation.
+- Log repro truth: `~/.rcc/logs/server-5520.log` around lines `812858`, `813067`, `813078`, `813096`, `813353`, `813368`, `813389` shows repeated `1token.key1.gpt-5.5` direct hits on 5520 immediately failing with `router-direct.send ... statusCode=502`, then `provider-switch` reroutes to `sdfv`. This is multi-request repro, not a single flaky request.
+- Success counter-evidence on the same day: the same log shows `1token.key1.gpt-5.5` completed successfully earlier at `18:58:35` (`...329531-2875`), `19:16:45` (`...329667-3011`), and `19:19:09` (`...329689-3033`), all HTTP 200 on `/v1/responses`. Therefore provider shape/baseURL is not globally broken; the failure is time-window dependent.
+- Direct black-box probe with real auth on `2026-06-09 20:58 CST`: both `https://one.1token.xyz/responses` and `https://one.1token.xyz/v1/responses` returned `HTTP/2 502` with body `{\"error\":{\"message\":\"Upstream service temporarily unavailable\",\"type\":\"upstream_error\"}}`. This rules out the narrow hypothesis that adding `/v1` alone fixes the current 502 window.
+- Current conclusion: for this 5520 incident, evidence points to upstream/provider instability at 1token rather than RouteCodex outbound shape drift. `/responses` vs `/v1/responses` still deserves provider-contract confirmation, but it is not the proven cause of the current 502.
+
+## 2026-06-09 SSE idle timeout / keepalive ping closeout
+- User screenshot symptom: Codex client showed `Reconnecting ... Stream disconnected before completion: idle timeout waiting for SSE` after a long-running Responses stream, which is different from the earlier `stream closed before response.completed` terminal-contract bug.
+- Current `sendPipelineResponse` already emitted `: keepalive` SSE comment frames every 3s, but live client behavior implies comments alone are not sufficient to reset Codex idle timeout on some long-running `/v1/responses` sessions.
+- Minimal owner-only fix applied in `src/server/handlers/handler-response-utils.ts`: keep the existing comment heartbeat, and for `/v1/responses` plus `/v1/responses.submit_tool_outputs` also emit an explicit client-visible `event: ping` with `data: {"type":"ping"}` on the same keepalive schedule. No request/provider/router semantics changed.
+- Added targeted lock test `tests/server/handlers/handler-response-utils.responses-keepalive-ping.spec.ts`; verifies Responses SSE emits both `: keepalive` and `event: ping` before upstream data arrives.
+- Focused regression verified: `npx jest tests/server/handlers/handler-response-utils.responses-keepalive-ping.spec.ts --runInBand` PASS; `npx jest tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts --runInBand -t "repairs required_action streams with response.completed before response.done"` PASS; `npx tsc --noEmit --pretty false` PASS.
+- Residual risk: this fixes the server-side idle-heartbeat path we control, but full end-to-end proof still needs one real long-running Codex session to confirm the client stops reconnecting under prolonged silence windows.
 
 ## 2026-06-09 provider system architecture audit
 - 审计报告曾生成于未跟踪文件 `docs/reports/provider-system-architecture-audit-2026-06-09.md`，但后续复核发现它只被 `note.md` 自引用，不被主线代码/gate/docs 依赖；按“无悬空文件”规则已删除，不纳入 git。
@@ -18873,3 +19208,122 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
   - Temporary `dist` server on random port returned `/health` 200 and `/v1/models` 200 with 292 models on `0.90.3045`; minimal config had `pipelineReady=false`, so this is an HTTP entry smoke only.
   - Existing live ports 5520 and 5555 both returned `/health` 200 with `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3044`; `/v1/models` returned 292 models on both.
 - Boundary: did not install/restart live RouteCodex with `0.90.3045`; current live proof is health of existing installed runtime plus controlled blackbox provider-failure harness.
+## 2026-06-09 23:29 CST - responses stream session hang investigation
+
+- User correction: do not stop RouteCodex; inspect why multiple `/v1/responses` sessions hang.
+- Evidence from `/Users/fanzhang/.rcc/logs/server-5520.log`:
+  - `openai-responses-router-gpt-5.5-20260609T231611543-331891-5235`, `...T231650230-331896-5240`, and `...T231824026-331901-5245` all start, hit VR, then emit `servertool stop_message_auto ... finish_reason=stop ... result=trigger_stop_schema_missing decision=trigger`.
+  - Older same-shape requests `...T230437299-331876-5220` / `...331877-5221` later log `response.sse.client_close ... sawTerminalEvent=false finishReason=tool_calls closeBeforeStreamEnd=true`.
+  - Provider samples for these request IDs contain normal completed Responses payloads; hang candidate is response-side client-visible SSE terminal projection, not provider no-response.
+- Suspect owner: `src/server/handlers/handler-response-utils.ts` client SSE projection around required_action normalization and terminal probe repair; must verify before code change.
+
+## 2026-06-10 00:20 CST - responses SSE hang build/install/runtime closeout
+
+- Verified root cause/fix: `sharedmodule/llmswitch-core/src/sse/shared/writer.ts` `StreamWriter.handleBackpressure()` previously only waited for `drain`; under `PassThrough({ objectMode: true })` highWaterMark, `writableLength` could already be below the cap after listener registration, leaving terminal SSE projection stuck. Fix rechecks synchronously, registers close/error cleanup, and calls `checkDrain()` immediately.
+- Regression coverage: `tests/sharedmodule/responses-json-to-sse-backpressure.spec.ts` plus focused SSE terminal tests were already green before this build/install pass.
+- Build/install completed: `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS; `npm run install:global` PASS; `npm run install:release` PASS. Installed CLI/runtime version is `0.90.3048`; `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` both point to `releases/routecodex-0.90.3048-2026-06-09T161413Z`.
+- Restart/runtime evidence: release installer sent in-place restart for `127.0.0.1:5520`; `curl /health` on `127.0.0.1:5520` and `127.0.0.1:5555` returned `status=ok`, `ready=true`, `pipelineReady=true`, `version=0.90.3048`.
+- Live SSE evidence: `/v1/responses` stream smoke on 5520 and 5555 with `model=1token.gpt-5.5` returned `response.completed` + `response.done`, no `event: error`, visible text `RCC_SSE_OK`. Request IDs: `openai-responses-router-token.gpt-5.5-20260610T001613058-332055-5399` and `...T001613784-332056-5400`.
+- 10000 caveat confirmed: `127.0.0.1:10000` still returns curl 52 because `netstat -anv -p tcp` shows `netdisk_service:3396` listening on `127.0.0.1.10000` while RouteCodex PID `59573` listens on `*.10000`. Non-loopback `192.168.0.93:10000/health` and `100.66.1.82:10000/health` both return `0.90.3048` ready. LAN `/v1/responses` currently returns `PROVIDER_NOT_AVAILABLE`, not SSE hang.
+
+## 2026-06-10 build/global-install/restart requested
+
+- Jason requested current progress be compiled, built, globally installed, and server restarted. Execute project restart truth: build first, then `install:global`, then `routecodex restart --port 5555`/runtime health + real `/v1/responses` smoke. Avoid broad kill; do not mix unrelated dirty work into commit.
+- Outcome: root build completed and bumped dev version to `0.90.3049`; first `npm run build:dev` failed only at `install:global` because login shell resolved Node `v26.0.0`, which violates engines `>=20 <26`. Re-ran `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run install:global`, which rebuilt in isolated root and completed global install.
+- Runtime snapshot: `routecodex --version` and `rcc --version` both `0.90.3049`; `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` point to `releases/routecodex-0.90.3049-2026-06-09T163455Z`.
+- Restart: `routecodex restart --port 5555` used in-place signal restart; new listener PID `96889` owns `*:5555` and `*:5520`. `/health` on `127.0.0.1:5555`, `127.0.0.1:5520`, `192.168.0.93:10000`, and `100.66.1.82:10000` all returned `status=ok`, `ready=true`, `pipelineReady=true`, `version=0.90.3049`.
+- Live SSE: `/v1/responses` stream smoke passed on 5555 (`RCC_BUILD_5555_OK`) and 5520 (`RCC_BUILD_5520_OK`), both emitted `response.completed` and `response.done`, no `event: error`.
+- Hang observation during smoke: both requests sat in `pendingNoResponseId=2` until upstream `1token.key1.gpt-5.5` returned after about 128s external time; once upstream returned, response writer completed and pending cleared. This smoke did not reproduce an SSE writer hang.
+- Build gate note: `repo-sanity` required 9 existing untracked files to be added to the git index before build. `llmswitch-rustification-audit` then required refreshing `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json`; total non-native TS decreased (`27422 -> 23557` LOC, `129 -> 106` files), no new prod TS file, so this was stale baseline refresh rather than allowlist/fallback.
+
+## 2026-06-10 Hub response Rust closeout - zero-consumer native response wrappers
+
+- Audit result: after shared response wrapper deletion docs/tests, public native wrapper/required-export residue still exposed response helper surfaces with no live TS consumer: `collectToolCallsFromResponsesWithNative`, `resolveFinishReasonWithNative`, `normalizeResponsesToolCallIdsWithNative`, and `resolveToolCallIdStyleWithNative`.
+- Implementation: removed those exports from `native-shared-conversion-semantics*.ts` and removed the matching required-export entries. Kept Rust internal owner functions because full Rust response projection/Rust internals still use the underlying implementations.
+- Gate: expanded `tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts` to fail if the deleted public native wrapper/required-export surfaces return.
+- Verification PASS: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`; `npm run jest:run -- --runTestsByPath tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`.
+
+## 2026-06-10 01:10 CST - build/global install/restart 0.90.3050
+
+- User requested current progress be compiled, built, globally installed, and RouteCodex server restarted.
+- First `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:dev` completed the compile/build gates and bumped dev version to `0.90.3050`, then failed only at `install:global` because the nested login shell resolved Node `v26.0.0`; engine requires `>=20 <26`.
+- Re-ran `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh`; isolated `build:min`, global install, release snapshot refresh, dev llmswitch link, and managed restart completed.
+- Installed version evidence: `routecodex --version` and `rcc --version` both return `0.90.3050`; `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` both point to `releases/routecodex-0.90.3050-2026-06-09T170436Z`.
+- Health evidence after restart: `127.0.0.1:5555/health`, `127.0.0.1:5520/health`, `192.168.0.93:10000/health`, and `100.66.1.82:10000/health` all returned `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3050`. Loopback `127.0.0.1:10000` still returns curl 52 due the known local binding conflict; non-loopback 10000 is healthy.
+- Live smoke: `5520 /v1/responses` stream returned `RCC_BUILD_5520_3050_OK` with `response.completed` and `response.done`, no `event:error`.
+- Live smoke caveat: `5555 /v1/responses` stream produced only keepalive/ping until curl `--max-time 170` timed out; server log recorded `response.sse.client_close` for request `openai-responses-router-gpt-5.5-20260610T010621250-332060-5404` with `sawTerminalEvent=false`, then `pendingNoResponseId=0`. Health remained green. This is not a complete 5555 SSE success and should be inspected separately if 5555 live streaming behavior is the acceptance target.
+
+## 2026-06-10 Hub response apply_patch SSE projection closeout
+- Current slice: `src/server/handlers/handler-response-utils.ts` still owns Responses apply_patch client SSE projection semantics: `function_call -> custom_tool_call`, `response.function_call_arguments.delta/done` suppression/reconstruction, call_id state, and done dedupe.
+- Rust existing owner already normalizes apply_patch freeform arguments in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; this slice will add Rust-owned SSE frame projection plan and shrink TS to frame parse/write glue.
+- Verification note: root repo has no `Cargo.toml`; run router-hotpath Rust tests from `sharedmodule/llmswitch-core/rust-core`, not repository root.
+- Implementation verified: Rust now owns `project_responses_client_body_for_client` and `project_responses_sse_frame_for_client`; TS `handler-response-utils.ts` is parse/native-call/state-holder/frame-writer glue for this apply_patch client projection.
+- Verification PASS: focused Jest/blackbox/residue 3 suites 133 tests; Rust `hub_resp` 126/126; Rust `resp_process` 209 passed/1 ignored; Rust `hub_pipeline_contracts` 11/11; llmswitch-core tsc; `verify:hub-response-responses-chat-projection`; `verify:hub-response-provider-sse-materialization`; `verify:function-map-compile-gate`; `verify:servertool-rust-only`.
+- Review fix: `build_responses_payload_from_chat_json_matches_core_shape` had volatile generated `resp_<timestamp>` top-level ids when calling JSON wrapper and core separately; test now asserts valid response ids and compares stable semantic payload without top-level `id/created_at`.
+- Build/install/restart 0.90.3051 evidence: Node 22 `ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh` completed isolated `build:min`, global install, release snapshot refresh, dev llmswitch link, and managed restart. `routecodex --version` / `rcc --version` both `0.90.3051`; both install current roots point to `releases/routecodex-0.90.3051-2026-06-09T174905Z`.
+- Runtime evidence after restart: `/health` on `127.0.0.1:5555`, `127.0.0.1:5520`, `192.168.0.93:10000`, and `100.66.1.82:10000` all returned `status=ok ready=true pipelineReady=true version=0.90.3051`.
+- Live SSE evidence: 5555 `/v1/responses` returned `RCC_BUILD_5555_3051_OK` with `response.completed` + `response.done` and no `event:error` in ~5.5s. 5520 `/v1/responses` returned `RCC_BUILD_5520_3051_OK` with `response.completed` + `response.done` and no `event:error` in ~34s.
+- Server log evidence: 5555 request `openai-responses-router-gpt-5.5-20260610T015133777-332062-5406` hit `[port:5555 group:gateway_priority_5555] default/gateway-priority-5555-priority-default -> 1token.key1.gpt-5.5.gpt-5.5`, completed status 200 `finish_reason=stop`; `git diff --check` passed after install.
+2026-06-10 servertool rustification stopless trigger diagnosis:
+- Verified stopless decision was triggering; failure was after trigger. Current focused failure came from primary optional `vision_auto` running before `stop_message_auto` and Rust backend-route policy fail-fasting on internal carrier `__rt`.
+- Fixed TS runner boundary so primary optional hook errors skip only that optional hook and continue the same primary queue; mandatory/default execution still fail-fast. Also unwrapped native backend-route Error object so Rust errors are exposed.
+
+2026-06-10 servertool rustification CLI projection error/carrier closeout:
+- Confirmed stopless trigger path was active; projection failures can surface as NAPI object errors like {code:GenericFailure}.
+- Added Rust CLI contract text-level denial for private carriers reenterPipeline/providerInvoker/serverToolFollowup/serverToolFollowupSource plus metadata/snapshot/debugCarrier.
+- Native wrapper now turns object native errors into explicit capability-scoped errors instead of non-string object.
+- Verified PASS: cargo test -p servertool-core; cargo test -p servertool-cli; npm run verify:servertool-rust-only; npx tsc --noEmit --pretty false; focused servertool Jest 4 suites/27 tests. Commit c54fd4b52.
+
+## 2026-06-10 02:24 CST - build/global install/restart recheck
+
+- Jason requested current progress be compiled, built, globally installed, and server restarted.
+- Executed controlled path with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh`.
+- Build/install result: `build:min` PASS, Rust native packaged `router_hotpath_napi.node` and `routecodex-servertool`, llmswitch-core dist built, WebUI built, global npm install succeeded, runtime snapshots refreshed.
+- Restart result: `routecodex restart --port 5555` used managed in-place signal restart and completed.
+- Installed version: `routecodex --version` and `rcc --version` both `0.90.3051`.
+- Runtime snapshot: `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` both point to `releases/routecodex-0.90.3051-2026-06-09T182040Z`.
+- Health verified after restart: `127.0.0.1:5555`, `127.0.0.1:5520`, `192.168.0.93:10000`, and `100.66.1.82:10000` all returned `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3051`.
+- Live SSE verified: 5555 `/v1/responses` returned `response.completed` + `response.done`, no `event:error`, curl status 0, duration about 32.4s. 5520 `/v1/responses` returned `response.completed` + `response.done`, no `event:error`, curl status 0, duration about 5.2s.
+- Server log evidence: 5555 request `openai-responses-router-token.gpt-5.5-20260610T022210992-332065-5409` and 5520 request `openai-responses-router-token.gpt-5.5-20260610T022318303-332066-5410` both completed status 200 with `finish_reason=stop`; `pendingNoResponseId` returned to 0.
+- `git diff --check` PASS after install/restart.
+
+2026-06-10 servertool rustification verifier closeout:
+- Added verify:servertool-rust-only gate for native object error surfacing on CLI projection wrappers.
+- Gate now fails if buildClientExecCliProjectionOutputJson/buildClientVisibleProjectionShellJson revert to opaque non-string object behavior without capability-scoped native error text.
+- Verified PASS: npm run verify:servertool-rust-only; git diff --check for verifier. Commit f60cc0a60.
+
+2026-06-10 servertool CLI private carrier blackbox closeout:
+- Added routecodex-servertool blackbox test that servertool_fixture input containing serverToolFollowup text fails fast with SERVERTOOL_DENIED_INTERNAL_CARRIER and emits no stdout.
+- Verified PASS: cargo test -p servertool-cli (18 passed), cargo test -p servertool-core cli_contract --lib (35 passed), npm run verify:servertool-rust-only, git diff --check for cli_blackbox. Commit 7c8221eaa.
+# 2026-06-10 Hub response client projection validation
+
+- Focused Jest after moving client-visible model/reasoning restore into Rust first failed on two expected wiring issues: the residue gate still asserted the old `projectResponsesClientBodyForClientWithNative` wrapper, and the blackbox test could not find new native export `projectResponsesClientPayloadForClientJson` before native core rebuild.
+- Fix direction: update the gate to the current Rust-owned payload projection wrapper, rebuild native core, then rerun the same focused Jest stack.
+- Native output probe after rebuild confirmed freeform apply_patch response `output[0]` is projected to client-visible `{ type: "custom_tool_call", name: "apply_patch", call_id, input }`; required_action tool arguments remain raw patch text. The blackbox assertion was updated to this current Rust-owned shape.
+2026-06-10 servertool Rustification: tightened CLI fail-fast verifier so `verify:servertool-rust-only` now locks `unknown_tool_fails_fast_without_client_stdout` in `servertool-cli` blackbox coverage. Evidence: `npm run verify:servertool-rust-only` PASS; `cargo test -p servertool-cli -- --nocapture` PASS 18/18.
+2026-06-10 servertool Rustification: tightened outcome verifier to lock Rust unknown-tool negative contract (`unknown_tool_returns_none`, `unknown_tool_is_rejected_by_projection_builder`). Evidence: `npm run verify:servertool-rust-only` PASS; `cargo test -p servertool-core outcome_contract::tests::unknown_tool --lib -- --nocapture` PASS 2/2.
+
+## 2026-06-10 02:50 CST - build/global install/restart 0.90.3052
+
+- Jason requested current progress be compiled, built, globally installed, and server restarted.
+- Root `npm run build:dev` with Node 22 passed the build chain and bumped dev version to `0.90.3052`; it failed only when nested `install:global` used login-shell Node `v26.0.0`, outside package engine range `>=20 <26`.
+- Controlled Node 22 install command succeeded: `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh`.
+- Build/install truth: isolated `build:min` PASS, `router_hotpath_napi.node` and `routecodex-servertool` packaged, llmswitch-core dist built, WebUI built, global install completed, release snapshots refreshed, and managed 5555 restart completed.
+- Installed version truth: `routecodex --version` and `rcc --version` both `0.90.3052`; both install-current roots point to `releases/routecodex-0.90.3052-2026-06-09T184736Z`.
+- Runtime health truth: `127.0.0.1:5555`, `127.0.0.1:5520`, `192.168.0.93:10000`, and `100.66.1.82:10000` all returned `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3052`.
+- Live SSE truth: 5555 `/v1/responses` returned `RCC_BUILD_5555_3052_OK`; 5520 `/v1/responses` returned `RCC_BUILD_5520_3052_OK`; both had `response.completed=1`, `response.done=1`, `event:error=0`, elapsed about 8s.
+- Build gate note: rustification audit baseline refreshed to current lower totals (`nonNativeFileCount=104`, `nonNativeLocTotal=23253`) after repo-sanity found a stale topDir baseline; no new prod TS files were introduced by the refresh.
+2026-06-10 servertool Rustification: tightened backend-route flow-policy TS shell gate so `backend-route-flow-policy.ts` must remain a single native delegate export (`resolveFollowupFlowDecision`). Evidence: `npm run verify:servertool-rust-only` PASS; focused backend-route/loop Jest 4 suites / 31 tests PASS.
+2026-06-10 stopless trigger root-cause check: user log with `decision=trigger used=1 left=2 active=true` proves stop_message_auto gate fired; failure point was client-visible projection bridge: `buildClientVisibleProjectionShellJson native returned non-string: object`. Current source `servertool_core_blocks.rs` serializes projection shell with `serde_json::to_string`, current dist probe via Node 22 returns `exec_command`, and blackbox `responses-handler.servertool-cli-projection` proves submit_tool_outputs resume re-projects when current response stops again. Therefore current evidence says stopless-not-triggering was stale/native projection bridge build mismatch or pre-fix runtime, not Rust stopless decision gate.
+2026-06-10 servertool Rustification: added structural verifier locks for backend-route finalize and vision eligibility TS thin shells. Gate now requires finalize to export only shouldShortCircuitRequiresActionFollowup/decorateFinalChatWithServerToolContext and vision eligibility to export only shouldRunVisionFlowForAdapterContext/shouldBypassStopMessageForMediaContext, with each function delegating to native. Evidence: npm run verify:servertool-rust-only PASS; focused Jest vision/web_search/mixed/finish-reason 4 suites / 29 tests PASS; git diff --check for verifier PASS.
+2026-06-10 servertool Rustification: added backend-route-runtime-block exported-function surface gate so runtime TS cannot grow new public semantic helpers outside the existing native-backed orchestration surface. Evidence: npm run verify:servertool-rust-only PASS; focused Jest loop-state/vision/web_search/mixed/finish-reason 5 suites / 32 tests PASS; git diff --check for verifier PASS.
+2026-06-10 servertool Rustification: added backend-route-origin-delta structural thin-shell gate. Gate now requires only extractAssistantFollowupMessage/loadFollowupOriginSeed/applyFollowupDeltaPlan exports and native delegate calls; TS may only load origin snapshot/scope IO. Evidence: npm run verify:servertool-rust-only PASS; focused Jest followup-origin-delta + mixed tools 2 suites / 8 tests PASS; git diff --check for verifier PASS.
+2026-06-10 servertool Rustification: added backend-route-mainline public surface gate. Gate now requires backend-route-mainline-block.ts to expose only runFollowupMainline so TS backend-route semantics cannot spread through new exported helpers while Rust/native blocks own decisions. Evidence: npm run verify:servertool-rust-only PASS; focused Jest loop-state/followup-origin-delta/mixed/finish-reason 4 suites / 12 tests PASS; git diff --check for verifier PASS.
+2026-06-10 servertool Rustification: added backend-route-response-block surface gate and native-delegate checks for empty/continuation response predicates. This does not claim response-block fully Rust-owned; it prevents new TS public semantic surface while later Rust migration can move remaining response/error planning. Evidence: npm run verify:servertool-rust-only PASS; focused Jest followup-stream-compat/followup-origin-delta/mixed/finish-reason 4 suites / 11 tests PASS; git diff --check for verifier PASS.
+2026-06-10 servertool Rustification: moved followup append_user_text extraction into servertool-core backend_route_contract as plan_followup_append_user_text with Rust tests. This is contract-only; TS/NAPI wiring still pending, but verifier now locks the Rust owner and tests. Evidence: cargo test -p servertool-core backend_route --lib PASS 41/41; cargo test -p servertool-core followup_append_user_text --lib PASS 2/2; npm run verify:servertool-rust-only PASS; focused Jest followup-stream-compat + finish-reason PASS 2 suites / 3 tests; git diff --check PASS.
+
+2026-06-10 Responses SSE client-close hang fix:
+- Live hang evidence showed `response.sse.client_close` with `streamEnded=false`, `sawTerminalEvent=false`, `closeBeforeStreamEnd=true` plus nonzero Responses store counters (`pendingNoResponseId` around 8/9) and high RSS.
+- Root cause slice: non-continuation `/v1/responses` client-close cleanup destroyed upstream but waited for `clientWriteQueue` before clearing abandoned Responses store state; if native projection/import stayed pending, cleanup stayed pending too.
+- Fix: non-continuation client-close cleanup now clears abandoned Responses conversation state immediately; required_action/tool-call continuation still waits for projection queue before persisting continuation state.
+- Evidence: focused SSE Jest PASS 19/19; root `tsc --noEmit` PASS; global install/restart to 0.90.3053 PASS; live 5555 and 5520 `/v1/responses` smokes emitted `response.completed` + `response.done`, no `event:error`.

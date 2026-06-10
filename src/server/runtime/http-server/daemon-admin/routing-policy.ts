@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
+import { writeUserConfigFile } from '../../../../config/user-config-writer.js';
 import { stableStringify } from '../../../../monitoring/semantic-tracker.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 import {
@@ -81,9 +83,8 @@ export async function loadPolicyFromConfigPath(
     return { policy: null, policyHash: null };
   }
   try {
-    const raw = await fs.readFile(configPath, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
-    const cfg: UnknownRecord = isRecord(parsed) ? parsed : {};
+    const decoded = await decodeUserConfigFile(configPath);
+    const cfg: UnknownRecord = isRecord(decoded.parsed) ? decoded.parsed : {};
     const policy = canonicalizePolicyFromRawConfig(cfg);
     if (!policy) {
       return { policy: null, policyHash: null };
@@ -128,17 +129,13 @@ export async function writePolicyToConfigPath(options: {
       ...(session !== undefined ? { session } : {})
     }
   };
-  const raw = await fs.readFile(options.configPath, 'utf8');
-  const parsed = raw.trim() ? JSON.parse(raw) : {};
-  const cfg: UnknownRecord = isRecord(parsed) ? parsed : {};
+  const decoded = await decodeUserConfigFile(options.configPath);
+  const cfg: UnknownRecord = isRecord(decoded.parsed) ? decoded.parsed : {};
   const location = isRecord(cfg.virtualrouter) ? 'virtualrouter.routing' : 'routing';
   const nextConfig = applyRoutingPolicyAtLocation(cfg, canonical.virtualrouter, location);
 
   const wroteAtMs = Date.now();
-  const serialized = `${JSON.stringify(nextConfig, null, 2)}\n`;
-  const tmpPath = `${options.configPath}.tmp.${process.pid}.${wroteAtMs}`;
-  await fs.writeFile(tmpPath, serialized, 'utf8');
-  await fs.rename(tmpPath, options.configPath);
+  await writeUserConfigFile(options.configPath, nextConfig);
 
   const persistedPolicy = canonicalizePolicyFromRawConfig(nextConfig) ?? canonical;
   const policyHash = hashRoutingPolicy(persistedPolicy);

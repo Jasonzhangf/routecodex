@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import fs from 'fs';
 const fetch = globalThis.fetch;
-import { resolveRccPathForRead } from '../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../config/config-paths.js';
+import { decodeUserConfigFileSync } from '../config/user-config-codec.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
@@ -50,7 +51,10 @@ function readJson(file: string): any | null {
 }
 
 function resolveBaseFromConfig(cfgPath: string): { host: string; port: number; base: string } {
-  const j = readJson(cfgPath) || {};
+  const j = decodeUserConfigFileSync(
+    cfgPath,
+    fs as Pick<typeof fs, 'readFileSync'>
+  ).parsed as Record<string, any>;
   const port = Number(j?.httpserver?.port ?? j?.server?.port ?? j?.port ?? 3000);
   const host = String(j?.httpserver?.host || j?.server?.host || j?.host || '127.0.0.1');
   const h = ((): string => {
@@ -199,7 +203,10 @@ function samplePayload(endpoint: string, scenario: string, model: string): any {
 }
 
 function resolveDefaultModelFromConfig(cfgPath: string, endpoint: string): string {
-  const j = readJson(cfgPath) || {};
+  const j = decodeUserConfigFileSync(
+    cfgPath,
+    fs as Pick<typeof fs, 'readFileSync'>
+  ).parsed as Record<string, any>;
   try {
     const vr = j?.virtualrouter || {};
     // 1) 优先使用 routing.default 中的第一个目标（例如 lmstudio.gpt-oss-20b-mlx__key1）
@@ -272,7 +279,7 @@ export function createValidateCommand(): Command {
       let started = false;
       let exitCode = 0;
       try {
-        const cfg = opts.config || resolveRccPathForRead('config.json');
+        const cfg = opts.config ? resolveRouteCodexConfigPath(String(opts.config)) : resolveRouteCodexConfigPath();
         const verbose = !!opts.verbose;
         const { base, started: didStart, stop } = await ensureServer(cfg, verbose);
         if (didStart) {

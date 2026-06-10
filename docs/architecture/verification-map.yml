@@ -356,6 +356,7 @@ verification:
       - Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) must stay deleted; do not expose internal VR cleanup/hashline helpers as standalone NAPI surfaces without runtime consumers.
       - Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) must stay deleted; do not restore standalone passthrough wrappers without a live TS/runtime consumer and owner map update.
       - Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) must stay deleted; do not restore per-stage public bridge APIs after total Hub Pipeline Rust entry closeout.
+      - Retired zero-consumer Hub orchestration public wrappers and standalone NAPI JSON exports must stay deleted; internal Rust helper functions may remain private to active Hub mainline/tests, but aggregate TS re-export and required-export gate must not preserve dead public surfaces.
       - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
       - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
       - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
@@ -715,6 +716,100 @@ verification:
       - Shared tool normalization is verified under `responses.function_tool_normalization`.
       - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
 
+  - feature_id: config.path_resolution_surface
+    change_risk: high
+    unit:
+      - src/config/unified-config-paths.ts
+      - src/config/config-paths.ts
+    contract:
+      - tests/config/unified-config-paths.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Missing config must fail fast; no fallback path result is allowed.
+
+  - feature_id: config.user_config_codec
+    change_risk: high
+    unit:
+      - src/config/user-config-codec.ts
+    contract:
+      - tests/config/toml-shadow-codec.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - User config JSON/TOML decode must stay centralized in shared codec.
+
+  - feature_id: config.provider_config_codec
+    change_risk: high
+    unit:
+      - src/config/provider-config-codec.ts
+      - src/config/provider-v2-loader.ts
+    contract:
+      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Provider config JSON/TOML decode must stay centralized in shared codec.
+
+  - feature_id: config.user_config_materialization
+    change_risk: high
+    unit:
+      - src/config/routecodex-config-loader.ts
+      - src/config/user-config-loader.ts
+    contract:
+      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Runtime materialization must remain the only place that validates v2 single-source layout and projects VR/provider profiles.
+
+  - feature_id: config.user_config_write_surface
+    change_risk: high
+    unit:
+      - src/config/user-config-writer.ts
+    contract:
+      - tests/config/config-writer.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - User config write/patch must stay in shared writer owner.
+
+  - feature_id: config.provider_config_write_surface
+    change_risk: high
+    unit:
+      - src/config/provider-config-writer.ts
+    contract:
+      - tests/config/config-writer.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - Provider config writes must stay in shared writer owner.
+
   - feature_id: manager.routing_control_surface
     change_risk: high
     unit:
@@ -918,7 +1013,7 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/providers/core/runtime/http-transport-provider.sse-business-error-retry.red.spec.ts
+      - tests/server/http-server/provider-response-sse-marker.blackbox.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     integration: []
     smoke:

@@ -112,13 +112,13 @@ describe('provider-update command core flows', () => {
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'sync-models', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No config.v2.json found for provider "demo"'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml/config.v2.json found for provider "demo"'));
 
     await fs.writeFile(v2Path, '{invalid json', 'utf8');
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'sync-models', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
-    expect(error).toHaveBeenCalledWith('Failed to parse existing config.v2.json:', expect.any(String));
+    expect(error).toHaveBeenCalledWith('Failed to parse existing provider config:', expect.any(String));
 
     await fs.writeFile(
       v2Path,
@@ -236,7 +236,7 @@ describe('provider-update command core flows', () => {
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'probe-context', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No config.v2.json found for provider "demo"'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml/config.v2.json found for provider "demo"'));
 
     await fs.writeFile(v2Path, '{bad json', 'utf8');
     await expect(

@@ -58,6 +58,8 @@ export interface RouterDirectResult {
   response: unknown;
   providerHandle: ProviderHandle;
   auditContext: RouterDirectAuditContext;
+  externalLatencyStartedAtMs: number;
+  externalLatencyMs: number;
   capturedUsage?: Record<string, unknown>;
   providerPayload?: Record<string, unknown>;
   standardizedRequest?: Record<string, unknown>;
@@ -131,6 +133,7 @@ export async function executeRouterDirectPipeline(
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 
   let response: unknown;
+  const providerStartedAtMs = Date.now();
   try {
     response =
       typeof providerHandle.instance.processIncomingDirect === 'function'
@@ -140,6 +143,7 @@ export async function executeRouterDirectPipeline(
     await input.onProviderError?.(error, auditContext);
     throw error;
   }
+  const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
 
   input.onSnapshotAfter?.(response, auditContext);
 
@@ -148,6 +152,8 @@ export async function executeRouterDirectPipeline(
     response,
     providerHandle,
     auditContext,
+    externalLatencyStartedAtMs: providerStartedAtMs,
+    externalLatencyMs,
   };
 }
 

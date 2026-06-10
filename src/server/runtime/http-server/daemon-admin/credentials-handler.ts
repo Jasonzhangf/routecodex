@@ -3,8 +3,8 @@ import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
-import { resolveRccPathForRead } from '../../../../config/user-data-paths.js';
-import { parseUserConfigText } from '../../../../config/user-config-codec.js';
+import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
+import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 import { withOAuthRepairEnv } from '../../../../providers/auth/oauth-repair-env.js';
@@ -239,20 +239,9 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       // Best effort: allow UI-configured browser selection without requiring restart.
       const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();
       if (!browserHint) {
-        const configPath = resolveRccPathForRead('config.json');
-        const tomlConfigPath = resolveRccPathForRead('config.toml');
         try {
-          // Try TOML first (preferred), fall back to JSON
-          let raw = '';
-          let format: 'json' | 'toml' = 'json';
-          try {
-            raw = await fs.readFile(tomlConfigPath, 'utf8');
-            format = 'toml';
-          } catch {
-            raw = await fs.readFile(configPath, 'utf8');
-            format = 'json';
-          }
-          const parsed = raw.trim() ? parseUserConfigText(raw, format) : {};
+          const configPath = resolveRouteCodexConfigPath();
+          const parsed = (await decodeUserConfigFile(configPath)).parsed;
           const oauthBrowser =
             typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
               ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string).trim()

@@ -1821,7 +1821,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(excluded).toEqual(['tab.key1']);
   });
 
-  it('retries the same provider once for a transport recoverable error before switching provider', async () => {
+  it('switches to the alternative provider immediately for a transport recoverable error', async () => {
     const transientError = Object.assign(new Error('socket reset'), {
       code: 'ECONNRESET',
       retryable: true
@@ -1916,7 +1916,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const executor = new HubRequestExecutor(deps);
     stubConvertProviderResponse();
     const request: PipelineExecutionInput = {
-      requestId: 'req_same_provider_once_then_switch',
+      requestId: 'req_switch_immediately_on_alternative',
       entryEndpoint: '/v1/responses',
       headers: {},
       body: { messages: [{ role: 'user', content: 'retry me' }] },
@@ -1926,21 +1926,16 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const response = await executor.execute(request);
 
     expect(response).toBeDefined();
-    expect(providerACalls).toHaveLength(2);
+    expect(providerACalls).toHaveLength(1);
     expect(providerBCalls).toHaveLength(1);
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(3);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect((fakePipeline.execute as jest.Mock).mock.calls[1][0].metadata).toEqual(expect.objectContaining({
-      __routecodexRetryProviderKey: 'tab.key1'
-    }));
-    expect((fakePipeline.execute as jest.Mock).mock.calls[1][0].metadata).not.toHaveProperty('excludedProviderKeys');
-    expect((fakePipeline.execute as jest.Mock).mock.calls[2][0].metadata).toEqual(expect.objectContaining({
       excludedProviderKeys: ['tab.key1']
     }));
-    expect((fakePipeline.execute as jest.Mock).mock.calls[2][0].metadata).not.toHaveProperty('__routecodexRetryProviderKey');
     const stages = logStage.mock.calls.map((call) => call[0]);
     const secondPipelineStartIndex = stages.findIndex((stage, index) => index > 0 && stage === 'hub.start');
     expect(stages.slice(0, secondPipelineStartIndex)).not.toContain('provider.transport_backoff.recorded');
-    expect(stages.filter((stage) => stage === 'provider.transport_backoff.recorded')).toHaveLength(1);
+    expect(stages).not.toContain('provider.transport_backoff.recorded');
     expect(stages).not.toContain('server.global_error_backoff_wait');
   });
 

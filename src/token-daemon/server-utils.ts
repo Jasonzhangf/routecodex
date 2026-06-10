@@ -1,7 +1,7 @@
 import path from 'path';
 const fetch = globalThis.fetch;
+import { resolveRouteCodexConfigPath } from '../config/config-paths.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
-import { resolveRccConfigFile } from '../config/user-data-paths.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
@@ -170,19 +170,11 @@ export async function detectLocalServerInstance(): Promise<ServerInstanceInfo | 
 }
 
 async function resolveUserConfigPath(): Promise<string> {
-  try {
-    // Prefer ROUTECODEX_CONFIG if present
-    const envPath = process.env.ROUTECODEX_CONFIG || process.env.ROUTECODEX_CONFIG_PATH;
-    if (envPath && envPath.trim()) {
-      return path.resolve(envPath.trim());
-    }
-    return resolveRccConfigFile();
-  } catch (error) {
-    logServerUtilsNonBlocking('resolve_user_config_path', 'fallback_to_default_config_path', error, {
-      envPath: process.env.ROUTECODEX_CONFIG || process.env.ROUTECODEX_CONFIG_PATH || ''
-    });
-    return resolveRccConfigFile();
+  const envPath = process.env.ROUTECODEX_CONFIG || process.env.ROUTECODEX_CONFIG_PATH;
+  if (envPath && envPath.trim()) {
+    return resolveRouteCodexConfigPath(path.resolve(envPath.trim()));
   }
+  return resolveRouteCodexConfigPath();
 }
 
 function readString(value: unknown): string | undefined {

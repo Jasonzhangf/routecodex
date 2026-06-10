@@ -131,15 +131,22 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys,
     retryError: args.retryError
   });
+  const hasAlternativeCandidate = hasAlternativeRouteCandidate({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+  const retryExcludedCurrentProvider = exclusionPlan.excludedCurrentProvider;
+  const shouldSkipBackoffForImmediate429Reroute =
+    retryExcludedCurrentProvider
+    && !holdOnLastAvailable429
+    && hasAlternativeCandidate
+    && !requestLocalTransient;
 
   const hasTerminalAlternativeCandidate =
     exclusionPlan.excludedCurrentProvider
     && !holdOnLastAvailable429
-    && hasAlternativeRouteCandidate({
-      providerKey: args.providerKey,
-      routePool: args.routePool,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
+    && hasAlternativeCandidate;
   const terminalPeriodicPolicyDecision =
     shouldRerouteTerminalPeriodicRecovery({
       classification,
@@ -178,6 +185,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
           attempt: args.attempt,
           forceProviderScopedBackoff: true,
           forceAttemptScopedBackoff: false,
+          skipBackoffWait: shouldSkipBackoffForImmediate429Reroute,
           abortSignal: args.abortSignal,
           logNonBlockingError: args.logNonBlockingError
         });
@@ -223,8 +231,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     };
   }
 
-  const retryExcludedCurrentProvider = exclusionPlan.excludedCurrentProvider;
-
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
     error: args.error,
     retryError: args.retryError,
@@ -235,6 +241,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     forceProviderScopedBackoff: retryExcludedCurrentProvider,
     forceAttemptScopedBackoff: hostContractFailure && !retryExcludedCurrentProvider,
     requestLocal: requestLocalTransient,
+    skipBackoffWait: shouldSkipBackoffForImmediate429Reroute,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -253,11 +260,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     shouldCancelUnrecoverableRerouteWithoutAlternative({
       classification,
       switchAction: 'reroute_explicit_alternative',
-      hasAlternativeCandidate: hasAlternativeRouteCandidate({
-        providerKey: args.providerKey,
-        routePool: args.routePool,
-        excludedProviderKeys: args.excludedProviderKeys
-      })
+      hasAlternativeCandidate
     })
   ) {
     return {

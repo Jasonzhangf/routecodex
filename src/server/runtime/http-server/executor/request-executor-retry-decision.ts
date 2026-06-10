@@ -123,6 +123,19 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
 
+  if (
+    args.classification === 'recoverable'
+    && hasAlternativeCandidate
+    && !args.promptTooLong
+  ) {
+    return {
+      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
+        providerKey,
+        excludedProviderKeys: args.excludedProviderKeys
+      })
+    };
+  }
+
   const isImmediateSwitchError = isImmediateProviderSwitchRecoverableError({ status: args.status, error: args.error });
   if (
     args.classification === 'recoverable'

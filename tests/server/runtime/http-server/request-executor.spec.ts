@@ -1473,6 +1473,7 @@ describe('HubRequestExecutor failover', () => {
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
       expect(executionPlan.shouldRetry).toBe(true);
       expect(executionPlan.backoffScope).toBe('provider');
+      expect(executionPlan.retryBackoffMs).toBe(0);
       expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
         switchAction: 'exclude_and_reroute',
         decisionLabel: 'provider_backoff_then_reroute'
@@ -2843,7 +2844,7 @@ describe('HubRequestExecutor failover', () => {
     ).toBe(false);
   });
 
-  test('reroutes 429 instead of retrying same provider when selected pool exposes no alternative candidate', async () => {
+  test('reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate', async () => {
     const primaryProviderKey = 'glm.key1.glm-4.7';
     const fallbackProviderKey = 'qwen.key2.qwen3.5-27b';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
@@ -3153,17 +3154,15 @@ describe('HubRequestExecutor failover', () => {
       }
     }
   });
-  test('retries generic recoverable 500 on the same provider with recoverable backoff', async () => {
+  test('reroutes generic recoverable 500 immediately when route pool exposes alternatives', async () => {
     const providerA = 'tabglm.key1.glm-5.1';
     const providerB = 'crs.key2.gpt-5.3-codex';
     const providerC = 'ali-coding-plan.key1.qwen3.6-plus';
     const authErrorA = Object.assign(new Error('HTTP 500: provider A overloaded'), {
       statusCode: 500
     });
-    const processA = jest.fn()
-      .mockRejectedValueOnce(authErrorA)
-      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_backoff' } });
-    const processB = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_b' } }));
+    const processA = jest.fn().mockRejectedValueOnce(authErrorA);
+    const processB = jest.fn(async () => ({ status: 200, data: { id: 'ok_after_immediate_reroute' } }));
     const processC = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_c' } }));
 
     const handles = new Map<string, ProviderHandle>([
@@ -3223,10 +3222,10 @@ describe('HubRequestExecutor failover', () => {
       });
       jest
         .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_same_provider_backoff' } });
+        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_immediate_reroute' } });
 
       const result = await executor.execute({
-        requestId: 'req-same-provider-500-backoff',
+        requestId: 'req-immediate-reroute-500',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
@@ -3236,15 +3235,14 @@ describe('HubRequestExecutor failover', () => {
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]') && line.includes('req-same-provider-500-backoff'));
+        .filter((line) => line.includes('[provider-switch]') && line.includes('req-immediate-reroute-500'));
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
-      expect(switchLines[0]).toMatch(/backoff=\d+ms/);
-      expect(switchLines[0]).toContain('switch=retry_same_provider_once');
+      expect(switchLines[0]).toContain('backoff=0ms');
+      expect(switchLines[0]).toContain('switch=exclude_and_reroute');
       expect(switchLines[0]).toContain('backoffScope=attempt');
-      expect(switchLines[0]).toContain('decision=recoverable_backoff_same_provider');
-      expect(processA).toHaveBeenCalledTimes(2);
-      expect(processB).toHaveBeenCalledTimes(0);
+      expect(processA).toHaveBeenCalledTimes(1);
+      expect(processB).toHaveBeenCalledTimes(1);
       expect(processC).toHaveBeenCalledTimes(0);
     } finally {
       warnSpy.mockRestore();

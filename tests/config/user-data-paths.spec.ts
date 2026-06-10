@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   ensureRccUserDirEnvironment,
   resolveLegacyRouteCodexUserDir,
-  resolveRccConfigFile,
   resolveRccProviderDir,
   resolveRccSnapshotsDirFromEnv,
   resolveRccSubdir,
@@ -117,6 +116,5 @@ describe('user-data-paths', () => {
     const home = await createTempDir('rcc-layout-');
     expect(resolveRccSubdir('provider', home)).toBe(path.join(home, '.rcc', 'provider'));
     expect(resolveRccProviderDir(home)).toBe(path.join(home, '.rcc', 'provider'));
-    expect(resolveRccConfigFile(home)).toBe(path.join(home, '.rcc', 'config.json'));
   });
 });

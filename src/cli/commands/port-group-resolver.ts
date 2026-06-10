@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { homedir } from 'node:os';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccConfigFile } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 
 export type PortGroupResolveContext = {
@@ -29,7 +29,7 @@ export function resolvePortGroupFromConfig(
 ): ResolvedPortGroup | null {
   const fsImpl = ctx.fsImpl ?? fs;
   const home = ctx.getHomeDir ?? (() => homedir());
-  const configPath = options?.configPath || resolveRccConfigFile(home());
+  const configPath = options?.configPath || resolveRouteCodexConfigPath();
   if (!fsImpl.existsSync(configPath)) {
     return null;
   }

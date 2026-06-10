@@ -30,6 +30,7 @@ export interface PipelineExecutionResult {
     stoplessArmed?: boolean;
     usage?: Record<string, unknown>;
     externalLatencyMs?: number;
+    externalLatencyStartedAtMs?: number;
     trafficWaitMs?: number;
     clientInjectWaitMs?: number;
     sseDecodeMs?: number;

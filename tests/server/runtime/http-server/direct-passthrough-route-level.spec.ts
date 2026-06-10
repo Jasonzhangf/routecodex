@@ -1100,7 +1100,7 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
-  it('router-direct retries same provider once for repeated recoverable 502 before VR-selected switch', async () => {
+  it('router-direct switches to alternative provider immediately for recoverable 502 when VR has another target', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -1124,7 +1124,7 @@ describe('direct passthrough route-level', () => {
     const secondDirectSend = jest.fn(async () => ({
       status: 200,
       data: {
-        id: 'resp_router_direct_502_switched_after_repeat',
+        id: 'resp_router_direct_502_switched_immediately',
         object: 'response',
         status: 'completed',
         output_text: 'ok',
@@ -1208,7 +1208,7 @@ describe('direct passthrough route-level', () => {
         sameProtocolBehavior: 'direct',
       },
       {
-        requestId: 'req_router_direct_502_retry_then_switch',
+        requestId: 'req_router_direct_502_switch_immediately',
         entryEndpoint: '/v1/responses',
         method: 'POST',
         headers: {},
@@ -1224,15 +1224,12 @@ describe('direct passthrough route-level', () => {
 
     expect(outcome.used).toBe(true);
     expect(outcome.auditContext.providerKey).toBe(secondProviderKey);
-    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_502_switched_after_repeat' });
-    expect(firstDirectSend).toHaveBeenCalledTimes(2);
+    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_502_switched_immediately' });
+    expect(firstDirectSend).toHaveBeenCalledTimes(1);
     expect(secondDirectSend).toHaveBeenCalledTimes(1);
-    expect(route).toHaveBeenCalledTimes(3);
+    expect(route).toHaveBeenCalledTimes(2);
     expect(route.mock.calls[0]?.[1]).toEqual(expect.not.objectContaining({ __routecodexRetryProviderKey: expect.anything() }));
     expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
-      __routecodexRetryProviderKey: firstProviderKey,
-    }));
-    expect(route.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
       excludedProviderKeys: [firstProviderKey],
     }));
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();

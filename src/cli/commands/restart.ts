@@ -4,7 +4,9 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccConfigFile, resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
@@ -141,9 +143,20 @@ function resolveConfigPortHostMaybe(
   opts?: { strict?: boolean }
 ): { port: number; host: string } | null {
   const fsImpl = ctx.fsImpl ?? fs;
-  const pathImpl = ctx.pathImpl ?? path;
-  const home = ctx.getHomeDir ?? (() => homedir());
-  const configPath = options.config || resolveRccConfigFile(home());
+  let configPath: string;
+  try {
+    configPath = options.config ? resolveRouteCodexConfigPath(options.config) : resolveRouteCodexConfigPath();
+  } catch {
+    if (opts?.strict) {
+      spinner.fail('Configuration file not found');
+      ctx.logger.error('Cannot determine server port without configuration file');
+      ctx.logger.info('Please create a configuration file first:');
+      ctx.logger.info('  rcc init');
+      ctx.logger.info('  rcc config init');
+      ctx.exit(1);
+    }
+    return null;
+  }
 
   if (!fsImpl.existsSync(configPath)) {
     if (opts?.strict) {
@@ -159,12 +172,14 @@ function resolveConfigPortHostMaybe(
 
   let config: any;
   try {
-    const configContent = fsImpl.readFileSync(configPath, 'utf8');
-    config = JSON.parse(configContent);
+    config = decodeUserConfigFileSync(
+      configPath,
+      fsImpl as Pick<typeof fs, 'readFileSync'>
+    ).parsed;
   } catch {
     if (opts?.strict) {
       spinner.fail('Failed to parse configuration file');
-      ctx.logger.error(`Invalid JSON in configuration file: ${configPath}`);
+      ctx.logger.error(`Invalid configuration file: ${configPath}`);
       ctx.exit(1);
     }
     return null;
@@ -202,12 +217,22 @@ function resolveRestartApiKey(
   options: RestartCommandOptions
 ): RestartApiKeyResolution {
   const fsImpl = ctx.fsImpl ?? fs;
-  const home = ctx.getHomeDir ?? (() => homedir());
-  const configPath = options.config || resolveRccConfigFile(home());
+  let configPath: string;
+  try {
+    configPath = options.config ? resolveRouteCodexConfigPath(options.config) : resolveRouteCodexConfigPath();
+  } catch {
+    const fromEnv = normalizeString(ctx.env?.ROUTECODEX_HTTP_APIKEY) || normalizeString(ctx.env?.RCC_HTTP_APIKEY);
+    if (fromEnv) {
+      return { value: fromEnv, source: 'env' };
+    }
+    return { value: '', source: 'none' };
+  }
   if (fsImpl.existsSync(configPath)) {
     try {
-      const configContent = fsImpl.readFileSync(configPath, 'utf8');
-      const config = JSON.parse(configContent);
+      const config = decodeUserConfigFileSync(
+        configPath,
+        fsImpl as Pick<typeof fs, 'readFileSync'>
+      ).parsed;
       const apiKeyField = readConfigApiKeyRaw(config);
       if (apiKeyField.present) {
         return {

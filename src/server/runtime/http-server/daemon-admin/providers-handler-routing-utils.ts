@@ -4,6 +4,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
+import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { resolveRccProviderDir, resolveRccUserDir } from '../../../../config/user-data-paths.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
@@ -610,9 +611,15 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
   const candidates: Array<{ kind: RoutingSourceSummary['kind']; label: string; path: string }> = [];
   candidates.push({ kind: 'active', label: 'Active config', path: activePath });
 
-  const defaultConfig = path.join(routecodexHome, 'config.json');
-  if (defaultConfig !== activePath) {
-    candidates.push({ kind: 'routecodex', label: 'Default config.json', path: defaultConfig });
+  for (const defaultConfig of [path.join(routecodexHome, 'config.toml'), path.join(routecodexHome, 'config.json')]) {
+    if (defaultConfig === activePath) {
+      continue;
+    }
+    candidates.push({
+      kind: 'routecodex',
+      label: path.basename(defaultConfig),
+      path: defaultConfig
+    });
   }
 
   // Root-level config backups or variants (config_*.json)
@@ -659,8 +666,8 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
     seen.add(abs);
     try {
       const allowed = resolveAllowedAdminFilePath(abs);
-      const raw = await fs.readFile(allowed, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(allowed);
+      const parsed = decoded.parsed;
       const snapshot = extractRoutingSnapshot(parsed);
 
       const hasRoutingContainer =

@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { decodeProviderConfigFileSync } from '../../../config/provider-config-codec.js';
+import { decodeUserConfigFileSync } from '../../../config/user-config-codec.js';
+import { writeProviderConfigFileSync } from '../../../config/provider-config-writer.js';
 import { resolveRccProviderDir } from '../../../config/user-data-paths.js';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
@@ -142,10 +145,12 @@ export function inspectConfigState(fsImpl: typeof fs, configPath: string): Confi
     return { kind: 'missing' };
   }
   try {
-    const raw = fsImpl.readFileSync(configPath, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    const parsed = decodeUserConfigFileSync(
+      configPath,
+      fsImpl as Pick<typeof fs, 'readFileSync'>
+    ).parsed;
     if (!isRecord(parsed)) {
-      return { kind: 'invalid', message: 'Config root must be a JSON object' };
+      return { kind: 'invalid', message: 'Config root must be an object' };
     }
     const mode = typeof parsed.virtualrouterMode === 'string' ? parsed.virtualrouterMode.trim().toLowerCase() : '';
     if (mode === 'v2') {
@@ -188,8 +193,10 @@ export function readProviderV2Payload(
     if (!fsImpl.existsSync(filePath)) {
       return null;
     }
-    const raw = fsImpl.readFileSync(filePath, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    const parsed = decodeProviderConfigFileSync(
+      filePath,
+      fsImpl as Pick<typeof fs, 'readFileSync'>
+    ).parsed;
     if (!isRecord(parsed)) {
       return null;
     }
@@ -256,7 +263,7 @@ export function writeProviderV2(
     providerId,
     provider: providerNode
   };
-  writeJsonFile(fsImpl, filePath, payload);
+  writeProviderConfigFileSync(filePath, payload as unknown as Record<string, unknown>, fsImpl);
   return filePath;
 }
 
@@ -276,8 +283,10 @@ export function loadProviderV2Map(fsImpl: typeof fs, pathImpl: typeof path, prov
       continue;
     }
     try {
-      const raw = fsImpl.readFileSync(filePath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const parsed = decodeProviderConfigFileSync(
+        filePath,
+        fsImpl as Pick<typeof fs, 'readFileSync'>
+      ).parsed;
       if (!isRecord(parsed)) {
         continue;
       }

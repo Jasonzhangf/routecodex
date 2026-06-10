@@ -107,6 +107,9 @@ describe('provider-direct-pipeline', () => {
 
   it('keeps openai-responses same-protocol requests on direct path in auto mode', async () => {
     const { handle, processIncoming, processIncomingDirect } = createHandle('openai-responses');
+    const startSpy = jest.spyOn(Date, 'now')
+      .mockReturnValueOnce(20_000)
+      .mockReturnValueOnce(23_210);
     const requestPayload = {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
@@ -115,31 +118,37 @@ describe('provider-direct-pipeline', () => {
     const beforeSnapshots: Array<Record<string, unknown>> = [];
     const afterSnapshots: unknown[] = [];
 
-    const result = await executeProviderDirectPipeline(
-      requestPayload,
-      { path: '/v1/responses', headers: {} },
-      {
-        portConfig: {
-          port: 5003,
-          host: '127.0.0.1',
-          mode: 'provider',
-          protocolBehavior: 'auto',
-          providerBinding: 'mock.model',
+    try {
+      const result = await executeProviderDirectPipeline(
+        requestPayload,
+        { path: '/v1/responses', headers: {} },
+        {
+          portConfig: {
+            port: 5003,
+            host: '127.0.0.1',
+            mode: 'provider',
+            protocolBehavior: 'auto',
+            providerBinding: 'mock.model',
+          },
+          resolveProvider: () => handle,
+          detectInboundProtocol: detectInboundProtocolFromRequest,
+          onSnapshotBefore: (payload) => beforeSnapshots.push(payload),
+          onSnapshotAfter: (response) => afterSnapshots.push(response),
         },
-        resolveProvider: () => handle,
-        detectInboundProtocol: detectInboundProtocolFromRequest,
-        onSnapshotBefore: (payload) => beforeSnapshots.push(payload),
-        onSnapshotAfter: (response) => afterSnapshots.push(response),
-      },
-    );
+      );
 
-    expect(result.actualBehavior).toBe('direct');
-    expect(processIncomingDirect).toHaveBeenCalledTimes(1);
-    expect(processIncomingDirect).toHaveBeenCalledWith(requestPayload);
-    expect(processIncoming).not.toHaveBeenCalled();
-    expect(beforeSnapshots).toHaveLength(1);
-    expect(beforeSnapshots[0]).toBe(requestPayload);
-    expect(afterSnapshots).toHaveLength(1);
+      expect(result.actualBehavior).toBe('direct');
+      expect(result.externalLatencyStartedAtMs).toBe(20_000);
+      expect(result.externalLatencyMs).toBe(3210);
+      expect(processIncomingDirect).toHaveBeenCalledTimes(1);
+      expect(processIncomingDirect).toHaveBeenCalledWith(requestPayload);
+      expect(processIncoming).not.toHaveBeenCalled();
+      expect(beforeSnapshots).toHaveLength(1);
+      expect(beforeSnapshots[0]).toBe(requestPayload);
+      expect(afterSnapshots).toHaveLength(1);
+    } finally {
+      startSpy.mockRestore();
+    }
   });
 
   it('reports provider-mode direct errors through ErrorErr hook and rethrows original error', async () => {

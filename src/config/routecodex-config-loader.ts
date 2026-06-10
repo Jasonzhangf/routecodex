@@ -1,7 +1,7 @@
+// feature_id: config.user_config_materialization
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
-import { resolveRccConfigFile } from './user-data-paths.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import type { UnknownRecord } from './user-config-loader.js';
 import { collectV2ConfigSourceErrors, materializeRouteCodexConfig } from './user-config-loader.js';
@@ -51,9 +51,5 @@ async function resolveConfigPath(explicit?: string): Promise<string> {
   if (explicit && explicit.trim()) {
     return path.resolve(explicit.trim());
   }
-  const resolved = resolveRouteCodexConfigPath();
-  if (resolved) {
-    return resolved;
-  }
-  return resolveRccConfigFile();
+  return resolveRouteCodexConfigPath();
 }

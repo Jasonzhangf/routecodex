@@ -60,12 +60,12 @@ fn evaluate_responses_direct_route_decision(
     let _ = apply_patch_mode;
     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
     if inbound_protocol == "openai-responses"
-        && requires_hub_relay_for_stopless_servertool(payload, metadata)
+        && requires_hub_relay_for_servertool_followup(payload, metadata)
     {
         return Ok(serde_json::json!({
             "providerWireValid": true,
             "requiresHubRelay": true,
-            "reason": "stopless_servertool_requires_hub_relay",
+            "reason": "servertool_followup_requires_hub_relay",
             "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
         }));
     }
@@ -87,14 +87,14 @@ fn evaluate_responses_direct_route_decision(
     }))
 }
 
-fn requires_hub_relay_for_stopless_servertool(payload: &Value, metadata: &Value) -> bool {
+fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value) -> bool {
     if has_stop_message_cli_result(payload) {
         return true;
     }
     if has_stop_message_cli_result(metadata) {
         return true;
     }
-    has_stop_message_followup_marker(metadata)
+    has_servertool_followup_marker(metadata)
 }
 
 fn has_stop_message_cli_result(value: &Value) -> bool {
@@ -179,21 +179,35 @@ fn collect_direct_stop_message_text(value: Option<&Value>, out: &mut Vec<String>
     }
 }
 
-fn has_stop_message_followup_marker(metadata: &Value) -> bool {
+fn read_boolish(value: Option<&Value>) -> bool {
+    matches!(value, Some(Value::Bool(true)))
+        || value
+            .and_then(Value::as_str)
+            .map(|text| text.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
+
+fn has_servertool_followup_marker(metadata: &Value) -> bool {
     let Some(root) = metadata.as_object() else {
         return false;
     };
     let rt = root.get("__rt").and_then(Value::as_object);
+    if read_boolish(root.get("serverToolFollowup"))
+        || rt
+            .map(|record| read_boolish(record.get("serverToolFollowup")))
+            .unwrap_or(false)
+    {
+        return true;
+    }
     let followup_source = read_trimmed_lower(root.get("followupSource"))
         .or_else(|| read_trimmed_lower(root.get("serverToolFollowupSource")))
+        .or_else(|| read_trimmed_lower(root.get("clientInjectSource")))
         .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("followupSource"))))
+        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("clientInjectSource"))))
         .or_else(|| {
             rt.and_then(|record| read_trimmed_lower(record.get("serverToolFollowupSource")))
         });
-    if followup_source
-        .as_deref()
-        .is_some_and(|value| value.contains("stop_message") || value.contains("stop-message"))
-    {
+    if followup_source.is_some() {
         return true;
     }
     let stopless_goal_status = read_trimmed_lower(root.get("stoplessGoalStatus"))
@@ -354,7 +368,7 @@ mod responses_direct_route_decision_tests {
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
+        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
     }
 
     #[test]
@@ -377,11 +391,11 @@ mod responses_direct_route_decision_tests {
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
+        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
     }
 
     #[test]
-    fn generic_servertool_followup_metadata_does_not_require_hub_relay_on_responses_direct() {
+    fn generic_servertool_followup_metadata_requires_hub_relay_on_responses_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -399,49 +413,19 @@ mod responses_direct_route_decision_tests {
         .expect("generic servertool followup metadata should be a direct decision");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], false);
-        assert_eq!(decision["reason"], Value::Null);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
     }
 }
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
-use crate::hub_pipeline_blocks::adapter_context::{
-    extract_adapter_context_metadata_fields, resolve_adapter_context_metadata_signals,
-    resolve_adapter_context_object_carriers,
-};
-use crate::hub_pipeline_blocks::metadata::{
-    build_hub_pipeline_result_metadata, resolve_router_metadata_runtime_flags,
-    resolve_stop_message_router_metadata,
-};
-use crate::hub_pipeline_blocks::nodes::{
-    build_captured_chat_request_snapshot, build_req_inbound_node_result,
-    build_req_inbound_skipped_node, build_req_outbound_node_result,
-    build_tool_governance_node_result,
-};
-use crate::hub_pipeline_blocks::policy::{
-    resolve_hub_policy_override, resolve_hub_shadow_compare_config,
-};
+use crate::hub_pipeline_blocks::metadata::resolve_stop_message_router_metadata;
 use crate::hub_pipeline_blocks::process_mode::find_mappable_semantics_keys;
 use crate::hub_pipeline_blocks::protocol::{
-    apply_outbound_stream_preference, extract_model_hint_from_metadata, normalize_endpoint,
-    resolve_hub_client_protocol, resolve_outbound_stream_intent, resolve_provider_protocol,
-    resolve_sse_protocol, resolve_sse_protocol_from_metadata,
-};
-use crate::hub_pipeline_blocks::responses_context::sync_responses_context_from_canonical_messages;
-use crate::hub_pipeline_blocks::responses_resume::{
-    lift_responses_resume_into_semantics, read_responses_resume_from_metadata,
-    read_responses_resume_from_request_semantics,
+    extract_model_hint_from_metadata, normalize_endpoint, resolve_sse_protocol,
 };
 use crate::hub_pipeline_blocks::router_metadata_input::build_router_metadata_input;
-use crate::hub_pipeline_blocks::runtime_metadata::{
-    apply_has_image_attachment_flag, prepare_runtime_metadata_for_servertools,
-    sync_session_identifiers_to_metadata,
-};
 use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
-use crate::hub_pipeline_blocks::web_search::{
-    apply_direct_builtin_web_search_tool, is_canonical_web_search_tool_definition,
-    is_search_route_id,
-};
 use crate::hub_pipeline_contracts::{
     describe_hub_pipeline_contracts, describe_meta_carrier_contracts, describe_pipeline_contract,
     describe_virtual_router_contracts, validate_pipeline_node_contract_boundary,
@@ -453,69 +437,6 @@ pub fn normalize_hub_endpoint_json(endpoint: String) -> napi::Result<String> {
     let output = normalize_endpoint(&endpoint);
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize endpoint: {}", e)))
-}
-
-#[napi_derive::napi]
-pub fn resolve_provider_protocol_json(value: String) -> napi::Result<String> {
-    let output = resolve_provider_protocol(&value).map_err(|e| napi::Error::from_reason(e))?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize provider protocol: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_hub_client_protocol_json(entry_endpoint: String) -> napi::Result<String> {
-    let output = resolve_hub_client_protocol(&entry_endpoint);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize hub client protocol: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_outbound_stream_intent_json(
-    provider_preference_json: String,
-) -> napi::Result<String> {
-    let provider_preference: Value =
-        serde_json::from_str(&provider_preference_json).map_err(|e| {
-            napi::Error::from_reason(format!("Failed to parse provider preference JSON: {}", e))
-        })?;
-    let output = resolve_outbound_stream_intent(&provider_preference);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize outbound stream intent: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn apply_outbound_stream_preference_json(
-    request_json: String,
-    stream_json: String,
-    process_mode_json: String,
-) -> napi::Result<String> {
-    let request: Value = serde_json::from_str(&request_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
-    let stream_value: Value = serde_json::from_str(&stream_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse stream JSON: {}", e)))?;
-    let process_mode_value: Value = serde_json::from_str(&process_mode_json).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to parse process mode JSON: {}", e))
-    })?;
-    let stream = stream_value.as_bool();
-    let process_mode = process_mode_value.as_str();
-    let output = apply_outbound_stream_preference(&request, stream, process_mode);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize stream preference output: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_sse_protocol_from_metadata_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_sse_protocol_from_metadata(&metadata);
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize sse protocol: {}", e)))
 }
 
 #[napi_derive::napi]
@@ -646,19 +567,6 @@ pub fn resolve_stop_message_router_metadata_json(metadata_json: String) -> napi:
 }
 
 #[napi_derive::napi]
-pub fn resolve_router_metadata_runtime_flags_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_router_metadata_runtime_flags(&metadata);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize router metadata runtime flags: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
 pub fn build_router_metadata_input_json(input_json: String) -> napi::Result<String> {
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
@@ -667,87 +575,6 @@ pub fn build_router_metadata_input_json(input_json: String) -> napi::Result<Stri
     })?;
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!("Failed to serialize router metadata input: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_hub_pipeline_result_metadata_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_hub_pipeline_result_metadata(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build hub pipeline result metadata: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize hub pipeline result metadata: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_req_outbound_node_result_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_req_outbound_node_result(&input).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to build req outbound node result: {}", e))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize req outbound node result: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_req_inbound_node_result_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_req_inbound_node_result(&input).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to build req inbound node result: {}", e))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize req inbound node result: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_req_inbound_skipped_node_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_req_inbound_skipped_node(&input).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to build req inbound skipped node: {}", e))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize req inbound skipped node: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_captured_chat_request_snapshot_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_captured_chat_request_snapshot(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build captured chat request snapshot: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize captured chat request snapshot: {}",
-            e
-        ))
     })
 }
 
@@ -764,261 +591,6 @@ pub fn coerce_standardized_request_from_payload_json(input_json: String) -> napi
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize standardized request coercion output: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn prepare_runtime_metadata_for_servertools_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = prepare_runtime_metadata_for_servertools(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to prepare runtime metadata for servertools: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize runtime metadata for servertools: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn apply_has_image_attachment_flag_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = apply_has_image_attachment_flag(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to apply has-image-attachment metadata flag: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize has-image-attachment metadata result: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn sync_session_identifiers_to_metadata_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = sync_session_identifiers_to_metadata(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to sync session identifiers to metadata: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize synced session identifier metadata: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn build_tool_governance_node_result_json(input_json: String) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_tool_governance_node_result(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build tool governance node result: {}",
-            e
-        ))
-    })?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize tool governance node result: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn extract_adapter_context_metadata_fields_json(
-    metadata_json: String,
-    keys_json: String,
-) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let keys: Value = serde_json::from_str(&keys_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse keys JSON: {}", e)))?;
-    let output = extract_adapter_context_metadata_fields(&metadata, &keys);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize adapter context metadata fields: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_adapter_context_metadata_signals_json(
-    metadata_json: String,
-) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_adapter_context_metadata_signals(&metadata);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize adapter context metadata signals: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_adapter_context_object_carriers_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_adapter_context_object_carriers(&metadata);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize adapter context object carriers: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_hub_policy_override_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_hub_policy_override(&metadata).unwrap_or(Value::Null);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize hub policy override: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn resolve_hub_shadow_compare_config_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = resolve_hub_shadow_compare_config(&metadata).unwrap_or(Value::Null);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize hub shadow compare config: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn is_search_route_id_json(route_id_json: String) -> napi::Result<String> {
-    let route_id: Value = serde_json::from_str(&route_id_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse routeId JSON: {}", e)))?;
-    let output = is_search_route_id(&route_id);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to serialize search route id: {}", e))
-    })
-}
-
-#[napi_derive::napi]
-pub fn is_canonical_web_search_tool_definition_json(tool_json: String) -> napi::Result<String> {
-    let tool: Value = serde_json::from_str(&tool_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse tool JSON: {}", e)))?;
-    let output = is_canonical_web_search_tool_definition(&tool);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize canonical web search tool definition: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn apply_direct_builtin_web_search_tool_json(
-    provider_payload_json: String,
-    provider_protocol: String,
-    route_id_json: String,
-    runtime_metadata_json: String,
-) -> napi::Result<String> {
-    let provider_payload: Value = serde_json::from_str(&provider_payload_json).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to parse provider payload JSON: {}", e))
-    })?;
-    let route_id: Value = serde_json::from_str(&route_id_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse route id JSON: {}", e)))?;
-    let runtime_metadata: Value = serde_json::from_str(&runtime_metadata_json).map_err(|e| {
-        napi::Error::from_reason(format!("Failed to parse runtime metadata JSON: {}", e))
-    })?;
-    let output = apply_direct_builtin_web_search_tool(
-        &provider_payload,
-        provider_protocol.trim(),
-        &route_id,
-        &runtime_metadata,
-    );
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize direct builtin web search tool payload: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn lift_responses_resume_into_semantics_json(
-    request_json: String,
-    metadata_json: String,
-) -> napi::Result<String> {
-    let request: Value = serde_json::from_str(&request_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = lift_responses_resume_into_semantics(&request, &metadata);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize lifted responses resume semantics: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn sync_responses_context_from_canonical_messages_json(
-    request_json: String,
-) -> napi::Result<String> {
-    let request: Value = serde_json::from_str(&request_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
-    let output = sync_responses_context_from_canonical_messages(&request)
-        .map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize synced responses context request: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn read_responses_resume_from_metadata_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = read_responses_resume_from_metadata(&metadata).unwrap_or(Value::Null);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize responses resume from metadata: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn read_responses_resume_from_request_semantics_json(
-    request_json: String,
-) -> napi::Result<String> {
-    let request: Value = serde_json::from_str(&request_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
-    let output = read_responses_resume_from_request_semantics(&request).unwrap_or(Value::Null);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize responses resume from request semantics: {}",
             e
         ))
     })

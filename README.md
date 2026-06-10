@@ -57,7 +57,7 @@ Both provide a **unified gateway for AI providers**, handling **routing + protoc
 
 ## 安装
 
-环境要求：Node.js 20+（推荐 LTS）。
+环境要求：Node.js `>=20 <26`、`tmux`、`cargo`（本地源码 dev/release 构建都依赖 Rust native build）。
 
 ### routecodex (dev mode)
 
@@ -81,6 +81,13 @@ routecodex --version
 npm run install:release
 rcc --version
 ```
+
+`npm run install:release` 会执行：
+
+- 隔离构建目录中的 release 构建
+- 缺失依赖时自动 `npm ci` / `npm install`
+- release snapshot 安装到 `~/.rcc/install/current`
+- `rcc restart --port 5520` + `/health` 最小 runtime smoke
 
 升级/卸载：
 

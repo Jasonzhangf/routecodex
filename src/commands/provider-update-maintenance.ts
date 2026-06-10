@@ -6,9 +6,10 @@ import path from 'node:path';
 import { runVercelAiProviderDoctor } from '../provider-sdk/vercel-ai-doctor.js';
 import { buildProviderFromTemplate, getProviderTemplates, pickProviderTemplate } from '../provider-sdk/provider-add-template.js';
 import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../provider-sdk/provider-inspect.js';
+import { decodeProviderConfigFile } from '../config/provider-config-codec.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
+import { writeProviderConfigFile } from '../config/provider-config-writer.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
-import { serializeTomlRecord } from '../config/toml-basic.js';
 import {
   ask,
   askYesNo,
@@ -37,7 +38,7 @@ function resolveProviderV2Path(providerRoot: string, providerId: string): string
 
 export function createInspectCommand(): Command {
   return new Command('inspect')
-    .description('Show normalized provider metadata from config.v2.json plus catalog defaults')
+    .description('Show normalized provider metadata from config.v2.toml/config.v2.json plus catalog defaults')
     .argument('<id>', 'Provider id to inspect (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--json', 'Output raw JSON', false)
@@ -56,7 +57,7 @@ export function createInspectCommand(): Command {
       const configs = await loadProviderConfigsV2(root);
       const cfg = configs[providerId];
       if (!cfg) {
-        console.error(`No config.v2.json found for provider "${providerId}" under ${root}`);
+        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${root}`);
         process.exit(1);
       }
       const configPath = resolveProviderV2Path(root, providerId);
@@ -127,7 +128,7 @@ export function createDoctorCommand(): Command {
       const configs = await loadProviderConfigsV2(root);
       const cfg = configs[providerId];
       if (!cfg) {
-        console.error(`No config.v2.json found for provider "${providerId}" under ${root}`);
+        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${root}`);
         process.exit(1);
       }
       const providerNode = (cfg.provider ?? {}) as UnknownRecord;
@@ -229,9 +230,9 @@ export function createAddCommand(): Command {
       await ensureDir(root);
       const dir = path.join(root, providerId);
       await ensureDir(dir);
-      const v2Path = resolveProviderV2Path(dir, providerId);
+      const v2Path = resolveProviderV2Path(root, providerId);
       if (await fileExists(v2Path)) {
-        const shouldOverwrite = await askYesNo(`config.v2.json already exists for "${providerId}". Overwrite?`, false);
+        const shouldOverwrite = await askYesNo(`provider config.v2.toml/config.v2.json already exists for "${providerId}". Overwrite?`, false);
         if (!shouldOverwrite) {
           console.log('Aborted');
           return;
@@ -295,7 +296,7 @@ export function createAddCommand(): Command {
         provider
       };
 
-      console.log('\nPlanned config.v2.json content:\n');
+      console.log('\nPlanned provider config content:\n');
       console.log(JSON.stringify(payload, null, 2));
       const confirm = await askYesNo('Write this provider config?', true);
       if (!confirm) {
@@ -303,14 +304,11 @@ export function createAddCommand(): Command {
         return;
       }
 
-      const addSerialized = v2Path.endsWith('.toml')
-        ? serializeTomlRecord(payload as unknown as Record<string, unknown>)
-        : `${JSON.stringify(payload, null, 2)}\n`;
-      await fs.writeFile(v2Path, addSerialized, 'utf8');
+      await writeProviderConfigFile(v2Path, payload as unknown as Record<string, unknown>);
       console.log(`Provider "${providerId}" written to ${v2Path}`);
       const inspection = inspectProviderConfig(payload, { configPath: v2Path, includeRoutingHints: true });
       if (inspection.routingHints) {
-        console.log('Suggested config fragment for ~/.rcc/config.json:');
+        console.log('Suggested config fragment for ~/.rcc/config.toml:');
         console.log(JSON.stringify(buildRoutingHintsConfigFragment(inspection.routingHints), null, 2));
       }
     });
@@ -329,17 +327,16 @@ export function createChangeCommand(): Command {
       }
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = resolveProviderV2Path(dir, providerId);
+      const v2Path = resolveProviderV2Path(root, providerId);
       if (!(await fileExists(v2Path))) {
-        console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
+        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${dir}`);
         process.exit(1);
       }
-      const raw = await fs.readFile(v2Path, 'utf8');
       let parsed: ProviderConfigV2;
       try {
-        parsed = JSON.parse(raw) as ProviderConfigV2;
+        parsed = (await decodeProviderConfigFile(v2Path)).parsed as unknown as ProviderConfigV2;
       } catch (e) {
-        console.error('Failed to parse existing config.v2.json:', (e as Error)?.message ?? String(e));
+        console.error('Failed to parse existing provider config:', (e as Error)?.message ?? String(e));
         process.exit(1);
         return;
       }
@@ -418,7 +415,7 @@ export function createChangeCommand(): Command {
 
       parsed.provider = node;
 
-      console.log('\nUpdated config.v2.json content:\n');
+      console.log('\nUpdated provider config content:\n');
       console.log(JSON.stringify(parsed, null, 2));
       const confirm = await askYesNo('Save changes to this provider config?', true);
       if (!confirm) {
@@ -426,17 +423,14 @@ export function createChangeCommand(): Command {
         return;
       }
 
-      const changeSerialized = v2Path.endsWith('.toml')
-        ? serializeTomlRecord(parsed as unknown as Record<string, unknown>)
-        : `${JSON.stringify(parsed, null, 2)}\n`;
-      await fs.writeFile(v2Path, changeSerialized, 'utf8');
+      await writeProviderConfigFile(v2Path, parsed as unknown as Record<string, unknown>);
       console.log(`Provider "${providerId}" updated at ${v2Path}`);
     });
 }
 
 export function createDeleteCommand(): Command {
   return new Command('delete')
-    .description('Delete provider v2 config (config.v2.json only by default)')
+    .description('Delete provider v2 config file (config.v2.toml/config.v2.json) by default')
     .argument('<id>', 'Provider id to delete')
     .option('--root <dir>', 'Override provider root directory')
     .option('--purge', 'Remove entire provider directory (including runtime state)', false)
@@ -448,7 +442,7 @@ export function createDeleteCommand(): Command {
       }
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = resolveProviderV2Path(dir, providerId);
+      const v2Path = resolveProviderV2Path(root, providerId);
       const targetDescription = opts.purge ? `directory ${dir}` : `file ${v2Path}`;
       const confirmed = await askYesNo(`Are you sure you want to delete provider "${providerId}" (${targetDescription})?`, false);
       if (!confirmed) {

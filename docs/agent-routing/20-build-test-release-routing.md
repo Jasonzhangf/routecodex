@@ -18,8 +18,9 @@
 - 目标改动对应的最小测试（同路径回归）。
 - 至少一条 failing-shape replay + 一条 control replay。
 - 安装后版本/可执行性复核（`routecodex --version` / `rcc --version`）。
+- 安装后真实 restart + `/health` 复核；仅 CLI 存在不算闭环。
 
 ## 发布边界
-- CLI release 统一走 `npm run install:release`（本地源码构建 + 全局安装）。
-- `rcc` 与 `routecodex` 均指向同一全局安装产物。
+- CLI release 统一走 `npm run install:release`（隔离构建 + release snapshot 安装 + restart/health smoke）。
+- release 运行时真源是 `~/.rcc/install/current`；dev `install:global` 仍是独立语义。
 - 不提交构建产物（`dist/`、tarball）。

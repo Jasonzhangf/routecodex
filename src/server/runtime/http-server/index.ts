@@ -242,7 +242,8 @@ function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
   return message.startsWith('protocol mismatch:')
     || message === 'direct_payload_requires_hub_relay'
-    || message === 'stopless_servertool_requires_hub_relay';
+    || message === 'stopless_servertool_requires_hub_relay'
+    || message === 'servertool_followup_requires_hub_relay';
 }
 
 function shouldRecordRouterDirectStorm(error: unknown, readableMessage?: string): boolean {
@@ -1692,6 +1693,8 @@ export class RouteCodexHttpServer {
       response: directOutcome.response,
       providerHandle: directOutcome.providerHandle,
       auditContext: directOutcome.auditContext,
+      externalLatencyStartedAtMs: directOutcome.externalLatencyStartedAtMs,
+      externalLatencyMs: directOutcome.externalLatencyMs,
       capturedUsage,
       providerPayload,
       pipelineMetadata: metadataForHub,
@@ -1785,6 +1788,8 @@ export class RouteCodexHttpServer {
         routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
+        externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+        externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
         requestStartedAtMs: Date.now(),
         logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
         sessionId: readSessionIdForUsageLog(inputMetadata),
@@ -1870,6 +1875,8 @@ export class RouteCodexHttpServer {
         routeName: 'port.provider-direct',
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
+        externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+        externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
         requestStartedAtMs: Date.now(),
         logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
         sessionId: readSessionIdForUsageLog(inputMetadata),

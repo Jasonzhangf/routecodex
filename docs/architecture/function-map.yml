@@ -653,6 +653,7 @@ owners:
       - Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) are physically deleted; corresponding Rust helpers stay internal to VR route cleanup and response apply_patch/hashline governance.
       - Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) are physically deleted; internal Rust helpers may remain only for current Hub mainline/tests until passthrough-mode semantics are separately retired.
       - Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) are physically deleted after `runHubPipelineStageJson` retirement; live mainline must use total Hub Pipeline Rust entries.
+      - Retired zero-consumer Hub orchestration public wrapper surface (`native-hub-pipeline-orchestration-semantics-search-resume.ts`, standalone metadata/protocol/node-result/web-search/resume NAPI JSON wrappers and TS `*WithNative` exports) is physically deleted; internal Rust helpers remain private to active Hub mainline/tests and must not be restored through aggregate re-export or required-export gate without a live runtime consumer plus map update.
       - Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath.
       - Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage.
       - Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports.
@@ -1260,6 +1261,195 @@ owners:
       - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
       - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
 
+  - feature_id: config.path_resolution_surface
+    status: active
+    summary: user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths
+    owner_module: src/config/config-paths.ts
+    canonical_types:
+      - ConfigPathOptions
+      - ConfigPathResult
+    canonical_builders:
+      - resolveRouteCodexConfigPath
+    allowed_paths:
+      - src/config/unified-config-paths.ts
+      - src/config/config-paths.ts
+      - src/config/user-data-paths.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
+      - src/commands/validate.ts
+      - src/cli/commands/launcher-kernel.ts
+      - src/cli/commands/config.ts
+      - src/cli/commands/env.ts
+      - src/cli/commands/init.ts
+      - src/cli/commands/port-group-resolver.ts
+      - src/cli/commands/restart.ts
+      - src/cli/commands/start.ts
+      - src/cli/commands/stop.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/config/unified-config-paths.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Missing config is fail-fast; no fallback path result is allowed.
+      - Callers may pass explicit path, but auto-resolution truth stays in shared resolver.
+
+  - feature_id: config.user_config_codec
+    status: active
+    summary: user config decode/parse truth for JSON and TOML lives in shared codec
+    owner_module: src/config/user-config-codec.ts
+    canonical_types:
+      - UserConfigFormat
+      - DecodedUserConfigFile
+    canonical_builders:
+      - detectUserConfigFormat
+      - parseUserConfigText
+      - decodeUserConfigFile
+      - decodeUserConfigFileSync
+    allowed_paths:
+      - src/config/user-config-codec.ts
+      - src/config/routecodex-config-loader.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/server/runtime/http-server/daemon-admin/routing-policy.ts
+      - src/server/runtime/http-server/daemon-admin/control-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
+      - src/commands/validate.ts
+      - src/cli/commands/config.ts
+      - src/cli/commands/env.ts
+      - src/cli/commands/init/basic.ts
+      - src/cli/commands/port-group-resolver.ts
+      - src/cli/commands/restart.ts
+      - src/cli/commands/stop.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/config/toml-shadow-codec.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - No caller may parse user config with raw JSON.parse/TOML logic outside codec owner.
+
+  - feature_id: config.provider_config_codec
+    status: active
+    summary: provider v2 config decode/parse truth for JSON and TOML lives in shared codec
+    owner_module: src/config/provider-config-codec.ts
+    canonical_types:
+      - ProviderConfigFormat
+      - DecodedProviderConfigFile
+    canonical_builders:
+      - detectProviderConfigFormat
+      - parseProviderConfigText
+      - decodeProviderConfigFile
+      - coerceProviderConfigV2FromParsed
+    allowed_paths:
+      - src/config/provider-config-codec.ts
+      - src/config/provider-v2-loader.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/cli/commands/init/basic.ts
+      - src/commands/provider-update.ts
+      - src/commands/provider-update-maintenance.ts
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Provider config decode truth is shared; maintenance/admin must not raw-parse provider files.
+
+  - feature_id: config.user_config_materialization
+    status: active
+    summary: runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain
+    owner_module: src/config/user-config-loader.ts
+    canonical_types:
+      - LoadedRouteCodexConfig
+      - MaterializedRouteCodexConfig
+    canonical_builders:
+      - materializeRouteCodexConfig
+      - collectV2ConfigSourceErrors
+      - validateV2ConfigSources
+    allowed_paths:
+      - src/config/routecodex-config-loader.ts
+      - src/config/user-config-loader.ts
+      - src/config/virtual-router-builder.ts
+      - src/server/handlers/config-admin-handler.ts
+    forbidden_paths:
+      - src/server/runtime/http-server/daemon-admin
+      - src/cli/commands
+      - src/commands
+    required_tests:
+      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Runtime/config callers consume materialized config output; they must not rebuild VR/provider-profile semantics locally.
+
+  - feature_id: config.user_config_write_surface
+    status: active
+    summary: full user config write and scalar patch update live in shared writer; callers must not stringify config directly
+    owner_module: src/config/user-config-writer.ts
+    canonical_types:
+      - PersistedUserConfigFile
+    canonical_builders:
+      - writeUserConfigFile
+      - updateUserConfigStringScalar
+    allowed_paths:
+      - src/config/user-config-writer.ts
+      - src/config/toml-comment-preserving.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/server/runtime/http-server/daemon-admin/routing-policy.ts
+      - src/server/runtime/http-server/daemon-admin/control-handler.ts
+      - src/cli/commands/config.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/config/config-writer.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - User config writes must be atomic and must flow through one writer owner.
+
+  - feature_id: config.provider_config_write_surface
+    status: active
+    summary: provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly
+    owner_module: src/config/provider-config-writer.ts
+    canonical_types:
+      - PersistedProviderConfigFile
+    canonical_builders:
+      - writeProviderConfigFile
+    allowed_paths:
+      - src/config/provider-config-writer.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/cli/commands/init/basic.ts
+      - src/commands/provider-update.ts
+      - src/commands/provider-update-maintenance.ts
+    forbidden_paths:
+      - src/server/handlers
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/config/config-writer.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - Provider config writes must go through one writer owner regardless of JSON/TOML extension.
+
   - feature_id: manager.routing_control_surface
     status: active
     summary: routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only
@@ -1621,7 +1811,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/response
     required_tests:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/providers/core/runtime/http-transport-provider.sse-business-error-retry.red.spec.ts
+      - tests/server/http-server/provider-response-sse-marker.blackbox.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
@@ -1740,20 +1930,16 @@ owners:
     canonical_builders:
       - capture_error_err_02_host_from_error_err_01_source
       - report_error_err_02_host_to_router_policy_from_error_err_01_source
-      - classify_error_err_03_runtime_from_error_err_02_host
-      - apply_error_err_04_router_policy_from_error_err_03_runtime
-      - consume_error_err_05_execution_decision_from_error_err_04_router_policy
-      - project_error_err_06_client_from_error_err_05_execution_decision
     allowed_paths:
       - src/providers/core/utils/provider-error-reporter.ts
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/utils/http-error-mapper.ts
-      - docs/reports/provider-system-architecture-audit-2026-06-09.md
-      - docs/goals/error-module-function-map-closeout-plan.md
+      - src/server/runtime/http-server/provider-direct-pipeline.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - scripts/architecture/verify-error-pipeline-contract.mjs
+      - docs
     forbidden_paths:
       - src/client
       - src/providers/profile
@@ -1789,9 +1975,8 @@ owners:
       - src/server/runtime/http-server/index.ts
       - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
-      - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+      - docs
     forbidden_paths:
-      - src/providers/core/runtime
       - src/providers/profile
       - src/server/handlers
       - src/client
@@ -1826,6 +2011,8 @@ owners:
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-tool-validation.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
+      - docs
     forbidden_paths:
       - src/providers/core/runtime
       - src/providers/core/utils/provider-error-reporter.ts
@@ -1838,3 +2025,6 @@ owners:
     required_gates:
       - npm run verify:error-pipeline-contract
       - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - ErrorErr06 may project client-visible error payloads only; it must not feed provider retry/reroute/cooldown policy.

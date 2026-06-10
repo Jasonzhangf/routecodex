@@ -4,9 +4,11 @@ import { homedir, tmpdir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
+import { writeUserConfigFile } from '../../config/user-config-writer.js';
 import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
@@ -210,9 +212,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (!configPath) {
           // Respect env overrides used by install/global verification scripts.
           // CLI flags still take precedence when provided.
-          configPath =
-            (ctx.env.ROUTECODEX_CONFIG_PATH || ctx.env.ROUTECODEX_CONFIG || '').trim() ||
-            resolveRccConfigFile(home());
+          const envConfigPath = (ctx.env.ROUTECODEX_CONFIG_PATH || ctx.env.ROUTECODEX_CONFIG || '').trim();
+          configPath = envConfigPath
+            ? resolveRouteCodexConfigPath(envConfigPath)
+            : resolveRouteCodexConfigPath();
+        } else {
+          configPath = resolveRouteCodexConfigPath(configPath);
         }
 
         // Ensure provided config path is a file (not a directory)
@@ -238,10 +243,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         // Load and validate configuration (non-dev packages rely on config port)
         let config: any;
+        let configFormat: 'json' | 'toml';
         try {
           const configContent = fsImpl.readFileSync(configPath, 'utf8');
-          const format = detectUserConfigFormat(configPath);
-          config = parseUserConfigText(configContent, format);
+          configFormat = detectUserConfigFormat(configPath);
+          config = parseUserConfigText(configContent, configFormat);
         } catch {
           spinner.fail('Failed to parse configuration file');
           ctx.logger.error(`Invalid configuration file: ${configPath}`);
@@ -272,8 +278,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           config = carrier;
 
           const dir = fsImpl.mkdtempSync(pathImpl.join(tmp(), 'routecodex-config-'));
-          const patchedPath = pathImpl.join(dir, 'config.json');
-          fsImpl.writeFileSync(patchedPath, JSON.stringify(config, null, 2), 'utf8');
+          const patchedPath = pathImpl.join(dir, pathImpl.basename(configPath));
+          await writeUserConfigFile(patchedPath, config, configFormat);
           configPath = patchedPath;
           spinner.info(`quota routing override: ${quotaRoutingOverride ? 'on' : 'off'} (temp config)`);
         }

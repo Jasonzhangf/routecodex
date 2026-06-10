@@ -25,10 +25,10 @@ class MockResponse extends PassThrough {
 describe('sendPipelineResponse usage log tag forwarding', () => {
   beforeEach(() => {
     jest.resetModules();
+    jest.restoreAllMocks();
   });
 
-  it('forwards providerDecodeTag into logUsageSummary', async () => {
-    const logUsageSummary = jest.fn();
+  async function importHandlerWithUsageMock(logUsageSummary: ReturnType<typeof jest.fn>) {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -36,11 +36,15 @@ describe('sendPipelineResponse usage log tag forwarding', () => {
     jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/usage-logger.js', () => ({
       logUsageSummary
     }));
+    return import('../../../src/server/handlers/handler-response-utils.js');
+  }
 
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+  it('forwards providerDecodeTag into logUsageSummary', async () => {
+    const logUsageSummary = jest.fn();
+    const { sendPipelineResponse } = await importHandlerWithUsageMock(logUsageSummary);
 
     const res = new MockResponse();
-    sendPipelineResponse(
+    await sendPipelineResponse(
       res as any,
       {
         status: 200,
@@ -76,5 +80,52 @@ describe('sendPipelineResponse usage log tag forwarding', () => {
         providerDecodeTag: 'qwen.nonstream=json'
       })
     );
+  });
+
+  it('keeps provided externalLatencyMs for JSON responses', async () => {
+    const logUsageSummary = jest.fn();
+    const { sendPipelineResponse } = await importHandlerWithUsageMock(logUsageSummary);
+    const fixedNow = 1_700_000_000_000;
+    const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(fixedNow);
+
+    try {
+      const res = new MockResponse();
+      await sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            id: 'resp_usage_json_timing',
+            object: 'response',
+            status: 'completed',
+            output: [
+              {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: 'ok' }]
+              }
+            ]
+          },
+          usageLogInfo: {
+            requestStartedAtMs: fixedNow - 10,
+            providerKey: 'mimo.key2.mimo-v2.5',
+            routeName: 'router-direct:tools',
+            externalLatencyStartedAtMs: fixedNow - 5000,
+            externalLatencyMs: 1234
+          }
+        } as any,
+        'req-usage-json-timing',
+        { entryEndpoint: '/v1/responses' }
+      );
+
+      expect(logUsageSummary).toHaveBeenCalledTimes(1);
+      expect(logUsageSummary.mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({
+          externalLatencyMs: 1234
+        })
+      );
+    } finally {
+      dateNowSpy.mockRestore();
+    }
   });
 });

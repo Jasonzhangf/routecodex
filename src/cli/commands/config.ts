@@ -7,12 +7,13 @@ import { stdin as input, stdout as output } from 'node:process';
 import type { Command } from 'commander';
 
 import { initializeConfigV1, parseProvidersArg } from '../config/init-config.js';
-import { resolveRccConfigFile } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { loadProviderConfigsV2 } from '../../config/provider-v2-loader.js';
 import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
-import { updateTomlStringScalarInTable } from '../../config/toml-comment-preserving.js';
+import { writeUserConfigFile } from '../../config/user-config-writer.js';
 import { migrateUserConfigJsonToToml, migrateAllProviderConfigs } from '../../config/config-migration-json-to-toml.js';
 
 type Spinner = {
@@ -329,10 +330,6 @@ function parsePort(value: unknown): number | null {
   return Math.floor(parsed);
 }
 
-function isTomlConfigPath(configPath: string): boolean {
-  return path.extname(configPath).trim().toLowerCase() === '.toml';
-}
-
 function buildInteractivePrompt(
   ctx: ConfigCommandContext
 ): { prompt: (question: string) => Promise<string>; close: () => void } | null {
@@ -390,7 +387,11 @@ Examples:
     .option('-f, --force', 'Force overwrite existing configuration')
     .action(async (action: string, options: { config?: string; template?: string; providers?: string; defaultProvider?: string; host?: string; port?: string; group?: string; reload?: boolean; force?: boolean }) => {
       try {
-        const configPath = options.config || resolveRccConfigFile(home());
+        const configPath = options.config
+          ? (action === 'init' ? pathImpl.resolve(options.config) : resolveRouteCodexConfigPath(options.config))
+          : action === 'init'
+            ? pathImpl.join(resolveRccUserDir(home()), 'config.toml')
+            : resolveRouteCodexConfigPath();
 
         switch (action) {
           case 'init':
@@ -579,12 +580,7 @@ Examples:
               }
 
               const next = applyRoutingGroupsIntoConfig(parsed, snapshot.groups, groupId);
-              if (isTomlConfigPath(configPath)) {
-                const nextRaw = updateTomlStringScalarInTable(decoded.raw, ['virtualrouter'], 'activeRoutingPolicyGroup', groupId);
-                fsImpl.writeFileSync(configPath, nextRaw, 'utf8');
-              } else {
-                fsImpl.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-              }
+              await writeUserConfigFile(configPath, next as Record<string, unknown>);
               ctx.logger.success(`Switched active routing group: ${snapshot.activeGroupId} -> ${groupId}`);
 
               if (options.reload !== false) {

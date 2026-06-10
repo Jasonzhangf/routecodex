@@ -184,26 +184,22 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = rootA;
     await writeProviderConfig(rootA);
     await fs.writeFile(
-      path.join(rootA, 'config.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        virtualrouterMode: 'v2',
-        httpserver: { host: '127.0.0.1', port: 5555 },
-        virtualrouter: {
-          routingPolicyGroups: {
-            default: {
-              routing: {
-                default: [{ id: 'a', targets: ['ali-coding-plan.glm-5'] }]
-              }
-            }
-          }
-        }
-      }, null, 2)}\n`,
+      path.join(rootA, 'config.toml'),
+      `version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+host = "127.0.0.1"
+port = 5555
+
+[virtualrouter.routingPolicyGroups.default.routing]
+default = [{ id = "a", targets = ["ali-coding-plan.glm-5"] }]
+`,
       'utf8'
     );
 
     const first = await loadRouteCodexConfig();
-    expect(first.configPath).toBe(path.join(rootA, 'config.json'));
+    expect(first.configPath).toBe(path.join(rootA, 'config.toml'));
 
     const rootB = await mkTmp('routecodex-v2-path-b-');
     process.env.RCC_HOME = rootB;
@@ -211,26 +207,22 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = rootB;
     await writeProviderConfig(rootB);
     await fs.writeFile(
-      path.join(rootB, 'config.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        virtualrouterMode: 'v2',
-        httpserver: { host: '127.0.0.1', port: 6666 },
-        virtualrouter: {
-          routingPolicyGroups: {
-            default: {
-              routing: {
-                default: [{ id: 'b', targets: ['ali-coding-plan.qwen3.5-plus'] }]
-              }
-            }
-          }
-        }
-      }, null, 2)}\n`,
+      path.join(rootB, 'config.toml'),
+      `version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+host = "127.0.0.1"
+port = 6666
+
+[virtualrouter.routingPolicyGroups.default.routing]
+default = [{ id = "b", targets = ["ali-coding-plan.qwen3.5-plus"] }]
+`,
       'utf8'
     );
 
     const second = await loadRouteCodexConfig();
-    expect(second.configPath).toBe(path.join(rootB, 'config.json'));
+    expect(second.configPath).toBe(path.join(rootB, 'config.toml'));
     expect((second.userConfig.httpserver as any).port).toBe(6666);
   });
 });

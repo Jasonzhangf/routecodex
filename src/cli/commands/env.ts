@@ -1,12 +1,10 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccConfigFile } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 import { normalizeConnectHost, normalizePort } from '../utils/normalize.js';
-import { safeReadJson } from '../utils/safe-read-json.js';
 
 export type EnvCommandOptions = {
   port?: string;
@@ -65,7 +63,7 @@ export function createEnvCommand(program: Command, ctx: EnvCommandContext): void
     .option('--json', 'Output JSON instead of shell exports')
     .action(async (options: EnvCommandOptions) => {
       try {
-        const configPath = options.config ? options.config : resolveRccConfigFile();
+        const configPath = options.config ? resolveRouteCodexConfigPath(options.config) : resolveRouteCodexConfigPath();
 
         let host = options.host;
         let port = normalizePort(options.port);
@@ -77,7 +75,10 @@ export function createEnvCommand(program: Command, ctx: EnvCommandContext): void
           }
         } else {
           if (!Number.isFinite(port) && fs.existsSync(configPath)) {
-            const cfg = safeReadJson<EnvCommandConfig>(configPath);
+            const cfg = decodeUserConfigFileSync(
+              configPath,
+              fs as Pick<typeof fs, 'readFileSync'>
+            ).parsed as EnvCommandConfig;
             port = normalizePort(cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
             host =
               typeof cfg?.httpserver?.host === 'string'

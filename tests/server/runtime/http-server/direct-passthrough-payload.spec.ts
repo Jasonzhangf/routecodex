@@ -20,12 +20,15 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
     const requiresHubRelay = Boolean(input.metadata?.__rt
       && typeof input.metadata.__rt === 'object'
       && !Array.isArray(input.metadata.__rt)
-      && (input.metadata.__rt as Record<string, unknown>).followupSource === 'stop_message_auto');
+      && (
+        (input.metadata.__rt as Record<string, unknown>).serverToolFollowup === true
+        || typeof (input.metadata.__rt as Record<string, unknown>).followupSource === 'string'
+      ));
     return {
       providerWireValid: true,
       requiresHubRelay,
       reason: requiresHubRelay
-          ? 'stopless_servertool_requires_hub_relay'
+          ? 'servertool_followup_requires_hub_relay'
           : undefined,
       hasDeclaredApplyPatchTool,
     };
@@ -277,11 +280,11 @@ describe('direct-passthrough-payload', () => {
     expect(result).toMatchObject({
       providerWireValid: true,
       requiresHubRelay: true,
-      reason: 'stopless_servertool_requires_hub_relay',
+      reason: 'servertool_followup_requires_hub_relay',
     });
   });
 
-  it('keeps generic servertool followup metadata on responses direct', () => {
+  it('requires Hub relay for generic servertool followup metadata on responses direct', () => {
     const result = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       metadata: { __rt: { serverToolFollowup: true, followupSource: 'servertool.apply_patch_flow' } },
@@ -293,8 +296,8 @@ describe('direct-passthrough-payload', () => {
 
     expect(result).toMatchObject({
       providerWireValid: true,
-      requiresHubRelay: false,
+      requiresHubRelay: true,
+      reason: 'servertool_followup_requires_hub_relay',
     });
-    expect(result.reason).toBeUndefined();
   });
 });

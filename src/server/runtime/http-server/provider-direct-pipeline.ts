@@ -39,6 +39,8 @@ export interface ProviderDirectPipelineResult {
   actualBehavior: 'direct' | 'relay';
   inboundProtocol: ProviderProtocol;
   providerProtocol: ProviderProtocol;
+  externalLatencyStartedAtMs: number;
+  externalLatencyMs: number;
 }
 
 export async function executeProviderDirectPipeline(
@@ -99,6 +101,7 @@ export async function executeProviderDirectPipeline(
     actualBehavior,
   };
 
+  const providerStartedAtMs = Date.now();
   let response: unknown;
   try {
     response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
@@ -108,6 +111,7 @@ export async function executeProviderDirectPipeline(
     await options.onProviderError?.(error, auditContext);
     throw error;
   }
+  const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
 
   options.onSnapshotAfter?.(response, {
     port: portConfig.port,
@@ -121,6 +125,8 @@ export async function executeProviderDirectPipeline(
     actualBehavior,
     inboundProtocol,
     providerProtocol: providerHandle.providerProtocol,
+    externalLatencyStartedAtMs: providerStartedAtMs,
+    externalLatencyMs,
   };
 }
 

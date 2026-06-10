@@ -40,6 +40,9 @@ const projectResponsesClientBodyForClientWithNativeMock = jest.fn((payload: any,
   };
   return visit(payload);
 });
+const projectResponsesClientPayloadForClientWithNativeMock = jest.fn((payload: any, toolsRaw: unknown[]) =>
+  projectResponsesClientBodyForClientWithNativeMock(payload, toolsRaw)
+);
 const projectResponsesSseFrameForClientWithNativeMock = jest.fn((input: any) => {
   const data = input.data;
   const hasFreeformApplyPatch = input.toolsRaw.some((tool: any) =>
@@ -95,12 +98,12 @@ const projectResponsesSseFrameForClientWithNativeMock = jest.fn((input: any) => 
       next.item = { type: 'custom_tool_call', name: 'apply_patch', call_id: callId, input: inputText };
     }
     if (next.response) {
-      next.response = projectResponsesClientBodyForClientWithNativeMock(next.response, input.toolsRaw);
+      next.response = projectResponsesClientPayloadForClientWithNativeMock(next.response, input.toolsRaw, input.metadata);
     }
     return { emit: true, frame: `event: ${input.eventName}\ndata: ${JSON.stringify(next)}\n\n`, state };
   }
   if (data.response) {
-    const next = { ...data, response: projectResponsesClientBodyForClientWithNativeMock(data.response, input.toolsRaw) };
+    const next = { ...data, response: projectResponsesClientPayloadForClientWithNativeMock(data.response, input.toolsRaw, input.metadata) };
     return { emit: true, frame: `event: ${input.eventName}\ndata: ${JSON.stringify(next)}\n\n`, state };
   }
   return { emit: true, frame: input.frame, state };
@@ -118,7 +121,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   importCoreDist: jest.fn(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return {
-      projectResponsesClientBodyForClientWithNative: projectResponsesClientBodyForClientWithNativeMock,
+      projectResponsesClientPayloadForClientWithNative: projectResponsesClientPayloadForClientWithNativeMock,
       projectResponsesSseFrameForClientWithNative: projectResponsesSseFrameForClientWithNativeMock,
     };
   }),

@@ -3,6 +3,7 @@
  * 支持OpenAI Responses API的JSON↔SSE双向转换
  */
 
+import type { Readable } from 'node:stream';
 import type { BaseSseEvent, StreamDirection, JsonObject, JsonValue } from './core-interfaces.js';
 import type { RequiredAction } from './sse-events.js';
 

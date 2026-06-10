@@ -688,9 +688,7 @@ mod tests {
 
     #[test]
     fn shared_stop_message_mode_normalizers_deletion_gate_removed_local_clones() {
-        for relative in [
-            "virtual_router_stop_message_actions.rs",
-        ] {
+        for relative in ["virtual_router_stop_message_actions.rs"] {
             let path = crate_src_path(relative);
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));

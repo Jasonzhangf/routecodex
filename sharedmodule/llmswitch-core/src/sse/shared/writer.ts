@@ -161,15 +161,34 @@ export class StreamWriter {
    * 处理背压
    */
   private async handleBackpressure(): Promise<void> {
-    return new Promise((resolve) => {
+    if (this.stream.destroyed || this.stream.writableLength < this.config.maxBufferSize) {
+      return;
+    }
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.stream.removeListener('drain', checkDrain);
+        this.stream.removeListener('close', handleClose);
+        this.stream.removeListener('error', handleError);
+      };
       const checkDrain = () => {
         if (this.stream.writableLength < this.config.maxBufferSize) {
-          this.stream.removeListener('drain', checkDrain);
+          cleanup();
           resolve();
         }
       };
+      const handleClose = () => {
+        cleanup();
+        resolve();
+      };
+      const handleError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
 
       this.stream.on('drain', checkDrain);
+      this.stream.on('close', handleClose);
+      this.stream.on('error', handleError);
+      checkDrain();
     });
   }
 

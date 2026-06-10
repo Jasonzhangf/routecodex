@@ -35,6 +35,14 @@ function resolveRccHome() {
   return path.join(resolveHomeDir(), '.rcc');
 }
 
+function resolveSourceRepoRoot() {
+  const raw = String(process.env.ROUTECODEX_RELEASE_SOURCE_ROOT || '').trim();
+  if (!raw) {
+    return repoRoot;
+  }
+  return path.resolve(raw.startsWith('~/') ? path.join(resolveHomeDir(), raw.slice(2)) : raw);
+}
+
 function requireExisting(relativePath) {
   const absolutePath = path.join(repoRoot, relativePath);
   if (!fs.existsSync(absolutePath)) {
@@ -206,10 +214,14 @@ function main() {
 
   writeManifest(stagingDir, {
     kind: 'routecodex-release-snapshot',
+    releaseId,
     version,
     buildMode,
     installedAt,
-    sourceRepoRoot: repoRoot
+    sourceRepoRoot: resolveSourceRepoRoot(),
+    buildRepoRoot: repoRoot,
+    installRoot,
+    distCli: path.join(releaseDir, 'dist', 'cli.js')
   });
 
   removeIfExists(releaseDir);

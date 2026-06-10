@@ -10,11 +10,10 @@ import { UnifiedConfigPathResolver } from './unified-config-paths.js';
  * @returns The resolved configuration file path
  */
 export function resolveRouteCodexConfigPath(preferredPath?: string): string {
-  // Use the unified resolver for consistent behavior; do not fall back to legacy search
   const result = UnifiedConfigPathResolver.resolveConfigPath({
     preferredPath,
     allowDirectoryScan: true,
-    strict: false
+    strict: true
   });
   return result.resolvedPath;
 }

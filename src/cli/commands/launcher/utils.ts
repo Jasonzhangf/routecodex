@@ -7,7 +7,7 @@
 import type fs from 'node:fs';
 import type path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { parseTomlRecord } from '../../../config/toml-basic.js';
+import { detectUserConfigFormat, parseUserConfigText } from '../../../config/user-config-codec.js';
 
 function logLauncherUtilsNonBlocking(
   stage: string,
@@ -20,22 +20,11 @@ function logLauncherUtilsNonBlocking(
 }
 
 function parseLauncherConfigText(configPath: string, raw: string): Record<string, unknown> {
-  const trimmedPath = String(configPath || '').trim().toLowerCase();
   const trimmed = String(raw || '').trim();
   if (!trimmed) {
     return {};
   }
-  if (trimmedPath.endsWith('.toml')) {
-    return parseTomlRecord(raw);
-  }
-  if (trimmedPath.endsWith('.json')) {
-    return JSON.parse(raw) as Record<string, unknown>;
-  }
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return parseTomlRecord(raw);
-  }
+  return parseUserConfigText(raw, detectUserConfigFormat(configPath));
 }
 
 function readConfigRecordField(record: Record<string, unknown>, key: string): unknown {

@@ -1243,21 +1243,6 @@ class RouteCodexApp {
         logNonBlockingError('detectServerPort.shared_config_probe', error);
       }
 
-      // 最后检查默认配置文件
-      const defaultConfigPath = resolveRccPathForRead('config.json');
-      if (fsSync.existsSync(defaultConfigPath)) {
-        const defaultStats = fsSync.statSync(defaultConfigPath);
-        if (!defaultStats.isFile()) {
-          throw new Error(`Default configuration path must be a file: ${defaultConfigPath}`);
-        }
-
-        const port = await readPortFromConfigFile(defaultConfigPath);
-        if (typeof port === 'number' && port > 0) {
-          console.log(`🔧 Using port ${port} from default config: ${defaultConfigPath}`);
-          return port;
-        }
-      }
-
       // Dev 模式：仅在未提供任何可解析配置时兜底 5555
       if (buildInfo.mode === 'dev') {
         console.log('🔧 Using dev default port 5555');

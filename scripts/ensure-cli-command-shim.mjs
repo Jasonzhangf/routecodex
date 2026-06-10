@@ -12,10 +12,7 @@ function resolveShimDirs() {
   return [path.join(os.homedir(), '.local', 'bin')];
 }
 
-function shouldPreferReleaseSnapshot(binName) {
-  if (binName !== 'rcc') {
-    return false;
-  }
+function shouldPreferReleaseSnapshot(_binName) {
   const raw = String(process.env.ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT || '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
 }

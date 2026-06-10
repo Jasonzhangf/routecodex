@@ -93,9 +93,7 @@ pub fn plan_stopless_goal_state_sync(
         out.push_str(&input.latest_user_text[cursor..block.start_offset]);
         directive_types.push(directive.directive_type.clone());
         next_state = Some(apply_stopless_goal_directive(
-            next_state,
-            &directive,
-            now_ms,
+            next_state, &directive, now_ms,
         )?);
         if directive.passthrough == "body-forward" {
             out.push_str(&directive.body);
@@ -455,13 +453,15 @@ mod tests {
 
     #[test]
     fn plans_start_directive_rewrite_and_state() {
-        let plan = plan_stopless_goal_state_sync(StoplessGoalStateSyncPlanInput {
-            latest_user_text: "前文\n<**rcc**>\nstopless start\n实现统一 RCC stopless\n</rcc**>\n后文"
-                .to_string(),
-            current_state: None,
-            now_ms: Some(100),
-        })
-        .expect("plan");
+        let plan =
+            plan_stopless_goal_state_sync(StoplessGoalStateSyncPlanInput {
+                latest_user_text:
+                    "前文\n<**rcc**>\nstopless start\n实现统一 RCC stopless\n</rcc**>\n后文"
+                        .to_string(),
+                current_state: None,
+                now_ms: Some(100),
+            })
+            .expect("plan");
 
         assert!(plan.had_directive);
         assert_eq!(plan.directive_types, vec!["stopless.start"]);

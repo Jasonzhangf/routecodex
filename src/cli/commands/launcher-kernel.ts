@@ -8,7 +8,7 @@ import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
-import { resolveRccConfigFileForRead, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import {
   encodeSessionClientApiKey,
   extractSessionClientDaemonIdFromApiKey,
@@ -132,11 +132,15 @@ function resolveLauncherConfigPath(
 ): string {
   let configPath = typeof options.config === 'string' && options.config.trim() ? options.config.trim() : '';
   if (!configPath) {
-    const resolved = resolveRouteCodexConfigPath();
-    const normalizedResolved = resolved && resolved.trim() ? resolved.trim() : '';
-    configPath = normalizedResolved && fsImpl.existsSync(normalizedResolved)
-      ? normalizedResolved
-      : resolveRccConfigFileForRead(ctx.homedir());
+    try {
+      const resolved = resolveRouteCodexConfigPath();
+      const normalizedResolved = resolved && resolved.trim() ? resolved.trim() : '';
+      configPath = normalizedResolved && fsImpl.existsSync(normalizedResolved)
+        ? normalizedResolved
+        : pathImpl.join(resolveRccUserDir(ctx.homedir()), 'config.toml');
+    } catch {
+      configPath = pathImpl.join(resolveRccUserDir(ctx.homedir()), 'config.toml');
+    }
   }
   return configPath;
 }

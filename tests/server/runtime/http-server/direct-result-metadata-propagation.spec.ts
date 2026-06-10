@@ -86,7 +86,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { __sse_responses: { pipe: () => undefined }, model: 'gpt-5.4' }
       },
       providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
-      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } }
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 2345,
     }, {
       requestId: 'req-router-direct-session-color',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -109,7 +111,8 @@ describe('http-server direct result metadata propagation', () => {
       conversationId: 'conv-router-direct-color',
       projectPath: '/tmp/router-direct-project',
       providerRequestId: 'req-router-direct-session-color',
-      inputRequestId: 'req-router-direct-session-color'
+      inputRequestId: 'req-router-direct-session-color',
+      externalLatencyMs: 2345
     });
   });
 
@@ -121,7 +124,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { id: 'resp_router_direct_tmux_session', model: 'gpt-5.4' }
       },
       providerHandle: { providerProtocol: 'openai-chat', providerType: 'openai' },
-      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'tools' } }
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'tools' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 678,
     }, {
       requestId: 'req-router-direct-tmux-session',
       body: { model: 'gpt-5.3-codex', stream: false },
@@ -133,7 +138,8 @@ describe('http-server direct result metadata propagation', () => {
 
     expect(result.usageLogInfo).toMatchObject({
       sessionId: 'tmux-router-direct-session',
-      projectPath: '/tmp/router-direct-tmux-project'
+      projectPath: '/tmp/router-direct-tmux-project',
+      externalLatencyMs: 678
     });
   });
 
@@ -146,7 +152,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { __sse_responses: { pipe: () => undefined }, model: 'gpt-5.4' }
       },
       providerProtocol: 'openai-responses',
-      providerHandle: { providerType: 'openai' }
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 3456,
     }, {
       requestId: 'req-provider-direct-session-color',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -169,7 +177,8 @@ describe('http-server direct result metadata propagation', () => {
       conversationId: 'conv-provider-direct-color',
       projectPath: '/tmp/provider-direct-project',
       providerRequestId: 'req-provider-direct-session-color',
-      inputRequestId: 'req-provider-direct-session-color'
+      inputRequestId: 'req-provider-direct-session-color',
+      externalLatencyMs: 3456
     });
   });
 
@@ -185,7 +194,9 @@ describe('http-server direct result metadata propagation', () => {
         data: readonlyBody
       },
       providerProtocol: 'openai-responses',
-      providerHandle: { providerType: 'openai' }
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 1,
     }, {
       body: { model: 'gpt-5.3-codex', stream: false },
       metadata: {}
@@ -239,6 +250,8 @@ describe('http-server direct result metadata propagation', () => {
       },
       providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
       auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-router-direct-retention-success',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -315,7 +328,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { error: { code: 'HTTP_502' } }
       },
       providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
-      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } }
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-router-direct-retention-http-502',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -363,7 +378,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { __sse_responses: { pipe: () => undefined }, model: 'gpt-5.4' }
       },
       providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
-      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } }
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-router-direct-retention-sse-wrapper',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -427,7 +444,9 @@ describe('http-server direct result metadata propagation', () => {
         },
       },
       providerProtocol: 'openai-responses',
-      providerHandle: { providerType: 'openai' }
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-provider-direct-retention-success',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -504,7 +523,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { error: { code: 'HTTP_502' } }
       },
       providerProtocol: 'openai-responses',
-      providerHandle: { providerType: 'openai' }
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-provider-direct-retention-http-502',
       body: { model: 'gpt-5.3-codex', stream: true },
@@ -552,7 +573,9 @@ describe('http-server direct result metadata propagation', () => {
         data: { __sse_responses: { pipe: () => undefined }, model: 'gpt-5.4' }
       },
       providerProtocol: 'openai-responses',
-      providerHandle: { providerType: 'openai' }
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
     }, {
       requestId: 'req-provider-direct-retention-sse-wrapper',
       body: { model: 'gpt-5.3-codex', stream: true },

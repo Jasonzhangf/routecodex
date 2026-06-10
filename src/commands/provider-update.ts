@@ -7,8 +7,9 @@ import { fetchModelsFromUpstream } from '../tools/provider-update/fetch-models.j
 import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklist.js';
 import { probeContextForModel } from '../tools/provider-update/probe-context.js';
 import type { ProviderInputConfig } from '../tools/provider-update/types.js';
+import { decodeProviderConfigFile } from '../config/provider-config-codec.js';
+import { writeProviderConfigFile } from '../config/provider-config-writer.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
-import { serializeTomlRecord } from '../config/toml-basic.js';
 import type { ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 import {
@@ -32,6 +33,14 @@ import {
 } from './provider-update-maintenance.js';
 
 export { __providerUpdateTestables };
+
+async function resolveProviderV2Path(dir: string): Promise<string> {
+  const tomlPath = path.join(dir, 'config.v2.toml');
+  if (await fileExists(tomlPath)) {
+    return tomlPath;
+  }
+  return path.join(dir, 'config.v2.json');
+}
 
 function createUpdateCommand(): Command {
   return new Command('update')
@@ -80,10 +89,10 @@ function createUpdateCommand(): Command {
 
 function createSyncModelsCommand(): Command {
   return new Command('sync-models')
-    .description('Sync upstream model list into an existing provider config.v2.json')
+    .description('Sync upstream model list into an existing provider config.v2.toml/config.v2.json')
     .argument('<id>', 'Provider id to update (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
-    .option('--write', 'Write updated config.v2.json (default: dry-run)', false)
+    .option('--write', 'Write updated provider config.v2.toml/config.v2.json (default: dry-run)', false)
     .option('--use-cache', 'Use cached models-latest.json on upstream failure', false)
     .option('--blacklist-add <items>', 'Add comma-separated model ids to blacklist')
     .option('--blacklist-remove <items>', 'Remove comma-separated model ids from blacklist')
@@ -107,21 +116,20 @@ function createSyncModelsCommand(): Command {
 
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = path.join(dir, 'config.v2.json');
+      const v2Path = await resolveProviderV2Path(dir);
       const blacklistPath = path.join(dir, 'blacklist.json');
       const cachePath = path.join(dir, 'models-latest.json');
 
       if (!(await fileExists(v2Path))) {
-        console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
+        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${dir}`);
         process.exit(1);
       }
 
-      const raw = await fs.readFile(v2Path, 'utf8');
       let parsed: ProviderConfigV2;
       try {
-        parsed = JSON.parse(raw) as ProviderConfigV2;
+        parsed = (await decodeProviderConfigFile(v2Path)).parsed as unknown as ProviderConfigV2;
       } catch (e) {
-        console.error('Failed to parse existing config.v2.json:', (e as Error)?.message ?? String(e));
+        console.error('Failed to parse existing provider config:', (e as Error)?.message ?? String(e));
         process.exit(1);
         return;
       }
@@ -204,9 +212,7 @@ function createSyncModelsCommand(): Command {
       parsed.provider = providerNode;
 
       if (opts.write) {
-        const serialized = v2Path.endsWith('.toml') ? serializeTomlRecord(parsed as unknown as Record<string, unknown>) : `${JSON.stringify(parsed, null, 2)}
-`;
-        await fs.writeFile(v2Path, serialized, 'utf8');
+        await writeProviderConfigFile(v2Path, parsed as unknown as Record<string, unknown>);
         console.log(`Provider "${providerId}" updated: ${v2Path}`);
       } else {
         console.log(`[DRY RUN] Provider "${providerId}" would be updated: ${v2Path}`);
@@ -217,7 +223,7 @@ function createSyncModelsCommand(): Command {
 
 function createProbeContextCommand(): Command {
   return new Command('probe-context')
-    .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into config.v2.json')
+    .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into provider config.v2.toml/config.v2.json')
     .argument('<id>', 'Provider id to probe (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--endpoint <url>', 'RouteCodex /v1/responses endpoint (default: $ROUTECODEX_BASE/v1/responses)')
@@ -226,7 +232,7 @@ function createProbeContextCommand(): Command {
     .option('--models <items>', 'Only probe these comma-separated model ids')
     .option('--thresholds <items>', 'Comma-separated token thresholds', '128000,150000,180000,200000,256000,512000,1000000')
     .option('--timeout-ms <ms>', 'Per-request timeout (ms)', '60000')
-    .option('--write', 'Write maxContextTokens/maxContext back into config.v2.json (default: dry-run)', false)
+    .option('--write', 'Write maxContextTokens/maxContext back into provider config.v2.toml/config.v2.json (default: dry-run)', false)
     .option('--verbose', 'Verbose logs', false)
     .action(async (
       id: string,
@@ -291,19 +297,18 @@ function createProbeContextCommand(): Command {
 
       const root = resolveProviderRoot(opts.root);
       const dir = path.join(root, providerId);
-      const v2Path = path.join(dir, 'config.v2.json');
+      const v2Path = await resolveProviderV2Path(dir);
 
       if (!(await fileExists(v2Path))) {
-        console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
+        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${dir}`);
         process.exit(1);
       }
 
-      const raw = await fs.readFile(v2Path, 'utf8');
       let parsed: ProviderConfigV2;
       try {
-        parsed = JSON.parse(raw) as ProviderConfigV2;
+        parsed = (await decodeProviderConfigFile(v2Path)).parsed as unknown as ProviderConfigV2;
       } catch (e) {
-        console.error('Failed to parse existing config.v2.json:', (e as Error)?.message ?? String(e));
+        console.error('Failed to parse existing provider config:', (e as Error)?.message ?? String(e));
         process.exit(1);
         return;
       }
@@ -374,9 +379,7 @@ function createProbeContextCommand(): Command {
       parsed.provider = providerNode;
 
       if (opts.write) {
-        const serialized = v2Path.endsWith('.toml') ? serializeTomlRecord(parsed as unknown as Record<string, unknown>) : `${JSON.stringify(parsed, null, 2)}
-`;
-        await fs.writeFile(v2Path, serialized, 'utf8');
+        await writeProviderConfigFile(v2Path, parsed as unknown as Record<string, unknown>);
         console.log(`\nProvider "${providerId}" updated: ${v2Path} (models changed=${changed})`);
       } else {
         console.log(`\n[DRY RUN] Provider "${providerId}" would be updated: ${v2Path} (models changed=${changed})`);
@@ -388,7 +391,7 @@ function createProbeContextCommand(): Command {
 function createSyncCapabilityRoutesCommand(): Command {
   return new Command('sync-capability-routes')
     .description('Sync capability-driven multimodal/video/web_search routes into active v2 routing policy (config-first, missing-only)')
-    .option('-c, --config <file>', 'RouteCodex config path (default: auto-resolve ~/.rcc/config.json)')
+    .option('-c, --config <file>', 'RouteCodex config path (default: auto-resolve ~/.rcc/config.toml)')
     .action(async (opts: { config?: string }) => {
       const explicitConfig = typeof opts.config === 'string' && opts.config.trim()
         ? path.resolve(opts.config.trim())

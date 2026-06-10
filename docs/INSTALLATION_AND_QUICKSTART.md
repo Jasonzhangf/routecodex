@@ -2,10 +2,18 @@
 
 ## 1) Release 安装（推荐，本地源码）
 
+前置要求：
+
+- Node.js `>=20 <26`
+- `tmux`
+- `cargo`
+
 ```bash
 npm run install:release
 rcc --version
 ```
+
+`npm run install:release` 会自动执行隔离构建、依赖准备、release snapshot 安装，并在安装后执行 `rcc restart --port 5520` 与 `/health` 验证。
 
 升级/卸载：
 
@@ -85,3 +93,4 @@ npm run install:global
 ```
 
 > 注意：release 统一通过本仓库 `npm run install:release` 生成并安装，不再依赖历史 npm rcc 包发布流程。
+> 注意：旧 `scripts/install.sh`、`scripts/quick-install.sh` 已删除，禁止恢复第二套安装实现。

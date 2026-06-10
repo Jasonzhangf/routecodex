@@ -3,14 +3,15 @@ import {
   throwIfClientCarrierAborted
 } from './request-executor-client-abort-block.js';
 
-const DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 900_000;
+const DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 10_000;
+const MAX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = 10_000;
 
 function parsePositiveTimeoutMs(value: unknown, fallbackMs: number): number {
   const n = typeof value === 'string' ? Number(value.trim()) : typeof value === 'number' ? value : Number.NaN;
   if (!Number.isFinite(n) || n <= 0) {
     return fallbackMs;
   }
-  return Math.floor(n);
+  return Math.min(Math.floor(n), MAX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS);
 }
 
 export function resolveServerToolNestedFollowupTimeoutMs(): number {

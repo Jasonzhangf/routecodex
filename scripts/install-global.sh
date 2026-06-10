@@ -43,11 +43,11 @@ check_node() {
     fi
     
     NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ "$NODE_VERSION" -lt 20 ]; then
-        echo "❌ Node.js 版本过低，需要 >=20"
+    if [ "$NODE_VERSION" -lt 20 ] || [ "$NODE_VERSION" -ge 26 ]; then
+        echo "❌ Node.js 版本不受支持，需要 >=20 <26（与 package.json engines 一致）"
         exit 1
     fi
-    # Node 24 在部分原生依赖上仍可能触发编译，给出提示但不阻塞
+    # Node 24/25 在部分原生依赖上仍可能触发编译，给出提示但不阻塞
     if [ "$NODE_VERSION" -ge 24 ]; then
         echo "⚠️  检测到 Node $(node -v)，某些原生依赖可能会尝试编译，建议使用 Node 22 以获得更快安装"
     fi
@@ -117,9 +117,6 @@ prepare_isolated_build_root() {
             --exclude './test-results' \
             --exclude './tsconfig.tsbuildinfo' \
             -cf - .) | (cd "$target_path" && tar -xf -)
-        if [ -d "$SOURCE_ROOT/$relative/rust-core/target" ]; then
-            ln -s "$SOURCE_ROOT/$relative/rust-core/target" "$target_path/rust-core/target"
-        fi
         if [ -d "$SOURCE_ROOT/$relative/node_modules" ]; then
             ln -s "$SOURCE_ROOT/$relative/node_modules" "$target_path/node_modules"
         fi

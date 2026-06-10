@@ -1,3 +1,4 @@
+// feature_id: config.path_resolution_surface
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -9,9 +10,9 @@ import {
 /**
  * Unified Configuration Path Resolution System
  *
- * This system provides a single source of truth for all RouteCodex configuration
- * path resolution, supporting multiple discovery methods while maintaining backward
- * compatibility with existing environment variables and file locations.
+ * This system provides a single source of truth for RouteCodex user-config
+ * path resolution. Auto-discovery is strict TOML-first and does not silently
+ * fall back to legacy JSON filenames.
  */
 
 export interface ConfigPathOptions {
@@ -31,7 +32,7 @@ export interface ConfigPathResult {
   /** The resolved configuration path */
   resolvedPath: string;
   /** Source of the resolution */
-  source: 'explicit' | 'environment' | 'default' | 'fallback';
+  source: 'explicit' | 'environment' | 'default';
   /** Type of configuration target */
   configType: 'file' | 'directory';
   /** Whether the path exists */
@@ -58,15 +59,7 @@ const ENVIRONMENT_VARIABLES = [
  * Default configuration file preferences for directory scanning
  */
 const CONFIG_FILE_PREFERENCES = [
-  'config.v2.toml',   // V2 canonical config — TOML (highest priority)
-  'config.v2.json',   // V2 canonical config — JSON
-  'config.toml',      // Primary user config — TOML
-  'default.json',      // Default/primary configuration
-  'glm.json',          // GLM provider configuration
-  'routecodex.json',   // Legacy format
-  'config.json',       // Generic config name (JSON fallback)
-  'lmstudio.json',     // LM Studio configuration
-  'qwen.json',         // Qwen provider configuration
+  'config.toml',
 ];
 
 function safeProcessCwd(defaultValue?: string): string {
@@ -187,31 +180,13 @@ export class UnifiedConfigPathResolver {
       }
     }
 
-    // No configuration found
+    const details = warnings.length
+      ? ` warnings=${warnings.join(' | ')}`
+      : '';
     if (strict) {
-      throw new Error(`No configuration file found. Searched: ${candidates.join(', ')}`);
+      throw new Error(`No configuration file found. Searched: ${candidates.join(', ')}.${details}`.trim());
     }
-
-    // Return fallback path
-    const fallbackPath = configName
-      ? path.join(this.getDefaultConfigDirectory(), configName)
-      : path.join(this.getDefaultConfigDirectory(), 'config.toml');
-
-    return {
-      resolvedPath: fallbackPath,
-      source: 'fallback',
-      configType: 'file',
-      exists: false,
-      warnings: [
-        'No configuration file found, using fallback path',
-        ...warnings
-      ],
-      resolutionInfo: {
-        candidates,
-        environmentVariables: envVars,
-        scannedDirectories
-      }
-    };
+    throw new Error(`No configuration file found. Searched: ${candidates.join(', ')}.${details}`.trim());
   }
 
   /**
@@ -237,13 +212,7 @@ export class UnifiedConfigPathResolver {
           if (preferredSet.has(lower)) {
             return true;
           }
-          if (lower === 'config.json' || lower === 'config.toml' || lower === 'routecodex.json') {
-            return true;
-          }
-          if (lower.startsWith('config.') && (lower.endsWith('.json') || lower.endsWith('.toml'))) {
-            return true;
-          }
-          return false;
+          return preferredSet.has(lower);
         })
         .map(file => ({
           name: file,
@@ -261,13 +230,6 @@ export class UnifiedConfigPathResolver {
         if (preferred) {
           return path.join(directory, preferred.name);
         }
-      }
-
-      // Prefer config.v2*.json when present (v2 canonical)
-      const v2Matches = entries.filter(entry => /^config\.v2(\..+)?\.(json|toml)$/i.test(entry.name));
-      if (v2Matches.length) {
-        v2Matches.sort((a, b) => b.mtime - a.mtime);
-        return path.join(directory, v2Matches[0].name);
       }
 
       // Look for preferred configuration names
@@ -318,8 +280,8 @@ export class UnifiedConfigPathResolver {
       candidates.push(path.join(baseDir, configName));
       candidates.push(path.join(baseDir, 'config', configName));
     } else {
-      candidates.push(path.join(baseDir, 'routecodex.json'));
-      candidates.push(path.join(baseDir, 'config', 'routecodex.json'));
+      candidates.push(path.join(baseDir, 'config.toml'));
+      candidates.push(path.join(baseDir, 'config', 'config.toml'));
     }
 
     // 4. Home directory configurations
@@ -330,8 +292,6 @@ export class UnifiedConfigPathResolver {
     } else {
       const primaryHome = resolveRccUserDir();
       candidates.push(path.join(primaryHome, 'config.toml'));
-      candidates.push(path.join(primaryHome, 'config.json'));
-      candidates.push(path.join(primaryHome, 'routecodex.json'));
     }
 
     // 5. Default configuration directory (with scanning)
@@ -342,7 +302,7 @@ export class UnifiedConfigPathResolver {
     } else if (configName) {
       candidates.push(path.join(defaultConfigDir, configName));
     } else {
-      candidates.push(path.join(defaultConfigDir, 'default.json'));
+      candidates.push(path.join(defaultConfigDir, 'config.toml'));
     }
 
     return candidates;

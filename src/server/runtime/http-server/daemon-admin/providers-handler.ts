@@ -6,6 +6,8 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { resolveRccAuthDirForRead } from '../../../../config/user-data-paths.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
+import { decodeProviderConfigFile } from '../../../../config/provider-config-codec.js';
+import { writeProviderConfigFile } from '../../../../config/provider-config-writer.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
 import type { ProviderConfigV2 } from '../../../../config/provider-v2-loader.js';
 import {
@@ -30,8 +32,8 @@ import {
   upsertRoutingGroupAtLocation,
   type RoutingLocation
 } from './providers-handler-routing-utils.js';
-import { parseUserConfigText } from '../../../../config/user-config-codec.js';
-import { updateTomlStringScalarInTable } from '../../../../config/toml-comment-preserving.js';
+import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
+import { updateUserConfigStringScalar, writeUserConfigFile } from '../../../../config/user-config-writer.js';
 
 interface ProviderRuntimeView {
   providerKey: string;
@@ -282,7 +284,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         providerId,
         provider: normalizedProvider.provider
       };
-      await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+      await writeProviderConfigFile(filePath, payload as unknown as Record<string, unknown>);
       res.status(200).json({ ok: true, providerId, path: filePath });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
@@ -327,8 +329,8 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     try {
       const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const detected = extractRoutingSnapshot(parsed);
       const groupsSnapshot = extractRoutingGroupsSnapshot(parsed, detected.location);
       res.status(200).json({
@@ -368,13 +370,13 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const configPath = resolveAllowedAdminFilePath(
         readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
       );
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const detected = extractRoutingSnapshot(parsed);
       const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
       const next = activateRoutingGroupAtLocation(parsed, groupId, location);
       await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
       const selfReload =
         typeof options.restartRuntimeFromDisk === 'function'
@@ -426,13 +428,13 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const configPath = resolveAllowedAdminFilePath(
         readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
       );
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const detected = extractRoutingSnapshot(parsed);
       const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
       const next = upsertRoutingGroupAtLocation(parsed, groupId, policyNode, location);
       await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
       res.status(200).json({
         ok: true,
@@ -468,13 +470,13 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
     try {
       const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const detected = extractRoutingSnapshot(parsed);
       const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
       const next = deleteRoutingGroupAtLocation(parsed, groupId, location);
       await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
       res.status(200).json({
         ok: true,
@@ -500,8 +502,8 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     try {
       const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const snapshot = extractRoutingSnapshot(parsed);
       res.status(200).json({ ok: true, path: configPath, ...snapshot });
     } catch (error: unknown) {
@@ -541,8 +543,8 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const configPath = resolveAllowedAdminFilePath(
         readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
       );
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const detected = extractRoutingSnapshot(parsed);
       const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
       const shouldApplyLoadBalancing = loadBalancingNode !== undefined;
@@ -558,7 +560,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         }
       );
       await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      await writeUserConfigFile(configPath, next);
       const snapshot = extractRoutingSnapshot(next);
       res.status(200).json({
         ok: true,
@@ -583,8 +585,8 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     try {
       const configPath = pickUserConfigPath();
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? parseUserConfigText(raw, configPath.endsWith('.toml') ? 'toml' : 'json') : {};
+      const decoded = await decodeUserConfigFile(configPath);
+      const parsed = decoded.parsed;
       const oauthBrowser =
         typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
           ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string)
@@ -612,17 +614,8 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
     try {
       const configPath = pickUserConfigPath();
-      const isToml = configPath.endsWith('.toml');
-      const raw = await fs.readFile(configPath, 'utf8');
       await backupFile(configPath);
-      if (isToml) {
-        const nextRaw = updateTomlStringScalarInTable(raw, [], 'oauthBrowser', oauthBrowser);
-        await fs.writeFile(configPath, nextRaw, 'utf8');
-      } else {
-        const parsed = raw.trim() ? JSON.parse(raw) : {};
-        const next = { ...(parsed as Record<string, unknown>), oauthBrowser };
-        await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
-      }
+      await updateUserConfigStringScalar({ configPath, tablePath: [], key: 'oauthBrowser', value: oauthBrowser });
       // apply immediately for oauth flows without requiring restart
       process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowser;
       res.status(200).json({ ok: true, path: configPath, oauthBrowser });

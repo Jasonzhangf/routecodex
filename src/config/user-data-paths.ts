@@ -227,24 +227,6 @@ export function resolveRccPrecommandDir(homeDir?: string): string {
   return resolveRccSubdir('precommand', homeDir);
 }
 
-export function resolveRccConfigFile(homeDir?: string): string {
-  const userDir = resolveRccUserDir(homeDir);
-  const toml = path.join(userDir, 'config.toml');
-  if (fs.existsSync(toml)) {
-    return toml;
-  }
-  return path.join(userDir, 'config.json');
-}
-
-export function resolveRccConfigFileForRead(homeDir?: string): string {
-  const userDir = resolveRccUserDir(homeDir);
-  const toml = path.join(userDir, 'config.toml');
-  if (fs.existsSync(toml)) {
-    return toml;
-  }
-  return path.join(userDir, 'config.json');
-}
-
 export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const userDir = resolveRccUserDir(homeDir);
   const snapshotsDir = resolveRccSnapshotsDirFromEnv(homeDir);

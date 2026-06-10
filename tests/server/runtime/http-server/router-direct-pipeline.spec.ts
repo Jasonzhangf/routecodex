@@ -83,25 +83,34 @@ describe('router-direct-pipeline', () => {
     beforeEach(() => { openaiHandle = createMockProviderHandle('openai-chat'); });
 
     it('uses direct when protocols match', async () => {
-      const input = {
-        portConfig: createRouterPortConfig(),
-        providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }], reasoning: { effort: 'medium' } },
-        requestPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'raw' }] },
-        target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
-        routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
-        requestInfo: { path: '/v1/chat/completions', headers: {} },
-        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
-      };
-      const result = await executeRouterDirectPipeline(input);
-      expect(result.used).toBe(true);
-      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
-      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
-      const ctx = result.auditContext;
-      expect(ctx.observedFields).toBeDefined();
-      expect(ctx.payload).toBe(input.requestPayload);
-      expect(ctx.providerKey).toBe('openai.gpt-4');
-      expect(ctx.inboundProtocol).toBe('openai-chat');
-      expect(ctx.providerProtocol).toBe('openai-chat');
+      const startSpy = jest.spyOn(Date, 'now')
+        .mockReturnValueOnce(10_000)
+        .mockReturnValueOnce(12_345);
+      try {
+        const input = {
+          portConfig: createRouterPortConfig(),
+          providerPayload: { model: 'gpt-4', messages: [{ role: 'user', content: 'hello' }], reasoning: { effort: 'medium' } },
+          requestPayload: { model: 'gpt-4o', messages: [{ role: 'user', content: 'raw' }] },
+          target: { providerKey: 'openai.gpt-4', providerType: 'openai', runtimeKey: openaiHandle.runtimeKey },
+          routingDecision: { routeName: 'default', pool: ['openai.gpt-4'] },
+          requestInfo: { path: '/v1/chat/completions', headers: {} },
+          resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+        };
+        const result = await executeRouterDirectPipeline(input);
+        expect(result.used).toBe(true);
+        expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+        expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
+        expect(result.externalLatencyStartedAtMs).toBe(10_000);
+        expect(result.externalLatencyMs).toBe(2345);
+        const ctx = result.auditContext;
+        expect(ctx.observedFields).toBeDefined();
+        expect(ctx.payload).toBe(input.requestPayload);
+        expect(ctx.providerKey).toBe('openai.gpt-4');
+        expect(ctx.inboundProtocol).toBe('openai-chat');
+        expect(ctx.providerProtocol).toBe('openai-chat');
+      } finally {
+        startSpy.mockRestore();
+      }
     });
 
     it('does not override chat model with provider payload model before direct send', async () => {

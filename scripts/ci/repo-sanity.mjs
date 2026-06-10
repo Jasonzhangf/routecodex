@@ -230,6 +230,19 @@ function checkRootWriteSources() {
   }
 }
 
+function checkLegacyInstallScriptsDeleted() {
+  const legacyScripts = [
+    'scripts/install.sh',
+    'scripts/quick-install.sh',
+  ];
+  const revived = legacyScripts.filter((scriptPath) => fs.existsSync(path.join(process.cwd(), scriptPath)));
+  if (revived.length) {
+    console.error('[repo-sanity] legacy install scripts must stay physically deleted:');
+    for (const scriptPath of revived) console.error(`- ${scriptPath}`);
+    process.exit(2);
+  }
+}
+
 function checkUntrackedNotIgnored() {
   // Fail fast if anything new appears outside gitignore (anywhere in repo).
   const out = runGit(['ls-files', '--others', '--exclude-standard']);
@@ -347,6 +360,7 @@ checkRootLayout();
 checkApprovedGeneratedSubroots();
 checkRootGeneratedResidue();
 checkRootWriteSources();
+checkLegacyInstallScriptsDeleted();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
 checkLlmswitchRustificationAudit();

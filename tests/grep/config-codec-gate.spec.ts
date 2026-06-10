@@ -6,6 +6,7 @@
  * without going through the codec functions (parseUserConfigText, parseProviderConfigText).
  */
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 // Files that are allowed to do raw config file I/O (the codec SSOT)
@@ -22,6 +23,8 @@ const CODEC_SSOT_FILES = new Set([
   'src/config/config-paths.ts',
   'src/config/config-migration.ts',
   'src/config/config-semantic-compare.ts',
+  'src/config/user-config-writer.ts',
+  'src/config/provider-config-writer.ts',
 ]);
 
 // Config-related filenames that trigger the gate
@@ -42,9 +45,10 @@ function isSsoTFile(filePath: string): boolean {
 
 describe('Config Codec Gate', () => {
   let grepOutput: string = '';
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
 
   beforeAll(() => {
-    const rootDir = path.resolve(__dirname, '..', '..');
+    const rootDir = path.resolve(testDir, '..', '..');
     try {
       grepOutput = execSync(
         `grep -rn --include='*.ts' -E 'JSON\\.parse.*(readFile|readFileSync)|readFileSync.*config|readFile.*config' src/ ` +
@@ -79,7 +83,7 @@ describe('Config Codec Gate', () => {
   });
 
   test('no raw JSON.stringify write for config files outside codec SSOT', () => {
-    const rootDir = path.resolve(__dirname, '..', '..');
+    const rootDir = path.resolve(testDir, '..', '..');
     let writeGrep = '';
     try {
       writeGrep = execSync(

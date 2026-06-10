@@ -51,6 +51,15 @@ describe('servertool followup fail-fast helper', () => {
     }
   });
 
+  it('caps timeout override to the fail-fast ceiling', () => {
+    process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS = '900000';
+    try {
+      expect(resolveServerToolNestedFollowupTimeoutMs()).toBe(10_000);
+    } finally {
+      delete process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
+    }
+  });
+
   it('shapes the timeout error as provider.followup fail-fast', () => {
     expect(createServerToolFollowupTimeoutError({ requestId: 'req1', timeoutMs: 99 })).toMatchObject({
       code: 'SERVERTOOL_TIMEOUT',

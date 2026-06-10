@@ -121,12 +121,18 @@ fn normalize_stop_gateway_payload(payload: &Value) -> Result<Value, String> {
     output.insert("eligible".to_string(), Value::Bool(eligible));
     output.insert("source".to_string(), Value::String(source.to_string()));
     output.insert("reason".to_string(), Value::String(reason.to_string()));
-    if let Some(choice_index) = record.get("choiceIndex").or_else(|| record.get("choice_index")) {
+    if let Some(choice_index) = record
+        .get("choiceIndex")
+        .or_else(|| record.get("choice_index"))
+    {
         if choice_index.is_i64() || choice_index.is_u64() {
             output.insert("choiceIndex".to_string(), choice_index.clone());
         }
     }
-    if let Some(has_tool_calls) = record.get("hasToolCalls").or_else(|| record.get("has_tool_calls")) {
+    if let Some(has_tool_calls) = record
+        .get("hasToolCalls")
+        .or_else(|| record.get("has_tool_calls"))
+    {
         if has_tool_calls.is_boolean() {
             output.insert("hasToolCalls".to_string(), has_tool_calls.clone());
         }
@@ -135,9 +141,9 @@ fn normalize_stop_gateway_payload(payload: &Value) -> Result<Value, String> {
 }
 
 fn normalize_servertool_runtime_action_payload(payload: &Value) -> Result<Value, String> {
-    let record = payload
-        .as_object()
-        .ok_or_else(|| "Rust HubPipeline servertoolRuntimeAction effect missing payload".to_string())?;
+    let record = payload.as_object().ok_or_else(|| {
+        "Rust HubPipeline servertoolRuntimeAction effect missing payload".to_string()
+    })?;
     let mut output = record.clone();
     if let Some(raw_stop_gateway) = record.get("stopGateway") {
         output.insert(

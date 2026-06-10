@@ -53,7 +53,7 @@ describe('provider-update command maintenance flows', () => {
   it('runs sync-capability-routes command success and failure branches', async () => {
     const { log, error } = swallowConsole();
     const { createProviderUpdateCommand, mocks } = await loadProviderCommand();
-    const configPath = path.join(await makeTempDir('provider-capability-sync-'), 'config.json');
+    const configPath = path.join(await makeTempDir('provider-capability-sync-'), 'config.toml');
     await fs.writeFile(configPath, '{"version":"2.0.0"}\n', 'utf8');
 
     mocks.loadRouteCodexConfig.mockResolvedValueOnce({
@@ -142,7 +142,7 @@ describe('provider-update command maintenance flows', () => {
 
     answers.push(
       'https://api.changed.example/v1',
-      'token',
+      'cookie',
       '~/.rcc/auth/glm.cookie',
       'gpt-5.2-codex,gpt-4.1-mini',
       'gpt-4.1-mini',
@@ -150,7 +150,7 @@ describe('provider-update command maintenance flows', () => {
     );
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'demo', '--root', root], { from: 'node' });
     const changed = JSON.parse(await fs.readFile(createdPath, 'utf8')) as { provider: { auth?: Record<string, unknown>; defaultModel?: string } };
-    expect(changed.provider.auth?.type).toBe('token');
+    expect(changed.provider.auth?.type).toBe('cookie');
     expect(changed.provider.auth?.cookieFile).toBe('~/.rcc/auth/glm.cookie');
     expect(changed.provider.defaultModel).toBe('gpt-4.1-mini');
 

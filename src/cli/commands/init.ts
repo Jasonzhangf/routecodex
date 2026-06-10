@@ -11,7 +11,8 @@ import {
 } from '../config/init-provider-catalog.js';
 import { parseProvidersArg } from '../config/init-config.js';
 import { buildV2ConfigObject } from '../config/init-v2-builder.js';
-import { resolveRccConfigFile } from '../../config/user-data-paths.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { installBundledProviderPackBestEffort } from '../config/bundled-provider-pack.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
@@ -57,7 +58,7 @@ export function createInitCommand(program: Command, ctx: InitCommandContext): vo
   program
     .command('init')
     .argument('[profile]', 'Init profile (currently supported: default)')
-    .description('Initialize ~/.rcc/config.json (V2 guided setup and maintenance)')
+    .description('Initialize ~/.rcc/config.toml (V2 guided setup and maintenance)')
     .addHelpText(
       'after',
       `
@@ -100,7 +101,9 @@ Examples:
         }
       };
 
-      const configPath = options.config || resolveRccConfigFile(home());
+      const configPath = options.config
+        ? pathImpl.resolve(options.config)
+        : pathImpl.join(resolveRccUserDir(home()), 'config.toml');
       const profile = typeof profileArg === 'string' ? profileArg.trim().toLowerCase() : '';
       if (profile && profile !== 'default') {
         spinner.fail('Failed to initialize configuration');
@@ -165,7 +168,7 @@ Examples:
         const state = inspectConfigState(fsImpl, configPath);
         if (state.kind === 'invalid') {
           spinner.fail('Failed to initialize configuration');
-          ctx.logger.error(`Invalid JSON in configuration file: ${state.message}`);
+          ctx.logger.error(`Invalid configuration file: ${state.message}`);
           return;
         }
 

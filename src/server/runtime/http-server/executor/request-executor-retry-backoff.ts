@@ -28,6 +28,7 @@ export async function resolveProviderRetryBackoffPlan(args: {
   forceProviderScopedBackoff?: boolean;
   forceAttemptScopedBackoff?: boolean;
   requestLocal?: boolean;
+  skipBackoffWait?: boolean;
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryBackoffPlan> {
@@ -42,6 +43,18 @@ export async function resolveProviderRetryBackoffPlan(args: {
     retryAction: 'reroute_explicit_alternative'
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
+  if (args.skipBackoffWait) {
+    return {
+      blockingRecoverable,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0,
+      backoffScope: actionPlan.backoff.scope === 'recoverable'
+        ? 'recoverable'
+        : actionPlan.backoff.scope === 'provider'
+          ? 'provider'
+          : 'attempt'
+    };
+  }
   if (args.requestLocal) {
     const retryBackoffMs = await waitBeforeRetry(args.error, {
       attempt: args.attempt,

@@ -3,9 +3,12 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { decodeProviderConfigFile } from '../../config/provider-config-codec.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../../cli/config/bootstrap-provider-templates.js';
 import { collectV2ConfigSourceErrors, loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
+import { decodeUserConfigFile } from '../../config/user-config-codec.js';
+import { writeUserConfigFile } from '../../config/user-config-writer.js';
 import { ServerFactory } from '../../server-factory.js';
 import type { ServerInstance } from '../../server-factory.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
@@ -28,7 +31,7 @@ function logConfigAdminNonBlockingError(stage: string, error: unknown, details?:
 /**
  * 与 index.ts 中逻辑对齐：解析用户配置文件路径。
  * 优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），
- * 否则退回共享解析（~/.rcc/config.json 或默认配置）。
+ * 否则退回共享解析（strict TOML-first auto-resolve）。
  */
 function pickUserConfigPath(): string {
   const envPaths = [
@@ -65,8 +68,8 @@ function pickProviderDirectoryPath(): string {
 export async function handleGetUserConfig(req: Request, res: Response): Promise<void> {
   try {
     const userConfigPath = pickUserConfigPath();
-    const content = await fs.readFile(userConfigPath, 'utf-8');
-    const parsed = JSON.parse(content);
+    const decoded = await decodeUserConfigFile(userConfigPath);
+    const parsed = decoded.parsed;
     if (!isRecord(parsed)) {
       res.status(500).json({
         error: {
@@ -102,9 +105,8 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
     let configuredProviderIds = new Set<string>();
     try {
       const userConfigPath = pickUserConfigPath();
-      const content = await fs.readFile(userConfigPath, 'utf-8');
-      const parsed = JSON.parse(content);
-      const userConfig: JsonObject = isRecord(parsed) ? parsed : {};
+      const decoded = await decodeUserConfigFile(userConfigPath);
+      const userConfig: JsonObject = isRecord(decoded.parsed) ? decoded.parsed : {};
       configuredProviderIds = new Set<string>([
         ...resolveReferencedProviderIds(userConfig)
       ]);
@@ -137,8 +139,8 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
             continue;
           }
           try {
-            const content = await fs.readFile(fullPath, 'utf-8');
-            const parsed = JSON.parse(content);
+            const decoded = await decodeProviderConfigFile(fullPath);
+            const parsed = decoded.parsed;
             if (!isRecord(parsed)) {
               continue;
             }
@@ -230,7 +232,7 @@ export async function handleSaveUserConfig(req: Request, res: Response): Promise
       return;
     }
 
-    await fs.writeFile(userConfigPath, JSON.stringify(draftConfig, null, 2), 'utf-8');
+    await writeUserConfigFile(userConfigPath, draftConfig);
 
     // 写入成功后，基于最新配置重新生成虚拟路由配置并热重载流水线
     try {

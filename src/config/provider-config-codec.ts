@@ -1,3 +1,4 @@
+// feature_id: config.provider_config_codec
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -14,6 +15,8 @@ export interface DecodedProviderConfigFile {
   raw: string;
   parsed: UnknownRecord;
 }
+
+type ReadFileSyncLike = Pick<typeof import('node:fs'), 'readFileSync'>;
 
 export function detectProviderConfigFormat(configPath: string): ProviderConfigFormat {
   const ext = path.extname(configPath).trim().toLowerCase();
@@ -37,6 +40,21 @@ export function parseProviderConfigText(raw: string, format: ProviderConfigForma
 
 export async function decodeProviderConfigFile(configPath: string): Promise<DecodedProviderConfigFile> {
   const raw = await fs.readFile(configPath, 'utf8');
+  const format = detectProviderConfigFormat(configPath);
+  const parsed = parseProviderConfigText(raw, format);
+  return {
+    path: configPath,
+    format,
+    raw,
+    parsed
+  };
+}
+
+export function decodeProviderConfigFileSync(
+  configPath: string,
+  fsImpl: ReadFileSyncLike
+): DecodedProviderConfigFile {
+  const raw = fsImpl.readFileSync(configPath, 'utf8');
   const format = detectProviderConfigFormat(configPath);
   const parsed = parseProviderConfigText(raw, format);
   return {

@@ -7,6 +7,8 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../../../constants/index.js';
+import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
+import { writeUserConfigFile } from '../../../../config/user-config-writer.js';
 import { listManagedServerPidsByPort } from '../../../../utils/managed-server-pids.js';
 import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
@@ -292,20 +294,16 @@ async function activateRoutingGroupAtConfigPath(options: {
   configPath: string;
   groupId: string;
 }): Promise<{ activeGroupId: string; wroteAtMs: number }> {
-  const raw = await fsPromises.readFile(options.configPath, 'utf8');
-  const parsed = raw.trim() ? JSON.parse(raw) : {};
-  const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
+  const decoded = await decodeUserConfigFile(options.configPath);
+  const root = decoded.parsed && typeof decoded.parsed === 'object' && !Array.isArray(decoded.parsed)
+    ? (decoded.parsed as Record<string, unknown>)
     : {};
   const detected = extractRoutingSnapshot(root);
   const nextConfig = activateRoutingGroupAtLocation(root, options.groupId, detected.location);
   const groupsSnapshot = extractRoutingGroupsSnapshot(nextConfig, detected.location);
 
   const wroteAtMs = Date.now();
-  const tmpPath = `${options.configPath}.tmp.${process.pid}.${wroteAtMs}`;
-  const serialized = `${JSON.stringify(nextConfig, null, 2)}\n`;
-  await fsPromises.writeFile(tmpPath, serialized, 'utf8');
-  await fsPromises.rename(tmpPath, options.configPath);
+  await writeUserConfigFile(options.configPath, nextConfig);
 
   return {
     activeGroupId: groupsSnapshot.activeGroupId,
