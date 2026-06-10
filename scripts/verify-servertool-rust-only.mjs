@@ -1046,7 +1046,7 @@ function checkStopMessagePersistedLookupRustOwner() {
         'stop-message-persisted-lookup-bridge-owner',
         `${file.replace(`${ROOT}/`, '')} must import stop-message lookup/scope helpers from native-servertool-core-semantics.js`
       );
-    }
+  }
   }
   for (const symbol of [
     'planStopMessagePersistedLookupWithNative',
@@ -4379,6 +4379,56 @@ function checkServertoolCliResultGuardRustOwner() {
   pass('servertool-cli-result-guard-rust-owner', 'servertool-core owns CLI result guard scanning; deleted TS shell stays absent');
 }
 
+function checkServertoolRustOutcomeCloseout() {
+  const rustOutcome = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
+  const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
+  const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
+  const tsProjection = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`);
+
+  for (const needle of [
+    'pub enum ServertoolOutcome',
+    'ServertoolClientExecCliProjection01Planned',
+    'ServertoolBackendRouteHint01Planned',
+    'ServertoolServerIoInternal01Observed',
+    'pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03',
+    'pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
+    'pub fn build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03',
+    'fake_exec',
+    'servertool_fixture',
+    'web_search',
+    'vision_auto',
+    'memory_cache_auto',
+  ]) {
+    assertContains('servertool-outcome-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, rustOutcome, needle);
+  }
+
+  for (const needle of [
+    'pub struct ServertoolCliRunInput',
+    'pub struct ServertoolCliRunOutput',
+    'build_servertool_cli_binary_run_command_from_client_exec_result',
+    'stopless_schema_guidance()',
+    'SERVERTOOL_UNSUPPORTED_TOOL',
+    'SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats',
+    'SERVERTOOL_CLI_MISSING_FIELD: flowId',
+    'SERVERTOOL_DENIED_TOOL: fake_exec',
+  ]) {
+    assertContains('servertool-cli-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCli, needle);
+  }
+
+  for (const marker of ['reenterPipeline', 'providerInvoker', 'serverToolFollowup', 'serverToolFollowupSource', '--ticket', 'stcli_', 'rcc_cli_']) {
+    if (tsProjection.includes(marker)) {
+      fail('servertool-cli-thin-shell', `cli-projection.ts must not carry legacy servertool marker ${marker}`);
+    }
+  }
+
+  if (resultRestoreSpec.includes('restore the old CLI restoration implementation')) {
+    fail('servertool-cli-result-restore-thin-shell', 'servertool-cli-result-restore.spec.ts must not reintroduce legacy CLI restoration behavior');
+  }
+
+  pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');
+  pass('servertool-cli-thin-shell', 'TS cli-projection remains a thin shell without legacy restore markers');
+}
+
 // ── Check 17: deleted empty_reply_continue path stays absent ───
 function checkDeletedEmptyReplyContinueAbsent() {
   for (const file of DELETED_EMPTY_REPLY_CONTINUE_FILES) {
@@ -4528,6 +4578,7 @@ checkStoplessGoalStateSyncRustOwner();
 checkStopMessageBlockedReportRustOwner();
 checkStoplessLearnedNoteRustOwner();
 checkServertoolCliResultGuardRustOwner();
+checkServertoolRustOutcomeCloseout();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();
 

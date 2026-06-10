@@ -1503,6 +1503,54 @@ mod tests {
     }
 
     #[test]
+    fn projection_plan_error_codes_are_documented_in_tests() {
+        let repeat_err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "continuationPrompt": "continue",
+                    "repeatCount": 4,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("repeat budget must fail fast");
+        assert_eq!(repeat_err.to_string(), "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats");
+
+        let flow_err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "continuationPrompt": "continue",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("missing flow id must fail fast");
+        assert_eq!(flow_err.to_string(), "SERVERTOOL_CLI_MISSING_FIELD: flowId");
+
+        let denied_err = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "fake_exec".to_string(),
+                input: json!({"value": 1}),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+            },
+        )
+        .expect_err("fake_exec must be denied");
+        assert_eq!(denied_err.to_string(), "SERVERTOOL_DENIED_TOOL: fake_exec");
+    }
+
+    #[test]
     fn exec_result_validation_accepts_valid_stop_message_auto() {
         let raw = json!({
             "toolName": "stop_message_auto",
