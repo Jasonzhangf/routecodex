@@ -1,5 +1,5 @@
 // feature_id: hub.response_responses_client_projection
-// canonical_builders: project_responses_client_body_for_client, project_responses_sse_frame_for_client
+// canonical_builders: project_responses_client_payload_for_client, project_responses_client_body_for_client, project_responses_sse_frame_for_client
 
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -814,7 +814,97 @@ fn convert_apply_patch_function_calls_to_custom_tool_calls(value: &Value) -> Val
     }
 }
 
-pub(crate) fn project_responses_client_body_for_client(
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn read_record(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
+fn read_reasoning_effort_candidate(value: Option<&Value>) -> Option<String> {
+    read_record(value).and_then(|record| read_trimmed_string(record.get("effort")))
+}
+
+fn resolve_client_visible_model_id(metadata: &Value) -> Option<String> {
+    let record = metadata.as_object()?;
+    read_trimmed_string(record.get("clientModelId"))
+        .or_else(|| read_trimmed_string(record.get("originalModelId")))
+        .or_else(|| {
+            read_record(record.get("target"))
+                .and_then(|target| read_trimmed_string(target.get("clientModelId")))
+        })
+        .or_else(|| {
+            read_record(record.get("originalRequest"))
+                .and_then(|original| read_trimmed_string(original.get("model")))
+        })
+        .or_else(|| {
+            read_record(record.get("originalRequest"))
+                .and_then(|original| read_trimmed_string(original.get("originalModelId")))
+        })
+}
+
+fn resolve_client_visible_reasoning_effort(metadata: &Value) -> Option<String> {
+    let record = metadata.as_object()?;
+    read_reasoning_effort_candidate(record.get("reasoning"))
+        .or_else(|| {
+            read_record(record.get("target"))
+                .and_then(|target| read_reasoning_effort_candidate(target.get("reasoning")))
+        })
+        .or_else(|| {
+            read_record(record.get("originalRequest"))
+                .and_then(|original| read_reasoning_effort_candidate(original.get("reasoning")))
+        })
+}
+
+fn restore_client_visible_response_payload(payload: &Value, metadata: &Value) -> Value {
+    let model = resolve_client_visible_model_id(metadata);
+    let reasoning_effort = resolve_client_visible_reasoning_effort(metadata);
+    if model.is_none() && reasoning_effort.is_none() {
+        return payload.clone();
+    }
+
+    let Some(record) = payload.as_object() else {
+        return payload.clone();
+    };
+    let Some(response) = record.get("response").and_then(Value::as_object) else {
+        return payload.clone();
+    };
+
+    let mut next_response = response.clone();
+    let mut changed = false;
+    if let Some(model) = model {
+        if next_response.get("model").and_then(Value::as_str) != Some(model.as_str()) {
+            next_response.insert("model".to_string(), Value::String(model));
+            changed = true;
+        }
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        let mut reasoning = next_response
+            .get("reasoning")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if reasoning.get("effort").and_then(Value::as_str) != Some(reasoning_effort.as_str()) {
+            reasoning.insert("effort".to_string(), Value::String(reasoning_effort));
+            next_response.insert("reasoning".to_string(), Value::Object(reasoning));
+            changed = true;
+        }
+    }
+    if !changed {
+        return payload.clone();
+    }
+
+    let mut out = record.clone();
+    out.insert("response".to_string(), Value::Object(next_response));
+    Value::Object(out)
+}
+
+fn project_responses_client_body_for_client_core(
     responses_payload: &Value,
     tools_raw: &Value,
 ) -> Value {
@@ -824,6 +914,22 @@ pub(crate) fn project_responses_client_body_for_client(
     } else {
         normalized
     }
+}
+
+pub(crate) fn project_responses_client_payload_for_client(
+    responses_payload: &Value,
+    tools_raw: &Value,
+    metadata: &Value,
+) -> Value {
+    let projected = project_responses_client_body_for_client_core(responses_payload, tools_raw);
+    restore_client_visible_response_payload(&projected, metadata)
+}
+
+pub(crate) fn project_responses_client_body_for_client(
+    responses_payload: &Value,
+    tools_raw: &Value,
+) -> Value {
+    project_responses_client_payload_for_client(responses_payload, tools_raw, &Value::Null)
 }
 
 #[derive(Default)]
@@ -1006,7 +1112,7 @@ fn project_responses_sse_client_payload_deep(value: &Value, tools_raw: &Value) -
                     project_responses_sse_client_payload_deep(child, tools_raw),
                 );
             }
-            project_responses_client_body_for_client(&Value::Object(out), tools_raw)
+            project_responses_client_payload_for_client(&Value::Object(out), tools_raw, &Value::Null)
         }
         _ => value.clone(),
     }
@@ -1017,6 +1123,7 @@ pub(crate) fn project_responses_sse_frame_for_client(
     event_name: Option<&str>,
     data: &Value,
     tools_raw: &Value,
+    metadata: &Value,
     state_value: &Value,
 ) -> Value {
     let mut state = ResponsesClientSseProjectionState::from_value(state_value);
@@ -1088,9 +1195,9 @@ pub(crate) fn project_responses_sse_frame_for_client(
                     }
                 }
                 let client_data = if has_responses_freeform_apply_patch_tool(tools_raw) {
-                    convert_apply_patch_function_calls_to_custom_tool_calls(&next_data)
+                    project_responses_client_payload_for_client(&next_data, tools_raw, metadata)
                 } else {
-                    next_data
+                    restore_client_visible_response_payload(&next_data, metadata)
                 };
                 output_frame = replace_frame_data(frame, &client_data);
 
@@ -1118,7 +1225,10 @@ pub(crate) fn project_responses_sse_frame_for_client(
                 }
             }
         } else {
-            let normalized = project_responses_sse_client_payload_deep(data, tools_raw);
+            let normalized = restore_client_visible_response_payload(
+                &project_responses_sse_client_payload_deep(data, tools_raw),
+                metadata,
+            );
             if normalized != *data {
                 output_frame = replace_frame_data(frame, &normalized);
             }

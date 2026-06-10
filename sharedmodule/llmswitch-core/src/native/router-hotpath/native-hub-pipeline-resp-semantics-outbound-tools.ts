@@ -264,11 +264,49 @@ export function projectResponsesClientBodyForClientWithNative(
   }
 }
 
+export function projectResponsesClientPayloadForClientWithNative(
+  responsesPayload: unknown,
+  toolsRaw: unknown[],
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const capability = 'projectResponsesClientPayloadForClientJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(responsesPayload);
+  const toolsRawJson = safeStringify(toolsRaw ?? []);
+  const metadataJson = safeStringify(metadata ?? {});
+  if (!payloadJson || !toolsRawJson || !metadataJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, toolsRawJson, metadataJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw, 'parseProjectResponsesClientPayloadForClient');
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function projectResponsesSseFrameForClientWithNative(input: {
   frame: string;
   eventName?: string;
   data: Record<string, unknown>;
   toolsRaw: unknown[];
+  metadata?: Record<string, unknown>;
   state: ResponsesClientSseProjectionState;
 }): ResponsesClientSseFrameProjection {
   const capability = 'projectResponsesSseFrameForClientJson';
@@ -284,12 +322,13 @@ export function projectResponsesSseFrameForClientWithNative(input: {
   const eventNameJson = safeStringify(input.eventName ?? null);
   const dataJson = safeStringify(input.data);
   const toolsRawJson = safeStringify(input.toolsRaw ?? []);
+  const metadataJson = safeStringify(input.metadata ?? {});
   const stateJson = safeStringify(input.state ?? {});
-  if (!frameJson || !eventNameJson || !dataJson || !toolsRawJson || !stateJson) {
+  if (!frameJson || !eventNameJson || !dataJson || !toolsRawJson || !metadataJson || !stateJson) {
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(frameJson, eventNameJson, dataJson, toolsRawJson, stateJson);
+    const raw = fn(frameJson, eventNameJson, dataJson, toolsRawJson, metadataJson, stateJson);
     const nativeErrorMessage = extractNativeErrorMessage(raw);
     if (nativeErrorMessage) {
       return fail(nativeErrorMessage);

@@ -1522,8 +1522,23 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts SSE projection fallback writes original frame', pattern: /catch[\s\S]{0,260}writeClientSseFrame\(frame,\s*errorLabel/ },
       { label: 'ts frame heuristic decides projection necessity', pattern: /frame\.includes\(['"]apply_patch['"]\)|frame\.includes\(['"]function_call['"]\)|frame\.includes\(['"]required_action['"]\)/ },
     ]);
-    expect(source).toContain('projectResponsesClientBodyForClientWithNative');
+    expect(source).toContain('projectResponsesClientPayloadForClientWithNative');
     expect(source).toContain('projectResponsesSseFrameForClientWithNative');
+    expect(findings).toEqual([]);
+  });
+
+
+  it('server response handler client-visible response restore must stay native-owned', () => {
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts client visible restore context type', pattern: /ClientVisibleResponseRestoreContext/ },
+      { label: 'ts client visible restore context builder', pattern: /buildClientVisibleResponseRestoreContext/ },
+      { label: 'ts client visible response payload restore helper', pattern: /restoreClientVisibleResponsePayload/ },
+      { label: 'ts extracts client model for response restore', pattern: /extractClientModelId/ },
+      { label: 'ts restores reasoning effort in client response', pattern: /reasoningEffort|reasoning\.effort|currentReasoning\.effort/ },
+    ]);
+    expect(source).toContain('projectResponsesClientPayloadForClientWithNative');
     expect(findings).toEqual([]);
   });
 

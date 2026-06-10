@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeResponsesToolCallArgumentsForClientWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import {
+  projectResponsesClientPayloadForClientWithNative,
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 const PATCH = '*** Begin Patch\n*** Add File: tmp/apft/01-hello.txt\n+hello from apply_patch\n*** End Patch';
 
@@ -56,16 +58,46 @@ function buildCodexFreeformApplyPatchTool() {
 
 describe('apply_patch freeform client projection blackbox', () => {
   it('projects provider JSON patch arguments back to Codex raw freeform patch text', () => {
-    const output = normalizeResponsesToolCallArgumentsForClientWithNative(
+    const output = projectResponsesClientPayloadForClientWithNative(
       buildResponsesPayload(),
       buildCodexFreeformApplyPatchTool(),
+      {},
     );
 
-    expect(output.output?.[0]?.arguments).toBe(PATCH);
+    expect(output.output?.[0]).toEqual({
+      type: 'custom_tool_call',
+      name: 'apply_patch',
+      call_id: 'call_apply_patch',
+      input: PATCH,
+    });
     const toolCall = output.required_action?.submit_tool_outputs?.tool_calls?.[0];
     expect(toolCall?.arguments).toBe(PATCH);
     expect(toolCall?.function?.arguments).toBe(PATCH);
     expect(JSON.stringify(output)).not.toContain('{\\"patch\\"');
     expect(JSON.stringify(output)).not.toContain('"patch":');
+  });
+
+  it('restores client-visible response model and reasoning effort from metadata in native projection', () => {
+    const output = projectResponsesClientPayloadForClientWithNative(
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp_restore',
+          object: 'response',
+          status: 'completed',
+          model: 'provider-internal-model',
+          reasoning: { summary: 'kept' },
+          output: [],
+        },
+      },
+      [],
+      {
+        clientModelId: 'client-visible-model',
+        reasoning: { effort: 'high' },
+      },
+    );
+
+    expect(output.response?.model).toBe('client-visible-model');
+    expect(output.response?.reasoning).toEqual({ summary: 'kept', effort: 'high' });
   });
 });

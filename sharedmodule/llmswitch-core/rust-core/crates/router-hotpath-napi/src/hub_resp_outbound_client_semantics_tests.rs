@@ -950,6 +950,33 @@ fn project_responses_client_body_for_client_projects_freeform_apply_patch_custom
 }
 
 #[test]
+fn project_responses_client_payload_for_client_restores_client_visible_response_fields() {
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_restore",
+            "object": "response",
+            "status": "completed",
+            "model": "provider-internal-model",
+            "reasoning": { "summary": "kept" },
+            "output": []
+        }
+    });
+    let output = project_responses_client_payload_for_client(
+        &payload,
+        &json!([]),
+        &json!({
+            "clientModelId": "client-visible-model",
+            "reasoning": { "effort": "high" }
+        }),
+    );
+
+    assert_eq!(output["response"]["model"], "client-visible-model");
+    assert_eq!(output["response"]["reasoning"]["effort"], "high");
+    assert_eq!(output["response"]["reasoning"]["summary"], "kept");
+}
+
+#[test]
 fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_projects_done() {
     let patch =
         "*** Begin Patch\n*** Add File: tmp/apft/01-sse.txt\n+hello from sse\n*** End Patch";
@@ -981,6 +1008,7 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
             }
         }),
         &freeform_apply_patch_tool_fixture(),
+        &json!({}),
         &state,
     );
     assert_eq!(added["emit"], true);
@@ -996,6 +1024,7 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
             "delta": raw_args
         }),
         &freeform_apply_patch_tool_fixture(),
+        &json!({}),
         &state,
     );
     assert_eq!(delta["emit"], false);
@@ -1011,6 +1040,7 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
             "arguments": raw_args
         }),
         &freeform_apply_patch_tool_fixture(),
+        &json!({}),
         &state,
     );
     assert_eq!(done["emit"], true);
@@ -1030,6 +1060,7 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
             "arguments": raw_args
         }),
         &freeform_apply_patch_tool_fixture(),
+        &json!({}),
         &done["state"],
     );
     assert_eq!(duplicate_done["emit"], false);
@@ -1043,6 +1074,7 @@ fn project_responses_sse_frame_for_client_keeps_terminal_frame_unchanged() {
         Some("response.done"),
         &json!({ "type": "response.done", "response": { "id": "resp_1" } }),
         &freeform_apply_patch_tool_fixture(),
+        &json!({}),
         &json!({}),
     );
     assert_eq!(output["emit"], true);

@@ -421,3 +421,30 @@ Known unrelated gate issue from the previous run: `npm run test:unified-hub-shad
 ### Review Note
 
 - Fixed one pre-existing Rust test non-determinism in `build_responses_payload_from_chat_json_matches_core_shape`: the JSON wrapper and core path each allocate volatile `resp_<timestamp>` ids when invoked separately. The test now validates both ids are valid Responses ids and compares the stable semantic payload after removing top-level `id` / `created_at`.
+
+## 2026-06-10 Slice: Responses Client-Visible Restore Projection
+
+### Audit Result
+
+- `src/server/handlers/handler-response-utils.ts` still owned client-visible response restore semantics in TS:
+  - Reading metadata to derive client-visible `model`.
+  - Reading metadata/target/original request reasoning blocks to derive `reasoning.effort`.
+  - Patching SSE `data.response.model` and `data.response.reasoning.effort` before writing frames to the client.
+- This is `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` projection semantics, not IO glue. The matching Rust owner is the existing Responses client projection owner in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`.
+
+### Implementation Result
+
+- Added Rust owner `project_responses_client_payload_for_client`.
+- Extended Rust `project_responses_sse_frame_for_client` to consume same-request metadata side-channel and apply client-visible restore inside native projection.
+- Added native export `projectResponsesClientPayloadForClientJson`.
+- Kept TS as SSE event/data parsing, native invocation, native state holder, internal carrier guard, and frame writer.
+- Removed TS `ClientVisibleResponseRestoreContext`, metadata model/reasoning parsing, and response payload patch helper from `handler-response-utils.ts`.
+- Updated function/verification maps with the new canonical builder and residue rule.
+- Added residue gate coverage in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+
+### Verification Plan
+
+- `cargo test -p router-hotpath-napi project_responses --lib -- --nocapture`
+- `npm run jest:run -- --runTestsByPath tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand --no-cache --forceExit`
+- `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
+- `npm run verify:function-map-compile-gate`

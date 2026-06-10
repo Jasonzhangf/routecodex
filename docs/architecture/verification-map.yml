@@ -506,6 +506,7 @@ verification:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
       - Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames.
+      - Responses client-visible model/reasoning restore from metadata must stay Rust-owned; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`.
 
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high

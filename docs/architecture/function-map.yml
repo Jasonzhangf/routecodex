@@ -873,12 +873,13 @@ owners:
 
   - feature_id: hub.response_responses_client_projection
     status: active
-    summary: OpenAI Responses client-visible tool-call projection for JSON body and SSE frames, including apply_patch freeform custom tool output
+    summary: OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
     canonical_types:
       - HubRespOutbound04ClientSemantic
       - ServerRespOutbound05ClientFrame
     canonical_builders:
+      - project_responses_client_payload_for_client
       - project_responses_client_body_for_client
       - project_responses_sse_frame_for_client
     allowed_paths:
@@ -904,6 +905,7 @@ owners:
     notes:
       - JSON body and SSE frame client-visible Responses tool projection must stay Rust-owned; TS handler may parse SSE event/data boundaries, hold opaque native state, and write returned frames only.
       - TS handler must not restore apply_patch function_call-to-custom_tool_call conversion, freeform argument parsing, delta aggregation, done de-duplication, frame heuristic routing, or projection fallback that writes the original frame on native failure.
+      - Client-visible response model and reasoning-effort restore must stay Rust-owned through `project_responses_client_payload_for_client`; TS must not parse metadata to patch response payloads.
 
   - feature_id: hub.response_provider_sse_materialization
     status: active

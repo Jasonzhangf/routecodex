@@ -11,7 +11,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::chat_reasoning::{
 };
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
     normalize_responses_tool_call_arguments_for_client, project_responses_client_body_for_client,
-    project_responses_sse_frame_for_client,
+    project_responses_client_payload_for_client, project_responses_sse_frame_for_client,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
@@ -279,11 +279,28 @@ pub fn project_responses_client_body_for_client_json(
 }
 
 #[napi]
+pub fn project_responses_client_payload_for_client_json(
+    responses_payload_json: String,
+    tools_raw_json: String,
+    metadata_json: String,
+) -> NapiResult<String> {
+    let responses_payload: Value = serde_json::from_str(&responses_payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let tools_raw: Value = serde_json::from_str(&tools_raw_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let metadata: Value =
+        serde_json::from_str(&metadata_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = project_responses_client_payload_for_client(&responses_payload, &tools_raw, &metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn project_responses_sse_frame_for_client_json(
     frame_json: String,
     event_name_json: String,
     data_json: String,
     tools_raw_json: String,
+    metadata_json: String,
     state_json: String,
 ) -> NapiResult<String> {
     let frame: Value = serde_json::from_str(&frame_json)
@@ -294,6 +311,8 @@ pub fn project_responses_sse_frame_for_client_json(
         serde_json::from_str(&data_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let tools_raw: Value = serde_json::from_str(&tools_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let metadata: Value =
+        serde_json::from_str(&metadata_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let state: Value =
         serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = project_responses_sse_frame_for_client(
@@ -301,6 +320,7 @@ pub fn project_responses_sse_frame_for_client_json(
         event_name.as_str(),
         &data,
         &tools_raw,
+        &metadata,
         &state,
     );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))

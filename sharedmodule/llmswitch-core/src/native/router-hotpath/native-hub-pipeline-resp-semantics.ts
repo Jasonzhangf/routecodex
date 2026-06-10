@@ -35,6 +35,7 @@ export {
   normalizeResponsesToolCallArgumentsForClientWithNative,
   normalizeResponsesUsageWithNative,
   projectResponsesClientBodyForClientWithNative,
+  projectResponsesClientPayloadForClientWithNative,
   projectResponsesSseFrameForClientWithNative,
   buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
   projectPostServertoolHubRespOutbound04ClientSemanticWithNative,
