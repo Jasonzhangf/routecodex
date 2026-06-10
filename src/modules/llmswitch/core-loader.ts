@@ -31,6 +31,10 @@ function getImportMetaUrlUnsafe(): string | undefined {
   }
 }
 
+function isJestRuntime(): boolean {
+  return typeof process.env.JEST_WORKER_ID === 'string' && process.env.JEST_WORKER_ID.length > 0;
+}
+
 function resolveCoreLoaderModulePath(): string {
   const metaUrl = getImportMetaUrlUnsafe();
   if (typeof metaUrl === 'string' && metaUrl.length > 0) {
@@ -181,7 +185,36 @@ export function resolveCoreModuleUrl(subpath: string, impl: LlmsImpl = 'ts'): st
   return pathToFileURL(modulePath).href;
 }
 
+function resolveBuiltinSourceModulePath(subpath: string, impl: LlmsImpl): string | null {
+  if (impl !== 'ts') {
+    return null;
+  }
+  try {
+    const packageDir = resolveCorePackageDir(impl);
+    return path.join(packageDir, 'src', `${subpath.replace(/^\/*/, '').replace(/\.js$/i, '')}.ts`);
+  } catch {
+    return null;
+  }
+}
+
 export async function importCoreModule<T = unknown>(subpath: string, impl: LlmsImpl = 'ts'): Promise<T> {
   const moduleUrl = resolveCoreModuleUrl(subpath, impl);
-  return (await import(moduleUrl)) as T;
+  try {
+    return (await import(moduleUrl)) as T;
+  } catch (error) {
+    const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
+    const sourcePath = isJestRuntime() ? resolveBuiltinSourceModulePath(subpath, impl) : null;
+    if (
+      sourcePath
+      && (
+        code === 'MODULE_NOT_FOUND'
+        || code === 'ERR_MODULE_NOT_FOUND'
+        || code === undefined
+      )
+    ) {
+      const require = createRequire(resolveCoreLoaderModulePath());
+      return require(sourcePath) as T;
+    }
+    throw error;
+  }
 }

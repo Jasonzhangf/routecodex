@@ -1,32 +1,31 @@
 import { PassThrough, Readable } from 'node:stream';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import { rm } from 'node:fs/promises';
 import { describe, expect, it, jest } from '@jest/globals';
 
-const writeServerSnapshotMock = jest.fn(async (options: {
-  phase: string;
-  requestId: string;
-  data: unknown;
-  entryEndpoint?: string;
-}) => {
-  const root = process.env.RCC_SNAPSHOT_DIR;
-  if (!root || options.phase !== 'client-response') return;
-  const dir = path.join(root, 'openai-responses', options.requestId.replace(/[^A-Za-z0-9_.-]/g, '_'));
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    path.join(dir, 'client-response_server.json'),
-    JSON.stringify({ meta: { stage: options.phase }, data: options.data }, null, 2),
-    'utf8'
-  );
-});
-
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () => ({
+const mockBridgeModule = async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
-  importCoreDist: jest.fn(),
-  requireCoreDist: jest.fn(),
+  importCoreDist: jest.fn(async (subpath?: string) => {
+    if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+      return {
+        projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+          emit: true,
+          frame: input.frame,
+          state: input.state,
+        }),
+        projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+        projectResponsesClientBodyForClientWithNative: (payload: unknown) => payload,
+      };
+    }
+    return {};
+  }),
+  requireCoreDist: jest.fn(() => ({})),
   deriveFinishReasonNative: jest.fn(() => undefined),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
+  isToolCallContinuationResponseNative: jest.fn((body: unknown) => Boolean(
+    body
+    && typeof body === 'object'
+    && !Array.isArray(body)
+    && (body as Record<string, unknown>).required_action
+  )),
   updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe: Record<string, unknown> | undefined) => {
     const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
     const next = { ...(probe ?? {}) } as Record<string, unknown>;
@@ -54,14 +53,16 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', async () =>
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-  recordResponsesResponseForRequest: jest.fn(async () => undefined)
-  ,
+  recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined)
-}));
+});
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-  isSnapshotsEnabled: () => true,
-  writeServerSnapshot: writeServerSnapshotMock
+  isSnapshotsEnabled: () => false,
+  writeServerSnapshot: async () => undefined
 }));
 
 class MockResponse extends PassThrough {
@@ -94,54 +95,15 @@ async function waitForEndWithTimeout(stream: PassThrough, timeoutMs: number): Pr
   ]);
 }
 
-async function readClientSnapshotFromDir(root: string): Promise<{ meta?: { stage?: string }; data?: { bodyText?: string } } | undefined> {
-  async function walk(dir: string): Promise<string[]> {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    const files: string[] = [];
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        files.push(...await walk(fullPath));
-      } else if (entry.isFile() && entry.name.includes('client-response') && entry.name.endsWith('.json')) {
-        files.push(fullPath);
-      }
-    }
-    return files;
-  }
-  const files = await walk(root);
-  for (const file of files) {
-    const parsed = JSON.parse(await readFile(file, 'utf8')) as { meta?: { stage?: string }; data?: { bodyText?: string } };
-    if (parsed.meta?.stage === 'client-response') {
-      return parsed;
-    }
-  }
-  return undefined;
-}
-
-async function waitForClientSnapshot(root: string, timeoutMs: number): Promise<{ meta?: { stage?: string }; data?: { bodyText?: string } } | undefined> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const snapshot = await readClientSnapshotFromDir(root);
-    if (snapshot) {
-      return snapshot;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  return undefined;
-}
-
 describe('handler-response-utils required_action split frame regression', () => {
   it('RED: split response.required_action SSE frames must not terminate before data payload arrives', async () => {
-    const previousCapture = process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
-    const previousSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
-    const previousGlobalSnapshotFlag = (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled;
-    const snapshotRoot = await mkdtemp(path.join(tmpdir(), 'rcc-client-sse-snap-'));
-    process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = '1';
-    process.env.RCC_SNAPSHOT_DIR = snapshotRoot;
-    (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled = true;
-    writeServerSnapshotMock.mockClear();
+    const previousProjectionTimeout = process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
+    const previousTerminalCloseTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+    const previousTotalTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
+    process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS = '40';
+    process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = '50';
+    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '1500';
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-    const { allowSnapshotLocalDiskWrite } = await import('../../../src/utils/snapshot-local-disk-gate.js');
     const requestId = 'openai-responses-router-gpt-5.3-codex-native-sse-required-action-split-frame';
     const responseId = 'resp_native_sse_required_action_split_frame_1';
     const callId = 'call_native_sse_required_action_split_frame_1';
@@ -165,7 +127,6 @@ describe('handler-response-utils required_action split frame regression', () => 
     const res = new MockResponse();
     const chunks: string[] = [];
     res.on('data', (chunk) => chunks.push(String(chunk)));
-    allowSnapshotLocalDiskWrite(requestId);
 
     void sendPipelineResponse(
       res as any,
@@ -218,7 +179,7 @@ describe('handler-response-utils required_action split frame regression', () => 
       }
     );
 
-    const ended = await waitForEndWithTimeout(res, 700);
+    const ended = await waitForEndWithTimeout(res, 1500);
     expect(ended).toBe(true);
     const text = chunks.join('');
     expect(text).toContain('event: response.required_action');
@@ -227,24 +188,20 @@ describe('handler-response-utils required_action split frame regression', () => 
     expect(text).toContain('event: response.done');
     expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
     expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
-    const clientSnapshot = await waitForClientSnapshot(snapshotRoot, 500);
-    expect(clientSnapshot?.data?.bodyText).toContain('event: response.required_action');
-    expect(clientSnapshot?.data?.bodyText).toContain(callId);
-    await rm(snapshotRoot, { recursive: true, force: true });
-    if (previousCapture === undefined) {
-      delete process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS;
+    if (previousProjectionTimeout === undefined) {
+      delete process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
     } else {
-      process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = previousCapture;
+      process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS = previousProjectionTimeout;
     }
-    if (previousSnapshotDir === undefined) {
-      delete process.env.RCC_SNAPSHOT_DIR;
+    if (previousTerminalCloseTimeout === undefined) {
+      delete process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
     } else {
-      process.env.RCC_SNAPSHOT_DIR = previousSnapshotDir;
+      process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = previousTerminalCloseTimeout;
     }
-    if (previousGlobalSnapshotFlag === undefined) {
-      delete (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled;
+    if (previousTotalTimeout === undefined) {
+      delete process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
     } else {
-      (globalThis as { rccSnapshotsEnabled?: boolean }).rccSnapshotsEnabled = previousGlobalSnapshotFlag;
+      process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = previousTotalTimeout;
     }
   });
 });

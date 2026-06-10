@@ -1,0 +1,362 @@
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import express from 'express';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { PassThrough } from 'node:stream';
+
+type SseEventRecord = {
+  event: string;
+  data: unknown;
+  raw: string;
+  receivedAtMs: number;
+};
+
+const mockBridgeModule = () => ({
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn((probe: Record<string, unknown> | undefined) => {
+    if (!probe?.required_action) {
+      return [];
+    }
+    const response = {
+      ...probe,
+      object: 'response',
+      status: 'requires_action',
+    };
+    return [
+      `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+      `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+    ];
+  }),
+  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+  createResponsesJsonToSseConverter: jest.fn(async () => ({
+    convertResponseToJsonToSse: async () => {
+      throw new Error('json_to_sse_not_expected_in_this_test');
+    },
+  })),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+  importCoreDist: jest.fn(async (subpath?: string) => {
+    if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+      return {
+        projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+          emit: true,
+          frame: input.frame,
+          state: input.state,
+        }),
+        projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+        projectResponsesClientBodyForClientWithNative: (payload: unknown) => payload,
+      };
+    }
+    return {};
+  }),
+  isToolCallContinuationResponseNative: jest.fn((body: unknown) => Boolean(
+    body
+    && typeof body === 'object'
+    && !Array.isArray(body)
+    && (body as Record<string, unknown>).required_action
+  )),
+  recordResponsesResponseForRequest: jest.fn(async () => undefined),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  requireCoreDist: jest.fn(() => ({})),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe?: Record<string, unknown>) => {
+    const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+    const next = { ...(probe ?? {}) } as Record<string, unknown>;
+    const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine) {
+      return next;
+    }
+    try {
+      const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
+      const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+        ? parsed.response as Record<string, unknown>
+        : undefined;
+      if (response) {
+        Object.assign(next, response);
+      }
+      if (parsed.required_action) {
+        next.required_action = parsed.required_action;
+      }
+    } catch {
+      return next;
+    }
+    return next;
+  }),
+});
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+
+jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+  isSnapshotsEnabled: () => false,
+  writeServerSnapshot: async () => undefined,
+}));
+
+describe('Responses SSE client contract blackbox', () => {
+  const originalProjectionTimeout = process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
+  const originalTerminalCloseTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+  const originalTotalTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
+
+  beforeEach(() => {
+    process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS = '40';
+    process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = '50';
+    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '1500';
+  });
+
+  async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
+    const server = await new Promise<http.Server>((resolve) => {
+      const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+    });
+    try {
+      const address = server.address() as AddressInfo;
+      return await run(`http://127.0.0.1:${address.port}`);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  }
+
+  async function collectSseEvents(
+    response: Response,
+    options?: { timeoutMs?: number; stopOnEvent?: string }
+  ): Promise<{ events: SseEventRecord[]; rawText: string }> {
+    const timeoutMs = options?.timeoutMs ?? 1_000;
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    const decoder = new TextDecoder();
+    const events: SseEventRecord[] = [];
+    let rawText = '';
+    let pending = '';
+    const startedAt = Date.now();
+
+    while (true) {
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        throw new Error(`SSE stream did not reach ${options?.stopOnEvent ?? 'EOF'} within ${timeoutMs}ms.\n${rawText}`);
+      }
+      const readResult = await Promise.race([
+        reader!.read(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`SSE stream timed out after ${timeoutMs}ms.\n${rawText}`)), remainingMs);
+        })
+      ]);
+      if (readResult.done) {
+        break;
+      }
+      const chunkText = decoder.decode(readResult.value, { stream: true });
+      pending += chunkText;
+      rawText += chunkText;
+      const frames = pending.split('\n\n');
+      pending = frames.pop() ?? '';
+      for (const frame of frames) {
+        if (!frame.trim()) {
+          continue;
+        }
+        const lines = frame.split('\n');
+        const eventLine = lines.find((line) => line.startsWith('event: '));
+        const dataLines = lines
+          .filter((line) => line.startsWith('data: '))
+          .map((line) => line.slice('data: '.length));
+        const event = eventLine ? eventLine.slice('event: '.length).trim() : 'message';
+        const rawData = dataLines.join('\n');
+        let data: unknown = rawData;
+        try {
+          data = rawData ? JSON.parse(rawData) : rawData;
+        } catch {
+          data = rawData;
+        }
+        events.push({
+          event,
+          data,
+          raw: frame,
+          receivedAtMs: Date.now() - startedAt,
+        });
+        if (options?.stopOnEvent && event === options.stopOnEvent) {
+          await reader!.cancel();
+          return { events, rawText };
+        }
+      }
+    }
+
+    return { events, rawText };
+  }
+
+  it('captures required_action -> completed -> done for tool-call continuation without hanging the client', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          body: {
+            __sse_responses: upstream,
+            __routecodex_finish_reason: 'tool_calls',
+            __routecodex_stream_contract_probe_body: {
+              id: 'resp_tool_call_contract',
+              object: 'response',
+              status: 'requires_action',
+              required_action: {
+                type: 'submit_tool_outputs',
+                submit_tool_outputs: {
+                  tool_calls: [{
+                    id: 'call_contract_1',
+                    type: 'function_call',
+                    function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+                  }]
+                }
+              }
+            }
+          },
+          usageLogInfo: {
+            requestStartedAtMs: Date.now(),
+            finishReason: 'tool_calls'
+          }
+        } as any,
+        'req_tool_call_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.output_item.done\n');
+      upstream.write('data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_contract_1","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}\n\n');
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { events, rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+      const names = events.map((entry) => entry.event);
+      const requiredActionIndex = names.indexOf('response.required_action');
+      const completedIndex = names.indexOf('response.completed');
+      const doneIndex = names.indexOf('response.done');
+
+      expect(response.status).toBe(200);
+      expect(requiredActionIndex).toBeGreaterThanOrEqual(0);
+      expect(completedIndex).toBeGreaterThan(requiredActionIndex);
+      expect(doneIndex).toBeGreaterThan(completedIndex);
+      expect(rawText).not.toContain('event: error');
+      expect(rawText).not.toContain('HTTP_SSE_TIMEOUT');
+      expect(rawText).not.toContain('upstream_stream_incomplete');
+    });
+  });
+
+  it('does not end a non-terminal text stream before upstream terminal events arrive', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          body: {
+            __sse_responses: upstream,
+            __routecodex_stream_contract_probe_body: {
+              id: 'resp_text_contract',
+              object: 'response',
+              status: 'in_progress'
+            }
+          },
+          usageLogInfo: {
+            requestStartedAtMs: Date.now(),
+            finishReason: 'stop'
+          }
+        } as any,
+        'req_text_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.output_text.delta\n');
+      upstream.write('data: {"type":"response.output_text.delta","delta":"first"}\n\n');
+      setTimeout(() => {
+        upstream.write('event: response.output_text.delta\n');
+        upstream.write('data: {"type":"response.output_text.delta","delta":"second"}\n\n');
+        upstream.write('event: response.completed\n');
+        upstream.write('data: {"type":"response.completed","response":{"id":"resp_text_contract","object":"response","status":"completed"}}\n\n');
+        upstream.write('event: response.done\n');
+        upstream.write('data: {"type":"response.done","response":{"id":"resp_text_contract","object":"response","status":"completed"}}\n\n');
+        upstream.end();
+      }, 120);
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { events, rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+      const names = events.map((entry) => entry.event);
+      const semanticNames = names.filter((name) => name !== 'message');
+
+      expect(response.status).toBe(200);
+      expect(semanticNames.slice(0, 2)).toEqual(['ping', 'response.output_text.delta']);
+      expect(rawText).toContain('"delta":"first"');
+      expect(rawText).toContain('"delta":"second"');
+      expect(rawText).not.toContain('response.required_action');
+      expect(rawText).not.toContain('event: error');
+      expect(semanticNames.indexOf('response.done')).toBeGreaterThan(semanticNames.indexOf('response.completed'));
+    });
+  });
+
+  it('turns early upstream close into explicit error instead of client hang', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_incomplete_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.created\n');
+      upstream.write('data: {"type":"response.created","response":{"id":"resp_incomplete_contract","object":"response","status":"in_progress"}}\n\n');
+      upstream.write('event: response.output_text.delta\n');
+      upstream.write('data: {"type":"response.output_text.delta","delta":"partial"}\n\n');
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).toContain('response.created');
+      expect(rawText).toContain('partial');
+      expect(rawText).toContain('event: error');
+      expect(rawText).toContain('"code":"upstream_stream_incomplete"');
+      expect(rawText).not.toContain('response.done');
+    });
+  });
+});

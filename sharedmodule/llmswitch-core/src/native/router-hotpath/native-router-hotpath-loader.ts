@@ -19,7 +19,12 @@ type ParsedVirtualRouterNativeError = {
 };
 
 function resolveLoaderModulePath(): string {
-  if (typeof __filename === "string" && __filename.length > 0) {
+  if (
+    typeof __filename === "string"
+    && __filename.length > 0
+    && __filename !== "[eval]"
+    && path.isAbsolute(__filename)
+  ) {
     return __filename;
   }
 
