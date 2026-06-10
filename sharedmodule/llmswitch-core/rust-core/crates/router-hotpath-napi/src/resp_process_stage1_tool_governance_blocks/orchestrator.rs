@@ -9,8 +9,7 @@ use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::message_content::normalize_thinking_only_reasoning_content;
 use crate::resp_process_stage1_tool_governance_blocks::napi_utilities::{
-    collect_tool_names_from_candidate, normalize_apply_patch_arguments,
-    resolve_requested_tool_names, validate_apply_patch_arguments,
+    normalize_apply_patch_arguments, validate_apply_patch_arguments,
 };
 use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
     copy_internal_tool_governance_state, inject_requested_tool_names_into_internal_governance,
@@ -206,47 +205,6 @@ pub fn govern_response_json(input_json: String) -> napi::Result<String> {
             request_id: input.request_id,
         })
     }
-    .map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
-}
-
-#[napi]
-pub fn prepare_resp_process_tool_governance_payload_json(
-    payload_json: String,
-) -> napi::Result<String> {
-    if payload_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Payload JSON is empty"));
-    }
-    let input: Value = serde_json::from_str(&payload_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
-    let (payload, requested_tool_names) = if let Some(root) = input.as_object() {
-        if root.contains_key("payload") {
-            let payload = root.get("payload").cloned().unwrap_or(Value::Null);
-            let requested_tool_names = root
-                .get("requested_tool_names")
-                .or_else(|| root.get("requestedToolNames"))
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(|value| value.to_string())
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default();
-            (payload, requested_tool_names)
-        } else {
-            (input, Vec::new())
-        }
-    } else {
-        (input, Vec::new())
-    };
-    let output = prepare_payload_for_governance_with_requested_tool_names(
-        &payload,
-        requested_tool_names.as_slice(),
-    )
     .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))

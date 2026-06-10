@@ -373,10 +373,13 @@ fn shared_tooling_deletion_gate_removed_chat_clock_reminder_semantics_local_wrap
 
 #[test]
 fn shared_tooling_deletion_gate_removed_tool_content_text_wrappers() {
-    for relative in [
-        "hub_semantic_mapper_chat.rs",
-        "req_outbound_stage3_compat/universal_shape_filter.rs",
-    ] {
+    let retired_path = crate_src_path("hub_semantic_mapper_chat.rs");
+    assert!(
+        !retired_path.exists(),
+        "retired hub_semantic_mapper_chat.rs must stay physically deleted: {}",
+        retired_path.display()
+    );
+    for relative in ["req_outbound_stage3_compat/universal_shape_filter.rs"] {
         let path = crate_src_path(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -527,10 +530,13 @@ fn shared_tooling_deletion_gate_removed_argument_string_wrappers() {
 
 #[test]
 fn shared_tooling_deletion_gate_removed_tool_result_value_wrappers() {
-    for relative in [
-        "hub_semantic_mapper_chat.rs",
-        "req_outbound_stage3_compat/universal_shape_filter.rs",
-    ] {
+    let retired_path = crate_src_path("hub_semantic_mapper_chat.rs");
+    assert!(
+        !retired_path.exists(),
+        "retired hub_semantic_mapper_chat.rs must stay physically deleted: {}",
+        retired_path.display()
+    );
+    for relative in ["req_outbound_stage3_compat/universal_shape_filter.rs"] {
         let path = crate_src_path(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));

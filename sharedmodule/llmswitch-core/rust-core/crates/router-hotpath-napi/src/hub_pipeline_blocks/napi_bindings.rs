@@ -420,7 +420,6 @@ mod responses_direct_route_decision_tests {
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_pipeline_blocks::metadata::resolve_stop_message_router_metadata;
-use crate::hub_pipeline_blocks::process_mode::find_mappable_semantics_keys;
 use crate::hub_pipeline_blocks::protocol::{
     extract_model_hint_from_metadata, normalize_endpoint, resolve_sse_protocol,
 };
@@ -591,19 +590,6 @@ pub fn coerce_standardized_request_from_payload_json(input_json: String) -> napi
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize standardized request coercion output: {}",
-            e
-        ))
-    })
-}
-
-#[napi_derive::napi]
-pub fn find_mappable_semantics_keys_json(metadata_json: String) -> napi::Result<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
-    let output = find_mappable_semantics_keys(&metadata);
-    serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize mappable semantics keys: {}",
             e
         ))
     })

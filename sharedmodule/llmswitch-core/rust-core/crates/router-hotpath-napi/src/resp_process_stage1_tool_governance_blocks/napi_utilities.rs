@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use serde_json::{Map, Value};
 
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_guard::{
@@ -12,43 +10,6 @@ use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::
 };
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_text::extract_apply_patch_text;
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
-
-pub(crate) fn collect_tool_names_from_candidate(candidate: &Value) -> Vec<String> {
-    let arr = match candidate {
-        Value::Array(a) => a,
-        _ => return Vec::new(),
-    };
-
-    arr.iter().filter_map(read_tool_name).collect()
-}
-
-pub(crate) fn resolve_requested_tool_names(input: &Value) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    if let Some(Value::Object(sem)) = input.get("requestSemantics") {
-        if let Some(tools) = sem.get("tools") {
-            collect_unique_tool_names(tools, &mut names, &mut seen);
-        }
-        if let Some(Value::Object(t)) = sem.get("tools") {
-            if let Some(v) = t.get("clientToolsRaw") {
-                collect_unique_tool_names(v, &mut names, &mut seen);
-            }
-            if let Some(v) = t.get("baselineTools") {
-                collect_unique_tool_names(v, &mut names, &mut seen);
-            }
-        }
-    }
-    if let Some(Value::Object(ac)) = input.get("adapterContext") {
-        if let Some(Value::Object(cr)) = ac.get("capturedChatRequest") {
-            if let Some(tools) = cr.get("tools") {
-                collect_unique_tool_names(tools, &mut names, &mut seen);
-            }
-        }
-    }
-
-    names
-}
 
 pub(crate) fn normalize_apply_patch_arguments(input: &Value) -> Value {
     let raw_args = input.get("arguments");
@@ -120,43 +81,4 @@ pub(crate) fn validate_apply_patch_arguments(input: &Value) -> Value {
         );
     }
     Value::Object(out)
-}
-
-fn collect_unique_tool_names(
-    candidate: &Value,
-    names: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-) {
-    for name in collect_tool_names_from_candidate(candidate) {
-        if seen.insert(name.clone()) {
-            names.push(name);
-        }
-    }
-}
-
-fn read_tool_name(item: &Value) -> Option<String> {
-    match item {
-        Value::String(s) => read_non_empty_trimmed(s),
-        Value::Object(m) => {
-            if let Some(Value::Object(func)) = m.get("function") {
-                func.get("name")
-                    .and_then(Value::as_str)
-                    .and_then(read_non_empty_trimmed)
-            } else {
-                m.get("name")
-                    .and_then(Value::as_str)
-                    .and_then(read_non_empty_trimmed)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn read_non_empty_trimmed(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }

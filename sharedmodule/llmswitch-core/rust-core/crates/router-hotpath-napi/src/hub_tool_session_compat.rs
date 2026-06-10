@@ -1,5 +1,3 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -674,30 +672,6 @@ fn update_tool_session_history_payload(
         history: Some(history),
         records_count: records.len(),
     }
-}
-
-#[napi]
-pub fn normalize_tool_session_messages_json(input_json: String) -> NapiResult<String> {
-    if input_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Input JSON is empty"));
-    }
-    let input: ToolSessionCompatInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = normalize_tool_session_payload(input);
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
-}
-
-#[napi]
-pub fn update_tool_session_history_json(input_json: String) -> NapiResult<String> {
-    if input_json.trim().is_empty() {
-        return Err(napi::Error::from_reason("Input JSON is empty"));
-    }
-    let input: ToolSessionHistoryUpdateInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = update_tool_session_history_payload(input);
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
 #[cfg(test)]

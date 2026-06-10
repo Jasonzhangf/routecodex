@@ -1,6 +1,5 @@
 export type {
-  NativeContextToolOutput,
-  NativeResumeToolOutput
+  NativeContextToolOutput
 } from './native-hub-pipeline-inbound-outbound-semantics.js';
 
 export interface NativeReqInboundSemanticLiftApplyInput {

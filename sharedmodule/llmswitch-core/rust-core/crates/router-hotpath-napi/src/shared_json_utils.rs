@@ -34,13 +34,6 @@ pub(crate) fn clone_non_empty_object(value: Option<&Value>) -> Option<Map<String
     Some(record)
 }
 
-pub(crate) fn parse_json_bool(raw: &str) -> Option<bool> {
-    match serde_json::from_str::<Value>(raw) {
-        Ok(Value::Bool(v)) => Some(v),
-        _ => None,
-    }
-}
-
 pub(crate) fn parse_js_number_like(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(num)) => num.as_f64(),
@@ -281,7 +274,7 @@ mod tests {
     use super::{
         as_object, extract_balanced_json_array_at, extract_balanced_json_candidate_at,
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
-        parse_js_number_like, parse_json_bool, read_first_object_trimmed_string,
+        parse_js_number_like, read_first_object_trimmed_string,
         read_object_trimmed_string, read_string_array_command, read_trimmed_string,
         read_workdir_from_args, split_command_string, value_as_object_or_empty,
     };
@@ -431,14 +424,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_json_bool_accepts_only_json_boolean_literals() {
-        assert_eq!(parse_json_bool("true"), Some(true));
-        assert_eq!(parse_json_bool("false"), Some(false));
-        assert_eq!(parse_json_bool("\"true\""), None);
-        assert_eq!(parse_json_bool("not-json"), None);
-    }
-
-    #[test]
     fn parse_js_number_like_accepts_numbers_and_numeric_strings() {
         let number = json!(12.5);
         let string = json!(" 7 ");
@@ -540,6 +525,14 @@ mod tests {
             "hub_req_inbound_semantic_lift.rs",
         ] {
             let path = crate_src_path(relative);
+            if !path.exists() {
+                assert_eq!(
+                    relative, "chat_governance_context.rs",
+                    "shared helper deletion gate scan root missing unexpectedly: {}",
+                    relative
+                );
+                continue;
+            }
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
             assert!(
@@ -1178,9 +1171,9 @@ mod tests {
         let submit_source = fs::read_to_string(&submit_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", submit_path.display(), error));
         assert!(
-            submit_source.contains("read_first_object_trimmed_string(row")
-                || submit_source.contains("read_first_object_trimmed_string(&row"),
-            "hub_submit_tool_outputs.rs must route prioritized tool id reads through shared_json_utils truth"
+            !submit_source.contains("build_submit_tool_outputs_payload"),
+            "retired submit_tool_outputs payload builder must not return in {}",
+            submit_path.display()
         );
     }
 
@@ -1204,16 +1197,10 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_thought_signature_validator_local_clone() {
         let validator_path = crate_src_path("thought_signature_validator.rs");
-        let validator_source = fs::read_to_string(&validator_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {}", validator_path.display(), error)
-        });
         assert!(
-            !validator_source.contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {\n    match value {"),
-            "thought_signature_validator.rs still owns local coerce_thought_signature clone"
-        );
-        assert!(
-            validator_source.contains("read_trimmed_string(value)"),
-            "thought_signature_validator.rs must route thought-signature trimming through shared read_trimmed_string truth"
+            !validator_path.exists(),
+            "retired thought_signature_validator.rs must not be restored: {}",
+            validator_path.display()
         );
     }
 
@@ -1365,16 +1352,10 @@ mod tests {
     #[test]
     fn shared_json_utils_deletion_gate_removed_thought_signature_validator_wrapper() {
         let path = crate_src_path("thought_signature_validator.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source
-                .contains("fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {"),
-            "thought_signature_validator.rs still owns local coerce_thought_signature wrapper"
-        );
-        assert!(
-            source.contains("read_trimmed_string(value)"),
-            "thought_signature_validator.rs must call shared read_trimmed_string truth directly"
+            !path.exists(),
+            "retired thought_signature_validator.rs must not be restored: {}",
+            path.display()
         );
     }
 
@@ -1411,9 +1392,8 @@ mod tests {
             path.display()
         );
         assert!(
-            source.contains("read_object_trimmed_string(&continuation, \"stateOrigin\")")
-                || source.contains("read_object_trimmed_string(resume_from, \"protocol\")"),
-            "chat_node_result_semantics.rs must use shared read_object_trimmed_string truth directly"
+            !source.contains("stateOrigin") && !source.contains("resume_from"),
+            "chat_node_result_semantics.rs must not restore retired continuation metadata readers"
         );
     }
 
@@ -1435,20 +1415,11 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_object_trimmed_string_deletion_gate_removed_finalize_strip_local_wrapper() {
+    fn shared_read_object_trimmed_string_deletion_gate_removed_finalize_strip_module() {
         let path = crate_src_path("servertool_skeleton/finalize_strip.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_string(record: &Map<String, Value>, key: &str) -> String {"),
-            "local read_string wrapper still present in {}",
-            path.display()
-        );
-        assert!(
-            source.contains("read_object_trimmed_string(row, \"name\").unwrap_or_default()")
-                || source.contains("read_object_trimmed_string(row, \"tool_call_id\").unwrap_or_default()")
-                || source.contains("read_object_trimmed_string(row, \"id\").unwrap_or_default()"),
-            "servertool_skeleton/finalize_strip.rs must use shared read_object_trimmed_string truth directly"
+            !path.exists(),
+            "retired servertool_skeleton/finalize_strip.rs must stay physically deleted"
         );
     }
 
@@ -1526,6 +1497,9 @@ mod tests {
     #[test]
     fn shared_json_record_helpers_deletion_gate_removed_chat_governance_finalize_local_wrappers() {
         let path = crate_src_path("chat_governance_finalize.rs");
+        if !path.exists() {
+            return;
+        }
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(

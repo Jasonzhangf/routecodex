@@ -1,5 +1,3 @@
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -166,90 +164,6 @@ fn normalize_context_tools(snapshot: &Value) -> Option<Vec<Value>> {
     Some(tools)
 }
 
-fn select_tool_call_id_style(
-    adapter_context: &Value,
-    snapshot: &Value,
-    current: Option<String>,
-) -> Option<String> {
-    let adapter_style = adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("toolCallIdStyle"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-
-    let snapshot_style = snapshot
-        .as_object()
-        .and_then(|obj| obj.get("toolCallIdStyle"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-
-    let resolved = adapter_style.or(snapshot_style)?;
-    if current
-        .as_ref()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        == Some(resolved.clone())
-    {
-        return Some(resolved);
-    }
-    Some(resolved)
-}
-
-fn strip_private_fields_in_place(value: &mut Value) {
-    match value {
-        Value::Array(list) => {
-            for entry in list.iter_mut() {
-                strip_private_fields_in_place(entry);
-            }
-        }
-        Value::Object(row) => {
-            let keys: Vec<String> = row.keys().cloned().collect();
-            for key in keys {
-                if key.starts_with("__rcc_") {
-                    row.remove(key.as_str());
-                    continue;
-                }
-                if let Some(child) = row.get_mut(key.as_str()) {
-                    strip_private_fields_in_place(child);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn strip_private_fields(value: &Value) -> Value {
-    let mut next = value.clone();
-    strip_private_fields_in_place(&mut next);
-    if let Value::Object(row) = &mut next {
-        if matches!(row.get("reasoning"), Some(Value::Null)) {
-            row.remove("reasoning");
-        }
-    }
-    next
-}
-
-fn resolve_compat_profile(
-    adapter_context: &Value,
-    explicit_profile: Option<String>,
-) -> Option<String> {
-    if let Some(explicit) = explicit_profile {
-        let trimmed = explicit.trim().to_string();
-        if !trimmed.is_empty() {
-            return Some(trimmed);
-        }
-    }
-
-    adapter_context
-        .as_object()
-        .and_then(|obj| obj.get("compatibilityProfile"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 fn should_attach_req_outbound_context_snapshot(
     has_snapshot: bool,
     context_metadata_key: Option<String>,
@@ -261,6 +175,7 @@ fn should_attach_req_outbound_context_snapshot(
     !key.is_empty()
 }
 
+#[cfg(test)]
 fn resolve_req_outbound_context_merge_plan(
     input: &ReqOutboundContextMergePlanInput,
 ) -> ReqOutboundContextMergePlanOutput {
@@ -324,112 +239,4 @@ pub fn apply_req_outbound_context_snapshot(
         tool_outputs,
         tools,
     }
-}
-
-#[napi]
-pub fn merge_context_tool_outputs_json(
-    existing_json: String,
-    snapshot_json: String,
-) -> NapiResult<String> {
-    let existing: Value = serde_json::from_str(&existing_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = merge_context_tool_outputs(&existing, &snapshot);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn normalize_context_tools_json(snapshot_json: String) -> NapiResult<String> {
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = normalize_context_tools(&snapshot);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn select_tool_call_id_style_json(
-    adapter_context_json: String,
-    snapshot_json: String,
-    current_style_json: String,
-) -> NapiResult<String> {
-    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let snapshot: Value = serde_json::from_str(&snapshot_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let current_style: Option<String> = serde_json::from_str(&current_style_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-
-    let output = select_tool_call_id_style(&adapter_context, &snapshot, current_style);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn strip_private_fields_json(payload_json: String) -> NapiResult<String> {
-    let payload: Value =
-        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = strip_private_fields(&payload);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[cfg(test)]
-mod strip_private_fields_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn strips_top_level_null_reasoning_without_changing_false_parallel_tool_calls() {
-        let output = strip_private_fields(&json!({
-            "model": "deepseek-v4-flash-free",
-            "messages": [{"role": "user", "content": "ping"}],
-            "reasoning": null,
-            "parallel_tool_calls": false,
-            "tool_choice": "auto"
-        }));
-
-        assert!(output.get("reasoning").is_none());
-        assert_eq!(output["parallel_tool_calls"], Value::Bool(false));
-        assert_eq!(output["tool_choice"], Value::String("auto".to_string()));
-    }
-}
-
-#[napi]
-pub fn resolve_compat_profile_json(
-    adapter_context_json: String,
-    explicit_profile_json: String,
-) -> NapiResult<String> {
-    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let explicit_profile: Option<String> = serde_json::from_str(&explicit_profile_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-
-    let output = resolve_compat_profile(&adapter_context, explicit_profile);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn resolve_req_outbound_context_merge_plan_json(input_json: String) -> NapiResult<String> {
-    let input: ReqOutboundContextMergePlanInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_req_outbound_context_merge_plan(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn apply_req_outbound_context_snapshot_json(input_json: String) -> NapiResult<String> {
-    let input: ReqOutboundContextSnapshotApplyInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = apply_req_outbound_context_snapshot(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn should_attach_req_outbound_context_snapshot_json(
-    has_snapshot: bool,
-    context_metadata_key_json: String,
-) -> NapiResult<String> {
-    let context_metadata_key: Option<String> = serde_json::from_str(&context_metadata_key_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = should_attach_req_outbound_context_snapshot(has_snapshot, context_metadata_key);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

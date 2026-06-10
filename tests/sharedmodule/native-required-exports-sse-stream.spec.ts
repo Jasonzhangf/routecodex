@@ -13,8 +13,6 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseEventWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamChunkWithConfigJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('extractDecodeStatsJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('resolveSseTimeoutOptionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('buildRespInboundSseErrorDescriptorJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('planProviderResponseServertoolRuntimeActionsJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runReqOutboundStage3CompatJson');
@@ -38,6 +36,31 @@ describe('native required exports for sse stream helpers', () => {
 
   test('does not require removed apply_patch legacy export', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentApplyPatchErrorContentJson');
+  });
+
+  test('does not require retired standalone SSE stats/timeout helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('extractDecodeStatsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveSseTimeoutOptionsJson');
+  });
+
+  test('does not require retired req_inbound standalone helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('mapResumeToolOutputsDetailedJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveClientInjectReadyJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeContextCaptureLabelJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('shouldRunHubChatProcessJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isShellLikeToolNameTokenJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveServerToolFollowupSnapshotJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentContextSnapshotJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('normalizeToolCallIdStyleCandidateJson');
+  });
+
+  test('does not require retired servertool continuation helper exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('buildContinueExecutionOperationsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('planContinueExecutionOperationsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('injectContinueExecutionDirectiveJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isStopMessageStateActiveJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveHasActiveStopMessageForContinueExecutionJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isCanonicalChatCompletionPayloadJson');
   });
 
   test('native resume helper returns protocol error envelope instead of napi generic failure', () => {

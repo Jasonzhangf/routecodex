@@ -15,7 +15,6 @@ const NON_BLOCKING_METADATA_POLICY_LOG_THROTTLE_MS = 60_000;
 const nonBlockingMetadataPolicyLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-metadata-policy.parse-failed');
 
-
 function logNativeMetadataPolicyNonBlocking(stage: string, error: unknown): void {
   const now = Date.now();
   const last = nonBlockingMetadataPolicyLogState.get(stage) ?? 0;
@@ -36,7 +35,6 @@ function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAIL
     return JSON_PARSE_FAILED;
   }
 }
-
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;

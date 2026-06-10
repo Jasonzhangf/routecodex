@@ -41,14 +41,6 @@ function parseOptionalString(raw: string): string | undefined | null {
   return normalized ? normalized : undefined;
 }
 
-function parseBoolean(raw: string): boolean | null {
-  const parsed = parseJson('parseBoolean', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  return typeof parsed === 'boolean' ? parsed : null;
-}
-
 function parseUnknown(raw: string): unknown | null {
   const parsed = parseJson('parseUnknown', raw);
   return parsed === JSON_PARSE_FAILED ? null : parsed;
@@ -93,7 +85,6 @@ function parseToolOutputSnapshotBuildResult(
 
 export {
   parseOptionalString,
-  parseBoolean,
   parseUnknown,
   parseRecord,
   parseArray,

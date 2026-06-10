@@ -1,5 +1,4 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde_json::{Map, Number, Value};
 
 use crate::shared_json_utils::{
@@ -300,8 +299,7 @@ mod tests {
     }
 }
 
-#[napi]
-pub fn apply_stop_message_instruction_json(
+pub(crate) fn apply_stop_message_instruction_json(
     instruction_json: String,
     state_json: String,
     now_ms: i64,

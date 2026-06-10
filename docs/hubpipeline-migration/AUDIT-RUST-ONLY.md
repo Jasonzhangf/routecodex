@@ -3,6 +3,7 @@
 **审计时间**: 2026-05-16
 **版本**: v0.90.1714
 **修正说明**: 原报告 P0 阻塞项存在错误判断，实际已有 Rust 代理
+**2026-06-09 状态修正**: 本文是历史审计记录，不是当前实时任务清单。`extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` standalone public bridge 已确认零消费者并物理删除；不得因本历史 slice 恢复 required-export gate 或 TS wrapper。
 
 ---
 
@@ -22,7 +23,7 @@
 | P0-1 VirtualRouterEngine | ❌ 纯 TS 阻塞 | ✅ 已有 nativeProxy | engine.ts:118 `nativeProxy.route()` |
 | P0-2 servertool engine | ❌ 纯 TS 阻塞 | ⚠️ 混合 | engine.ts:119 有 Rust 调用，但主体仍是 TS |
 | P0-3 tool-governor-request | ❌ 纯 TS 阻塞 | ⚠️ 混合 | 部分逻辑调用 Rust，部分纯 TS |
-| P0-4 anthropic-alias | ❌ 纯 TS 阻塞 | ✅ 已有 Rust | buildAnthropicToolAliasMapWithNative |
+| P0-4 anthropic-alias | ❌ 纯 TS 阻塞 | ✅ 已收口 | Rust shared tool mapping internal；旧公共 NAPI wrapper 已退休 |
 
 ---
 
@@ -51,7 +52,7 @@
 |-------|------|------|-------------|
 | req_process.stage1 | tool_governance/index.ts | 93 | `maybeInjectClockRemindersAndApplyDirectives`(TS)、`sanitizeChatProcessRequest`(TS) |
 | req_process.stage2 | route_select/index.ts | 65 | `VirtualRouterEngine` TS wrapper（但已委托 Rust nativeProxy） |
-| resp_inbound.stage1 | sse_decode/index.ts | 373 | `resolveSseTimeoutOptions`(~80L)、`extractSseStream`(~30L) |
+| resp_inbound.stage1 | sse_decode/index.ts | 373 | 历史条目；当前 standalone `resolveSseTimeoutOptions` / `extractDecodeStats` public bridge 已退休，真实 SSE 主线保留 parser/stream/error descriptor/context diagnostics exports |
 | resp_process.stage3 | servertool_orchestration/index.ts | 174 | `runServerToolOrchestration` TS engine（但有 Rust 检测点） |
 
 ---
@@ -66,7 +67,7 @@
 | VirtualRouterEngine | engine.ts | 408 | ✅ | nativeProxy 委托 Rust |
 | servertool engine | servertool/engine.ts | 262 | ⚠️ | 部分 Rust，主体 TS 编排 |
 | tool-governor-request | tool-governor-request.ts | 196 | ⚠️ | 部分 Rust，治理逻辑 TS |
-| anthropic-alias | chat-process-anthropic-alias.ts | 80 | ✅ | buildAnthropicToolAliasMapWithNative |
+| anthropic-alias | chat-process-anthropic-alias.ts | 80 | ✅ | Rust shared tool mapping internal；旧公共 NAPI wrapper 已退休 |
 | operation-table | operation-table-runner.ts | ~150 | ⚠️ | TS，有 pre/post hook 机制 |
 | marker-lifecycle | marker-lifecycle.ts | ~80 | ⚠️ | cleanMarkerSyntaxInPlace TS |
 
@@ -87,7 +88,7 @@
 
 | # | 模块 | 行数 | 说明 |
 |---|------|------|------|
-| P1-1 | `resolveSseTimeoutOptions` | ~80L | resp_inbound.stage1 SSE timeout 解析 |
+| P1-1 | `resolveSseTimeoutOptions` | retired | standalone public bridge 已删除；如需新 timeout 语义必须先定位当前 live SSE owner，不得恢复旧 wrapper |
 | P1-2 | `extractSseStream` | ~30L | resp_inbound.stage1 流提取 |
 | P1-3 | `runServerToolOrchestration` 优化 | ~174L | servertool engine Rust 增强 |
 | P1-4 | `maybeInjectClockRemindersAndApplyDirectives` | ~40L | clock reminder 注入 |
@@ -169,3 +170,7 @@
 
 ### 累计
 - extractDecodeStats: 35行 TS → Rust ✅
+
+### 2026-06-09 Closeout
+- `extractDecodeStatsWithNative` / `extractDecodeStatsJson` 后续确认无 live runtime consumer，已从 TS wrapper、required-export gate 和 Rust NAPI public surface 删除。
+- 同片删除同类零消费者 `resolveSseTimeoutOptionsWithNative` / `resolveSseTimeoutOptionsJson` public surface；真实 SSE parser/stream/error descriptor/context diagnostics exports 保留。

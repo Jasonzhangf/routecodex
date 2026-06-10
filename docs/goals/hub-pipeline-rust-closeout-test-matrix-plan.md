@@ -73,8 +73,6 @@
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-governance-orchestration.ts`
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-request-sanitizer.ts`
 - Rust 真源：
-  - `chat_governance_context.rs`
-  - `chat_governance_finalize.rs`
   - `chat_governed_filter_payload.rs`
   - `chat_node_result_semantics.rs`
 - 测试矩阵：
@@ -155,7 +153,17 @@
   - Flow：tool append、review inject、media shape 主链回归
   - 删除门禁：TS 不再保留文本/内容/工具语义改写
 
-Phase 0 deletion note (2026-06-07): `chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`chat-process-governance-finalize.ts` 已证明无 live consumer 并物理删除；相关 native capabilities 保留在 Rust/native wrapper 真源中，不再通过这些 TS helper 暴露。
+Phase 0 deletion note (2026-06-07): `chat-process-web-search.ts`、`chat-process-web-search-intent.ts`、`chat-process-web-search-tool-schema.ts`、`client-inject-readiness.ts`、`chat-process-governance-finalize.ts` 已证明无 live consumer 并物理删除；仍有 live consumer 的 native capabilities 保留在 Rust/native wrapper 真源中，后续证明无 consumer 的 public bridge 必须继续物理删除。
+
+Phase 0 deletion note (2026-06-09): `chat_governance_context.rs`、`chat_governance_finalize.rs` 与对应 request-governance public bridge (`resolveGovernanceContext*` / `applyGoverned*` / `mergeGovernanceSummary*` / `finalizeGovernedRequest*`) 后续证明无 live consumer 并物理删除；请求治理语义保留在 active Rust Hub mainline / `req_process_stage1_tool_governance*` owners。
+
+Phase 0 deletion note (2026-06-09): response-governance utility public bridges (`buildWebSearchToolAppendOperations*` / `prepareRespProcessToolGovernancePayload*` / `filterOutExecutedServerToolCalls*` / `resolveRequestedToolNames*`) 后续证明无 live TS/runtime consumer 并物理删除，旧 `servertool_skeleton/finalize_strip.rs` Rust bridge module 也已删除；live response path 保留 `governResponseJson` / `finalizeChatResponseJson` / apply_patch wrappers，web_search append operations 只作为 Rust-internal req-process helper。
+
+Phase 0 deletion note (2026-06-09): servertool utility public bridges (`tryPlanChatServerToolBundleWithNative` / `resolveServertoolFollowupFlowProfileWithNative` / `runApplyPatchWithNative` / `webSearchResolveToolNameWithNative` / `webSearchParseToolArgumentsWithNative` / `webSearchFindArrayWithNative`) 和 standalone NAPI surfaces (`planChatServertoolOrchestrationBundleJson` / `resolveServertoolFollowupFlowProfileJson` / `webSearchFindArrayJson` / `runApplyPatchJson`) 后续证明无 live TS/runtime consumer 并物理删除；req-process servertool bundle planning 与 followup profile lookup 改为 Rust-internal helper 直连，apply_patch freeform contract 只保留 `normalizeApplyPatchArgumentsJson` / `validateApplyPatchArgumentsJson` owner。
+
+Phase 0 deletion note (2026-06-09): req_inbound standalone public bridges (`mapReqInboundResumeToolOutputsDetailedWithNative` / `resolveClientInjectReadyWithNative` / `normalizeContextCaptureLabelWithNative` / `shouldRunHubChatProcessWithNative` / `isShellLikeToolNameTokenWithNative` / `resolveReqInboundServerToolFollowupSnapshotWithNative` / `augmentReqInboundContextSnapshotWithNative` / `normalizeReqInboundToolCallIdStyleWithNative`) 和 matching standalone NAPI JSON exports 后续证明无 live TS/runtime consumer 并物理删除；Rust-internal `resolve_client_inject_ready` 改为 crate helper 直连，旧 `coverage-hub-req-inbound-semantic-lift.mjs` 因指向已删除 stage dist owner 一并删除。
+
+Phase 0 deletion note (2026-06-09): VR bootstrap/stop-message follow-on public bridges (`bootstrapVirtualRouterRoutingJson` / `bootstrapVirtualRouterConfigMetaJson` / `applyStopMessageInstructionJson`) 证明无 live TS/runtime consumer 后从 required-export / NAPI public surface 删除；routing/meta bootstrap 与 stop-message action application 保留为 Rust-internal helper，由 total `bootstrapVirtualRouterConfigJson` 和 routing-instruction state owner 调用。
 
 Phase 0 deletion note (2026-06-08): `chat-process-generic-marker-strip.ts` 已证明无 live consumer 并物理删除；generic marker strip / routing marker 保留判断由 Rust `request_sanitizer.rs` 主链拥有，并由 `tests/servertool/chat-request-marker-strip.spec.ts` 通过 Rust total HubPipeline 覆盖。
 

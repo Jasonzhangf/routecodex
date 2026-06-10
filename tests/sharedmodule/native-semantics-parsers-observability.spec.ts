@@ -2,7 +2,6 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import { parseOutput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.js';
 import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
-import { parseBoolean as parseReqInboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.js';
 import { parseBoolean as parseReqOutboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.js';
 import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
 
@@ -72,27 +71,32 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs req inbound parser JSON failures and still returns null', () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    expect(parseReqInboundBoolean('{not-json')).toBeNull();
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseBoolean failed (non-blocking)');
-
-    warnSpy.mockRestore();
-  });
-
   it('logs governance parser JSON failures before fail-fasting native capability', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mod = await importWithNativeParseFailureMock<{
-      buildAnthropicToolAliasMapWithNative: (tools: unknown) => Record<string, unknown> | undefined;
+      applyRespProcessToolGovernanceWithNative: (input: {
+        payload: Record<string, unknown>;
+        clientProtocol: string;
+        entryEndpoint: string;
+        requestId: string;
+      }) => unknown;
     }>(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.js',
-      'buildAnthropicToolAliasMapJson'
+      'governResponseJson'
     );
 
-    expect(() => mod.buildAnthropicToolAliasMapWithNative([])).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseAliasMapPayload failed (non-blocking)');
+    expect(() =>
+      mod.applyRespProcessToolGovernanceWithNative({
+        payload: {},
+        clientProtocol: 'openai-chat',
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req_parser_observability'
+      })
+    ).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain(
+      'parseRespProcessToolGovernancePayload failed (non-blocking)'
+    );
 
     warnSpy.mockRestore();
   });
@@ -120,14 +124,14 @@ describe('native semantics parser observability', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mod = await importWithNativeParseFailureMock<{
-      mapResumeToolOutputsDetailedWithNative: (responsesResume: unknown) => Array<{ tool_call_id: string; content: string }>;
+      collectToolOutputsWithNative: (payload: unknown) => Array<{ tool_call_id: string; call_id: string }>;
     }>(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.js',
-      'mapResumeToolOutputsDetailedJson'
+      'collectToolOutputsJson'
     );
 
-    expect(() => mod.mapResumeToolOutputsDetailedWithNative({})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseResumeToolOutputs failed (non-blocking)');
+    expect(() => mod.collectToolOutputsWithNative({})).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseCollectedToolOutputs failed (non-blocking)');
 
     warnSpy.mockRestore();
   });

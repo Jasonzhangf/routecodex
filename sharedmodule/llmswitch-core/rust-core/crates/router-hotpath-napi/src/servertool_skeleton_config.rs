@@ -560,14 +560,13 @@ pub fn should_use_servertool_gold_progress_highlight_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
-pub fn resolve_servertool_followup_flow_profile_json(flow_id: String) -> NapiResult<String> {
+fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
-        return Ok("null".to_string());
+        return Value::Null;
     }
     let output = build_default_servertool_skeleton_document_value();
-    let profile = output
+    output
         .get("servertool")
         .and_then(|v| v.get("skeleton"))
         .and_then(|v| v.get("followup"))
@@ -575,16 +574,13 @@ pub fn resolve_servertool_followup_flow_profile_json(flow_id: String) -> NapiRes
         .and_then(|v| v.get("profilesByFlowId"))
         .and_then(|v| v.get(normalized_flow_id))
         .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    serde_json::to_string(&profile).map_err(|e| napi::Error::from_reason(e.to_string()))
+        .unwrap_or(Value::Null)
 }
 
 #[napi]
 pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<String> {
     let normalized_flow_id = flow_id.trim().to_string();
-    let profile_raw = resolve_servertool_followup_flow_profile_json(normalized_flow_id.clone())?;
-    let profile: serde_json::Value =
-        serde_json::from_str(&profile_raw).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let profile = resolve_servertool_followup_flow_profile(&normalized_flow_id);
     let profile_obj = profile.as_object();
     let runtime_plan = json!({
         "flowId": if normalized_flow_id.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(normalized_flow_id.clone()) },
@@ -614,7 +610,7 @@ mod tests {
     use super::{
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
         plan_servertool_followup_runtime_json, plan_servertool_skeleton_derived_config_json,
-        resolve_servertool_followup_flow_profile_json, resolve_servertool_progress_tool_name_json,
+        resolve_servertool_followup_flow_profile, resolve_servertool_progress_tool_name_json,
         resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
     };
     use serde_json::{json, Value};
@@ -831,11 +827,10 @@ mod tests {
 
     #[test]
     fn apply_patch_followup_profile_is_gone() {
-        let raw = resolve_servertool_followup_flow_profile_json(
-            "apply_patch_read_before_retry_guard".to_string(),
-        )
-        .expect("profile json");
-        assert_eq!(raw, "null");
+        let profile = resolve_servertool_followup_flow_profile(
+            "apply_patch_read_before_retry_guard",
+        );
+        assert_eq!(profile, Value::Null);
     }
 
     #[test]

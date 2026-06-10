@@ -10,9 +10,8 @@ const moduleUrl = pathToFileURL(
   path.join(
     repoRoot,
     'dist',
-    'router',
-    'virtual-router',
-    'engine-selection',
+    'native',
+    'router-hotpath',
     'native-chat-process-servertool-orchestration-semantics.js'
   )
 ).href;
@@ -59,7 +58,6 @@ exports.buildContinueExecutionOperationsJson = (shouldInject) => JSON.stringify(
 );
 exports.isStopMessageStateActiveJson = () => JSON.stringify(true);
 exports.resolveHasActiveStopMessageForContinueExecutionJson = () => JSON.stringify(true);
-exports.resolveStopMessageSessionScopeJson = () => JSON.stringify('session:sess_123');
 exports.injectContinueExecutionDirectiveJson = (messagesJson, marker, targetText) => {
   const messages = JSON.parse(messagesJson);
   return JSON.stringify({
@@ -108,12 +106,6 @@ exports.injectContinueExecutionDirectiveJson = (messagesJson, marker, targetText
         false
       );
       assert.equal(stopMessageActive, true);
-
-      const stopMessageScope = mod.resolveStopMessageSessionScopeWithNative(
-        { sessionId: 'sess_123' },
-        undefined
-      );
-      assert.equal(stopMessageScope, 'session:sess_123');
 
       const hasActiveStopMessage = mod.resolveHasActiveStopMessageForContinueExecutionWithNative(
         { stopMessageText: '继续执行', stopMessageMaxRepeats: 10, stopMessageStageMode: 'on' },

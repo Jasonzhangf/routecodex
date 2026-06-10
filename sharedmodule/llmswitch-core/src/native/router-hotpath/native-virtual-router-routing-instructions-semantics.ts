@@ -1,7 +1,6 @@
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import type { RoutingInstruction, RoutingInstructionState } from './native-virtual-router-routing-state.js';
-import { serializeRoutingInstructionState } from './native-virtual-router-routing-state.js';
+import type { RoutingInstruction } from './native-virtual-router-routing-state.js';
 import type { StandardizedMessage } from '../../conversion/hub/types/standardized.js';
 import { resolveRccUserDir } from '../../runtime/user-data-paths.js';
 
@@ -90,7 +89,7 @@ export function parseRoutingInstructionKindsWithNative(request: unknown): string
   }
 }
 
-export function parseRoutingInstructionsWithNative(
+function parseRoutingInstructionsWithNative(
   messages: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
   const capability = 'parseRoutingInstructionsJson';
@@ -113,32 +112,6 @@ export function parseRoutingInstructionsWithNative(
       return fail('empty result');
     }
     const parsed = parseRecordArrayPayload(result);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function cleanRoutingInstructionMarkersWithNative(
-  request: Record<string, unknown>
-): Record<string, unknown> {
-  const capability = 'cleanRoutingInstructionMarkersJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request);
-  if (!requestJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const result = fn(requestJson);
-    if (typeof result !== 'string' || !result) {
-      return fail('empty result');
-    }
-    const parsed = parseRecordPayload(result);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -202,36 +175,6 @@ export function parseRoutingInstructions(messages: StandardizedMessage[]): Routi
     inst.type === 'stopMessageMode' ||
     inst.type === 'stopMessageClear'
   ));
-}
-
-export function parseAndPreprocessRoutingInstructions(messages: StandardizedMessage[]): RoutingInstruction[] {
-  const rawInstructions = parseRoutingInstructions(messages);
-  if (rawInstructions.length === 0) {
-    return [];
-  }
-  const clearIndex = rawInstructions.findIndex((inst) => inst.type === 'clear');
-  if (clearIndex < 0) {
-    return rawInstructions;
-  }
-  return rawInstructions.slice(clearIndex + 1);
-}
-
-export function extractClearInstruction(messages: StandardizedMessage[]): boolean {
-  return parseRoutingInstructions(messages).some((inst) => inst.type === 'clear');
-}
-
-export function extractStopMessageClearInstruction(messages: StandardizedMessage[]): boolean {
-  return parseRoutingInstructions(messages).some((inst) => inst.type === 'stopMessageClear');
-}
-
-export function applyRoutingInstructionsToStateWithNative(input: {
-  instructions: Array<Record<string, unknown>>;
-  state: RoutingInstructionState;
-}): Record<string, unknown> {
-  return applyRoutingInstructionsWithNative({
-    instructions: input.instructions,
-    state: serializeRoutingInstructionState(input.state)
-  });
 }
 
 export function isPreCommandScriptPathAllowedWithNative(rawPath: string): boolean {

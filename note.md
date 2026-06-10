@@ -4,6 +4,7 @@
 
 - 配置真源是 `~/.rcc/config.toml`；5520 使用 `virtualrouter.routingPolicyGroups."gateway_priority_5520"`。
 - 本次按 Jason 指定只改 `tools` / `search` / `multimodal` 三个 route：保留目标 `fwd.gpt.gpt-5.4-mini`、`asxs.gpt-5.4-mini`、`cc.gpt-5.4-mini`，从 priority 改为显式 round-robin；`web_search` 未改。
+- 后续按 Jason 纠正，同组 `longcontext` 只把 `asxs` / `cc` 改为 GPT-5.4-mini，`fwd` 保持 GPT-5.5；最终 targets 为 `fwd.gpt.gpt-5.5`、`asxs.gpt-5.4-mini`、`cc.gpt-5.4-mini`，策略仍为 priority。
 
 ## 2026-06-10 双端口 SSE 请求挂起取证
 
@@ -10045,7 +10046,7 @@ Protocol target:
 
 ## 2026-05-24 req-process servertool injection block migration
 - Moved req-process servertool/tool injection helpers into `req_process_stage1_tool_governance_blocks/servertool_injection.rs`: bundle plan parsing/defaults, runtime metadata reads, websearch/clock operation assembly, tool-name detection, and hub operation application.
-- Root `req_process_stage1_tool_governance.rs` now keeps `apply_hub_operations_json` as NAPI parse/serialize wrapper and calls block functions from the main orchestrator.
+- Root `req_process_stage1_tool_governance.rs` originally kept `apply_hub_operations_json` as NAPI parse/serialize wrapper after block extraction; this standalone wrapper was later retired on 2026-06-09, while internal `apply_hub_operations` remains Rust-mainline only.
 - Validation: servertool orchestration targeted tests passed: clock-only hidden review/continue, skip direct websearch, inject servertool websearch, skip mixed direct+servertool websearch, explicit stop-message flag.
 - Validation: apply_patch schema targeted tests passed for declared legacy fields, default client contract, and direct responses tool shape; final `cargo check -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml` passes with existing warnings.
 - No TS functional changes. Remaining req root helpers: governed filter payload, sanitizer metadata, processed/node result assembly, public orchestrator wrappers.
@@ -19327,3 +19328,111 @@ build:min success 2026-06-09; auto-bump to 0.90.3025; proceeding install:global 
 - Root cause slice: non-continuation `/v1/responses` client-close cleanup destroyed upstream but waited for `clientWriteQueue` before clearing abandoned Responses store state; if native projection/import stayed pending, cleanup stayed pending too.
 - Fix: non-continuation client-close cleanup now clears abandoned Responses conversation state immediately; required_action/tool-call continuation still waits for projection queue before persisting continuation state.
 - Evidence: focused SSE Jest PASS 19/19; root `tsc --noEmit` PASS; global install/restart to 0.90.3053 PASS; live 5555 and 5520 `/v1/responses` smokes emitted `response.completed` + `response.done`, no `event:error`.
+
+
+2026-06-09 HubPipeline session header helper public wrapper deletion:
+- Exact scan: `coerceClientHeadersWithNative`, `findHeaderValueWithNative`, `pickHeaderWithNative`, `normalizeHeaderKeyWithNative` and their `*Json` exports had no consumer outside wrapper/required-export surfaces.
+- Change: removed the public TS wrappers, required-export entries, Rust NAPI JSON exports, and helper-only public Rust tests; kept internal Rust helpers used by `extract_session_identifiers_from_metadata`.
+- Guard: added residue gate so standalone session header helper public surfaces cannot return without a live consumer and map update.
+
+2026-06-09 HubPipeline mappable-semantics public wrapper deletion:
+- Exact scan: `findMappableSemanticsKeysWithNative` / `findMappableSemanticsKeysJson` had no TS/runtime consumer; active Rust references are private helper tests only.
+- Change: removed public TS wrapper, required-export entry, Rust NAPI JSON wrapper, and public hub_pipeline re-export; kept internal Rust `find_mappable_semantics_keys`.
+- Guard: residue gate blocks the public wrapper/export names from returning.
+
+2026-06-09 HubPipeline chat sanitize public wrapper deletion:
+- Exact scan: `sanitizeChatProcessMessagesWithNative` / `sanitizeChatProcessMessagesJson` had no TS/runtime consumer outside wrapper/required-export/root NAPI surfaces.
+- Change: removed public TS wrapper, required-export entry, and Rust root NAPI JSON wrapper; kept internal Rust sanitization helpers because request governance / responses context still use them.
+- Guard: residue gate scans only public TS/NAPI surfaces so internal Rust `shared_response_compat` helpers remain private implementation, not public bridge.
+
+2026-06-09 HubPipeline semantic mapper public wrapper deletion:
+- Inventory picked `native-hub-pipeline-semantic-mappers.ts`: 6/7 wrappers had zero TS/runtime consumers; live one is `normalizeServertoolFollowupPayloadShapeWithNative`.
+- Change: removed dead TS wrappers, `mapOpenaiChat*Json` required exports, Rust modules `hub_semantic_mapper_chat.rs` / `hub_provider_response_helpers.rs`, and the unused submit-tool-output payload builder from `hub_submit_tool_outputs.rs`; retained live followup shape normalizer.
+- Guard: residue gate blocks retired wrapper/export/module names; deleted obsolete `docs/goals/r1-tool-outputs-rustification-plan.md` because it described restoring the now-retired submit payload bridge.
+
+2026-06-09 HubPipeline req-process standalone public wrapper deletion:
+- Inventory picked `native-hub-pipeline-req-process-semantics.ts`: `applyHubOperationsWithNative` and `applyReqProcessRouteSelectionWithNative` had zero TS/runtime consumers; `applyReqProcessToolGovernanceWithNative` stays live for req-process contract tests.
+- Change: removed the two public TS wrappers, required-export entries, Rust NAPI JSON wrappers, and wrapper-only empty-input test. Internal Rust `apply_hub_operations` / `apply_route_selection` remain because active Rust mainline uses them.
+- Guard: residue gate blocks the public wrapper/export names from returning without banning the internal Rust mainline functions.
+
+2026-06-09 VR bootstrap/stop-message public wrapper deletion:
+- Inventory picked two single zero-consumer wrappers: `bootstrapProviderProfilesWithNative` and `parseStopMessageInstructionWithNative`.
+- Change: removed the TS wrappers, required-export entries, `bootstrapVirtualRouterProviderProfilesJson` NAPI bridge, and public NAPI exposure for `parse_stop_message_instruction_json`. Kept Rust-internal provider-profile bootstrap and stop-message parser because Rust config/bootstrap and routing-instruction parser still call them.
+- Guard: residue gate blocks the public wrapper/export names while allowing crate-internal Rust helpers.
+
+2026-06-09 HubPipeline edge-stage public wrapper deletion:
+- Inventory confirmed zero-consumer TS wrappers in `native-hub-pipeline-edge-stage-semantics.ts` for chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope surfaces.
+- Change: removed those TS wrappers, the associated required-export entries, the Rust NAPI JSON bridges, and the SSE effect-plan public bridge; kept active TS wrappers `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, `processSseStreamWithNative`, and kept Rust mainline helpers for req/resp parsing and response semantics.
+- Guard: residue gate now blocks the retired edge-stage public wrapper/export names while allowing live mainline helpers and still-consumed public bridges.
+
+2026-06-09 Rust client-semantics flaky test note:
+- While validating edge-stage wrapper deletion, `cargo test -p router-hotpath-napi hub_resp_outbound_client_semantics --lib -- --nocapture` failed only on `build_responses_payload_from_chat_json_matches_core_shape` because the test compares a direct core output and JSON wrapper output that each generate `resp_<now_unix_millis()>`; repeated run reproduced a 1ms id mismatch.
+- This is a pre-existing time-sensitive test design issue, not caused by edge-stage public wrapper deletion. Fix separately by making the test compare stable fields or injecting deterministic id/time into both paths.
+
+2026-06-09 VR routing-instruction public helper deletion:
+- Inventory: `cleanRoutingInstructionMarkersWithNative`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, and `applyRoutingInstructionsToStateWithNative` had zero external consumers. `cleanRoutingInstructionMarkersJson` only existed as a standalone required-export/NAPI bridge. Live `parseRoutingInstructions` / `applyRoutingInstructionsWithNative` remain consumed by routing-instruction tests, and Rust cleanup remains used by VR route mainline.
+- Change: removed zero-consumer TS helpers, removed required-export entry and Rust NAPI wrapper for `cleanRoutingInstructionMarkersJson`, and added residue/map/memory notes.
+
+2026-06-09 Hub bridge policy protocol-spec wrapper deletion:
+- Inventory: `resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, and `resolveHubProtocolAllowlistsJson` had no live runtime consumer. Active bridge-policy consumers use `resolveBridgePolicy*` and `sanitizeProviderOutboundPayloadWithNative`.
+- Change: removed dead TS wrappers/types/parsers, required-export entries, and Rust public NAPI wrappers; kept Rust protocol spec/allowlist builders internal for `sanitizeProviderOutboundPayloadJson`.
+
+2026-06-09 Responses remap public wrapper deletion:
+- Inventory: `remapResponsesToolCallsWithNative` had zero external consumers; `remapResponsesToolCallsJson` was not a required export and only existed as root NAPI -> hub_bridge_actions binding.
+- Change: removed TS wrapper, root NAPI export, hub_bridge_actions re-export, and Rust binding body. Kept `remapChatToolCallsWithNative` because tests/active remap path still consume it.
+
+2026-06-09 Req outbound public wrapper deletion:
+- Inventory: `resolveReqOutboundContextMergePlanWithNative`, `buildReqOutboundFormatPayloadWithNative`, `applyReqOutboundContextSnapshotWithNative`, `normalizeToolSessionMessagesWithNative`, `updateToolSessionHistoryWithNative`, and `shouldAttachReqOutboundContextSnapshotWithNative` had no live source/runtime consumers. Their matching JSON exports only existed as public NAPI/required-export surfaces.
+- Change: removed those TS wrappers, TS-only parser/type shells, required-export entries, and Rust public JSON bridge functions. Kept Rust internal helpers (`build_format_request`, `apply_req_outbound_context_snapshot`, `normalize_tool_session_payload`, etc.) for active Hub mainline/tests.
+
+2026-06-09 Req outbound context helper public wrapper deletion:
+- Inventory: `mergeContextToolOutputsWithNative`, `normalizeContextToolsWithNative`, `selectToolCallIdStyleWithNative` had no consumers outside defining TS bridge/required-export/Rust public NAPI bridge surfaces.
+- Change: removed the three TS wrappers, wrapper-only local parsers, required-export entries, Rust public `*_json` NAPI bridge functions, and the now-unused Rust internal `select_tool_call_id_style`. Kept Rust internal `merge_context_tool_outputs` and `normalize_context_tools` because active `apply_req_outbound_context_snapshot` still calls them.
+
+2026-06-09 Shared conversion thought/normalizeTools public wrapper deletion:
+- Inventory: `hasValidThoughtSignatureWithNative`, `sanitizeThinkingBlockWithNative`, `filterInvalidThinkingBlocksWithNative`, `removeTrailingUnsignedThinkingBlocksWithNative`, and `normalizeToolsWithNative` had no live runtime consumers; hits were only TS public bridge/required-export/Rust root NAPI/module-local tests/historical notes.
+- Change: removed these TS wrappers, required-export entries, Rust root NAPI exports, deleted `thought_signature_validator.rs` plus tests, and removed standalone `normalize_tools_json` with its shell-schema helpers from `shared_args_mapping.rs`; kept live `normalizeArgsBySchemaJson` and `hub_standardized_bridge` private `normalize_tools`.
+
+2026-06-09 SSE stats/timeout public wrapper deletion:
+- Inventory: `extractDecodeStatsWithNative` / `resolveSseTimeoutOptionsWithNative` and matching `*Json` exports had no live runtime consumer; remaining hits were historical note/audit docs and required-export tests.
+- Change: removed the TS wrappers, required-export entries, Rust public NAPI functions/tests/helper chain; kept live SSE parser/stream/error descriptor/context diagnostics exports.
+
+2026-06-09 Chat node-result public builder deletion:
+- Inventory: old `buildChatProcessContextMetadataWithNative`, `applyChatProcessedRequestWithNative`, `buildChatProcessedDescriptorWithNative`, `buildChatNodeResultMetadataWithNative`, `buildChatNodeResultObservationWithNative`, `buildProcessedRequestFromChatResponseWithNative`, and `restoreResponseContinuationSemanticsWithNative` had no live source/runtime consumer. Matching JSON exports were held only by required-export gate, Rust public wrapper functions, and stale `coverage-hub-chat-process-node-result.mjs`.
+- Change: removed those TS wrappers, required-export entries, Rust public wrappers and now-dead private helper chain, plus stale coverage script. Kept live request-executor wrappers (`hasRequestedToolsInSemanticsWithNative`, `isRequiredToolCallTurnWithNative`, `isToolResultFollowupTurnWithNative`, `detectRetryableEmptyAssistantResponseWithNative`) and live server/bridge exports (`deriveFinishReasonJson`, `classifyEmptyResponseSignalJson`, `isToolCallContinuationResponseJson`, `isEmptyClientResponsePayloadJson`).
+
+2026-06-09 Anthropic alias public bridge deletion:
+- Inventory: `buildAnthropicToolAliasMapWithNative` / `buildAnthropicToolAliasMapJson` had no live runtime consumer. Rust mainline alias semantics are already internal via shared tool mapping and Hub req/resp owners; remaining public hits were required-export gate, stale coverage script, parser observability test, and stale migration docs.
+- Change: removed the TS wrapper, required-export entry, NAPI-only Rust module, stale coverage script, and retargeted parser observability to live response-governance native parsing.
+
+2026-06-09 Request-governance public bridge deletion:
+- Inventory: `resolveGovernanceContextWithNative`, `applyGovernedControlOperationsWithNative`, `applyGovernedMergeRequestWithNative`, `mergeGovernanceSummaryIntoMetadataWithNative`, `finalizeGovernedRequestWithNative` and matching JSON exports had no live runtime consumer; hits were limited to TS wrapper, required-export gate, stale coverage scripts, and docs/history.
+- Change: removed those TS wrappers/types/parsers, required-export entries, Rust modules `chat_governance_context.rs` / `chat_governance_finalize.rs`, NAPI-only request merge/control helpers from `chat_continue_execution_directive_injection.rs`, and stale `coverage-hub-chat-process-governance-finalize.mjs`. Kept live response governance / apply_patch / continue_execution directive wrappers.
+- Guard: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks the retired request-governance bridge symbols, modules, and stale coverage script from returning; shared-json helper tests only allow the explicitly deleted request-governance scan roots to be absent.
+
+2026-06-09 Response-governance utility public bridge deletion:
+- Inventory: `buildWebSearchToolAppendOperationsWithNative`, `prepareRespProcessToolGovernancePayloadWithNative`, `filterOutExecutedServerToolCallsWithNative`, `resolveRequestedToolNamesWithNative` and matching JSON exports had no live TS/runtime consumer; active consumers use `applyRespProcessToolGovernanceWithNative`, `finalizeRespProcessChatResponseWithNative`, and apply_patch wrappers.
+- Change: removed those TS wrappers/parsers/types, required-export entry for web_search append, Rust public NAPI wrappers for web_search append / prepare payload / requested tool names / executed servertool strip, the now-dead requested-tool collector chain, and old `servertool_skeleton/finalize_strip.rs` Rust bridge module. Rewired Rust req-process servertool injection to call the Rust web_search append helper directly.
+- Guard: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` blocks these response-governance utility public bridges and old finalize_strip Rust bridge from returning while allowing the Rust-internal web_search append helper.
+
+2026-06-09 VR bootstrap/stop-message follow-on public bridge deletion:
+- Inventory: `bootstrapVirtualRouterRoutingJson`, `bootstrapVirtualRouterConfigMetaJson`, and `applyStopMessageInstructionJson` had no live TS/runtime consumer; their Rust helpers are only called internally by total `bootstrapVirtualRouterConfigJson` or routing-instruction state application.
+- Current-state correction: older notes that named `bootstrapVirtualRouterConfigMetaJson` as public bootstrap entry are now historical only; live public bootstrap is total `bootstrapVirtualRouterConfigJson` plus provider bootstrap.
+- Change: removed these public NAPI exports from `lib.rs` / required-export gate and removed `#[napi]` from stop-message action apply while keeping Rust-internal helper functions.
+- Guard: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now blocks these public bridge names / NAPI bridge functions from returning.
+
+2026-06-09 Servertool utility public bridge deletion:
+- Inventory: `tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, and `webSearchFindArrayWithNative` had no live TS/runtime consumer; remaining refs were defining TS wrappers, required-export entries, Rust standalone public NAPI surfaces, docs, or tests.
+- Change: removed those TS wrappers, removed required-export entries for standalone bundle/profile/find-array surfaces, removed public NAPI `plan_chat_servertool_orchestration_bundle_json`, `resolve_servertool_followup_flow_profile_json`, `web_search_find_array_json`, and the dead servertool `run_apply_patch_json` executor. Rust req-process servertool injection now calls `plan_chat_servertool_orchestration_bundle(...)` and `build_continue_execution_operations(...)` directly; followup runtime planning calls private profile lookup directly.
+- Guard: residue audit blocks retired servertool utility wrapper/export names; function-map now names apply_patch freeform owner as `normalize_apply_patch_schema_args` + `validate_apply_patch_arguments_json`, not deleted `run_apply_patch_json`.
+- Verification script drift: `coverage-native-chat-process-servertool-orchestration-semantics.mjs` still imported old `dist/router/virtual-router/engine-selection/...`; current build emits `dist/native/router-hotpath/...`, so the script path was corrected before using it as evidence. The same script still asserted `resolveStopMessageSessionScopeWithNative` from this wrapper, but the live owner is `native-servertool-core-semantics.ts`, so that stale assertion/mock was removed.
+
+2026-06-09 Req inbound standalone public bridge deletion:
+- Inventory: req_inbound standalone wrappers (`mapReqInboundResumeToolOutputsDetailedWithNative`, `resolveClientInjectReadyWithNative`, `normalizeContextCaptureLabelWithNative`, `shouldRunHubChatProcessWithNative`, `isShellLikeToolNameTokenWithNative`, `resolveReqInboundServerToolFollowupSnapshotWithNative`, `augmentReqInboundContextSnapshotWithNative`, `normalizeReqInboundToolCallIdStyleWithNative`) had no live TS/runtime consumer; remaining hits were TS wrappers, required-export list, Rust standalone NAPI functions, stale parser observability, and stale `coverage-hub-req-inbound-semantic-lift.mjs`.
+- Change: removed those TS wrappers, retired required-export entries, removed standalone NAPI wrappers (`mapResumeToolOutputsDetailedJson`, `resolveClientInjectReadyJson`, `normalizeContextCaptureLabelJson`, `shouldRunHubChatProcessJson`, `isShellLikeToolNameTokenJson`, `resolveServerToolFollowupSnapshotJson`, `augmentContextSnapshotJson`, `normalizeToolCallIdStyleCandidateJson`), deleted stale coverage script from matrix, and rewired Rust servertool injection to call `resolve_client_inject_ready` directly instead of self-calling JSON/NAPI. Removed orphan `parse_json_bool` and req_inbound `parseBoolean` helper/test.
+- Guard: residue audit now blocks retired req_inbound standalone bridge symbols, matching Rust `*_json` functions, and stale coverage script path from returning. Parser observability now targets live `collectToolOutputsJson`.
+
+2026-06-09 Servertool continuation public bridge deletion:
+- Inventory: continuation helpers (`buildContinueExecutionOperationsWithNative`, `planContinueExecutionOperationsWithNative`, `injectContinueExecutionDirectiveWithNative`, `isStopMessageStateActiveWithNative`, `resolveHasActiveStopMessageForContinueExecutionWithNative`, `isCanonicalChatCompletionPayloadWithNative`) had no live TS/runtime consumer; remaining active hits were required-export entries, standalone Rust NAPI functions/module, old docs, and residue tests.
+- Change: removed the TS wrappers, required-export entries, standalone NAPI functions, deleted `chat_continue_execution_directive_injection.rs`, and removed now-dead private stop-message-state active helpers. Kept Rust-internal `build_continue_execution_operations` / `resolve_continue_execution_plan` / response-stage `is_canonical_chat_completion_payload` because active Rust mainline still calls them.
+- Guard: servertool utility residue audit now blocks the continuation wrapper/export/module names from returning; required-export negative test now asserts continuation exports stay absent.

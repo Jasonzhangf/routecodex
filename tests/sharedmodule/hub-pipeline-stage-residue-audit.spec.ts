@@ -1891,6 +1891,10 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toMatch(/parseProviderKeyJson|analyzeProviderKey|parseProviderKeyPayload|ProviderKeyParsePayload/);
       expect(source).not.toMatch(/serializeStopMessageStateJson|deserializeStopMessageStateJson/);
       expect(source).not.toMatch(/cleanMalformedRoutingInstructionMarkersJson|runHashlineNativeEditJson/);
+      expect(source).not.toMatch(/cleanRoutingInstructionMarkersJson|cleanRoutingInstructionMarkersWithNative/);
+      expect(source).not.toMatch(
+        /parseAndPreprocessRoutingInstructions|extractClearInstruction|extractStopMessageClearInstruction|applyRoutingInstructionsToStateWithNative/,
+      );
     }
     for (const source of [respToolGovernanceBindings, respToolGovernanceReexports, requiredExports]) {
       expect(source).not.toMatch(/collectToolNamesFromCandidateJson|collect_tool_names_from_candidate_json/);
@@ -1905,6 +1909,7 @@ describe('hub pipeline stage residue audit', () => {
       'utf8',
     );
     expect(rustLib).not.toMatch(/clean_malformed_routing_instruction_markers_json|run_hashline_native_edit_json/);
+    expect(rustLib).not.toMatch(/clean_routing_instruction_markers_json/);
   });
 
   it('legacy TS chat-process request utility residue must be physically removed', () => {
@@ -2354,6 +2359,856 @@ describe('hub pipeline stage residue audit', () => {
       'sync_responses_context_from_canonical_messages_json',
       'read_responses_resume_from_metadata_json',
       'read_responses_resume_from_request_semantics_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired session header helper public NAPI wrappers must stay internal to session identifier extraction', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_session_identifiers.rs',
+    ];
+    const retiredSymbols = [
+      'coerceClientHeadersWithNative',
+      'findHeaderValueWithNative',
+      'pickHeaderWithNative',
+      'normalizeHeaderKeyWithNative',
+      'coerceClientHeadersJson',
+      'findHeaderValueJson',
+      'pickHeaderJson',
+      'normalizeHeaderKeyJson',
+      'coerce_client_headers_json',
+      'find_header_value_json',
+      'pick_header_json',
+      'normalize_header_key_json',
+      'coerce_client_headers_public',
+      'normalize_header_key_public',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired mappable semantics public wrapper must stay private to Rust process-mode internals', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
+    ];
+    const retiredSymbols = [
+      'findMappableSemanticsKeysWithNative',
+      'findMappableSemanticsKeysJson',
+      'find_mappable_semantics_keys_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired chat process sanitize public wrapper must stay private to Rust request governance internals', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+    ];
+    const retiredSymbols = [
+      'sanitizeChatProcessMessagesWithNative',
+      'sanitizeChatProcessMessagesJson',
+      'sanitize_chat_process_messages_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired semantic mapper public wrappers and Rust modules must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_semantic_mapper_chat.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_provider_response_helpers.rs',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    expect(existingRetiredFiles).toEqual([]);
+
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_submit_tool_outputs.rs',
+    ];
+    const retiredSymbols = [
+      'mapOpenaiChatToChatWithNative',
+      'mapOpenaiChatFromChatWithNative',
+      'buildSubmitToolOutputsPayloadWithNative',
+      'extractToolSignaturesFromPayloadWithNative',
+      'hasNewGovernedServerToolCallsWithNative',
+      'responsesPayloadRequiresSubmitToolOutputsWithNative',
+      'mapOpenaiChatToChatJson',
+      'mapOpenaiChatFromChatJson',
+      'buildSubmitToolOutputsPayloadJson',
+      'extractToolSignaturesFromPayloadJson',
+      'hasNewGovernedServerToolCallsJson',
+      'responsesPayloadRequiresSubmitToolOutputsJson',
+      'hub_provider_response_helpers',
+      'hub_semantic_mapper_chat',
+      'map_openai_chat_to_chat_json',
+      'map_openai_chat_from_chat_json',
+      'build_submit_tool_outputs_payload_json',
+      'extract_tool_signatures_from_payload_json',
+      'has_new_governed_server_tool_calls_json',
+      'responses_payload_requires_submit_tool_outputs_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired req-process standalone public wrappers must stay internal to Rust mainline', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs',
+    ];
+    const retiredSymbols = [
+      'applyHubOperationsWithNative',
+      'applyReqProcessRouteSelectionWithNative',
+      'applyHubOperationsJson',
+      'applyReqProcessRouteSelectionJson',
+      'apply_hub_operations_json',
+      'apply_req_process_route_selection_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired VR bootstrap and stop-message public wrappers must stay Rust-internal', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_instruction.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs',
+    ];
+    const retiredSymbols = [
+      'bootstrapProviderProfilesWithNative',
+      'bootstrapVirtualRouterProviderProfilesJson',
+      'bootstrap_virtual_router_provider_profiles_json_bridge',
+      'bootstrapVirtualRouterRoutingJson',
+      'bootstrap_virtual_router_routing_json_bridge',
+      'bootstrapVirtualRouterConfigMetaJson',
+      'bootstrap_virtual_router_config_meta_json_bridge',
+      'parseStopMessageInstructionWithNative',
+      'StopMessageNativeParseOutput',
+      'parseStopMessageInstructionJson',
+      'applyStopMessageInstructionJson',
+      '#[napi]\npub(crate) fn parse_stop_message_instruction_json',
+      '#[napi]\npub fn parse_stop_message_instruction_json',
+      '#[napi]\npub fn apply_stop_message_instruction_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired edge-stage public wrappers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_chat_envelope_validator.rs',
+    ];
+    const retiredSymbols = [
+      'sanitizeChatCompletionLikeWithNative',
+      'normalizeOpenaiChatReasoningOutboundWithNative',
+      'stripPrivateFieldsWithNative',
+      'resolveCompatProfileWithNative',
+      'planSseStreamEffectWithNative',
+      'parseReqInboundFormatEnvelopeWithNative',
+      'parseRespInboundFormatEnvelopeWithNative',
+      'validateChatEnvelopeWithNative',
+      'sanitizeChatCompletionLikeJson',
+      'normalizeOpenaiChatReasoningOutboundJson',
+      'stripPrivateFieldsJson',
+      'resolveCompatProfileJson',
+      'planSseStreamEffectJson',
+      'validateChatEnvelopeJson',
+      '#[napi]\npub fn sanitize_chat_completion_like_json',
+      '#[napi]\npub fn normalize_openai_chat_reasoning_outbound_json',
+      '#[napi]\npub fn strip_private_fields_json',
+      '#[napi]\npub fn resolve_compat_profile_json',
+      '#[napi]\npub fn plan_sse_stream_effect_json',
+      '#[napi]\npub fn validate_chat_envelope_json',
+      '#[napi]\npub fn parse_format_envelope_json',
+      '#[napi]\npub fn parse_resp_format_envelope_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired SSE stats/timeout public wrappers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_decode_semantics.rs',
+    ];
+    const retiredSymbols = [
+      'extractDecodeStatsWithNative',
+      'resolveSseTimeoutOptionsWithNative',
+      'extractDecodeStatsJson',
+      'resolveSseTimeoutOptionsJson',
+      '#[napi]\npub fn extract_decode_stats_json',
+      '#[napi]\npub fn resolve_sse_timeout_options_json',
+      'fn read_positive_timeout',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired chat node-result public builders must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-node-result-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-node-result.mjs',
+    ];
+    const retiredSymbols = [
+      'buildChatProcessContextMetadataWithNative',
+      'applyChatProcessedRequestWithNative',
+      'buildChatProcessedDescriptorWithNative',
+      'buildChatNodeResultMetadataWithNative',
+      'buildChatNodeResultObservationWithNative',
+      'buildProcessedRequestFromChatResponseWithNative',
+      'restoreResponseContinuationSemanticsWithNative',
+      'buildChatProcessContextMetadataJson',
+      'applyChatProcessedRequestJson',
+      'buildChatProcessedDescriptorJson',
+      'buildChatNodeResultMetadataJson',
+      'buildChatNodeResultObservationJson',
+      'buildProcessedRequestFromChatResponseJson',
+      'restoreResponseContinuationSemanticsJson',
+      'fn build_context_metadata',
+      'fn build_processed_descriptor',
+      'fn build_node_result_metadata',
+      'fn build_node_result_observation',
+      'fn apply_chat_processed_request',
+      'fn restore_response_continuation_semantics',
+      'fn build_processed_request_from_chat_response',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired anthropic alias public bridge must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_anthropic_tool_alias.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-anthropic-alias.mjs',
+    ];
+    const retiredSymbols = [
+      'buildAnthropicToolAliasMapWithNative',
+      'buildAnthropicToolAliasMapJson',
+      'mod chat_anthropic_tool_alias',
+      'build_anthropic_tool_alias_map_json',
+      'function parseAliasMapPayload',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired request-governance public bridge must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_governance_context.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_governance_finalize.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-governance-finalize.mjs',
+    ];
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_continue_execution_directive_injection.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-native-chat-process-governance-semantics.mjs',
+      ...retiredFiles,
+    ];
+    const retiredSymbols = [
+      'NativeGovernanceContextPayload',
+      'parseGovernanceContextPayload',
+      'resolveGovernanceContextWithNative',
+      'applyGovernedControlOperationsWithNative',
+      'applyGovernedMergeRequestWithNative',
+      'mergeGovernanceSummaryIntoMetadataWithNative',
+      'finalizeGovernedRequestWithNative',
+      'resolveGovernanceContextJson',
+      'applyGovernedControlOperationsJson',
+      'applyGovernedMergeRequestJson',
+      'mergeGovernanceSummaryIntoMetadataJson',
+      'finalizeGovernedRequestJson',
+      'mod chat_governance_context',
+      'mod chat_governance_finalize',
+      'resolve_governance_context_json',
+      'apply_governed_control_operations_json',
+      'apply_governed_merge_request_json',
+      'merge_governance_summary_into_metadata_json',
+      'finalize_governed_request_json',
+      'fn resolve_governed_control_plan',
+      'fn resolve_governed_merge_plan',
+      'fn apply_governed_control_operations',
+      'fn apply_governed_merge_request',
+      'GovernedControlPlanOutput',
+      'GovernedMergePlanOutput',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect({ existingRetiredFiles, findings }).toEqual({ existingRetiredFiles: [], findings: [] });
+  });
+
+  it('retired response-governance utility public bridges must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_web_search_tool_schema.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/mod.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/finalize_strip.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/napi_bindings.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/orchestrator.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/napi_utilities.rs',
+    ];
+    const retiredSymbols = [
+      'buildWebSearchToolAppendOperationsWithNative',
+      'prepareRespProcessToolGovernancePayloadWithNative',
+      'filterOutExecutedServerToolCallsWithNative',
+      'resolveRequestedToolNamesWithNative',
+      'buildWebSearchToolAppendOperationsJson',
+      'prepareRespProcessToolGovernancePayloadJson',
+      'filterOutExecutedServerToolCallsJson',
+      'resolveRequestedToolNamesJson',
+      'build_web_search_tool_append_operations_json',
+      'prepare_resp_process_tool_governance_payload_json',
+      'filter_out_executed_server_tool_calls_json',
+      'resolve_requested_tool_names_json',
+      'mod finalize_strip',
+      'pub mod finalize_strip',
+      'servertool_skeleton::finalize_strip',
+      'fn filter_out_executed_servertool_calls',
+      'fn resolve_requested_tool_names',
+      'fn collect_tool_names_from_candidate',
+      'NativeRespProcessToolGovernancePreparationOutput',
+      'parseWebSearchOperationsPayload',
+      'parseRespProcessToolGovernancePreparationPayload',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired servertool utility public bridges must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_continue_execution_directive_injection.rs',
+    ];
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs',
+    ];
+    const retiredSymbols = [
+      'tryPlanChatServerToolBundleWithNative',
+      'resolveServertoolFollowupFlowProfileWithNative',
+      'runApplyPatchWithNative',
+      'webSearchResolveToolNameWithNative',
+      'webSearchParseToolArgumentsWithNative',
+      'webSearchFindArrayWithNative',
+      'buildContinueExecutionOperationsWithNative',
+      'planContinueExecutionOperationsWithNative',
+      'injectContinueExecutionDirectiveWithNative',
+      'isStopMessageStateActiveWithNative',
+      'resolveHasActiveStopMessageForContinueExecutionWithNative',
+      'isCanonicalChatCompletionPayloadWithNative',
+      'NativeContinueExecutionPlan',
+      'NativeContinueDirectiveInjection',
+      'parseBooleanInjectionPlan',
+      'parseContinueExecutionPlan',
+      'parseContinueDirectiveInjection',
+      'parseReviewOperations',
+      'ServertoolFollowupFlowProfilePayload',
+      'parseServertoolFollowupFlowProfilePayload',
+      'planChatServertoolOrchestrationBundleJson',
+      'resolveServertoolFollowupFlowProfileJson',
+      'webSearchFindArrayJson',
+      'runApplyPatchJson',
+      'buildContinueExecutionOperationsJson',
+      'planContinueExecutionOperationsJson',
+      'injectContinueExecutionDirectiveJson',
+      'isStopMessageStateActiveJson',
+      'resolveHasActiveStopMessageForContinueExecutionJson',
+      'isCanonicalChatCompletionPayloadJson',
+      'chat_continue_execution_directive_injection',
+      '#[napi]\npub fn plan_chat_servertool_orchestration_bundle_json',
+      '#[napi]\npub fn resolve_servertool_followup_flow_profile_json',
+      '#[napi]\npub fn web_search_find_array_json',
+      '#[napi]\npub fn run_apply_patch_json',
+      '#[napi]\npub fn build_continue_execution_operations_json',
+      '#[napi]\npub fn plan_continue_execution_operations_json',
+      '#[napi]\npub fn inject_continue_execution_directive_json',
+      '#[napi]\npub fn is_stop_message_state_active_json',
+      '#[napi]\npub fn resolve_has_active_stop_message_for_continue_execution_json',
+      '#[napi]\npub fn is_canonical_chat_completion_payload_json',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = existingRetiredFiles.map((relativePath) => `${relativePath}:file exists`);
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired req_inbound standalone public bridges must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-semantic-lift.mjs',
+    ];
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/servertool_injection.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs',
+      'sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs',
+    ];
+    const retiredSymbols = [
+      'mapReqInboundResumeToolOutputsDetailedWithNative',
+      'resolveClientInjectReadyWithNative',
+      'normalizeContextCaptureLabelWithNative',
+      'shouldRunHubChatProcessWithNative',
+      'isShellLikeToolNameTokenWithNative',
+      'resolveReqInboundServerToolFollowupSnapshotWithNative',
+      'augmentReqInboundContextSnapshotWithNative',
+      'normalizeReqInboundToolCallIdStyleWithNative',
+      'mapResumeToolOutputsDetailedWithNative',
+      'resolveServerToolFollowupSnapshotWithNative',
+      'augmentContextSnapshotWithNative',
+      'normalizeToolCallIdStyleCandidateWithNative',
+      'NativeResumeToolOutput',
+      'parseResumeToolOutputs',
+      'parse_json_bool',
+      'parseBoolean',
+      'mapResumeToolOutputsDetailedJson',
+      'resolveServerToolFollowupSnapshotJson',
+      'augmentContextSnapshotJson',
+      'normalizeToolCallIdStyleCandidateJson',
+      'isShellLikeToolNameTokenJson',
+      'resolveClientInjectReadyJson',
+      'normalizeContextCaptureLabelJson',
+      'shouldRunHubChatProcessJson',
+      'map_resume_tool_outputs_detailed_json',
+      'is_shell_like_tool_name_token_json',
+      'resolve_client_inject_ready_json',
+      'resolve_server_tool_followup_snapshot_json',
+      'augment_context_snapshot_json',
+      'normalize_tool_call_id_style_candidate_json',
+      'normalize_context_capture_label_json',
+      'should_run_hub_chat_process_json',
+      'coverage-hub-req-inbound-semantic-lift',
+    ];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = existingRetiredFiles.map((relativePath) => `${relativePath}:file exists`);
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+    ];
+    const retiredSymbols = [
+      'export function cleanRoutingInstructionMarkersWithNative',
+      'export function parseAndPreprocessRoutingInstructions',
+      'export function extractClearInstruction',
+      'export function extractStopMessageClearInstruction',
+      'export function applyRoutingInstructionsToStateWithNative',
+      'cleanRoutingInstructionMarkersJson',
+      '#[napi]\npub fn clean_routing_instruction_markers_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired hub protocol spec public wrappers must stay deleted from TS and Rust exports', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs',
+    ];
+    const retiredSymbols = [
+      'resolveHubProtocolSpecWithNative',
+      'resolveHubProtocolAllowlistsWithNative',
+      'resolveHubProtocolSpecJson',
+      'resolveHubProtocolAllowlistsJson',
+      'resolve_hub_protocol_spec_json',
+      'resolve_hub_protocol_allowlists_json',
+      'NativeProtocolSpec',
+      'NativeHubProtocolAllowlists',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired responses tool-call remap public wrapper must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/mod.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs',
+    ];
+    const retiredSymbols = [
+      'remapResponsesToolCallsWithNative',
+      'remapResponsesToolCallsJson',
+      'remap_responses_tool_calls_json',
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of scannedFiles) {
+      const absolutePath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+      const source = fs.readFileSync(absolutePath, 'utf8');
+      for (const symbol of retiredSymbols) {
+        if (source.includes(symbol)) {
+          findings.push(`${relativePath}:${symbol}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('retired req outbound context/tool-session public wrappers must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs',
+    ];
+    const retiredSymbols = [
+      'resolveReqOutboundContextMergePlanWithNative',
+      'buildReqOutboundFormatPayloadWithNative',
+      'applyReqOutboundContextSnapshotWithNative',
+      'mergeContextToolOutputsWithNative',
+      'normalizeContextToolsWithNative',
+      'selectToolCallIdStyleWithNative',
+      'normalizeToolSessionMessagesWithNative',
+      'updateToolSessionHistoryWithNative',
+      'shouldAttachReqOutboundContextSnapshotWithNative',
+      'resolveReqOutboundContextMergePlanJson',
+      'buildFormatRequestJson',
+      'applyReqOutboundContextSnapshotJson',
+      'mergeContextToolOutputsJson',
+      'normalizeContextToolsJson',
+      'selectToolCallIdStyleJson',
+      'normalizeToolSessionMessagesJson',
+      'updateToolSessionHistoryJson',
+      'shouldAttachReqOutboundContextSnapshotJson',
+      'resolve_req_outbound_context_merge_plan_json',
+      'build_format_request_json',
+      'apply_req_outbound_context_snapshot_json',
+      'merge_context_tool_outputs_json',
+      'normalize_context_tools_json',
+      'select_tool_call_id_style_json',
+      'select_tool_call_id_style',
+      'normalize_tool_session_messages_json',
+      'update_tool_session_history_json',
+      'should_attach_req_outbound_context_snapshot_json',
+      'NativeReqOutboundContextMergePlanInput',
+      'NativeReqOutboundFormatBuildInput',
+      'NativeReqOutboundContextMergePlan',
+      'NativeReqOutboundContextSnapshotPatchInput',
+      'NativeReqOutboundContextSnapshotPatch',
+      'NativeToolSessionCompatInput',
+      'NativeToolSessionCompatOutput',
+      'NativeToolSessionHistoryUpdateInput',
+      'NativeToolSessionHistoryUpdateOutput',
+      'parseReqOutboundContextMergePlan',
+      'parseReqOutboundFormatBuildOutput',
+      'parseReqOutboundContextSnapshotPatch',
+      'parseToolSessionCompatOutput',
+      'parseToolSessionHistoryUpdateOutput',
     ];
     const findings: string[] = [];
 
@@ -2996,9 +3851,14 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_args_mapping.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs',
     ];
     const findings: string[] = [];
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator/tests.rs',
+    ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     for (const relativePath of files) {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -3043,12 +3903,31 @@ describe('hub pipeline stage residue audit', () => {
         { label: 'keeps unused shell args packing rust napi export', pattern: /\bpack_shell_args_json\b/ },
         { label: 'keeps unused comma flattening rust napi export', pattern: /\bflatten_by_comma_json\b/ },
         { label: 'keeps unused chunk string rust napi export', pattern: /\bchunk_string_json\b/ },
+        { label: 'exports unused thought signature validator bridge', pattern: /hasValidThoughtSignatureWithNative\b/ },
+        { label: 'exports unused thinking block sanitizer bridge', pattern: /sanitizeThinkingBlockWithNative\b/ },
+        { label: 'exports unused thinking block filter bridge', pattern: /filterInvalidThinkingBlocksWithNative\b/ },
+        { label: 'exports unused trailing thinking block bridge', pattern: /removeTrailingUnsignedThinkingBlocksWithNative\b/ },
+        { label: 'keeps unused thought signature capability', pattern: /hasValidThoughtSignatureJson\b/ },
+        { label: 'keeps unused thinking block sanitizer capability', pattern: /sanitizeThinkingBlockJson\b/ },
+        { label: 'keeps unused thinking block filter capability', pattern: /filterInvalidThinkingBlocksJson\b/ },
+        { label: 'keeps unused trailing thinking block capability', pattern: /removeTrailingUnsignedThinkingBlocksJson\b/ },
+        { label: 'keeps unused thought signature rust napi export', pattern: /\bhas_valid_thought_signature_json\b/ },
+        { label: 'keeps unused thinking block sanitizer rust napi export', pattern: /\bsanitize_thinking_block_json\b/ },
+        { label: 'keeps unused thinking block filter rust napi export', pattern: /\bfilter_invalid_thinking_blocks_json\b/ },
+        { label: 'keeps unused trailing thinking block rust napi export', pattern: /\bremove_trailing_unsigned_thinking_blocks_json\b/ },
+        { label: 'exports unused normalizeTools bridge', pattern: /normalizeToolsWithNative\b/ },
+        { label: 'keeps unused normalizeTools capability', pattern: /normalizeToolsJson\b/ },
+        { label: 'keeps unused normalizeTools rust napi export', pattern: /\bnormalize_tools_json\b/ },
+        { label: 'keeps unused standalone normalize_tools helper', pattern: /\bfn\s+normalize_tools\s*\(/ },
+        { label: 'keeps unused standalone shell schema helper', pattern: /\bfn\s+ensure_shell_schema\s*\(/ },
+        { label: 'keeps unused standalone shell description helper', pattern: /\bfn\s+build_shell_description\s*\(/ },
       ]);
       for (const match of matches) {
         findings.push(`${relativePath}:${match}`);
       }
     }
 
+    expect(retiredFiles).toEqual([]);
     expect(findings).toEqual([]);
   });
 

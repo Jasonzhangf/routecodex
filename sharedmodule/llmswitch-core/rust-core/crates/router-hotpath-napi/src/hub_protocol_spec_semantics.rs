@@ -812,20 +812,6 @@ fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
 }
 
 #[napi_derive::napi]
-pub fn resolve_hub_protocol_spec_json(input_json: String) -> NapiResult<String> {
-    let input: ResolveHubProtocolSpecInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_hub_protocol_spec(input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
-pub fn resolve_hub_protocol_allowlists_json() -> NapiResult<String> {
-    let output = build_default_allowlists();
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
 pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult<String> {
     let input: SanitizeProviderOutboundPayloadInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;

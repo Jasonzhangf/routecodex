@@ -1,4 +1,3 @@
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -95,8 +94,7 @@ pub fn parse_format_envelope(input: FormatParseInput) -> Result<FormatParseOutpu
     Ok(FormatParseOutput { envelope })
 }
 
-#[napi]
-pub fn parse_format_envelope_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn parse_format_envelope_json(input_json: String) -> napi::Result<String> {
     // Validate input JSON is not empty
     if input_json.trim().is_empty() {
         return Err(napi::Error::from_reason("Input JSON is empty"));

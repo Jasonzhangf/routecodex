@@ -10,10 +10,6 @@ use chat_process_media_semantics::{
 use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
 mod anthropic_response_helper;
-mod chat_anthropic_tool_alias;
-mod chat_continue_execution_directive_injection;
-mod chat_governance_context;
-mod chat_governance_finalize;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
 mod chat_process_media_semantics;
@@ -36,7 +32,6 @@ mod hub_pipeline_lib;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_types;
 mod hub_protocol_spec_semantics;
-mod hub_provider_response_helpers;
 mod hub_reasoning_tool_normalizer;
 mod hub_req_chatprocess_03_governance_boundary;
 mod hub_req_inbound_context_capture;
@@ -56,7 +51,6 @@ mod hub_resp_outbound_04_finalize_boundary;
 mod hub_resp_outbound_client_semantics;
 mod hub_resp_outbound_client_semantics_blocks;
 mod hub_resp_outbound_sse_stream;
-mod hub_semantic_mapper_chat;
 mod hub_snapshot_hooks;
 mod hub_standardized_bridge;
 mod hub_submit_tool_outputs;
@@ -101,7 +95,6 @@ mod shared_tooling;
 mod snapshot_tool_failures;
 mod stop_message_auto_blocks;
 mod streaming_tool_extractor;
-mod thought_signature_validator;
 mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_stop_message_actions;
@@ -535,11 +528,6 @@ pub fn flatten_chat_tools_for_function_calling_with_options_json(
 }
 
 #[napi]
-pub fn normalize_tools_json(tools_json: String) -> NapiResult<String> {
-    shared_args_mapping::normalize_tools_json(tools_json)
-}
-
-#[napi]
 pub fn normalize_bridge_tool_call_ids_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_bridge_tool_call_ids_json(input_json)
 }
@@ -691,26 +679,6 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi]
-pub fn has_valid_thought_signature_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::has_valid_thought_signature_json(input_json)
-}
-
-#[napi]
-pub fn sanitize_thinking_block_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::sanitize_thinking_block_json(input_json)
-}
-
-#[napi]
-pub fn filter_invalid_thinking_blocks_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::filter_invalid_thinking_blocks_json(input_json)
-}
-
-#[napi]
-pub fn remove_trailing_unsigned_thinking_blocks_json(input_json: String) -> NapiResult<String> {
-    thought_signature_validator::remove_trailing_unsigned_thinking_blocks_json(input_json)
-}
-
-#[napi]
 pub fn ensure_messages_array_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::ensure_messages_array_json(input_json)
 }
@@ -796,11 +764,6 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
     )
 }
 
-#[napi(js_name = "planSseStreamEffectJson")]
-pub fn plan_sse_stream_effect_json(input_json: String) -> NapiResult<String> {
-    hub_resp_outbound_sse_stream::plan_sse_stream_effect_json(input_json)
-}
-
 #[napi(js_name = "resolveClientToolFromIndexJson")]
 pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::resolve_client_tool_from_index_json(input_json)
@@ -811,10 +774,6 @@ pub fn remap_chat_tool_calls_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::remap_chat_tool_calls_json(input_json)
 }
 
-#[napi(js_name = "remapResponsesToolCallsJson")]
-pub fn remap_responses_tool_calls_json(input_json: String) -> NapiResult<String> {
-    hub_bridge_actions::remap_responses_tool_calls_json(input_json)
-}
 #[napi]
 pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::normalize_resp_inbound_reasoning_payload_json(input_json)
@@ -1736,6 +1695,12 @@ pub fn plan_followup_materialization_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_followup_payload_stream_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_payload_stream_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_followup_append_user_text_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_append_user_text_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1836,14 +1801,6 @@ pub fn inject_mcp_tools_for_responses_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = shared_mcp_injection::inject_mcp_tools(&tools, &discovered, "responses");
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn clean_routing_instruction_markers_json(request_json: String) -> NapiResult<String> {
-    let mut request: Value =
-        serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    virtual_router_engine::instructions::clean_routing_instruction_markers(&mut request);
-    serde_json::to_string(&request).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
@@ -1977,12 +1934,6 @@ pub fn detect_tool_execution_failures_json_bridge(payload_json: String) -> NapiR
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)
-}
-
-#[allow(non_snake_case)]
-#[napi(js_name = "sanitizeChatProcessMessagesJson")]
-pub fn sanitize_chat_process_messages_json(input_json: String) -> NapiResult<String> {
-    shared_response_compat::sanitize_chat_process_messages_json(input_json)
 }
 
 #[napi(js_name = "applyUniversalShapeRequestFilterJson")]
@@ -2163,21 +2114,6 @@ pub fn run_gemini_from_openai_chat_codec_json_bridge(
     gemini_openai_codec::run_gemini_from_openai_chat_codec_json(payload_json, options_json)
 }
 
-#[napi(js_name = "bootstrapVirtualRouterRoutingJson")]
-pub fn bootstrap_virtual_router_routing_json_bridge(
-    routing_json: String,
-    alias_index_json: String,
-    model_index_json: String,
-    forwarder_ids_json: Option<String>,
-) -> NapiResult<String> {
-    virtual_router_engine::routing::bootstrap_virtual_router_routing_json(
-        routing_json,
-        alias_index_json,
-        model_index_json,
-        forwarder_ids_json,
-    )
-}
-
 #[napi(js_name = "bootstrapVirtualRouterConfigJson")]
 pub fn bootstrap_virtual_router_config_json_bridge(input_json: String) -> NapiResult<String> {
     virtual_router_engine::bootstrap::bootstrap_virtual_router_config_json(input_json)
@@ -2189,32 +2125,6 @@ pub fn bootstrap_virtual_router_providers_json_bridge(
 ) -> NapiResult<String> {
     virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_providers_json(
         providers_json,
-    )
-}
-
-#[napi(js_name = "bootstrapVirtualRouterProviderProfilesJson")]
-pub fn bootstrap_virtual_router_provider_profiles_json_bridge(
-    routed_target_keys_json: String,
-    alias_index_json: String,
-    model_index_json: String,
-    runtime_entries_json: String,
-) -> NapiResult<String> {
-    virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_provider_profiles_json(
-        routed_target_keys_json,
-        alias_index_json,
-        model_index_json,
-        runtime_entries_json,
-    )
-}
-
-#[napi(js_name = "bootstrapVirtualRouterConfigMetaJson")]
-pub fn bootstrap_virtual_router_config_meta_json_bridge(
-    section_json: String,
-    routing_source_json: String,
-) -> NapiResult<String> {
-    virtual_router_engine::config_bootstrap::bootstrap_virtual_router_config_meta_json(
-        section_json,
-        routing_source_json,
     )
 }
 
@@ -2339,22 +2249,6 @@ pub fn compute_provider_backoff_ms_json(
     Ok(failure_policy::compute_backoff(classification, attempt) as i64)
 }
 
-#[napi(js_name = "filterOutExecutedServerToolCallsJson")]
-pub fn filter_out_executed_server_tool_calls_json(
-    finalized_payload_json: String,
-    orchestration_payload_json: String,
-) -> NapiResult<String> {
-    let finalized_payload: Value = serde_json::from_str(&finalized_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let orchestration_payload: Value = serde_json::from_str(&orchestration_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = servertool_skeleton::finalize_strip::filter_out_executed_servertool_calls(
-        &finalized_payload,
-        &orchestration_payload,
-    );
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,
@@ -2364,16 +2258,6 @@ pub use shared_responses_conversation_utils::{
     materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,
     prepare_responses_conversation_entry_json, resume_responses_conversation_payload_json,
 };
-
-#[napi(js_name = "resolveHubProtocolSpecJson")]
-pub fn resolve_hub_protocol_spec_export_json(input_json: String) -> NapiResult<String> {
-    hub_protocol_spec_semantics::resolve_hub_protocol_spec_json(input_json)
-}
-
-#[napi(js_name = "resolveHubProtocolAllowlistsJson")]
-pub fn resolve_hub_protocol_allowlists_export_json() -> NapiResult<String> {
-    hub_protocol_spec_semantics::resolve_hub_protocol_allowlists_json()
-}
 
 #[napi(js_name = "sanitizeProviderOutboundPayloadJson")]
 pub fn sanitize_provider_outbound_payload_export_json(input_json: String) -> NapiResult<String> {

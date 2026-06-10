@@ -14,8 +14,7 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
 #[cfg(test)]
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::{
-    apply_hub_operations, maybe_apply_servertool_orchestration, read_runtime_metadata,
-    resolve_client_inject_ready,
+    maybe_apply_servertool_orchestration, read_runtime_metadata, resolve_client_inject_ready,
 };
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 
@@ -41,22 +40,6 @@ pub struct ToolGovernanceOutput {
 #[derive(Debug)]
 struct GovernanceContext {
     entry_endpoint: String,
-}
-
-#[napi_derive::napi]
-pub fn apply_hub_operations_json(
-    request_json: String,
-    operations_json: String,
-) -> NapiResult<String> {
-    let request: Value =
-        serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let operations: Value = serde_json::from_str(&operations_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut request_obj = request.as_object().cloned().unwrap_or_else(Map::new);
-    let ops = operations.as_array().cloned().unwrap_or_default();
-    apply_hub_operations(&mut request_obj, &ops);
-    serde_json::to_string(&Value::Object(request_obj))
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 pub fn apply_req_process_tool_governance(

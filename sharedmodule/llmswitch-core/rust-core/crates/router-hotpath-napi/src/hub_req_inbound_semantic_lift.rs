@@ -439,14 +439,6 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
 }
 
 #[napi]
-pub fn map_resume_tool_outputs_detailed_json(responses_resume_json: String) -> NapiResult<String> {
-    let responses_resume: Value = serde_json::from_str(&responses_resume_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = map_resume_tool_outputs_detailed(&responses_resume);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn apply_req_inbound_semantic_lift_json(input_json: String) -> NapiResult<String> {
     let input: ReqInboundSemanticLiftApplyInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
