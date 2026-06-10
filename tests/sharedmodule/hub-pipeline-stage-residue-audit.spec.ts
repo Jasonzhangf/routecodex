@@ -3031,6 +3031,10 @@ describe('hub pipeline stage residue audit', () => {
       'normalize_tool_call_id_style_candidate_json',
       'normalize_context_capture_label_json',
       'should_run_hub_chat_process_json',
+      'normalize_req_inbound_reasoning_payload_json',
+      'should_normalize_reasoning_payload_json',
+      'normalize_reasoning_payload_v2_json',
+      'apply_req_inbound_semantic_lift_json',
       'coverage-hub-req-inbound-semantic-lift',
     ];
     const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
