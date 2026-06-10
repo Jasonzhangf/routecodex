@@ -1800,17 +1800,17 @@ export async function sendPipelineResponse(
     const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
       abortSourceStreamForClientClose();
       void (async () => {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        try {
-          await clientWriteQueue;
-        } catch (error) {
-          logResponseNonBlockingError(`response.sse.client_close.flush_queue:${requestLabel}`, error);
-        }
         if (
           entryEndpoint === '/v1/responses'
           && contractProbe.probe
           && isToolCallContinuationResponse(contractProbe.probe)
         ) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          try {
+            await clientWriteQueue;
+          } catch (error) {
+            logResponseNonBlockingError(`response.sse.client_close.flush_queue:${requestLabel}`, error);
+          }
           preservedConversationOnClientClose = true;
           await persistNativeSseConversationState().catch((error) => {
             logResponseNonBlockingError(`responses-conversation-native-sse-client-close:${requestLabel}`, error);

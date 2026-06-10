@@ -412,9 +412,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   it('destroys upstream immediately on client close even when response projection is still pending', async () => {
     let releaseProjection: (() => void) | undefined;
+    const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
+      clearResponsesConversationByRequestId,
       finalizeResponsesConversationRequestRetention: async () => undefined,
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
@@ -480,6 +481,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     expect(destroySpy).toHaveBeenCalled();
     expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
+    expect(clearResponsesConversationByRequestId).toHaveBeenCalledWith('req-stream-client-close-projection-pending');
     releaseProjection?.();
   });
 
