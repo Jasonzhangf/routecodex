@@ -411,6 +411,30 @@ export interface ServertoolFollowupPayloadStreamPlan {
   stream: boolean;
 }
 
+export interface ServertoolHubFollowupPolicyShadowInput {
+  modeRaw?: string;
+  sampleRateRaw?: unknown;
+  requestId?: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ServertoolHubFollowupPolicyShadowDiffItem {
+  path: string;
+  baseline: unknown;
+  candidate: unknown;
+}
+
+export interface ServertoolHubFollowupPolicyShadowPlan {
+  mode: 'off' | 'shadow' | 'enforce';
+  sampled: boolean;
+  shouldRecord: boolean;
+  shouldEnforce: boolean;
+  candidate: Record<string, unknown>;
+  diffCount: number;
+  diffPaths: string[];
+  diffHead: ServertoolHubFollowupPolicyShadowDiffItem[];
+}
+
 export interface ServertoolPreferredFinalResponseInput {
   hasFollowupBody: boolean;
   hasRequiresActionShape: boolean;
@@ -2835,6 +2859,66 @@ export function planFollowupPayloadStreamWithNative(stream: boolean): Servertool
     throw new Error('planFollowupPayloadStreamJson native returned invalid stream');
   }
   return { stream: record.stream };
+}
+
+export function planHubFollowupPolicyShadowWithNative(
+  input: ServertoolHubFollowupPolicyShadowInput,
+): ServertoolHubFollowupPolicyShadowPlan {
+  const capability = 'planHubFollowupPolicyShadowJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planHubFollowupPolicyShadowJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planHubFollowupPolicyShadowJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planHubFollowupPolicyShadowJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.mode !== 'off' && record.mode !== 'shadow' && record.mode !== 'enforce') {
+    throw new Error('planHubFollowupPolicyShadowJson native returned invalid mode');
+  }
+  if (
+    typeof record.sampled !== 'boolean' ||
+    typeof record.shouldRecord !== 'boolean' ||
+    typeof record.shouldEnforce !== 'boolean' ||
+    !record.candidate ||
+    typeof record.candidate !== 'object' ||
+    Array.isArray(record.candidate) ||
+    !Number.isInteger(record.diffCount) ||
+    !Array.isArray(record.diffPaths) ||
+    !record.diffPaths.every((path) => typeof path === 'string') ||
+    !Array.isArray(record.diffHead)
+  ) {
+    throw new Error('planHubFollowupPolicyShadowJson native returned invalid fields');
+  }
+  const diffHead = record.diffHead.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('planHubFollowupPolicyShadowJson native returned invalid diffHead entry');
+    }
+    const row = entry as Record<string, unknown>;
+    if (typeof row.path !== 'string') {
+      throw new Error('planHubFollowupPolicyShadowJson native returned invalid diffHead path');
+    }
+    return {
+      path: row.path,
+      baseline: row.baseline,
+      candidate: row.candidate
+    };
+  });
+  return {
+    mode: record.mode,
+    sampled: record.sampled,
+    shouldRecord: record.shouldRecord,
+    shouldEnforce: record.shouldEnforce,
+    candidate: record.candidate as Record<string, unknown>,
+    diffCount: record.diffCount as number,
+    diffPaths: record.diffPaths as string[],
+    diffHead
+  };
 }
 
 export function planPreferredFinalResponseWithNative(

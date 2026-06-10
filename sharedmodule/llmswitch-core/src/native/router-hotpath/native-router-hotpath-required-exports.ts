@@ -298,6 +298,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planFollowupRuntimeMetadataJson",
   "planFollowupMaterializationJson",
   "planFollowupPayloadStreamJson",
+  "planHubFollowupPolicyShadowJson",
   "planFollowupAppendUserTextJson",
   "planPreferredFinalResponseJson",
   "resolveFollowupOriginSeedJson",

@@ -1701,6 +1701,12 @@ pub fn plan_followup_payload_stream_json(input_json: String) -> NapiResult<Strin
 }
 
 #[napi]
+pub fn plan_hub_followup_policy_shadow_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_hub_followup_policy_shadow_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_followup_append_user_text_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_append_user_text_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

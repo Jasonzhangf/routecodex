@@ -241,6 +241,36 @@ pub struct ServertoolFollowupPayloadStreamPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolHubFollowupPolicyShadowInput {
+    pub mode_raw: Option<String>,
+    pub sample_rate_raw: Option<Value>,
+    pub request_id: Option<String>,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolHubFollowupPolicyShadowDiffItem {
+    pub path: String,
+    pub baseline: Value,
+    pub candidate: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolHubFollowupPolicyShadowPlan {
+    pub mode: String,
+    pub sampled: bool,
+    pub should_record: bool,
+    pub should_enforce: bool,
+    pub candidate: Value,
+    pub diff_count: usize,
+    pub diff_paths: Vec<String>,
+    pub diff_head: Vec<ServertoolHubFollowupPolicyShadowDiffItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolFollowupAppendUserTextInput {
     pub followup_plan: Value,
 }
@@ -825,6 +855,58 @@ pub fn plan_followup_payload_stream(
     }
 }
 
+pub fn plan_hub_followup_policy_shadow(
+    input: ServertoolHubFollowupPolicyShadowInput,
+) -> ServertoolHubFollowupPolicyShadowPlan {
+    let mode = normalize_hub_followup_mode(input.mode_raw.as_deref());
+    if mode == "off" {
+        return ServertoolHubFollowupPolicyShadowPlan {
+            mode,
+            sampled: false,
+            should_record: false,
+            should_enforce: false,
+            candidate: input.payload,
+            diff_count: 0,
+            diff_paths: Vec::new(),
+            diff_head: Vec::new(),
+        };
+    }
+
+    let sampled = should_sample_hub_followup(
+        input.sample_rate_raw.as_ref().unwrap_or(&Value::Null),
+        input.request_id.as_deref(),
+    );
+    if !sampled {
+        return ServertoolHubFollowupPolicyShadowPlan {
+            mode,
+            sampled: false,
+            should_record: false,
+            should_enforce: false,
+            candidate: input.payload,
+            diff_count: 0,
+            diff_paths: Vec::new(),
+            diff_head: Vec::new(),
+        };
+    }
+
+    let candidate = normalize_hub_followup_payload(&input.payload);
+    let mut diffs = Vec::new();
+    diff_hub_followup_payloads(&input.payload, &candidate, "<root>", &mut diffs);
+    let diff_count = diffs.len();
+    let diff_head: Vec<_> = diffs.into_iter().take(50).collect();
+    let diff_paths = diff_head.iter().map(|diff| diff.path.clone()).collect();
+    ServertoolHubFollowupPolicyShadowPlan {
+        mode: mode.clone(),
+        sampled: true,
+        should_record: diff_count > 0,
+        should_enforce: mode == "enforce",
+        candidate,
+        diff_count,
+        diff_paths,
+        diff_head,
+    }
+}
+
 pub fn plan_followup_append_user_text(
     input: ServertoolFollowupAppendUserTextInput,
 ) -> ServertoolFollowupAppendUserTextPlan {
@@ -1045,6 +1127,126 @@ fn normalize_web_search_count(value: Option<&Value>) -> u64 {
         .filter(|count| *count > 0)
         .map(|count| count.min(10))
         .unwrap_or(10)
+}
+
+fn normalize_hub_followup_mode(raw: Option<&str>) -> String {
+    match raw.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "shadow" => "shadow".to_string(),
+        "enforce" => "enforce".to_string(),
+        "off" | "0" | "false" | "" => "off".to_string(),
+        _ => "off".to_string(),
+    }
+}
+
+fn normalize_hub_followup_sample_rate(value: &Value) -> f64 {
+    let parsed = match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(raw) => raw.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|number| number.is_finite())
+    .unwrap_or(1.0);
+    parsed.clamp(0.0, 1.0)
+}
+
+fn should_sample_hub_followup(sample_rate_raw: &Value, request_id: Option<&str>) -> bool {
+    let rate = normalize_hub_followup_sample_rate(sample_rate_raw);
+    if rate <= 0.0 {
+        return false;
+    }
+    if rate >= 1.0 {
+        return true;
+    }
+    let key = request_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("no_request_id");
+    let bucket = fnv1a32(key) as f64 / 0xffff_ffffu32 as f64;
+    bucket < rate
+}
+
+fn fnv1a32(input: &str) -> u32 {
+    let mut hash = 0x811c9dc5u32;
+    for byte in input.as_bytes() {
+        hash ^= *byte as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
+
+fn normalize_hub_followup_payload(payload: &Value) -> Value {
+    let mut out = payload.clone();
+    let Some(record) = out.as_object_mut() else {
+        return out;
+    };
+    if record.contains_key("stream") {
+        record.insert("stream".to_string(), Value::Bool(false));
+    }
+    record.remove("routeHint");
+    record.remove("route_hint");
+    let private_keys: Vec<String> = record
+        .keys()
+        .filter(|key| key.starts_with("__"))
+        .cloned()
+        .collect();
+    for key in private_keys {
+        record.remove(&key);
+    }
+    if let Some(parameters) = record.get_mut("parameters").and_then(Value::as_object_mut) {
+        parameters.remove("stream");
+    }
+    out
+}
+
+fn diff_hub_followup_payloads(
+    baseline: &Value,
+    candidate: &Value,
+    path: &str,
+    diffs: &mut Vec<ServertoolHubFollowupPolicyShadowDiffItem>,
+) {
+    if baseline == candidate {
+        return;
+    }
+    match (baseline, candidate) {
+        (Value::Array(baseline_items), Value::Array(candidate_items)) => {
+            let max = baseline_items.len().max(candidate_items.len());
+            for index in 0..max {
+                diff_hub_followup_payloads(
+                    baseline_items.get(index).unwrap_or(&Value::Null),
+                    candidate_items.get(index).unwrap_or(&Value::Null),
+                    &format!("{path}[{index}]"),
+                    diffs,
+                );
+            }
+        }
+        (Value::Object(baseline_object), Value::Object(candidate_object)) => {
+            let mut keys: Vec<String> = baseline_object
+                .keys()
+                .chain(candidate_object.keys())
+                .cloned()
+                .collect();
+            keys.sort();
+            keys.dedup();
+            for key in keys {
+                let next = if path == "<root>" {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                diff_hub_followup_payloads(
+                    baseline_object.get(&key).unwrap_or(&Value::Null),
+                    candidate_object.get(&key).unwrap_or(&Value::Null),
+                    &next,
+                    diffs,
+                );
+            }
+        }
+        _ => diffs.push(ServertoolHubFollowupPolicyShadowDiffItem {
+            path: path.to_string(),
+            baseline: baseline.clone(),
+            candidate: candidate.clone(),
+        }),
+    }
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -2275,6 +2477,84 @@ mod tests {
             stream: false,
         });
         assert!(!non_streaming.stream);
+    }
+
+    #[test]
+    fn hub_followup_policy_shadow_off_skips_payload_planning() {
+        let payload = json!({
+            "stream": true,
+            "routeHint": "router",
+            "__rt": { "private": true }
+        });
+        let plan = plan_hub_followup_policy_shadow(ServertoolHubFollowupPolicyShadowInput {
+            mode_raw: Some("false".to_string()),
+            sample_rate_raw: Some(json!(1)),
+            request_id: Some("req_shadow_off".to_string()),
+            payload: payload.clone(),
+        });
+        assert_eq!(plan.mode, "off");
+        assert!(!plan.sampled);
+        assert!(!plan.should_record);
+        assert!(!plan.should_enforce);
+        assert_eq!(plan.candidate, payload);
+        assert_eq!(plan.diff_count, 0);
+    }
+
+    #[test]
+    fn hub_followup_policy_shadow_plans_normalized_candidate_and_diff() {
+        let plan = plan_hub_followup_policy_shadow(ServertoolHubFollowupPolicyShadowInput {
+            mode_raw: Some("shadow".to_string()),
+            sample_rate_raw: Some(json!("1")),
+            request_id: Some("req_shadow_payload".to_string()),
+            payload: json!({
+                "model": "gpt-test",
+                "stream": true,
+                "routeHint": "router",
+                "route_hint": "router",
+                "__rt": { "private": true },
+                "parameters": {
+                    "stream": true,
+                    "temperature": 0.2
+                }
+            }),
+        });
+        assert_eq!(plan.mode, "shadow");
+        assert!(plan.sampled);
+        assert!(plan.should_record);
+        assert!(!plan.should_enforce);
+        assert_eq!(plan.candidate["stream"], json!(false));
+        assert!(plan.candidate.get("routeHint").is_none());
+        assert!(plan.candidate.get("route_hint").is_none());
+        assert!(plan.candidate.get("__rt").is_none());
+        assert!(plan.candidate["parameters"].get("stream").is_none());
+        assert_eq!(plan.candidate["parameters"]["temperature"], json!(0.2));
+        assert!(plan.diff_paths.contains(&"stream".to_string()));
+        assert!(plan.diff_paths.contains(&"routeHint".to_string()));
+        assert!(plan.diff_paths.contains(&"parameters.stream".to_string()));
+    }
+
+    #[test]
+    fn hub_followup_policy_shadow_enforce_and_sampling_are_rust_owned() {
+        let skipped = plan_hub_followup_policy_shadow(ServertoolHubFollowupPolicyShadowInput {
+            mode_raw: Some("enforce".to_string()),
+            sample_rate_raw: Some(json!(0)),
+            request_id: Some("req_shadow_skip".to_string()),
+            payload: json!({ "stream": true }),
+        });
+        assert_eq!(skipped.mode, "enforce");
+        assert!(!skipped.sampled);
+        assert!(!skipped.should_enforce);
+        assert_eq!(skipped.candidate["stream"], json!(true));
+
+        let enforced = plan_hub_followup_policy_shadow(ServertoolHubFollowupPolicyShadowInput {
+            mode_raw: Some("enforce".to_string()),
+            sample_rate_raw: Some(json!(1)),
+            request_id: Some("req_shadow_enforce".to_string()),
+            payload: json!({ "stream": true }),
+        });
+        assert!(enforced.sampled);
+        assert!(enforced.should_enforce);
+        assert_eq!(enforced.candidate["stream"], json!(false));
     }
 
     #[test]

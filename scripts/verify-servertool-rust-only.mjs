@@ -75,6 +75,7 @@ const TS_BACKEND_ROUTE_RUNTIME = `${SERVERTOOL_TS_DIR}/backend-route-runtime-blo
 const TS_BACKEND_ROUTE_REENTER = `${SERVERTOOL_TS_DIR}/backend-route-reenter-block.ts`;
 const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bootstrap-replay-block.ts`;
 const TS_BACKEND_ROUTE_RESPONSE = `${SERVERTOOL_TS_DIR}/backend-route-response-block.ts`;
+const TS_BACKEND_ROUTE_SHADOW = `${SERVERTOOL_TS_DIR}/backend-route-shadow.ts`;
 const TS_VISION_ELIGIBILITY = `${SERVERTOOL_TS_DIR}/handlers/vision-eligibility.ts`;
 const TS_LOOP_STATE_BLOCK = `${SERVERTOOL_TS_DIR}/loop-state-block.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
@@ -3169,6 +3170,7 @@ function checkBackendRoutePolicyRustOwner() {
     }
   }
   const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
+  const shadowShell = readRequired(TS_BACKEND_ROUTE_SHADOW);
   const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
   const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
@@ -3375,6 +3377,38 @@ function checkBackendRoutePolicyRustOwner() {
     readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
     'planPreferredFinalResponseJson'
   );
+  assertContains(
+    'backend-route-shadow-native-export',
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
+    'planHubFollowupPolicyShadowJson'
+  );
+  assertContains(
+    'backend-route-shadow-rust-owner',
+    RUST_SERVERTOOL_BACKEND_ROUTE,
+    rustBackendRoute,
+    'pub fn plan_hub_followup_policy_shadow'
+  );
+  assertContains(
+    'backend-route-shadow-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planHubFollowupPolicyShadowWithNative'
+  );
+  assertContains(
+    'backend-route-shadow-ts-thin-shell',
+    TS_BACKEND_ROUTE_SHADOW,
+    shadowShell,
+    'planHubFollowupPolicyShadowWithNative'
+  );
+  for (const keyword of ['fnv1a32', 'shouldSample(', 'normalizeFollowupPayload', 'diffPayloads(', 'clampSampleRate', 'readMode(']) {
+    if (shadowShell.includes(keyword)) {
+      fail(
+        'backend-route-shadow-ts-thin-shell',
+        `Forbidden TS shadow semantic "${keyword}" found in backend-route-shadow.ts`
+      );
+    }
+  }
   assertContains(
     'backend-route-response-rust-owner',
     RUST_SERVERTOOL_BACKEND_ROUTE,
