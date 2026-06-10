@@ -1792,8 +1792,16 @@ export class RouteCodexHttpServer {
         externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
         requestStartedAtMs: Date.now(),
         logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
+        clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
+        client_tmux_session_id: inputMetadata.client_tmux_session_id,
+        tmuxSessionId: inputMetadata.tmuxSessionId,
+        tmux_session_id: inputMetadata.tmux_session_id,
+        rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
+        rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
         sessionId: readSessionIdForUsageLog(inputMetadata),
+        session_id: inputMetadata.session_id,
         conversationId: inputMetadata.conversationId,
+        conversation_id: inputMetadata.conversation_id,
         projectPath:
           inputMetadata.clientWorkdir
           ?? inputMetadata.client_workdir
@@ -1879,8 +1887,16 @@ export class RouteCodexHttpServer {
         externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
         requestStartedAtMs: Date.now(),
         logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
+        clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
+        client_tmux_session_id: inputMetadata.client_tmux_session_id,
+        tmuxSessionId: inputMetadata.tmuxSessionId,
+        tmux_session_id: inputMetadata.tmux_session_id,
+        rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
+        rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
         sessionId: readSessionIdForUsageLog(inputMetadata),
+        session_id: inputMetadata.session_id,
         conversationId: inputMetadata.conversationId,
+        conversation_id: inputMetadata.conversation_id,
         projectPath:
           inputMetadata.clientWorkdir
           ?? inputMetadata.client_workdir

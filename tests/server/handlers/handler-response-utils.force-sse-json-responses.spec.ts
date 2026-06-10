@@ -98,6 +98,102 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
+  it('keeps direct responses JSON function_call payload unchanged and never projects servertool CLI', async () => {
+    const app = express();
+    app.get('/direct-json-function-call', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            id: 'resp_direct_json_tool',
+            object: 'response',
+            status: 'completed',
+            output: [
+              {
+                id: 'fc_direct_json_tool',
+                type: 'function_call',
+                call_id: 'call_direct_json_tool',
+                name: 'stop_message_auto',
+                arguments: '{"flowId":"stop_message_flow"}',
+                status: 'completed'
+              }
+            ]
+          },
+          metadata: {
+            __routecodexDirectPassthrough: true,
+          },
+        } as any,
+        'req_direct_json_function_call',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-json-function-call`);
+      const body = await response.json() as Record<string, unknown>;
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(body)).toContain('"name":"stop_message_auto"');
+      expect(JSON.stringify(body)).not.toContain('routecodex servertool run');
+      expect(JSON.stringify(body)).not.toContain('"name":"exec_command"');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('keeps direct raw SSE function_call frames unchanged and never projects servertool CLI', async () => {
+    const app = express();
+    app.get('/direct-sse-function-call', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: Readable.from([
+              'event: response.output_item.done\n',
+              'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_direct_sse_tool","call_id":"call_direct_sse_tool","name":"stop_message_auto","arguments":"{\\"flowId\\":\\"stop_message_flow\\"}"}}\n\n',
+              'event: response.completed\n',
+              'data: {"type":"response.completed","response":{"id":"resp_direct_sse_tool","status":"completed"}}\n\n',
+              'event: response.done\n',
+              'data: {"type":"response.done","response":{"id":"resp_direct_sse_tool","status":"completed"}}\n\n',
+            ]),
+          },
+          metadata: {
+            outboundStream: true,
+            __routecodexDirectPassthrough: true,
+          },
+          usageLogInfo: {
+            routeName: 'router-direct:thinking',
+            requestStartedAtMs: Date.now(),
+          },
+        } as any,
+        'req_direct_sse_function_call',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-sse-function-call`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('"name":"stop_message_auto"');
+      expect(text).not.toContain('routecodex servertool run');
+      expect(text).not.toContain('"name":"exec_command"');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('encodes JSON responses payload into client-visible SSE instead of sse_bridge_error', async () => {
     const app = express();
     app.get('/responses-sse-from-json', (_req, res) => {
