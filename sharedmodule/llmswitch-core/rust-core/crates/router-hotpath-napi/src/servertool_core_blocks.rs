@@ -2,15 +2,17 @@
 
 use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
-    plan_followup_error_envelope, plan_followup_execution_mode, plan_followup_materialization,
-    plan_followup_append_user_text, plan_followup_runtime_action, plan_followup_runtime_metadata,
-    plan_preferred_final_response,
+    plan_empty_followup_error, plan_followup_error_envelope, plan_followup_execution_mode,
+    plan_followup_materialization, plan_followup_append_user_text,
+    plan_followup_runtime_action, plan_followup_runtime_metadata,
+    plan_missing_followup_payload_error, plan_preferred_final_response,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
-    ServertoolBootstrapReplayPlanInput, ServertoolFollowupErrorPlanInput,
-    ServertoolFollowupAppendUserTextInput,
+    ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
+    ServertoolFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
+    ServertoolMissingFollowupPayloadErrorPlanInput,
     ServertoolPreferredFinalResponseInput,
     ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
     ServertoolVisionEligibilityInput,
@@ -729,6 +731,21 @@ pub fn plan_followup_error_envelope_json(input_json: &str) -> Result<String, Str
         .map_err(|e| format!("deserialize followup error envelope input: {e}"))?;
     let output = plan_followup_error_envelope(input);
     serde_json::to_string(&output).map_err(|e| format!("serialize followup error envelope: {e}"))
+}
+
+pub fn plan_empty_followup_error_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolEmptyFollowupErrorPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize empty followup error input: {e}"))?;
+    let output = plan_empty_followup_error(input);
+    serde_json::to_string(&output).map_err(|e| format!("serialize empty followup error plan: {e}"))
+}
+
+pub fn plan_missing_followup_payload_error_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolMissingFollowupPayloadErrorPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize missing followup payload error input: {e}"))?;
+    let output = plan_missing_followup_payload_error(input);
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize missing followup payload error plan: {e}"))
 }
 
 pub fn plan_bootstrap_replay_json(input_json: &str) -> Result<String, String> {

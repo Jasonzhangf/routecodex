@@ -277,6 +277,44 @@ pub struct ServertoolFollowupErrorEnvelopePlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolEmptyFollowupErrorPlanInput {
+    pub flow_id: Option<String>,
+    pub request_id: String,
+    pub last_error_message: Option<String>,
+    pub original_response_was_empty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEmptyFollowupErrorPlan {
+    pub message: String,
+    pub code: String,
+    pub category: String,
+    pub status: i64,
+    pub details: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolMissingFollowupPayloadErrorPlanInput {
+    pub flow_id: Option<String>,
+    pub request_id: String,
+    pub followup_plan: Value,
+    pub adapter_context: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolMissingFollowupPayloadErrorPlan {
+    pub message: String,
+    pub code: String,
+    pub category: String,
+    pub status: i64,
+    pub details: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolBootstrapReplayPlanInput {
     pub preflight_body: Option<Value>,
     pub replay_seed: Option<Value>,
@@ -820,6 +858,79 @@ pub fn plan_followup_error_envelope(
         upstream_code,
         reason,
         terminal,
+    }
+}
+
+pub fn plan_empty_followup_error(
+    input: ServertoolEmptyFollowupErrorPlanInput,
+) -> ServertoolEmptyFollowupErrorPlan {
+    let message_flow_id = input.flow_id.as_deref().unwrap_or("unknown").to_string();
+    let mut details = serde_json::Map::new();
+    if let Some(flow_id) = input.flow_id {
+        details.insert("flowId".to_string(), Value::String(flow_id));
+    }
+    details.insert("requestId".to_string(), Value::String(input.request_id));
+    if let Some(message) = input.last_error_message {
+        details.insert("error".to_string(), Value::String(message));
+    }
+    if input.original_response_was_empty {
+        details.insert("originalResponseWasEmpty".to_string(), Value::Bool(true));
+    }
+    ServertoolEmptyFollowupErrorPlan {
+        message: format!("[servertool] Followup returned empty response for flow {message_flow_id}"),
+        code: "SERVERTOOL_EMPTY_FOLLOWUP".to_string(),
+        category: "EXTERNAL_ERROR".to_string(),
+        status: 502,
+        details: Value::Object(details),
+    }
+}
+
+pub fn plan_missing_followup_payload_error(
+    input: ServertoolMissingFollowupPayloadErrorPlanInput,
+) -> ServertoolMissingFollowupPayloadErrorPlan {
+    let followup_plan_record = input.followup_plan.as_object();
+    let adapter_record = input.adapter_context.as_object();
+    let captured_entry_request = adapter_record.and_then(|record| record.get("capturedEntryRequest"));
+    let captured_chat_request = adapter_record.and_then(|record| record.get("capturedChatRequest"));
+    let seed_available = captured_entry_request
+        .into_iter()
+        .chain(captured_chat_request)
+        .any(|value| extract_captured_chat_seed(value).is_some());
+    let mut details = serde_json::Map::new();
+    if let Some(flow_id) = input.flow_id {
+        details.insert("flowId".to_string(), Value::String(flow_id));
+    }
+    details.insert("requestId".to_string(), Value::String(input.request_id));
+    details.insert(
+        "reason".to_string(),
+        Value::String("followup_payload_missing".to_string()),
+    );
+    details.insert(
+        "hasPayloadPlan".to_string(),
+        Value::Bool(followup_plan_record.is_some_and(|plan| plan.contains_key("payload"))),
+    );
+    details.insert(
+        "hasInjectionPlan".to_string(),
+        Value::Bool(followup_plan_record.is_some_and(|plan| plan.contains_key("injection"))),
+    );
+    details.insert(
+        "hasMetadataPlan".to_string(),
+        Value::Bool(followup_plan_record.is_some_and(|plan| plan.contains_key("metadata"))),
+    );
+    details.insert(
+        "hasCapturedEntryRequest".to_string(),
+        Value::Bool(captured_entry_request.is_some_and(|value| value.is_object())),
+    );
+    details.insert(
+        "capturedSeedAvailable".to_string(),
+        Value::Bool(seed_available),
+    );
+    ServertoolMissingFollowupPayloadErrorPlan {
+        message: "[servertool] followup payload missing for non-clientInject flow".to_string(),
+        code: "SERVERTOOL_FOLLOWUP_FAILED".to_string(),
+        category: "INTERNAL_ERROR".to_string(),
+        status: 502,
+        details: Value::Object(details),
     }
 }
 
@@ -2219,6 +2330,48 @@ mod tests {
         assert_eq!(plan.upstream_status, Some(502));
         assert_eq!(plan.reason.as_deref(), Some("temporary upstream failure"));
         assert!(!plan.terminal);
+    }
+
+    #[test]
+    fn empty_followup_error_plan_preserves_status_and_details() {
+        let plan = plan_empty_followup_error(ServertoolEmptyFollowupErrorPlanInput {
+            flow_id: Some("web_search_flow".to_string()),
+            request_id: "req-1".to_string(),
+            last_error_message: Some("upstream empty".to_string()),
+            original_response_was_empty: true,
+        });
+        assert_eq!(plan.message, "[servertool] Followup returned empty response for flow web_search_flow");
+        assert_eq!(plan.code, "SERVERTOOL_EMPTY_FOLLOWUP");
+        assert_eq!(plan.category, "EXTERNAL_ERROR");
+        assert_eq!(plan.status, 502);
+        assert_eq!(plan.details["flowId"], json!("web_search_flow"));
+        assert_eq!(plan.details["requestId"], json!("req-1"));
+        assert_eq!(plan.details["error"], json!("upstream empty"));
+        assert_eq!(plan.details["originalResponseWasEmpty"], json!(true));
+    }
+
+    #[test]
+    fn missing_followup_payload_error_plan_reports_plan_and_seed_state() {
+        let plan = plan_missing_followup_payload_error(ServertoolMissingFollowupPayloadErrorPlanInput {
+            flow_id: Some("vision_auto_flow".to_string()),
+            request_id: "req-2".to_string(),
+            followup_plan: json!({ "injection": {}, "metadata": {} }),
+            adapter_context: json!({
+                "capturedEntryRequest": { "messages": [{ "role": "user", "content": "hi" }] }
+            }),
+        });
+        assert_eq!(plan.message, "[servertool] followup payload missing for non-clientInject flow");
+        assert_eq!(plan.code, "SERVERTOOL_FOLLOWUP_FAILED");
+        assert_eq!(plan.category, "INTERNAL_ERROR");
+        assert_eq!(plan.status, 502);
+        assert_eq!(plan.details["flowId"], json!("vision_auto_flow"));
+        assert_eq!(plan.details["requestId"], json!("req-2"));
+        assert_eq!(plan.details["reason"], json!("followup_payload_missing"));
+        assert_eq!(plan.details["hasPayloadPlan"], json!(false));
+        assert_eq!(plan.details["hasInjectionPlan"], json!(true));
+        assert_eq!(plan.details["hasMetadataPlan"], json!(true));
+        assert_eq!(plan.details["hasCapturedEntryRequest"], json!(true));
+        assert_eq!(plan.details["capturedSeedAvailable"], json!(true));
     }
 
     #[test]

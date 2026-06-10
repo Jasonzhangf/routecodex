@@ -424,6 +424,14 @@ export interface ServertoolFollowupErrorEnvelopePlan {
   terminal: boolean;
 }
 
+export interface ServertoolFollowupErrorPlan {
+  message: string;
+  code: string;
+  category: string;
+  status: number;
+  details: Record<string, unknown>;
+}
+
 export interface ServertoolBootstrapReplayPlan {
   preflightFailure?: {
     status?: number;
@@ -2865,6 +2873,66 @@ export function planFollowupErrorEnvelopeWithNative(error: unknown): ServertoolF
     ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
     terminal: record.terminal
   };
+}
+
+function parseServertoolFollowupErrorPlan(capability: string, resultJson: unknown): ServertoolFollowupErrorPlan {
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid payload`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.message !== 'string' ||
+    typeof record.code !== 'string' ||
+    typeof record.category !== 'string' ||
+    !Number.isInteger(record.status) ||
+    !record.details ||
+    typeof record.details !== 'object' ||
+    Array.isArray(record.details)
+  ) {
+    throw new Error(`${capability} native returned invalid fields`);
+  }
+  return {
+    message: record.message,
+    code: record.code,
+    category: record.category,
+    status: record.status as number,
+    details: record.details as Record<string, unknown>
+  };
+}
+
+export function planEmptyFollowupErrorWithNative(input: {
+  flowId?: string;
+  requestId: string;
+  lastErrorMessage?: string;
+  originalResponseWasEmpty?: boolean;
+}): ServertoolFollowupErrorPlan {
+  const capability = 'planEmptyFollowupErrorJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planEmptyFollowupErrorJson native unavailable');
+  }
+  return parseServertoolFollowupErrorPlan(capability, fn(JSON.stringify({
+    ...input,
+    originalResponseWasEmpty: input.originalResponseWasEmpty === true
+  })));
+}
+
+export function planMissingFollowupPayloadErrorWithNative(input: {
+  flowId?: string;
+  requestId: string;
+  followupPlan: unknown;
+  adapterContext: unknown;
+}): ServertoolFollowupErrorPlan {
+  const capability = 'planMissingFollowupPayloadErrorJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planMissingFollowupPayloadErrorJson native unavailable');
+  }
+  return parseServertoolFollowupErrorPlan(capability, fn(JSON.stringify(input)));
 }
 
 export function planBootstrapReplayWithNative(input: {

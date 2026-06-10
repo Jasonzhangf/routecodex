@@ -359,6 +359,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planPreferredFinalResponseJson",
   "resolveFollowupOriginSeedJson",
   "planFollowupErrorEnvelopeJson",
+  "planEmptyFollowupErrorJson",
+  "planMissingFollowupPayloadErrorJson",
   "planBootstrapReplayJson",
   "extractServertoolTextFromChatLikeJson",
   "extractCurrentAssistantStopTextJson",

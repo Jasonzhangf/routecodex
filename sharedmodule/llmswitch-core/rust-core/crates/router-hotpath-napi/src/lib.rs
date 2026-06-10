@@ -1754,6 +1754,18 @@ pub fn plan_followup_error_envelope_json(input_json: String) -> NapiResult<Strin
 }
 
 #[napi]
+pub fn plan_empty_followup_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_empty_followup_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_missing_followup_payload_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_missing_followup_payload_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_bootstrap_replay_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_bootstrap_replay_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

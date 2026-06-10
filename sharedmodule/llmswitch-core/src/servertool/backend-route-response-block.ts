@@ -1,15 +1,20 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import {
+  ProviderProtocolError,
+  type ProviderErrorCategory,
+  type ProviderProtocolErrorCode
+} from '../conversion/provider-protocol-error.js';
 import {
   isEmptyClientResponsePayloadWithNative,
   isToolCallContinuationResponseWithNative
 } from '../native/router-hotpath/native-chat-process-node-result-semantics.js';
 import {
+  planEmptyFollowupErrorWithNative,
   planFollowupAppendUserTextWithNative,
+  planMissingFollowupPayloadErrorWithNative,
   planPreferredFinalResponseWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { extractCapturedChatSeed } from './backend-route-seed.js';
 
 export function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
   return planFollowupAppendUserTextWithNative(followupPlan).text ?? undefined;
@@ -52,20 +57,13 @@ export function createEmptyFollowupError(args: {
   lastError?: unknown;
   originalResponseWasEmpty?: boolean;
 }): ProviderProtocolError & { status?: number; cause?: unknown } {
-  const wrapped = new ProviderProtocolError(
-    `[servertool] Followup returned empty response for flow ${args.flowId ?? 'unknown'}`,
-    {
-      code: 'SERVERTOOL_EMPTY_FOLLOWUP',
-      category: 'EXTERNAL_ERROR',
-      details: {
-        flowId: args.flowId,
-        requestId: args.requestId,
-        error: args.lastError instanceof Error ? args.lastError.message : undefined,
-        ...(args.originalResponseWasEmpty ? { originalResponseWasEmpty: true } : {})
-      }
-    }
-  ) as ProviderProtocolError & { status?: number; cause?: unknown };
-  wrapped.status = 502;
+  const plan = planEmptyFollowupErrorWithNative({
+    flowId: args.flowId,
+    requestId: args.requestId,
+    lastErrorMessage: args.lastError instanceof Error ? args.lastError.message : undefined,
+    originalResponseWasEmpty: args.originalResponseWasEmpty === true
+  });
+  const wrapped = buildProviderProtocolErrorFromPlan(plan) as ProviderProtocolError & { status?: number; cause?: unknown };
   wrapped.cause = args.lastError;
   return wrapped;
 }
@@ -76,36 +74,26 @@ export function createMissingFollowupPayloadError(args: {
   followupPlan: unknown;
   adapterContext: AdapterContext;
 }): ProviderProtocolError & { status?: number } {
-  const followupPlanRecord =
-    args.followupPlan && typeof args.followupPlan === 'object' && !Array.isArray(args.followupPlan)
-      ? (args.followupPlan as Record<string, unknown>)
-      : undefined;
-  const adapterRecord = args.adapterContext as Record<string, unknown> | null;
-  const capturedEntryRequest = adapterRecord?.capturedEntryRequest;
-  const capturedChatRequest = adapterRecord?.capturedChatRequest;
-  const seedAvailable = Boolean(extractCapturedChatSeed(capturedEntryRequest ?? capturedChatRequest));
-  const wrapped = new ProviderProtocolError('[servertool] followup payload missing for non-clientInject flow', {
-    code: 'SERVERTOOL_FOLLOWUP_FAILED',
-    category: 'INTERNAL_ERROR',
-    details: {
-      flowId: args.flowId,
-      requestId: args.requestId,
-      reason: 'followup_payload_missing',
-      hasPayloadPlan: Boolean(followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'payload')),
-      hasInjectionPlan: Boolean(
-        followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'injection')
-      ),
-      hasMetadataPlan: Boolean(
-        followupPlanRecord && Object.prototype.hasOwnProperty.call(followupPlanRecord, 'metadata')
-      ),
-      hasCapturedEntryRequest: Boolean(
-        capturedEntryRequest &&
-          typeof capturedEntryRequest === 'object' &&
-          !Array.isArray(capturedEntryRequest)
-      ),
-      capturedSeedAvailable: seedAvailable
-    }
+  return buildProviderProtocolErrorFromPlan(planMissingFollowupPayloadErrorWithNative({
+    flowId: args.flowId,
+    requestId: args.requestId,
+    followupPlan: args.followupPlan,
+    adapterContext: args.adapterContext
+  }));
+}
+
+function buildProviderProtocolErrorFromPlan(plan: {
+  message: string;
+  code: string;
+  category: string;
+  status: number;
+  details: Record<string, unknown>;
+}): ProviderProtocolError & { status?: number } {
+  const wrapped = new ProviderProtocolError(plan.message, {
+    code: plan.code as ProviderProtocolErrorCode,
+    category: plan.category as ProviderErrorCategory,
+    details: plan.details
   }) as ProviderProtocolError & { status?: number };
-  wrapped.status = 502;
+  wrapped.status = plan.status;
   return wrapped;
 }
