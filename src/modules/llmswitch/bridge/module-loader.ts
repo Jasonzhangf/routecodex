@@ -87,6 +87,20 @@ function resolveBuiltinSourceModulePath(subpath: string, impl: LlmsImpl): string
   }
 }
 
+const JEST_SOURCE_FIRST_SUBPATHS = new Set<string>([
+  'native/router-hotpath/native-virtual-router-routing-state',
+  'native/router-hotpath/native-servertool-core-semantics',
+  'runtime/virtual-router-hit-log'
+]);
+
+function shouldPreferSourceInJest(subpath: string, impl: LlmsImpl): boolean {
+  if (impl !== 'ts' || !isJestRuntime()) {
+    return false;
+  }
+  const normalized = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
+  return JEST_SOURCE_FIRST_SUBPATHS.has(normalized);
+}
+
 function parsePrefixList(raw: string | undefined): string[] {
   return String(raw || '')
     .split(',')
@@ -145,17 +159,27 @@ function requireCoreDist<TModule extends object = AnyRecord>(
   if (impl === 'engine' && !isEngineEnabled()) {
     throw new Error('[llmswitch-bridge] ROUTECODEX_LLMS_ENGINE_ENABLE must be enabled to load engine core');
   }
+  if (shouldPreferSourceInJest(subpath, impl)) {
+    const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
+    if (sourcePath) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      return nodeRequire(sourcePath) as TModule;
+    }
+  }
   const modulePath = resolveCoreModulePath(subpath, impl);
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return nodeRequire(modulePath) as TModule;
   } catch (error) {
-    const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
-    if (code === 'ERR_REQUIRE_ESM' && isJestRuntime()) {
+    if (isJestRuntime()) {
       const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
       if (sourcePath) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        return nodeRequire(sourcePath) as TModule;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          return nodeRequire(sourcePath) as TModule;
+        } catch {
+          // fall through to original error below
+        }
       }
     }
     throw error;

@@ -5,34 +5,9 @@
  * clock task store compatibility wrappers.
  */
 
-import { importCoreDist, requireCoreDist } from './module-loader.js';
+import { requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
-import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-
-const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
-const nonBlockingLogState = new Map<string, number>();
-
-
-function logStateIntegrationsNonBlocking(
-  stage: string,
-  error: unknown,
-  details?: Record<string, unknown>
-): void {
-  const now = Date.now();
-  const last = nonBlockingLogState.get(stage) ?? 0;
-  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
-    return;
-  }
-  nonBlockingLogState.set(stage, now);
-  try {
-    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(
-      `[llmswitch-bridge.state-integrations] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
-    );
-  } catch {
-    // Never throw from non-blocking logging.
-  }
-}
+import { formatUnknownError } from '../../../utils/common-utils.js';
 
 function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
@@ -48,18 +23,12 @@ function buildStateIntegrationFailure(stage: string, error: unknown, details?: R
 }
 
 export function loadRoutingInstructionStateSync(key: string): unknown | null {
-  const routingStateStoreModule = requireCoreDist<{
-    loadRoutingInstructionStateSync?: (key: string) => unknown | null;
-  }>('native/router-hotpath/native-virtual-router-routing-state');
-  const fn = routingStateStoreModule.loadRoutingInstructionStateSync;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'routing_state_store.load_state.api_unavailable',
-      'loadRoutingInstructionStateSync not available',
-      { key }
-    );
-  }
   try {
+    const mod = requireCoreDist<{ loadRoutingInstructionStateSync?: (k: string) => unknown | null }>('native/router-hotpath/native-virtual-router-routing-state');
+    const fn = mod.loadRoutingInstructionStateSync;
+    if (typeof fn !== 'function') {
+      throw new Error('loadRoutingInstructionStateSync native unavailable');
+    }
     return fn(key);
   } catch (error) {
     throw buildStateIntegrationFailure('routing_state_store.load_state.invoke', error, { key });
@@ -67,38 +36,26 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
 }
 
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
-  const routingStateStoreModule = requireCoreDist<{
-    saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
-  }>('native/router-hotpath/native-virtual-router-routing-state');
-  const fn = routingStateStoreModule.saveRoutingInstructionStateAsync;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'routing_state_store.save_async.api_unavailable',
-      'saveRoutingInstructionStateAsync not available',
-      { key }
-    );
-  }
   try {
-    fn(key, state as Parameters<typeof fn>[1]);
+    const mod = requireCoreDist<{ saveRoutingInstructionStateAsync?: (k: string, s: unknown | null) => void }>('native/router-hotpath/native-virtual-router-routing-state');
+    const fn = mod.saveRoutingInstructionStateAsync;
+    if (typeof fn !== 'function') {
+      throw new Error('saveRoutingInstructionStateAsync native unavailable');
+    }
+    fn(key, state);
   } catch (error) {
     throw buildStateIntegrationFailure('routing_state_store.save_async.invoke', error, { key });
   }
 }
 
 export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
-  const routingStateStoreModule = requireCoreDist<{
-    saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
-  }>('native/router-hotpath/native-virtual-router-routing-state');
-  const fn = routingStateStoreModule.saveRoutingInstructionStateSync;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'routing_state_store.save_sync.api_unavailable',
-      'saveRoutingInstructionStateSync not available',
-      { key }
-    );
-  }
   try {
-    fn(key, state as Parameters<typeof fn>[1]);
+    const mod = requireCoreDist<{ saveRoutingInstructionStateSync?: (k: string, s: unknown | null) => void }>('native/router-hotpath/native-virtual-router-routing-state');
+    const fn = mod.saveRoutingInstructionStateSync;
+    if (typeof fn !== 'function') {
+      throw new Error('saveRoutingInstructionStateSync native unavailable');
+    }
+    fn(key, state);
   } catch (error) {
     throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });
   }
@@ -106,32 +63,24 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
 
 export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unknown {
   try {
-    const stoplessGoalStateModule = requireCoreDist<{
-      syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
-    }>('servertool/handlers/stopless-goal-state');
-    const fn = stoplessGoalStateModule.syncStoplessGoalStateFromRequest;
+    const mod = requireCoreDist<{ syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
+    const fn = mod.syncStoplessGoalStateFromRequest;
     if (typeof fn !== 'function') {
-      return null;
+      throw new Error('syncStoplessGoalStateFromRequest native unavailable');
     }
     return fn(adapterContext);
   } catch (error) {
-    logStateIntegrationsNonBlocking('stopless_goal_state.sync.invoke', error);
-    return null;
+    throw buildStateIntegrationFailure('stopless_goal_state.sync.invoke', error);
   }
 }
 
 export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
-  const stoplessGoalStateModule = requireCoreDist<{
-    persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
-  }>('servertool/handlers/stopless-goal-state');
-  const fn = stoplessGoalStateModule.persistStoplessGoalStateSnapshot;
-  if (typeof fn !== 'function') {
-    throw buildStateIntegrationFailure(
-      'stopless_goal_state.persist.api_unavailable',
-      'persistStoplessGoalStateSnapshot not available'
-    );
-  }
   try {
+    const mod = requireCoreDist<{ persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
+    const fn = mod.persistStoplessGoalStateSnapshot;
+    if (typeof fn !== 'function') {
+      throw new Error('persistStoplessGoalStateSnapshot native unavailable');
+    }
     return fn(adapterContext, state);
   } catch (error) {
     throw buildStateIntegrationFailure('stopless_goal_state.persist.invoke', error);
@@ -140,17 +89,14 @@ export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state:
 
 export function readStoplessGoalState(adapterContext: unknown): unknown {
   try {
-    const stoplessGoalStateModule = requireCoreDist<{
-      readStoplessGoalState?: (adapterContext: unknown) => unknown;
-    }>('servertool/handlers/stopless-goal-state');
-    const fn = stoplessGoalStateModule.readStoplessGoalState;
+    const mod = requireCoreDist<{ readStoplessGoalState?: (adapterContext: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
+    const fn = mod.readStoplessGoalState;
     if (typeof fn !== 'function') {
-      return null;
+      throw new Error('readStoplessGoalState native unavailable');
     }
     return fn(adapterContext);
   } catch (error) {
-    logStateIntegrationsNonBlocking('stopless_goal_state.read.invoke', error);
-    return null;
+    throw buildStateIntegrationFailure('stopless_goal_state.read.invoke', error);
   }
 }
 
