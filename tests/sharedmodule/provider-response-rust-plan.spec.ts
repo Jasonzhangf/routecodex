@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { Readable } from 'node:stream';
 import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.js';
 
 const recordResponsesResponseMock = jest.fn();
@@ -26,6 +27,44 @@ async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function buildMimoAnthropicStopSse(): string {
+  return [
+    ': PROCESSING',
+    '',
+    'event: message_start',
+    'data: {"type":"message_start","message":{"id":"msg_mimo_stop_sse","type":"message","role":"assistant","model":"mimo-v2.5","content":[],"usage":{"input_tokens":0,"output_tokens":0}}}',
+    '',
+    'event: content_block_start',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}',
+    '',
+    'event: content_block_delta',
+    'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Need continue."},"index":0}',
+    '',
+    'event: content_block_delta',
+    'data: {"type":"content_block_delta","delta":{"type":"signature_delta","signature":""},"index":0}',
+    '',
+    'event: content_block_stop',
+    'data: {"type":"content_block_stop","index":0}',
+    '',
+    'event: content_block_start',
+    'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}',
+    '',
+    'event: content_block_delta',
+    'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Stopped without schema."},"index":1}',
+    '',
+    'event: content_block_stop',
+    'data: {"type":"content_block_stop","index":1}',
+    '',
+    'event: message_delta',
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":97,"output_tokens":13}}',
+    '',
+    'event: message_stop',
+    'data: {"type":"message_stop"}',
+    '',
+    ''
+  ].join('\n');
 }
 
 describe('provider response Rust native plan', () => {
@@ -160,6 +199,45 @@ describe('provider response Rust native plan', () => {
     expect(bodyText).toContain('stop_message_flow');
   });
 
+  it('projects stopless CLI command for captured mimo Anthropic SSE stop shape', async () => {
+    const suffix = `mimo_sse_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const context: Record<string, unknown> = {
+      requestId: `req_provider_response_mimo_sse_stopless_${suffix}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages',
+      sessionId: `provider-response-mimo-sse-stopless-${suffix}`
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'anthropic-messages',
+      providerResponse: { __sse_responses: Readable.from([buildMimoAnthropicStopSse()]) },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+    });
+
+    expect(result.body?.object).toBe('response');
+    expect(result.body?.status).toBe('requires_action');
+    const bodyText = JSON.stringify(result.body);
+    expect(bodyText).toContain('exec_command');
+    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
+    expect(bodyText).toContain('stop_message_flow');
+    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
+      runtimeEffects: expect.objectContaining({
+        servertoolRuntimeActions: expect.arrayContaining([
+          expect.objectContaining({
+            reason: 'stop_eligible_followup',
+            stopGateway: expect.objectContaining({
+              eligible: true,
+              reason: 'finish_reason_stop'
+            })
+          })
+        ])
+      })
+    }));
+  });
+
   it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
     const suffix = `responses_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const context: Record<string, unknown> = {
@@ -205,7 +283,92 @@ describe('provider response Rust native plan', () => {
     const output = Array.isArray((result.body as any)?.output) ? (result.body as any).output : [];
     const reasoning = output.find((item: any) => item?.type === 'reasoning');
     expect(reasoning).toBeDefined();
-    expect(outputText).toContain('continuationPrompt');
+  });
+
+  it('projects stopless CLI command for relay OpenAI Responses completed stop without session scope', async () => {
+    const suffix = `responses_scope_free_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const context: Record<string, unknown> = {
+      requestId: `req_provider_response_responses_stopless_cli_projection_scope_free_${suffix}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true,
+      capturedEntryRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: {
+        id: 'resp_stopless_cli_projection_scope_free',
+        object: 'response',
+        status: 'completed',
+        model: 'gpt-test',
+        output: [{
+          id: 'msg_stopless_cli_projection_scope_free',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+        }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+    });
+
+    expect(result.body?.object).toBe('response');
+    const outputText = JSON.stringify(result.body);
+    expect(outputText).toContain('exec_command');
+    expect(outputText).toContain('routecodex servertool run stop_message_auto');
+    expect(outputText).toContain('stop_message_flow');
+    expect(outputText).toContain('"status":"requires_action"');
+  });
+
+  it('does not project stopless CLI command for relay OpenAI Responses completed stop when stop message is disabled', async () => {
+    const suffix = `responses_scope_free_disabled_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const context: Record<string, unknown> = {
+      requestId: `req_provider_response_responses_stopless_cli_projection_scope_free_disabled_${suffix}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
+      capturedEntryRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: {
+        id: 'resp_stopless_cli_projection_scope_free_disabled',
+        object: 'response',
+        status: 'completed',
+        model: 'gpt-test',
+        output: [{
+          id: 'msg_stopless_cli_projection_scope_free_disabled',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+        }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+    });
+
+    const outputText = JSON.stringify(result.body);
+    expect(outputText).not.toContain('exec_command');
+    expect(outputText).not.toContain('stop_message_flow');
+    expect((result.body as any)?.status).toBe('completed');
   });
 
   it('streams stopless CLI command for relay OpenAI Responses completed stop', async () => {
