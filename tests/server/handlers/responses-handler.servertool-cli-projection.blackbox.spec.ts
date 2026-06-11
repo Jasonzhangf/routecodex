@@ -100,10 +100,11 @@ describe('servertool CLI projection blackbox', () => {
     expect(match).toBeTruthy();
     const input = JSON.parse(match?.[1] ?? '{}');
     expect(input.flowId).toBe('stop_message_flow');
-    expect(typeof input.continuationPrompt).toBe('string');
-    expect(input.continuationPrompt.length).toBeGreaterThan(20);
-    expect(input.continuationPrompt).toMatch(/继续完成当前用户目标|Stop schema|stop schema|stopreason|最终收尾/);
-    expect(input.continuationPrompt).not.toBe('继续执行原任务');
+    expect(input.continuationPrompt).toBeUndefined();
+    expect(input.schemaGuidance).toBeUndefined();
+    expect(command).not.toMatch(/Stop schema|stop schema|stopreason/);
+    expect(command).not.toContain('continuationPrompt');
+    expect(command).not.toContain('继续执行');
     expect(input.repeatCount).toBeGreaterThanOrEqual(0);
     expect(input.maxRepeats).toBeGreaterThanOrEqual(1);
 
@@ -113,12 +114,11 @@ describe('servertool CLI projection blackbox', () => {
     const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
     expect(reasoning?.summary?.[0]?.type).toBe('summary_text');
     expect(reasoning?.summary?.[0]?.text).toContain('阶段完成');
-    expect(reasoning?.summary?.[0]?.text).not.toContain(input.continuationPrompt);
     expect(reasoning?.content).toBeUndefined();
   });
 
   it('re-projects stop_message_auto on submit_tool_outputs resume when current response stops again', async () => {
-    const validResumeCommand = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行。\",\"repeatCount\":1,\"maxRepeats\":3,\"stdoutPreview\":\"stopless continuation ready\"}'";
+    const validResumeCommand = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_after_cli_result',
@@ -270,7 +270,7 @@ describe('servertool CLI projection blackbox', () => {
               call_id: 'call_servertool_cli_stop_legacy_1',
               name: 'exec_command',
               arguments: JSON.stringify({
-                cmd: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"stdoutPreview\":\"stopless continuation ready\"}'"
+                cmd: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'"
               })
             },
             {

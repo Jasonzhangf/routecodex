@@ -12,8 +12,7 @@ describe('servertool CLI native bridge', () => {
         continuationPrompt: '继续执行原任务',
         repeatCount: 1,
         maxRepeats: 3
-      },
-      stdoutPreview: 'continue'
+      }
     });
 
     expect(nativeProjection).toMatchObject({
@@ -23,6 +22,10 @@ describe('servertool CLI native bridge', () => {
       maxRepeats: 3
     });
     expect(nativeProjection.execCommand).toContain('routecodex servertool run stop_message_auto');
+    expect(nativeProjection.execCommand).not.toContain('continuationPrompt');
+    expect(nativeProjection.execCommand).not.toContain('继续执行原任务');
+    expect(nativeProjection.execCommand).not.toContain('stdoutPreview');
+    expect(nativeProjection.execCommand).not.toContain('schemaGuidance');
     expect(nativeProjection.execCommand).not.toContain(['--', 'ticket'].join(''));
     expect(nativeProjection.execCommand).not.toContain('old_cli_');
 
@@ -59,8 +62,7 @@ describe('servertool CLI native bridge', () => {
         continuationPrompt: '继续执行原任务',
         repeatCount: 1,
         maxRepeats: 3
-      },
-      stdoutPreview: 'continue'
+      }
     }));
     expect(typeof rawProjection).toBe('string');
 

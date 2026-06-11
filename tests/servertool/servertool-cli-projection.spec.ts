@@ -12,11 +12,9 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
       return {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续执行原任务\",\"repeatCount\":2,\"maxRepeats\":3,\"stdoutPreview\":\"continue\"}'",
-        continuationPrompt: '继续执行原任务',
+        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}'",
         repeatCount: 2,
         maxRepeats: 3,
-        schemaGuidance: { requiredFields: ['stopreason'] },
       };
     }
     if (input.toolName === 'servertool_fixture' && input.input?.value === "can't stop") {
@@ -121,11 +119,13 @@ describe('servertool CLI projection', () => {
     const inputJson = command.match(/--input-json '(.+)'$/)?.[1];
     expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
       flowId: 'stop_message_flow',
-      continuationPrompt: '继续执行原任务',
       repeatCount: 2,
-      maxRepeats: 3,
-      stdoutPreview: 'continue'
+      maxRepeats: 3
     });
+    expect(command).not.toContain('continuationPrompt');
+    expect(command).not.toContain('继续执行原任务');
+    expect(command).not.toContain('stdoutPreview');
+    expect(command).not.toContain('schemaGuidance');
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));

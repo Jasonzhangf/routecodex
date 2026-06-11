@@ -36,6 +36,8 @@ describe('servertool CLI result restoration removal', () => {
     expect((payload.tool_outputs[0] as any).name).toBeUndefined();
     expect(payload.tool_outputs[0].output).not.toContain('"metadata"');
     expect(payload.tool_outputs[0].output).not.toContain('"__rt"');
+    expect(payload.tool_outputs[0].output).not.toContain('continuationPrompt');
+    expect(payload.tool_outputs[0].output).not.toContain('继续执行原任务');
     expect(payload.tool_outputs[0].output).not.toContain('"ticket"');
     expect(payload.tool_outputs[0].output).not.toContain('old_cli_');
     expect(payload.tool_outputs[0].output).not.toContain('old_cli_result_');

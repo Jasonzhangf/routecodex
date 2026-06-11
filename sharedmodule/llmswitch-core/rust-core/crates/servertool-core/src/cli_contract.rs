@@ -179,7 +179,6 @@ fn build_stop_message_auto_run_output(
     if flow_id != "stop_message_flow" {
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
-    let continuation_prompt = read_non_empty_string(&input.input, "continuationPrompt")?;
     let repeat_count = input
         .repeat_count
         .or_else(|| read_u32(&input.input, "repeatCount"))
@@ -191,8 +190,11 @@ fn build_stop_message_auto_run_output(
     if max_repeats == 0 || repeat_count > max_repeats {
         return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
     }
-    let injected_prompt_preview = read_optional_non_empty_string(&input.input, "stdoutPreview")
-        .unwrap_or_else(|| truncate_preview(&continuation_prompt, 160));
+    let canonical_input = serde_json::json!({
+        "flowId": flow_id,
+        "repeatCount": repeat_count,
+        "maxRepeats": max_repeats
+    });
     Ok(ServertoolCliRunOutput {
         ok: true,
         kind: "stop_message_auto".to_string(),
@@ -200,12 +202,12 @@ fn build_stop_message_auto_run_output(
         summary: "stopless continuation ready".to_string(),
         tool_name: input.tool_name,
         flow_id,
-        continuation_prompt: continuation_prompt.clone(),
+        continuation_prompt: String::new(),
         repeat_count,
         max_repeats,
-        schema_guidance: Some(stopless_schema_guidance()),
-        injected_prompt_preview: Some(injected_prompt_preview),
-        input: input.input,
+        schema_guidance: None,
+        injected_prompt_preview: None,
+        input: canonical_input,
     })
 }
 
@@ -348,10 +350,6 @@ fn validate_no_denied_cli_marker(raw: &str) -> Result<(), ServertoolCliError> {
     Ok(())
 }
 
-fn truncate_preview(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
-}
-
 pub fn build_client_exec_cli_projection_output(
     tool_name: &str,
     flow_id: &str,
@@ -381,13 +379,8 @@ pub fn build_client_exec_cli_projection_output(
         if flow_id != "stop_message_flow" {
             return Err(ServertoolCliError::InvalidField("flowId"));
         }
-        let continuation_prompt = read_non_empty_string(&input, "continuationPrompt")?;
         let mut input_payload = Map::new();
         input_payload.insert("flowId".to_string(), Value::String(flow_id.to_string()));
-        input_payload.insert(
-            "continuationPrompt".to_string(),
-            Value::String(continuation_prompt.clone()),
-        );
         input_payload.insert(
             "repeatCount".to_string(),
             Value::Number(serde_json::Number::from(repeat_count)),
@@ -396,9 +389,6 @@ pub fn build_client_exec_cli_projection_output(
             "maxRepeats".to_string(),
             Value::Number(serde_json::Number::from(max_repeats)),
         );
-        if let Some(stdout_preview) = read_optional_non_empty_string(&input, "stdoutPreview") {
-            input_payload.insert("stdoutPreview".to_string(), Value::String(stdout_preview));
-        }
         let input_json = serde_json::to_string(&Value::Object(input_payload))
             .map_err(|_| ServertoolCliError::InvalidField("json"))?;
         let cmd = format!(
@@ -410,10 +400,8 @@ pub fn build_client_exec_cli_projection_output(
         return Ok(serde_json::json!({
             "toolName": tool_name,
             "flowId": flow_id,
-            "continuationPrompt": continuation_prompt,
             "repeatCount": repeat_count,
             "maxRepeats": max_repeats,
-            "schemaGuidance": stopless_schema_guidance(),
             "execCommand": cmd
         }));
     }
@@ -474,7 +462,6 @@ pub fn plan_client_exec_cli_projection_output(
     }
 
     if tool_name == "stop_message_auto" {
-        let continuation_prompt = read_non_empty_string(&payload, "continuationPrompt")?;
         let repeat_count = input
             .repeat_count
             .or_else(|| read_u32(&payload, "repeatCount"))
@@ -489,10 +476,6 @@ pub fn plan_client_exec_cli_projection_output(
         let mut canonical = Map::new();
         canonical.insert("flowId".to_string(), Value::String(flow_id.clone()));
         canonical.insert(
-            "continuationPrompt".to_string(),
-            Value::String(continuation_prompt),
-        );
-        canonical.insert(
             "repeatCount".to_string(),
             Value::Number(serde_json::Number::from(repeat_count)),
         );
@@ -500,13 +483,6 @@ pub fn plan_client_exec_cli_projection_output(
             "maxRepeats".to_string(),
             Value::Number(serde_json::Number::from(max_repeats)),
         );
-        if let Some(stdout_preview) = input
-            .stdout_preview
-            .as_deref()
-            .and_then(read_optional_trimmed)
-        {
-            canonical.insert("stdoutPreview".to_string(), Value::String(stdout_preview));
-        }
         return build_client_exec_cli_projection_output(
             &tool_name,
             &flow_id,
@@ -725,7 +701,7 @@ fn read_stop_message_followup_text(execution: &Value) -> String {
             read_optional_string_from_object(decision, "followupText")
                 .or_else(|| read_optional_string_from_object(decision, "followup_text"))
         });
-    if let Some(text) = decision_text {
+    if let Some(text) = decision_text.filter(|text| !looks_like_stop_schema_guidance(text)) {
         return text;
     }
     let ops = execution
@@ -743,12 +719,25 @@ fn read_stop_message_followup_text(execution: &Value) -> String {
             let Some("append_user_text") = record.get("op").and_then(Value::as_str) else {
                 continue;
             };
-            if let Some(text) = read_optional_string_from_object(record, "text") {
+            if let Some(text) = read_optional_string_from_object(record, "text")
+                .filter(|text| !looks_like_stop_schema_guidance(text))
+            {
                 return text;
             }
         }
     }
     "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。".to_string()
+}
+
+fn looks_like_stop_schema_guidance(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && (trimmed.contains("\"stopreason\"")
+            || trimmed.contains("Stop schema")
+            || trimmed.contains("stop schema")
+            || trimmed.contains("第一轮核对")
+            || trimmed.contains("第二轮核对")
+            || trimmed.contains("第三轮最终收尾"))
 }
 
 fn read_stop_message_assistant_stop_text(execution: &Value) -> Option<String> {
@@ -949,7 +938,7 @@ mod tests {
                 tool_name: "stop_message_auto".to_string(),
                 input: json!({
                     "flowId": "stop_message_flow",
-                    "continuationPrompt": "continue with schema",
+                    "continuationPrompt": "continue with full schema",
                     "repeatCount": 1,
                     "maxRepeats": 3
                 }),
@@ -962,23 +951,24 @@ mod tests {
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
         assert_eq!(output.repeat_count, 1);
-        assert!(output
-            .schema_guidance
-            .as_ref()
-            .expect("schema guidance")
-            .required_fields
-            .contains(&"stopreason".to_string()));
+        assert!(output.continuation_prompt.is_empty());
+        assert!(output.schema_guidance.is_none());
+        assert!(output.injected_prompt_preview.is_none());
+        assert_eq!(
+            output.input,
+            json!({
+                "flowId": "stop_message_flow",
+                "repeatCount": 1,
+                "maxRepeats": 3
+            })
+        );
         assert_eq!(output.ok, true);
         assert_eq!(output.kind, "stop_message_auto");
-        assert_eq!(
-            output.injected_prompt_preview.as_deref(),
-            Some("continue with schema")
-        );
     }
 
     #[test]
-    fn missing_continuation_prompt_fails_fast() {
-        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+    fn status_only_stopless_cli_output_does_not_require_prompt() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
                 input: json!({ "repeatCount": 1, "maxRepeats": 3 }),
@@ -987,8 +977,22 @@ mod tests {
                 max_repeats: None,
             },
         )
-        .expect_err("missing prompt must fail");
-        assert_eq!(err, ServertoolCliError::MissingField("continuationPrompt"));
+        .expect("status-only stopless CLI must not require prompt");
+        assert_eq!(output.tool_name, "stop_message_auto");
+        assert_eq!(output.flow_id, "stop_message_flow");
+        assert_eq!(output.repeat_count, 1);
+        assert_eq!(output.max_repeats, 3);
+        assert!(output.continuation_prompt.is_empty());
+        assert!(output.schema_guidance.is_none());
+        assert!(output.injected_prompt_preview.is_none());
+        assert_eq!(
+            output.input,
+            json!({
+                "flowId": "stop_message_flow",
+                "repeatCount": 1,
+                "maxRepeats": 3
+            })
+        );
     }
 
     #[test]
@@ -1107,7 +1111,7 @@ mod tests {
             tool_name: None,
             flow_id: Some("stop_message_flow".to_string()),
             input: Some(json!({
-                "continuationPrompt": "continue",
+                "continuationPrompt": "第一轮核对：补齐 stop schema",
                 "repeatCount": 2,
                 "maxRepeats": 5
             })),
@@ -1120,10 +1124,14 @@ mod tests {
         assert_eq!(out["flowId"], "stop_message_flow");
         assert_eq!(out["repeatCount"], 2);
         assert_eq!(out["maxRepeats"], 5);
-        assert_eq!(out["schemaGuidance"]["stopreasonValues"]["finished"], 0);
+        assert!(out.get("continuationPrompt").is_none());
+        assert!(out.get("schemaGuidance").is_none());
         let cmd = out["execCommand"].as_str().unwrap();
         assert!(cmd.contains("routecodex servertool run"));
-        assert!(cmd.contains("stdoutPreview"));
+        assert!(!cmd.contains("continuationPrompt"));
+        assert!(!cmd.contains("第一轮核对"));
+        assert!(!cmd.contains("stdoutPreview"));
+        assert!(!cmd.contains("schemaGuidance"));
         assert!(!cmd.contains("stcli_"), "no old stcli_ marker");
         assert!(!cmd.contains("rcc_cli_"), "no old rcc_cli_ marker");
         assert!(!cmd.contains("--ticket"), "no --ticket marker");
@@ -1136,7 +1144,6 @@ mod tests {
                 tool_name: Some("servertool_fixture".to_string()),
                 flow_id: Some("stop_message_flow".to_string()),
                 input: Some(json!({
-                    "continuationPrompt": "continue",
                     "repeatCount": 1,
                     "maxRepeats": 3
                 })),
@@ -1155,7 +1162,7 @@ mod tests {
                 tool_name: None,
                 flow_id: Some("stop_message_flow".to_string()),
                 input: Some(json!({
-                    "continuationPrompt": "continue",
+                    "continuationPrompt": "continue with full schema",
                     "repeatCount": 4,
                     "maxRepeats": 3
                 })),
@@ -1227,10 +1234,24 @@ mod tests {
             stdout_preview: None,
         })
         .expect("projection output");
+        let command = out["execCommand"].as_str().expect("exec command");
+        assert!(command.starts_with("routecodex servertool run stop_message_auto --input-json '"));
+        let input_json = command
+            .strip_prefix("routecodex servertool run stop_message_auto --input-json '")
+            .and_then(|value| value.strip_suffix('\''))
+            .expect("quoted input");
+        let decoded = input_json.replace("'\\''", "'");
+        let parsed: Value = serde_json::from_str(&decoded).expect("quoted json");
         assert_eq!(
-            out["execCommand"],
-            "routecodex servertool run stop_message_auto --input-json '{\"continuationPrompt\":\"can'\\''t stop\",\"flowId\":\"stop_message_flow\",\"maxRepeats\":5,\"repeatCount\":2}'"
+            parsed,
+            json!({
+                "flowId": "stop_message_flow",
+                "repeatCount": 2,
+                "maxRepeats": 5
+            })
         );
+        assert!(!command.contains("continuationPrompt"));
+        assert!(!command.contains("can't stop"));
     }
 
     #[test]
@@ -1238,7 +1259,7 @@ mod tests {
         let native_projection = build_client_exec_cli_projection_output(
             "stop_message_auto",
             "stop_message_flow",
-            json!({"continuationPrompt":"continue","repeatCount":2,"maxRepeats":5}),
+            json!({"repeatCount":2,"maxRepeats":5}),
             2,
             5,
         )
@@ -1519,7 +1540,10 @@ mod tests {
             },
         )
         .expect_err("repeat budget must fail fast");
-        assert_eq!(repeat_err.to_string(), "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats");
+        assert_eq!(
+            repeat_err.to_string(),
+            "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats"
+        );
 
         let flow_err = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
@@ -1694,6 +1718,31 @@ mod tests {
         assert_eq!(seed.reasoning_text, "assistant from chat");
         assert_eq!(seed.repeat_count, 1);
         assert_eq!(seed.max_repeats, 3);
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_ignores_schema_guidance_followup_text() {
+        let seed = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "decision": {
+                        "followupText": "第一轮核对：补齐 stop schema。{\"stopreason\":2}"
+                    },
+                    "serverToolLoopState": {
+                        "repeatCount": 1,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            final_chat_response: json!({
+                "choices": [{ "message": { "content": "阶段完成，但还需继续执行。" } }]
+            }),
+        })
+        .expect("seed");
+        assert!(seed.continuation_prompt.contains("继续执行"));
+        assert!(!seed.continuation_prompt.contains("stopreason"));
+        assert!(!seed.continuation_prompt.contains("第一轮核对"));
     }
 
     #[test]
