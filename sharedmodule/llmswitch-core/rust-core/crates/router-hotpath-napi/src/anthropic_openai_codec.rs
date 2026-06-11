@@ -1204,6 +1204,7 @@ fn convert_anthropic_messages(
 #[cfg(test)]
 mod tests {
     use super::{build_anthropic_from_openai_chat_json, build_openai_chat_from_anthropic_json};
+    use crate::responses_openai_codec::run_responses_openai_request_codec_json;
     use serde_json::{json, Value};
 
     #[test]
@@ -1318,6 +1319,66 @@ mod tests {
             tool_calls[0]["function"]["arguments"].as_str(),
             Some("{\"cmd\":\"pwd\"}")
         );
+    }
+
+    #[test]
+    fn build_openai_chat_from_anthropic_preserves_parallel_tool_pair_order() {
+        let payload = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_parallel_1",
+                            "name": "exec_command",
+                            "input": { "cmd": "pwd" }
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "call_parallel_2",
+                            "name": "exec_command",
+                            "input": { "cmd": "ls" }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_parallel_1",
+                            "content": "/tmp"
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_parallel_2",
+                            "content": "file-a"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_openai_chat_from_anthropic_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["request"]["messages"]
+            .as_array()
+            .expect("messages array");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(messages[0]["tool_calls"][0]["id"], json!("call_parallel_1"));
+        assert_eq!(messages[0]["tool_calls"][1]["id"], json!("call_parallel_2"));
+        assert_eq!(messages[1]["role"], json!("tool"));
+        assert_eq!(messages[1]["tool_call_id"], json!("call_parallel_1"));
+        assert_eq!(messages[1]["content"], json!("/tmp"));
+        assert_eq!(messages[2]["role"], json!("tool"));
+        assert_eq!(messages[2]["tool_call_id"], json!("call_parallel_2"));
+        assert_eq!(messages[2]["content"], json!("file-a"));
     }
 
     #[test]
@@ -1447,6 +1508,88 @@ mod tests {
         assert_eq!(messages[2]["role"].as_str(), Some("user"));
         assert_eq!(messages[2]["content"].as_array().unwrap().len(), 1);
         assert_eq!(messages[2]["content"][0]["type"].as_str(), Some("text"));
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_splits_parallel_tool_pairs_before_followup_user_turn() {
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                { "role": "user", "content": "start" },
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_parallel_1",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        },
+                        {
+                            "id": "call_parallel_2",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"ls\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_parallel_1",
+                    "content": "/tmp"
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_parallel_2",
+                    "content": "file-a"
+                },
+                {
+                    "role": "user",
+                    "content": [{ "type": "text", "text": "继续" }]
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[0]["role"], json!("user"));
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(messages[1]["content"][0]["id"], json!("call_parallel_1"));
+        assert_eq!(messages[2]["role"], json!("user"));
+        assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(
+            messages[2]["content"][0]["tool_use_id"],
+            json!("call_parallel_1")
+        );
+        assert_eq!(messages[3]["role"], json!("assistant"));
+        assert_eq!(messages[3]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(messages[3]["content"][0]["id"], json!("call_parallel_2"));
+        assert_eq!(messages[4]["role"], json!("user"));
+        assert_eq!(messages[4]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(
+            messages[4]["content"][0]["tool_use_id"],
+            json!("call_parallel_2")
+        );
     }
 
     #[test]
@@ -1705,6 +1848,71 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("[Image omitted]"));
+    }
+
+    #[test]
+    fn responses_to_anthropic_chain_preserves_image_turn_after_tool_result() {
+        let responses_raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "router-gpt-5.5",
+                "previous_response_id": "resp_prev_image_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_image_1",
+                        "call_id": "call_image_1",
+                        "name": "probe_tool",
+                        "arguments": "{\"query\":\"routecodex_probe\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_image_1",
+                        "call_id": "call_image_1",
+                        "output": "TOOL_RESULT_ROUTE_CODEX_OK"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_image", "image_url": "data:image/png;base64,AAA" },
+                            { "type": "input_text", "text": "看看这张图" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "probe_tool",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_to_anthropic_image_turn" }).to_string()),
+        )
+        .expect("responses build success");
+        let openai_chat: Value = serde_json::from_str(&responses_raw).expect("responses json");
+
+        let anthropic_raw =
+            build_anthropic_from_openai_chat_json(openai_chat["request"].to_string(), None)
+                .expect("anthropic build success");
+        let anthropic: Value = serde_json::from_str(&anthropic_raw).expect("anthropic json");
+        let messages = anthropic["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(messages[0]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(messages[1]["role"], json!("user"));
+        assert_eq!(messages[1]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(
+            messages[1]["content"][0]["tool_use_id"],
+            json!("call_image_1")
+        );
+        assert_eq!(messages[2]["role"], json!("user"));
+        assert_eq!(messages[2]["content"][0]["type"], json!("image"));
+        assert_eq!(messages[2]["content"][1]["type"], json!("text"));
+        assert_eq!(messages[2]["content"][1]["text"], json!("看看这张图"));
     }
 
     #[test]
