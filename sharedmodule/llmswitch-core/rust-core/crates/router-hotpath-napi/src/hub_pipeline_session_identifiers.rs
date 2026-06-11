@@ -266,5 +266,4 @@ mod tests {
         assert_eq!(result.session_id.as_deref(), Some("sess-norm"));
         assert_eq!(result.conversation_id.as_deref(), Some("conv-norm"));
     }
-
 }

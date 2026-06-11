@@ -419,5 +419,4 @@ mod tests {
         assert_eq!(result.request["model"], "kimi-k2.5");
         assert_eq!(result.request["metadata"]["assignedModelId"], "kimi-k2.5");
     }
-
 }

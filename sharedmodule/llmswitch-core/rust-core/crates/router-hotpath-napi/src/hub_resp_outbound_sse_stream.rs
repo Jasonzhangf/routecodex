@@ -41,9 +41,7 @@ fn normalize_sse_stream_protocol(value: &str) -> Result<Option<String>, String> 
     Ok(match normalized.as_str() {
         "openai-chat" | "openai" | "chat" => Some("openai-chat".to_string()),
         "responses" | "openai-responses" => Some("openai-responses".to_string()),
-        "anthropic-messages" | "anthropic" | "messages" => {
-            Some("anthropic-messages".to_string())
-        }
+        "anthropic-messages" | "anthropic" | "messages" => Some("anthropic-messages".to_string()),
         "gemini-chat" | "gemini" | "google-gemini" => Some("gemini-chat".to_string()),
         _ => None,
     })

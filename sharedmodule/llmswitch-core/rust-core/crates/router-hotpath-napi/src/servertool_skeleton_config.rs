@@ -827,9 +827,8 @@ mod tests {
 
     #[test]
     fn apply_patch_followup_profile_is_gone() {
-        let profile = resolve_servertool_followup_flow_profile(
-            "apply_patch_read_before_retry_guard",
-        );
+        let profile =
+            resolve_servertool_followup_flow_profile("apply_patch_read_before_retry_guard");
         assert_eq!(profile, Value::Null);
     }
 
