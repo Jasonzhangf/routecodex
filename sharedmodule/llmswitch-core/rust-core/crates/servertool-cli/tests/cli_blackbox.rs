@@ -39,7 +39,7 @@ fn stop_message_auto_outputs_rust_owned_schema() {
             "run",
             "stop_message_auto",
             "--input-json",
-            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue with schema","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue with full schema","repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
@@ -55,11 +55,10 @@ fn stop_message_auto_outputs_rust_owned_schema() {
     assert_eq!(value["tool"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
     assert_eq!(value["summary"], "stopless continuation ready");
-    assert_eq!(
-        value["schemaGuidance"]["stopreasonValues"]["continueNeeded"],
-        2
-    );
-    assert_eq!(value["injectedPromptPreview"], "continue with schema");
+    assert!(value.get("continuationPrompt").is_none());
+    assert!(value.get("schemaGuidance").is_none());
+    assert!(value.get("injectedPromptPreview").is_none());
+    assert!(value["input"].get("continuationPrompt").is_none());
     assert_no_internal_or_restoration_carrier(&value);
 }
 
@@ -74,7 +73,7 @@ fn stop_message_auto_explicit_repeat_args_override_input_json() {
             "--max-repeats",
             "5",
             "--input-json",
-            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue from explicit args","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
@@ -86,13 +85,13 @@ fn stop_message_auto_explicit_repeat_args_override_input_json() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["repeatCount"], 2);
     assert_eq!(value["maxRepeats"], 5);
-    assert_eq!(value["input"]["repeatCount"], 1);
-    assert_eq!(value["input"]["maxRepeats"], 3);
+    assert_eq!(value["input"]["repeatCount"], 2);
+    assert_eq!(value["input"]["maxRepeats"], 5);
     assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
-fn missing_continuation_prompt_fails_fast() {
+fn missing_continuation_prompt_still_succeeds_status_only() {
     let output = Command::new(bin())
         .args([
             "run",
@@ -104,9 +103,12 @@ fn missing_continuation_prompt_fails_fast() {
         ])
         .output()
         .expect("run routecodex-servertool");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("SERVERTOOL_CLI_MISSING_FIELD: continuationPrompt"));
+    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["toolName"], "stop_message_auto");
+    assert_eq!(value["flowId"], "stop_message_flow");
+    assert!(value.get("continuationPrompt").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -118,7 +120,7 @@ fn invalid_stop_message_flow_id_fails_fast() {
             "--flow",
             "not_stop_message_flow",
             "--input-json",
-            r#"{"continuationPrompt":"continue","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
@@ -136,7 +138,7 @@ fn explicit_flow_arg_overrides_input_json_flow_id() {
             "--flow",
             "stop_message_flow",
             "--input-json",
-            r#"{"flowId":"wrong_flow","continuationPrompt":"continue from explicit flow","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"flowId":"wrong_flow","repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
@@ -147,15 +149,15 @@ fn explicit_flow_arg_overrides_input_json_flow_id() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["flowId"], "stop_message_flow");
-    assert_eq!(value["input"]["flowId"], "wrong_flow");
+    assert_eq!(value["input"]["flowId"], "stop_message_flow");
     assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
 fn invalid_stop_message_repeat_budget_fails_fast() {
     for input_json in [
-        r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":1,"maxRepeats":0}"#,
-        r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":4,"maxRepeats":3}"#,
+        r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":0}"#,
+        r#"{"flowId":"stop_message_flow","repeatCount":4,"maxRepeats":3}"#,
     ] {
         let output = Command::new(bin())
             .args(["run", "stop_message_auto", "--input-json", input_json])
@@ -181,7 +183,7 @@ fn invalid_explicit_repeat_args_fail_fast() {
             "--max-repeats",
             "3",
             "--input-json",
-            r#"{"flowId":"stop_message_flow","continuationPrompt":"continue","repeatCount":1,"maxRepeats":3}"#,
+            r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
