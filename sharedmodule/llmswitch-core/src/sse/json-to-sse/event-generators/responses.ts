@@ -207,7 +207,12 @@ function createResponsePayload(
   return payload;
 }
 
-function normalizeUsage(usage: any): { input_tokens: number; output_tokens: number; total_tokens: number } {
+function normalizeUsage(usage: any): {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  input_tokens_details?: { cached_tokens?: number };
+} {
   const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
   if (!usage || typeof usage !== 'object') {
     return fallback;
@@ -215,24 +220,33 @@ function normalizeUsage(usage: any): { input_tokens: number; output_tokens: numb
 
   const asAny = usage as Record<string, unknown>;
   const baseInputRaw = Number((asAny.input_tokens ?? asAny.prompt_tokens) as number);
-  const baseInput = Number.isFinite(baseInputRaw) ? baseInputRaw : 0;
+  const input = Number.isFinite(baseInputRaw) ? baseInputRaw : 0;
   let cachedRaw = Number(asAny.cache_read_input_tokens as number);
   if (!Number.isFinite(cachedRaw) && asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object') {
     const details = asAny.input_tokens_details as Record<string, unknown>;
     cachedRaw = Number(details.cached_tokens as number);
   }
-  const cached = Number.isFinite(cachedRaw) ? cachedRaw : 0;
-  const input = baseInput + cached;
   const outputRaw = Number((asAny.output_tokens ?? asAny.completion_tokens) as number);
   const output = Number.isFinite(outputRaw) ? outputRaw : 0;
   const totalRaw = Number(asAny.total_tokens as number);
   const total = Number.isFinite(totalRaw) ? totalRaw : input + output;
 
-  return {
+  const normalized: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    input_tokens_details?: { cached_tokens?: number };
+  } = {
     input_tokens: input,
     output_tokens: output,
     total_tokens: total
   };
+
+  if (Number.isFinite(cachedRaw)) {
+    normalized.input_tokens_details = { cached_tokens: cachedRaw };
+  }
+
+  return normalized;
 }
 
 // 生成器配置
