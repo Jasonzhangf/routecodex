@@ -146,9 +146,9 @@ function dedupePaths(paths: string[]): string[] {
 function getModuleRelativeNativeCandidates(): string[] {
   const loaderDir = path.dirname(loaderModulePath);
   return dedupePaths([
+    path.resolve(loaderDir, "../router_hotpath_napi.node"),
     path.resolve(loaderDir, "../../../rust-core/target/release/router_hotpath_napi.node"),
     path.resolve(loaderDir, "../../../rust-core/target/debug/router_hotpath_napi.node"),
-    path.resolve(loaderDir, "../router_hotpath_napi.node"),
   ]);
 }
 
@@ -187,9 +187,9 @@ export function loadNativeRouterHotpathBinding(): NativeRouterHotpathBinding | n
   }
 
   for (const candidate of [
+    ...getPackagedNativeCandidates(),
     ...getModuleRelativeNativeCandidates(),
     ...getWorkspaceNativeCandidates(),
-    ...getPackagedNativeCandidates(),
   ]) {
     const loaded = tryRequireFromPath(candidate);
     if (loaded) {

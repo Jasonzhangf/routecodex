@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const rustRoot = path.join(projectRoot, 'rust-core');
 const cargoManifest = path.join(rustRoot, 'Cargo.toml');
-const targetRelease = path.join(rustRoot, 'target', 'release');
+const cargoTargetRoot = resolveCargoTargetRoot();
+const targetRelease = path.join(cargoTargetRoot, 'release');
 const distNativeDir = path.join(projectRoot, 'dist', 'native');
 const distBinDir = path.join(projectRoot, 'dist', 'bin');
 const packagedNodeTarget = path.join(distNativeDir, 'router_hotpath_napi.node');
@@ -35,6 +36,14 @@ function readBoolEnv(name) {
     .trim()
     .toLowerCase();
   return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
+function resolveCargoTargetRoot() {
+  const configured = String(process.env.CARGO_TARGET_DIR || '').trim();
+  if (!configured) {
+    return path.join(rustRoot, 'target');
+  }
+  return path.isAbsolute(configured) ? configured : path.resolve(rustRoot, configured);
 }
 
 function resolveCargoBinary() {
