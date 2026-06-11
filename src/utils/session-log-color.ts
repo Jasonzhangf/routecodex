@@ -1,7 +1,7 @@
 import {
   resolveSessionColor,
   resolveSessionLogColorKey as resolveSharedSessionLogColorKey
-} from 'rcc-llmswitch-core/v2/runtime/virtual-router-hit-log';
+} from '../../sharedmodule/llmswitch-core/dist/runtime/virtual-router-hit-log.js';
 
 function normalizeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
