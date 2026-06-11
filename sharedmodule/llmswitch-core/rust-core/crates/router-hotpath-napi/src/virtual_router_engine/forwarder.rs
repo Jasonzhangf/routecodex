@@ -225,6 +225,7 @@ impl ForwarderRegistry {
         forwarder_id: &str,
         load_balancer: &mut RouteLoadBalancer,
         availability_check: impl Fn(&str) -> bool,
+        target_check: impl Fn(&str) -> bool,
         session_id: Option<&str>,
     ) -> Result<String, String> {
         let entry = self
@@ -238,7 +239,7 @@ impl ForwarderRegistry {
             if let Some(sid) = session_id {
                 let key = (sid.to_string(), forwarder_id.to_string());
                 if let Some(pinned) = self.sticky_sessions.get(&key) {
-                    if availability_check(pinned) {
+                    if availability_check(pinned) && target_check(pinned) {
                         return Ok(pinned.clone());
                     }
                     // pinned 不再可用，删除 sticky
@@ -251,14 +252,40 @@ impl ForwarderRegistry {
         let enabled_targets: Vec<String> = entry
             .targets
             .iter()
-            .filter(|t| !t.disabled)
+            .filter(|t| !t.disabled && target_check(&t.provider_key))
             .map(|t| t.provider_key.clone())
             .collect();
         if enabled_targets.is_empty() {
             return Err(ERR_FORWARDER_NO_AVAILABLE_TARGET.to_string());
         }
 
-        // 3. RouteLoadBalancer::select 复用（weighted/priority/round-robin）
+        // 3. priority is strict ordered failover: lowest priority number wins.
+        if entry.strategy == ForwarderStrategy::Priority {
+            let selected = entry
+                .targets
+                .iter()
+                .filter(|target| enabled_targets.contains(&target.provider_key))
+                .filter(|target| availability_check(&target.provider_key))
+                .min_by(|left, right| {
+                    left.priority
+                        .unwrap_or(i64::MAX)
+                        .cmp(&right.priority.unwrap_or(i64::MAX))
+                })
+                .map(|target| target.provider_key.clone())
+                .ok_or_else(|| ERR_FORWARDER_NO_AVAILABLE_TARGET.to_string())?;
+
+            if entry.sticky_key == StickyKey::Session {
+                if let Some(sid) = session_id {
+                    self.sticky_sessions.insert(
+                        (sid.to_string(), forwarder_id.to_string()),
+                        selected.clone(),
+                    );
+                }
+            }
+            return Ok(selected);
+        }
+
+        // 4. RouteLoadBalancer::select 复用（weighted/round-robin）
         let strategy_override = match entry.strategy {
             ForwarderStrategy::Weighted => Some("weighted"),
             ForwarderStrategy::RoundRobin => Some("round-robin"),
@@ -278,7 +305,7 @@ impl ForwarderRegistry {
             )
             .ok_or_else(|| ERR_FORWARDER_NO_AVAILABLE_TARGET.to_string())?;
 
-        // 4. sticky 写回
+        // 5. sticky 写回
         if entry.sticky_key == StickyKey::Session {
             if let Some(sid) = session_id {
                 self.sticky_sessions.insert(
@@ -532,7 +559,7 @@ mod tests {
         let providers = make_providers();
         reg.load(&fwd, &providers).expect("load");
         let mut lb = RouteLoadBalancer::new(None);
-        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, None);
+        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, |_| true, None);
         assert!(result.is_ok());
         let key = result.unwrap();
         // 必须是 real provider_key，不含 fwd. 前缀
@@ -558,7 +585,7 @@ mod tests {
         let providers = make_providers();
         reg.load(&fwd, &providers).expect("load");
         let mut lb = RouteLoadBalancer::new(None);
-        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, None);
+        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, |_| true, None);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ERR_FORWARDER_NO_AVAILABLE_TARGET);
     }
@@ -586,6 +613,7 @@ mod tests {
             "fwd.openai.gpt-4o",
             &mut lb,
             |k| k == "openai-prod-1.key1",
+            |_| true,
             None,
         );
         assert!(result.is_ok());
@@ -614,7 +642,7 @@ mod tests {
         let mut counts: HashMap<String, i64> = HashMap::new();
         for _ in 0..30 {
             let key = reg
-                .select("fwd.openai.gpt-4o", &mut lb, |_| true, None)
+                .select("fwd.openai.gpt-4o", &mut lb, |_| true, |_| true, None)
                 .unwrap();
             *counts.entry(key).or_insert(0) += 1;
         }
@@ -648,10 +676,82 @@ mod tests {
         let providers = make_providers();
         reg.load(&fwd, &providers).expect("load");
         let mut lb = RouteLoadBalancer::new(None);
-        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, None);
+        let result = reg.select("fwd.openai.gpt-4o", &mut lb, |_| true, |_| true, None);
         assert!(result.is_ok());
         // priority 1 最低，最高优先级
         assert_eq!(result.unwrap(), "openai-prod-2.key1");
+    }
+
+    #[test]
+    fn select_priority_does_not_weight_round_robin_to_lower_priority() {
+        let mut reg = ForwarderRegistry::new();
+        let mut fwd = serde_json::Map::new();
+        let (id, value) = make_entry(
+            "fwd.paid.gpt-5.5",
+            "openai",
+            "gpt-5.5",
+            ForwarderStrategy::Priority,
+            vec![
+                ("asxs.crsa.gpt-5.5", None, Some(1), false),
+                ("1token.key1.gpt-5.5", None, Some(2), false),
+                ("cc.key1.gpt-5.5", None, Some(3), false),
+            ],
+        );
+        fwd.insert(id, value);
+        let providers: HashSet<String> = [
+            "asxs.crsa.gpt-5.5".to_string(),
+            "1token.key1.gpt-5.5".to_string(),
+            "cc.key1.gpt-5.5".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        reg.load(&fwd, &providers).expect("load");
+        let mut lb = RouteLoadBalancer::new(None);
+
+        for _ in 0..8 {
+            let selected = reg
+                .select("fwd.paid.gpt-5.5", &mut lb, |_| true, |_| true, None)
+                .expect("select");
+            assert_eq!(selected, "asxs.crsa.gpt-5.5");
+        }
+    }
+
+    #[test]
+    fn select_priority_uses_next_target_only_when_primary_unavailable() {
+        let mut reg = ForwarderRegistry::new();
+        let mut fwd = serde_json::Map::new();
+        let (id, value) = make_entry(
+            "fwd.paid.gpt-5.5",
+            "openai",
+            "gpt-5.5",
+            ForwarderStrategy::Priority,
+            vec![
+                ("asxs.crsa.gpt-5.5", None, Some(1), false),
+                ("1token.key1.gpt-5.5", None, Some(2), false),
+                ("cc.key1.gpt-5.5", None, Some(3), false),
+            ],
+        );
+        fwd.insert(id, value);
+        let providers: HashSet<String> = [
+            "asxs.crsa.gpt-5.5".to_string(),
+            "1token.key1.gpt-5.5".to_string(),
+            "cc.key1.gpt-5.5".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        reg.load(&fwd, &providers).expect("load");
+        let mut lb = RouteLoadBalancer::new(None);
+
+        let selected = reg
+            .select(
+                "fwd.paid.gpt-5.5",
+                &mut lb,
+                |key| key != "asxs.crsa.gpt-5.5",
+                |_| true,
+                None,
+            )
+            .expect("select");
+        assert_eq!(selected, "1token.key1.gpt-5.5");
     }
 
     #[test]
@@ -675,18 +775,36 @@ mod tests {
         reg.load(&fwd, &providers).expect("load");
         let mut lb = RouteLoadBalancer::new(None);
         let first = reg
-            .select("fwd.openai.gpt-4o", &mut lb, |_| true, Some("session-A"))
+            .select(
+                "fwd.openai.gpt-4o",
+                &mut lb,
+                |_| true,
+                |_| true,
+                Some("session-A"),
+            )
             .unwrap();
         // 同 session 5 次都返回相同 key
         for _ in 0..5 {
             let again = reg
-                .select("fwd.openai.gpt-4o", &mut lb, |_| true, Some("session-A"))
+                .select(
+                    "fwd.openai.gpt-4o",
+                    &mut lb,
+                    |_| true,
+                    |_| true,
+                    Some("session-A"),
+                )
                 .unwrap();
             assert_eq!(again, first);
         }
         // 不同 session 允许不同
         let _ = reg
-            .select("fwd.openai.gpt-4o", &mut lb, |_| true, Some("session-B"))
+            .select(
+                "fwd.openai.gpt-4o",
+                &mut lb,
+                |_| true,
+                |_| true,
+                Some("session-B"),
+            )
             .unwrap();
         assert_eq!(reg.sticky_count(), 2);
     }
@@ -713,7 +831,13 @@ mod tests {
         let mut lb = RouteLoadBalancer::new(None);
         // 第一次：可全选
         let first = reg
-            .select("fwd.openai.gpt-4o", &mut lb, |_| true, Some("session-A"))
+            .select(
+                "fwd.openai.gpt-4o",
+                &mut lb,
+                |_| true,
+                |_| true,
+                Some("session-A"),
+            )
             .unwrap();
         // 第二次：first 已不可用 → 应 fallback
         let next = reg
@@ -721,6 +845,7 @@ mod tests {
                 "fwd.openai.gpt-4o",
                 &mut lb,
                 |k| k != first,
+                |_| true,
                 Some("session-A"),
             )
             .unwrap();

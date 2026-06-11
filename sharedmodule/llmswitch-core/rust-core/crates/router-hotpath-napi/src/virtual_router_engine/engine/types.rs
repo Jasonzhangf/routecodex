@@ -5,6 +5,7 @@ pub(super) struct SelectionResult {
     pub provider_key: String,
     pub route_used: String,
     pub pool: Vec<String>,
+    pub route_pool: Vec<String>,
     pub pool_id: Option<String>,
     pub route_params: Option<Map<String, Value>>,
     pub unavailable_providers: Option<Value>,
@@ -15,12 +16,14 @@ impl SelectionResult {
         provider_key: String,
         route_used: String,
         pool: Vec<String>,
+        route_pool: Vec<String>,
         pool_id: Option<String>,
     ) -> Self {
         Self {
             provider_key,
             route_used,
             pool,
+            route_pool,
             pool_id,
             route_params: None,
             unavailable_providers: None,

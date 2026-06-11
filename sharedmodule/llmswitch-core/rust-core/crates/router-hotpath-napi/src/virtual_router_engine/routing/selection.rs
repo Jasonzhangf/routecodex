@@ -262,6 +262,7 @@ pub(crate) fn select_with_forwarder_resolution(
                 candidate,
                 load_balancer,
                 &availability_check,
+                |_| true,
                 session_id,
             ) {
                 Ok(provider_key) => real.push(provider_key),

@@ -213,6 +213,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
+            state.persisted_503_reprobe_available = false;
             state.state = "healthy".to_string();
             state.cooldown_expires_at = None;
             state.last_failure_at = None;
@@ -287,24 +288,6 @@ impl ProviderHealthManager {
         Some(expiry - now_ms)
     }
 
-    pub(crate) fn is_persisted_503_daily_cooldown_active(
-        &self,
-        provider_key: &str,
-        now_ms: i64,
-    ) -> bool {
-        let canonical = Self::canonicalize_provider_key(provider_key);
-        let Some(state) = self.states.get(&canonical) else {
-            return false;
-        };
-        if state.reason.as_deref() != Some(PERSIST_REASON_HTTP_503_DAILY) {
-            return false;
-        }
-        state
-            .cooldown_expires_at
-            .map(|expiry| expiry > now_ms)
-            .unwrap_or(false)
-    }
-
     pub(crate) fn consume_persisted_503_reprobe_if_available(
         &mut self,
         provider_key: &str,
@@ -336,10 +319,6 @@ impl ProviderHealthManager {
         state.reason = None;
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures = 0;
-        // A persisted cooldown passive reprobe is a single startup chance, not a
-        // fresh three-error series. If that routed request fails again, the next
-        // provider-failure event must immediately return this provider to the
-        // recoverable cooldown ladder so the executor can reroute to backup.
         state.consecutive_recoverable_failures = 0;
         true
     }
@@ -419,6 +398,7 @@ impl ProviderHealthManager {
             state.http_429_cooldown_cycles = 0;
             state.consecutive_recoverable_failures = 0;
             state.recoverable_cooldown_cycles = 0;
+            state.persisted_503_reprobe_available = false;
         }
     }
 
@@ -529,6 +509,7 @@ impl ProviderHealthManager {
         state.consecutive_http_502_failures = 0;
         state.consecutive_http_429_failures += 1;
         state.consecutive_recoverable_failures += 1;
+        state.persisted_503_reprobe_available = false;
         state.last_failure_at = Some(now_ms);
         if let Some(reason) = reason {
             state.reason = Some(reason);

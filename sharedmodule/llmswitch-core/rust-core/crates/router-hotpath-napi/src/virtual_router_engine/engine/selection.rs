@@ -337,6 +337,7 @@ impl VirtualRouterEngineCore {
                         forced_key.clone(),
                         requested_route.to_string(),
                         resolved.keys.clone(),
+                        resolved.keys.clone(),
                         Some("forced".to_string()),
                     ));
                 }
@@ -404,6 +405,7 @@ impl VirtualRouterEngineCore {
                         return Ok(SelectionResult::new(
                             preferred_key,
                             "prefer".to_string(),
+                            ordered_candidates.clone(),
                             ordered_candidates,
                             Some("prefer".to_string()),
                         ));
@@ -545,6 +547,8 @@ impl VirtualRouterEngineCore {
                         &route_name,
                         &pool.id,
                         &pool.targets,
+                        features,
+                        multimodal_route_requested,
                     ) {
                         if !pool_candidate_targets.contains(&resolved_key) {
                             pool_candidate_targets.push(resolved_key);
@@ -636,6 +640,7 @@ impl VirtualRouterEngineCore {
                                     filtered_candidates[0].clone(),
                                     route_name.to_string(),
                                     pool.targets.clone(),
+                                    pool.targets.clone(),
                                     Some(pool.id.clone()),
                                 )
                                 .with_route_params(pool.route_params.clone()),
@@ -702,6 +707,7 @@ impl VirtualRouterEngineCore {
                         key,
                         route_name.to_string(),
                         pool.targets.clone(),
+                        pool.targets.clone(),
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
@@ -714,7 +720,6 @@ impl VirtualRouterEngineCore {
         }
 
         if let Some(selection) = default_floor_selection {
-            self.consume_persisted_503_reprobe_for_selected_provider(&selection.provider_key);
             return Ok(selection.with_unavailable_providers(
                 (!unavailable_route_pools.is_empty())
                     .then_some(Value::Array(unavailable_route_pools)),
@@ -761,6 +766,8 @@ impl VirtualRouterEngineCore {
         route_name: &str,
         pool_id: &str,
         pool_targets: &[String],
+        features: &RoutingFeatures,
+        multimodal_route_requested: bool,
     ) -> Option<String> {
         if !crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(key) {
             return Some(key.to_string());
@@ -806,10 +813,24 @@ impl VirtualRouterEngineCore {
             key,
             &mut self.load_balancer,
             |provider_key: &str| selectable_real_keys.contains(provider_key),
+            |provider_key: &str| {
+                if !multimodal_route_requested {
+                    return true;
+                }
+                if features.has_video_attachment && features.has_remote_video_attachment {
+                    return self
+                        .provider_registry
+                        .has_capability(provider_key, "multimodal");
+                }
+                self.provider_registry
+                    .has_capability(provider_key, "multimodal")
+                    || self
+                        .provider_registry
+                        .has_capability(provider_key, "vision")
+            },
             forwarder_sticky_session_id,
         );
         if let Ok(real) = &selected {
-            self.consume_persisted_503_reprobe_for_selected_provider(real);
         }
         match selected {
             Ok(real) => Some(real),
@@ -1750,6 +1771,99 @@ mod tests {
     }
 
     #[test]
+    fn image_request_skips_text_only_forwarder_target_in_multimodal_route() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "media.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "media.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text", "multimodal"]
+                }
+            }),
+        );
+        providers.insert(
+            "text.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "text.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.gpt.gpt-5.4-mini".to_string(),
+            json!({
+                "forwarderId": "fwd.gpt.gpt-5.4-mini",
+                "protocol": "openai",
+                "modelId": "gpt-5.4-mini",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": "text.key1.gpt-5.4-mini", "priority": 1, "disabled": false },
+                    { "providerKey": "media.key1.gpt-5.4-mini", "priority": 2, "disabled": false }
+                ]
+            }),
+        );
+        let provider_keys = core
+            .provider_registry
+            .list_keys()
+            .into_iter()
+            .collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+        let routing = Map::from_iter([(
+            "multimodal".to_string(),
+            Value::Array(vec![json!({
+                "id": "multimodal-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.gpt.gpt-5.4-mini"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        core.quota_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "default".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["default".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "default",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("image request should skip text-only forwarder target and select media target");
+
+        assert_eq!(selected.provider_key, "media.key1.gpt-5.4-mini");
+        assert_eq!(selected.route_used, "multimodal");
+    }
+
+    #[test]
     fn forwarder_selection_uses_metadata_session_for_sticky() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
@@ -2553,7 +2667,7 @@ mod tests {
 
         assert!(
             selected.is_err(),
-            "runtime active 503 cooldown must stay out of the routing pool until startup import grants a passive reprobe"
+            "runtime active 503 cooldown must stay out of the routing pool while cooldown is active"
         );
     }
 
@@ -3329,4 +3443,6 @@ mod tests {
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
+
+
 }
