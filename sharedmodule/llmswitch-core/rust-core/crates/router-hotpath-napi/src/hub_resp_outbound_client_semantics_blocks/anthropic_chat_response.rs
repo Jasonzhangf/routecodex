@@ -114,6 +114,13 @@ fn normalize_usage(raw: Option<&Value>) -> Option<Value> {
     ])))
 }
 
+fn serialize_tool_input_arguments(input: &Value) -> String {
+    if let Some(raw_arguments) = input.as_str() {
+        return raw_arguments.to_string();
+    }
+    serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string())
+}
+
 pub(crate) fn build_openai_chat_response_from_anthropic_message(
     payload: &Value,
     request_id: &str,
@@ -178,10 +185,7 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
                             ("name".to_string(), Value::String(name)),
                             (
                                 "arguments".to_string(),
-                                Value::String(
-                                    serde_json::to_string(&input)
-                                        .unwrap_or_else(|_| "{}".to_string()),
-                                ),
+                                Value::String(serialize_tool_input_arguments(&input)),
                             ),
                         ])),
                     ),
@@ -638,9 +642,8 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
                 let input = if block.json_delta.is_empty() {
                     block.input.unwrap_or_else(|| Value::Object(Map::new()))
                 } else {
-                    serde_json::from_str::<Value>(block.json_delta.as_str()).map_err(|error| {
-                        format!("Anthropic SSE tool_use input_json_delta is invalid JSON: {error}")
-                    })?
+                    serde_json::from_str::<Value>(block.json_delta.as_str())
+                        .unwrap_or_else(|_| Value::String(block.json_delta.clone()))
                 };
                 content.push(Value::Object(Map::from_iter([
                     ("type".to_string(), Value::String("tool_use".to_string())),
@@ -761,6 +764,35 @@ mod tests {
         assert_eq!(tool_call["id"], "call_1");
         assert_eq!(tool_call["function"]["name"], "exec_command");
         assert_eq!(tool_call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    }
+
+    #[test]
+    fn builds_chat_response_from_anthropic_sse_incomplete_tool_json_as_raw_arguments() {
+        let body_text = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"exec_command\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"cmd\\\":\\\"unzip -l /tmp/app.apk\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({ "mode": "sse", "bodyText": body_text }),
+            "req_sse",
+        )
+        .expect("chat response from incomplete anthropic sse tool args");
+        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+        let tool_call = &output["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(tool_call["id"], "call_1");
+        assert_eq!(tool_call["function"]["name"], "exec_command");
+        assert_eq!(
+            tool_call["function"]["arguments"],
+            "{\"cmd\":\"unzip -l /tmp/app.apk"
+        );
     }
 
     #[test]
