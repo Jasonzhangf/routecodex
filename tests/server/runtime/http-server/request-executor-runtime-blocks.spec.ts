@@ -28,9 +28,9 @@ describe('request-executor-runtime-blocks', () => {
       });
 
       const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
-      expect(lines.some((line) => line.includes('attempt=2/2 -> 4/2'))).toBe(true);
+      expect(lines.some((line) => line.includes('attempt=2/2 -> 2/2'))).toBe(true);
       expect(lines.some((line) => line.includes('3/2'))).toBe(false);
-      expect(lines.some((line) => line.includes('4/2'))).toBe(true);
+      expect(lines.some((line) => line.includes('4/2'))).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
@@ -133,6 +133,52 @@ describe('request-executor-runtime-blocks', () => {
     }, {
       metadata: { __rt: { applyPatch: { mode: 'servertool' } } },
       serverToolsEnabled: true
+    })).toBe(true);
+  });
+
+  test('does not bypass cross-protocol completed responses bodies on /v1/responses when stopless is enabled', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: '阶段完成' }]
+          }
+        ],
+        output_text: '阶段完成'
+      }
+    }, {
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages',
+      serverToolsEnabled: true
+    })).toBe(false);
+  });
+
+  test('still bypasses cross-protocol completed responses bodies on /v1/responses when stopless is disabled', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: '阶段完成' }]
+          }
+        ],
+        output_text: '阶段完成'
+      }
+    }, {
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages',
+      serverToolsEnabled: false
     })).toBe(true);
   });
 });

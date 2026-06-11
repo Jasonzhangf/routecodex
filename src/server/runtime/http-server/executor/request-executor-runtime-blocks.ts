@@ -185,6 +185,9 @@ export function shouldBypassProviderResponseConversion(
       }
     }
   }
+  if (entry.includes('/v1/responses') && options?.serverToolsEnabled !== false) {
+    return false;
+  }
   if (options?.serverToolsEnabled !== false && hasServertoolApplyPatchToolCall(normalized.body, options?.metadata)) {
     return false;
   }
