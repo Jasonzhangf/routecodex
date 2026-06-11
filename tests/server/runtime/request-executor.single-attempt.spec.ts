@@ -1,13 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
+import { createRequire } from 'node:module';
 import { jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../src/server/runtime/handlers/types.js';
 import type { HubPipeline } from '../../../src/server/runtime/http-server/types.js';
-import {
-  HubRequestExecutor,
-  __requestExecutorTestables
-} from '../../../src/server/runtime/http-server/request-executor.js';
 import type { ProviderRuntimeManager } from '../../../src/server/runtime/http-server/runtime-manager.js';
 import type { ProviderHandle } from '../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -16,6 +13,29 @@ import {
   canWriteSnapshotToLocalDisk
 } from '../../../src/utils/snapshot-local-disk-gate.js';
 import { setRuntimeFlag, runtimeFlags } from '../../../src/runtime/runtime-flags.js';
+
+const nodeRequire = createRequire(import.meta.url);
+
+jest.unstable_mockModule(
+  '../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js',
+  () => ({
+    resolveRequestExecutorNativeRetryPolicy: (input: Record<string, unknown>) => {
+      const binding = nodeRequire(
+        path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+      ) as { resolveProviderRetryExecutionPolicyJson?: (inputJson: string) => string };
+      const fn = binding.resolveProviderRetryExecutionPolicyJson;
+      if (typeof fn !== 'function') {
+        throw new Error('resolveProviderRetryExecutionPolicyJson native export missing');
+      }
+      return JSON.parse(fn(JSON.stringify(input)));
+    }
+  })
+);
+
+const {
+  HubRequestExecutor,
+  __requestExecutorTestables
+} = await import('../../../src/server/runtime/http-server/request-executor.js');
 
 function writeStopMessageState(sessionId: string, used: number): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -1123,6 +1143,120 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(switchLine).not.toContain('reason=');
   });
 
+  it('does not same-provider retry streaming pre-response failures when provider payload omits stream flag', async () => {
+    const retryable = Object.assign(new Error('HTTP 525: upstream ssl handshake failed'), {
+      statusCode: 525,
+      code: 'HTTP_525',
+      upstreamCode: 'HTTP_525',
+      retryable: true
+    });
+    const failingHandle = createRuntimeHandleWithProtocol(async () => {
+      throw retryable;
+    }, 'openai-responses');
+    const successHandle = createRuntimeHandleWithProtocol(async () => ({ ok: true }), 'openai-responses');
+
+    const pipelineResultOne: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.5', input: 'tool request' },
+      target: {
+        providerKey: 'asxs.crsa.gpt-5.5',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'longcontext',
+        pool: ['asxs.crsa.gpt-5.5']
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const pipelineResultTwo: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.5', input: 'tool request' },
+      target: {
+        providerKey: 'backup.crsa.gpt-5.5',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      routingDecision: {
+        routeName: 'longcontext',
+        pool: ['backup.crsa.gpt-5.5']
+      } as unknown as { routeName?: string },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultOne).mockResolvedValueOnce(pipelineResultTwo)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? failingHandle : successHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
+
+    const response = await executor.execute({
+      requestId: 'req_stream_metadata_payload_no_stream_reroute',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { model: 'gpt-5.5', input: 'tool request', stream: true },
+      metadata: { stream: true, inboundStream: true }
+    });
+
+    expect(response.status).toBe(200);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(failingHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.retryAttempt).toBe(2);
+    const excluded = Array.isArray(secondCallMetadata.excludedProviderKeys)
+      ? secondCallMetadata.excludedProviderKeys as string[]
+      : [];
+    expect(excluded).toEqual(['asxs.crsa.gpt-5.5']);
+    expect(secondCallMetadata.retryProviderKey).toBeUndefined();
+    expect(secondCallMetadata.__routecodexRetryProviderKey).toBeUndefined();
+    const providerSendStart = (deps.logStage as jest.Mock).mock.calls.find(([stage]) => stage === 'provider.send.start');
+    expect(providerSendStart?.[2]).toMatchObject({
+      providerRequestedStream: true,
+      providerPayloadRequestedStream: undefined,
+      inboundStream: true
+    });
+    const warnLines = warnSpy.mock.calls.map(call => String(call[0] ?? ''));
+    const switchLine = warnLines.find(line =>
+      line.includes('[provider-switch]')
+      && line.includes('req_stream_metadata_payload_no_stream_reroute')
+    );
+    expect(switchLine).toContain('switch=exclude_and_reroute');
+    expect(switchLine).toContain('policy=streaming_recoverable_pre_response');
+    expect(switchLine).not.toContain('switch=retry_same_provider_once');
+  });
+
   it('retries and reroutes when converted response returns status 429 without error envelope', async () => {
     const rateLimitedHandle = createRuntimeHandle(async () => ({ data: { id: 'resp_429' }, status: 429 }));
     const successHandle = createRuntimeHandle(async () => ({ data: { id: 'resp_ok' }, status: 200 }));
@@ -1934,8 +2068,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     }));
     const stages = logStage.mock.calls.map((call) => call[0]);
     const secondPipelineStartIndex = stages.findIndex((stage, index) => index > 0 && stage === 'hub.start');
-    expect(stages.slice(0, secondPipelineStartIndex)).not.toContain('provider.transport_backoff.recorded');
-    expect(stages).not.toContain('provider.transport_backoff.recorded');
+    expect(stages.slice(0, secondPipelineStartIndex)).not.toContain('provider.transport_backoff_wait');
+    expect(stages).not.toContain('provider.transport_backoff_wait');
+    expect(stages).toContain('provider.transport_backoff.recorded');
     expect(stages).not.toContain('server.global_error_backoff_wait');
   });
 

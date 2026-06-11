@@ -2240,6 +2240,14 @@ pub fn compute_provider_backoff_ms_json(
     Ok(failure_policy::compute_backoff(classification, attempt) as i64)
 }
 
+#[napi(js_name = "resolveProviderRetryExecutionPolicyJson")]
+pub fn resolve_provider_retry_execution_policy_json(input_json: String) -> NapiResult<String> {
+    let input: failure_policy::ProviderRetryExecutionPolicyInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let decision = failure_policy::resolve_retry_execution_policy(input);
+    serde_json::to_string(&decision).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,

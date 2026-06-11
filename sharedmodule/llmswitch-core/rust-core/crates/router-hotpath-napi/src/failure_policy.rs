@@ -33,6 +33,7 @@ const BLOCKING_RECOVERABLE_CODES: &[&str] = &[
 pub enum FailureClassification {
     Unrecoverable,
     Recoverable,
+    #[serde(rename = "special_400")]
     Special400,
 }
 
@@ -50,6 +51,29 @@ pub enum BackoffScope {
     Attempt,
     Recoverable,
     Provider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRetryExecutionPolicyInput {
+    pub classification: FailureClassification,
+    #[serde(default)]
+    pub is_streaming_request: bool,
+    #[serde(default)]
+    pub host_contract_failure: bool,
+    #[serde(default)]
+    pub force_exclude_current_provider_on_retry: bool,
+    #[serde(default)]
+    pub prompt_too_long: bool,
+    #[serde(default)]
+    pub existing_exclusion: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRetryExecutionPolicyDecision {
+    pub exclude_current_provider: bool,
+    pub reason: &'static str,
 }
 
 const ERROR_ACTION_BACKOFF_SEQUENCE_MS: [u64; 3] = [1_000, 2_000, 3_000];
@@ -117,6 +141,42 @@ pub fn compute_backoff(classification: FailureClassification, attempt: u32) -> u
     ERROR_ACTION_BACKOFF_SEQUENCE_MS[step % ERROR_ACTION_BACKOFF_SEQUENCE_MS.len()]
 }
 
+pub fn resolve_retry_execution_policy(
+    input: ProviderRetryExecutionPolicyInput,
+) -> ProviderRetryExecutionPolicyDecision {
+    if input.host_contract_failure {
+        return ProviderRetryExecutionPolicyDecision {
+            exclude_current_provider: false,
+            reason: "host_contract_failure",
+        };
+    }
+    if input.force_exclude_current_provider_on_retry {
+        return ProviderRetryExecutionPolicyDecision {
+            exclude_current_provider: true,
+            reason: "forced_exclusion",
+        };
+    }
+    if input.existing_exclusion {
+        return ProviderRetryExecutionPolicyDecision {
+            exclude_current_provider: true,
+            reason: "existing_exclusion",
+        };
+    }
+    if input.is_streaming_request
+        && input.classification == FailureClassification::Recoverable
+        && !input.prompt_too_long
+    {
+        return ProviderRetryExecutionPolicyDecision {
+            exclude_current_provider: true,
+            reason: "streaming_recoverable_pre_response",
+        };
+    }
+    ProviderRetryExecutionPolicyDecision {
+        exclude_current_provider: false,
+        reason: "preserve_existing_policy",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +217,47 @@ mod tests {
         assert_eq!(compute_backoff(classification, 3), 3_000);
         assert_eq!(compute_backoff(classification, 4), 1_000);
         assert_eq!(compute_backoff(FailureClassification::Unrecoverable, 1), 0);
+    }
+
+    #[test]
+    fn test_streaming_recoverable_pre_response_excludes_current_provider() {
+        let decision = resolve_retry_execution_policy(ProviderRetryExecutionPolicyInput {
+            classification: FailureClassification::Recoverable,
+            is_streaming_request: true,
+            host_contract_failure: false,
+            force_exclude_current_provider_on_retry: false,
+            prompt_too_long: false,
+            existing_exclusion: false,
+        });
+        assert!(decision.exclude_current_provider);
+        assert_eq!(decision.reason, "streaming_recoverable_pre_response");
+    }
+
+    #[test]
+    fn test_non_streaming_recoverable_preserves_existing_policy() {
+        let decision = resolve_retry_execution_policy(ProviderRetryExecutionPolicyInput {
+            classification: FailureClassification::Recoverable,
+            is_streaming_request: false,
+            host_contract_failure: false,
+            force_exclude_current_provider_on_retry: false,
+            prompt_too_long: false,
+            existing_exclusion: false,
+        });
+        assert!(!decision.exclude_current_provider);
+        assert_eq!(decision.reason, "preserve_existing_policy");
+    }
+
+    #[test]
+    fn test_host_contract_failure_does_not_exclude_streaming_recoverable() {
+        let decision = resolve_retry_execution_policy(ProviderRetryExecutionPolicyInput {
+            classification: FailureClassification::Recoverable,
+            is_streaming_request: true,
+            host_contract_failure: true,
+            force_exclude_current_provider_on_retry: false,
+            prompt_too_long: false,
+            existing_exclusion: false,
+        });
+        assert!(!decision.exclude_current_provider);
+        assert_eq!(decision.reason, "host_contract_failure");
     }
 }

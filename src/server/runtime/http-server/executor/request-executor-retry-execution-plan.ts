@@ -10,6 +10,9 @@ import {
   shouldRerouteTerminalUnrecoverableProviderFailure,
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
+  resolveRequestExecutorNativeRetryPolicy,
+} from './request-executor-native-retry-policy.js';
+import {
   applyRetryExclusionForCurrentProvider,
   buildProviderRetrySwitchPlan,
   hasAlternativeRouteCandidate,
@@ -67,6 +70,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   maxContextOverflowRetries?: number;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  isStreamingRequest?: boolean;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
@@ -90,29 +94,39 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   args.recordAttempt({ error: true });
 
-  const exclusionPlan = hostContractFailure
-    ? {
-        excludedCurrentProvider: false
-      }
-    : args.forceExcludeCurrentProviderOnRetry
+  const baseExclusionPlan = hostContractFailure
+    ? { excludedCurrentProvider: false }
+    : resolveProviderRetryExclusionPlan({
+        providerKey: args.providerKey,
+        status: args.retryError.statusCode ?? args.status,
+        error: args.error,
+        classification,
+        attempt: args.attempt,
+        promptTooLong: Boolean(args.promptTooLong),
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys,
+        retryError: args.retryError,
+        transientRetryTracker: args.transientRetryTracker
+      });
+  if (!classification) {
+    throw new Error('[request-executor] provider failure classification missing');
+  }
+  const nativeExecutionPolicy = resolveRequestExecutorNativeRetryPolicy({
+    classification,
+    isStreamingRequest: args.isStreamingRequest === true,
+    hostContractFailure,
+    forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry === true,
+    promptTooLong: args.promptTooLong === true,
+    existingExclusion: baseExclusionPlan.excludedCurrentProvider,
+  });
+  const exclusionPlan = nativeExecutionPolicy.excludeCurrentProvider
       ? {
           excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
             providerKey: args.providerKey,
             excludedProviderKeys: args.excludedProviderKeys
           })
         }
-      : resolveProviderRetryExclusionPlan({
-          providerKey: args.providerKey,
-          status: args.retryError.statusCode ?? args.status,
-          error: args.error,
-          classification,
-          attempt: args.attempt,
-          promptTooLong: Boolean(args.promptTooLong),
-          routePool: args.routePool,
-          excludedProviderKeys: args.excludedProviderKeys,
-          retryError: args.retryError,
-          transientRetryTracker: args.transientRetryTracker
-        });
+      : { excludedCurrentProvider: false };
   const requestLocalTransient =
     classification === 'recoverable'
     && !hostContractFailure
@@ -209,7 +223,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
       retryBackoffMs: retryBackoffPlan.retryBackoffMs,
       recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
       backoffScope: retryBackoffPlan.backoffScope,
-      retrySwitchPlan
+      retrySwitchPlan,
+      retryExecutionPolicyReason: nativeExecutionPolicy.reason
     };
   }
 
@@ -282,6 +297,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryBackoffMs: retryBackoffPlan.retryBackoffMs,
     recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
     backoffScope: retryBackoffPlan.backoffScope,
-    retrySwitchPlan
+    retrySwitchPlan,
+    retryExecutionPolicyReason: nativeExecutionPolicy.reason
   };
 }

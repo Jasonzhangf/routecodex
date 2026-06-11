@@ -61,6 +61,7 @@ type RequestExecutorProviderSendFailureArgs = {
     switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
+    retryExecutionPolicyReason?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
     runtimeScopeExcludedCount?: number;
   }) => void;
@@ -80,6 +81,7 @@ type RequestExecutorProviderSendFailureArgs = {
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   maxContextOverflowRetries: number;
+  isStreamingRequest?: boolean;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
   phase: 'provider_send' | 'provider_response_processing';
@@ -295,6 +297,7 @@ export async function processProviderSendFailure(
     contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status,
+    isStreamingRequest: args.isStreamingRequest,
     transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     metadata: args.metadata,

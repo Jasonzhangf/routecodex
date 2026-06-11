@@ -25,6 +25,17 @@ type NativeFailurePolicyModule = {
     classification: NativeFailureClassification,
     attempt: number
   ) => number;
+  resolveProviderRetryExecutionPolicyNative?: (input: {
+    classification: NativeFailureClassification;
+    isStreamingRequest?: boolean;
+    hostContractFailure?: boolean;
+    forceExcludeCurrentProviderOnRetry?: boolean;
+    promptTooLong?: boolean;
+    existingExclusion?: boolean;
+  }) => {
+    excludeCurrentProvider: boolean;
+    reason: string;
+  };
   getNetworkErrorCodes?: () => string[];
   isBlockingRecoverableNative?: (
     classification: NativeFailureClassification,
@@ -107,6 +118,10 @@ type NativeRouterHotpathJsonBinding = {
     metadataJson: string,
     inboundProtocolJson: string,
     applyPatchModeJson: string
+  ) => string;
+  runResponsesOpenaiRequestCodecJson?: (
+    payloadJson: string,
+    optionsJson?: string
   ) => string;
 };
 
@@ -508,6 +523,17 @@ export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
   return row.hasDeclaredApplyPatchTool === true;
 }
 
+export function convertResponsesRequestToChatNative(
+  payload: Record<string, unknown>,
+  options?: Record<string, unknown>
+): AnyRecord {
+  const parsed = invokeRouterHotpathJsonCapability('runResponsesOpenaiRequestCodecJson', [
+    payload,
+    options ?? {},
+  ]);
+  return assertNativeObject('runResponsesOpenaiRequestCodecJson', parsed);
+}
+
 export function evaluateResponsesDirectRouteDecisionNative(input: {
   payload: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -736,6 +762,24 @@ export function computeBackoffMsNative(
     throw new Error('[llmswitch-bridge] computeBackoffMsNative not available');
   }
   return fn(classification, attempt);
+}
+
+export function resolveProviderRetryExecutionPolicyNative(input: {
+  classification: NativeFailureClassification;
+  isStreamingRequest?: boolean;
+  hostContractFailure?: boolean;
+  forceExcludeCurrentProviderOnRetry?: boolean;
+  promptTooLong?: boolean;
+  existingExclusion?: boolean;
+}): {
+  excludeCurrentProvider: boolean;
+  reason: string;
+} {
+  const fn = getFailurePolicyModule().resolveProviderRetryExecutionPolicyNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveProviderRetryExecutionPolicyNative not available');
+  }
+  return fn(input);
 }
 
 export function getNetworkErrorCodes(): string[] {

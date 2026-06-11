@@ -432,6 +432,7 @@ export class HubRequestExecutor implements RequestExecutor {
     switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
+    retryExecutionPolicyReason?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
     runtimeScopeExcludedCount?: number;
   }): void {
@@ -817,10 +818,16 @@ export class HubRequestExecutor implements RequestExecutor {
         let providerSendStartedAtMs = 0;
         let providerSendElapsedMs = 0;
         const stoplessLogState = resolveStoplessLogState(mergedMetadata);
-        const providerRequestedStream =
+        const providerPayloadRequestedStream =
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
             : undefined;
+        const providerRequestedStream =
+          providerPayloadRequestedStream === true
+          || mergedMetadata.inboundStream === true
+          || mergedMetadata.stream === true
+          || metadataForAttempt.inboundStream === true
+          || metadataForAttempt.stream === true;
         const providerTransportBackoffKey = buildProviderTransportBackoffKey({
           providerKey: target.providerKey,
           runtimeKey
@@ -918,6 +925,9 @@ export class HubRequestExecutor implements RequestExecutor {
             model: providerModel,
             providerLabel,
             providerRequestedStream,
+            providerPayloadRequestedStream,
+            inboundStream: mergedMetadata.inboundStream === true || metadataForAttempt.inboundStream === true,
+            metadataStream: mergedMetadata.stream === true || metadataForAttempt.stream === true,
             attempt
           }));
           throwIfClientAbortSignalAborted(clientAbortSignal);
@@ -1247,6 +1257,7 @@ export class HubRequestExecutor implements RequestExecutor {
             forcedRouteHint,
             contextOverflowRetries,
             maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES,
+            isStreamingRequest: providerRequestedStream === true,
             abortSignal: clientAbortSignal,
             metadata: metadataForAttempt,
             phase: providerFailurePhase,

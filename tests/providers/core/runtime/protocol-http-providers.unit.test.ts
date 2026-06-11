@@ -12,6 +12,29 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   reportProviderErrorToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
+  convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+    request: {
+      model: payload.model,
+      messages: [
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: '/Users/fanzhang/Documents/github/routecodex'
+        }
+      ],
+      tools: payload.tools
+    }
+  }),
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
@@ -138,6 +161,83 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(sentBody?.stream).toBe(true);
     expect(sentBody?.stream_options).toEqual({ include_usage: true });
     expect(sentHeaders?.Accept).toBe('text/event-stream');
+  });
+
+  test('HTTP TRANSPORT RED: openai chat materializes responses tool continuation with native codec', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-openai-chat-responses-tool-continuation',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'test-openai-chat-responses-tool-continuation',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/chat/completions' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new HttpTransportProvider(config, emptyDeps, 'openai-http-provider') as any;
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.postprocessResponse = async (response: unknown) => response;
+
+    let sentBody: Record<string, unknown> | undefined;
+    const fakeHttpClient = {
+      post: async (_url: string, body: Record<string, unknown>) => {
+        sentBody = body;
+        return { status: 200, data: { id: 'chatcmpl_test', choices: [] } };
+      }
+    };
+    await provider.initialize();
+    provider.httpClient = fakeHttpClient;
+    provider.requestExecutor = new HttpRequestExecutor(
+      provider.httpClient,
+      provider.createRequestExecutorDeps()
+    );
+
+    const request: Record<string, unknown> = {
+      model: 'gpt-5.4-mini',
+      previous_response_id: 'resp_prev',
+      input: [
+        {
+          id: 'fc_1',
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: '/Users/fanzhang/Documents/github/routecodex'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          name: 'exec_command',
+          parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+        }
+      ],
+      stream: false
+    };
+    attachProviderRuntimeMetadata(request, {
+      requestId: 'req_openai_chat_responses_tool_continuation',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      providerId: 'asxs',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      metadata: { entryEndpoint: '/v1/responses' }
+    });
+
+    const processed = await provider.preprocessRequest(request);
+    await provider.sendRequestInternal(processed);
+
+    expect(sentBody?.input).toBeUndefined();
+    expect(sentBody?.previous_response_id).toBeUndefined();
+    expect(Array.isArray(sentBody?.messages)).toBe(true);
+    const messages = sentBody?.messages as Array<Record<string, unknown>>;
+    expect(messages.length).toBeGreaterThanOrEqual(2);
+    expect(messages.some((message) => message.role === 'assistant' && Array.isArray(message.tool_calls))).toBe(true);
+    expect(messages.some((message) => message.role === 'tool' && message.tool_call_id === 'call_1')).toBe(true);
   });
 
   test('ResponsesProvider forces providerType=responses', () => {

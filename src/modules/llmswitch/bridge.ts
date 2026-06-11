@@ -90,6 +90,7 @@ export {
   injectMcpToolsForResponsesJson,
   sanitizeFollowupText,
   sanitizeProviderOutboundPayload,
+  convertResponsesRequestToChatNative,
   evaluateResponsesDirectRouteDecisionNative,
   hasDeclaredApplyPatchToolNative,
   deriveFinishReasonNative,

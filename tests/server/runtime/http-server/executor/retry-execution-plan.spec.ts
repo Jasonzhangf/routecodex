@@ -1,7 +1,32 @@
 import { jest } from '@jest/globals';
-import { resolveProviderRetryExecutionPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js';
 import { createRequestLocalTransientRetryTracker } from '../../../../../src/server/runtime/http-server/executor/request-executor-transient-retry-tracker.js';
 import { resetRequestExecutorRetryStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-state.js';
+
+jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
+  resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
+    classification?: string;
+    isStreamingRequest?: boolean;
+    hostContractFailure?: boolean;
+    forceExcludeCurrentProviderOnRetry?: boolean;
+    promptTooLong?: boolean;
+    existingExclusion?: boolean;
+  }) => {
+    if (input.hostContractFailure) {
+      return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
+    }
+    if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
+      return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
+    }
+    if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
+      return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
+    }
+    return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
+  })
+}));
+
+const { resolveProviderRetryExecutionPlan } = await import(
+  '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js'
+);
 
 describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
   beforeEach(() => {
@@ -92,6 +117,87 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.retryBackoffMs).toBe(0);
     expect(plan.recoverableBackoffMs).toBe(0);
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
+  });
+
+  it('does not retry the same provider for streaming recoverable pre-response failures', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const transientRetryTracker = createRequestLocalTransientRetryTracker();
+    const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
+      statusCode: 525,
+      code: 'HTTP_525',
+      upstreamCode: 'HTTP_525'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 525,
+        errorCode: 'HTTP_525',
+        upstreamCode: 'HTTP_525',
+        reason: 'HTTP 525: upstream SSL handshake failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'asxs.crsa.gpt-5.5',
+      runtimeKey: 'asxs.crsa',
+      logicalRequestChainKey: 'req-stream-no-same-provider',
+      logicalChainRetryLimitStageRequestId: 'req-stream-no-same-provider',
+      routePool: ['asxs.crsa.gpt-5.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      transientRetryTracker,
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.requestLocalTransient).toBe(false);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).not.toContain('same_provider');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual(['asxs.crsa.gpt-5.5']);
+  });
+
+  it('keeps the existing single same-provider retry for non-stream recoverable pre-response failures', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const transientRetryTracker = createRequestLocalTransientRetryTracker();
+    const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
+      statusCode: 525,
+      code: 'HTTP_525',
+      upstreamCode: 'HTTP_525'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 525,
+        errorCode: 'HTTP_525',
+        upstreamCode: 'HTTP_525',
+        reason: 'HTTP 525: upstream SSL handshake failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'asxs.crsa.gpt-5.5',
+      runtimeKey: 'asxs.crsa',
+      logicalRequestChainKey: 'req-json-keeps-same-provider',
+      logicalChainRetryLimitStageRequestId: 'req-json-keeps-same-provider',
+      routePool: ['asxs.crsa.gpt-5.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      transientRetryTracker,
+      isStreamingRequest: false
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.requestLocalTransient).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
   it('keeps excluding current provider for repeated recoverable HTTP 502 when alternatives exist', async () => {

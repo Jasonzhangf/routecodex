@@ -57,6 +57,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     switchAction: retrySwitchPlan.switchAction,
     backoffScope: args.retryExecutionPlan.backoffScope,
     decisionLabel: retrySwitchPlan.decisionLabel,
+    retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     stage: args.stage,
     runtimeScopeExcludedCount: retrySwitchPlan.runtimeScopeExcludedCount
   } as ProviderRetryTelemetryPlan['switchLogArgs'];
@@ -76,6 +77,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     recoverableBackoffMs: args.retryExecutionPlan.recoverableBackoffMs,
     backoffScope: args.retryExecutionPlan.backoffScope,
     decisionLabel: retrySwitchPlan.decisionLabel,
+    retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0
       ? { runtimeScopeExcludedCount: retrySwitchPlan.runtimeScopeExcludedCount }
       : {}),

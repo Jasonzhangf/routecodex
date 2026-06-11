@@ -88,6 +88,33 @@ export function computeBackoffMsNative(
   return fn(JSON.stringify(classification), attempt);
 }
 
+export type ProviderRetryExecutionPolicyInput = {
+  classification: FailureClassification;
+  isStreamingRequest?: boolean;
+  hostContractFailure?: boolean;
+  forceExcludeCurrentProviderOnRetry?: boolean;
+  promptTooLong?: boolean;
+  existingExclusion?: boolean;
+};
+
+export type ProviderRetryExecutionPolicyDecision = {
+  excludeCurrentProvider: boolean;
+  reason: string;
+};
+
+export function resolveProviderRetryExecutionPolicyNative(
+  input: ProviderRetryExecutionPolicyInput,
+): ProviderRetryExecutionPolicyDecision {
+  const binding = getBindingOrThrow();
+  const fn = binding.resolveProviderRetryExecutionPolicyJson as (
+    inputJson: string,
+  ) => string;
+  if (typeof fn !== 'function') {
+    throw failNativeRequired('resolveProviderRetryExecutionPolicyJson');
+  }
+  return JSON.parse(fn(JSON.stringify(input))) as ProviderRetryExecutionPolicyDecision;
+}
+
 export function getNetworkErrorCodes(): string[] {
   const binding = getBindingOrThrow();
   const fn = binding.networkErrorSetJson as () => string;

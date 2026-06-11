@@ -63,6 +63,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   maxContextOverflowRetries?: number;
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  isStreamingRequest?: boolean;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
@@ -107,6 +108,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status: args.status,
     forceExcludeCurrentProviderOnRetry,
+    isStreamingRequest: args.isStreamingRequest,
     transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError

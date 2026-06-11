@@ -63,6 +63,7 @@ export type ProviderRetryExecutionPlan = {
   recoverableBackoffMs: number;
   backoffScope?: ProviderRetryBackoffScope;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
+  retryExecutionPolicyReason?: string;
 };
 
 export type ProviderRetryTelemetryPlan = {
@@ -81,6 +82,7 @@ export type ProviderRetryTelemetryPlan = {
     switchAction: ProviderRetrySwitchAction;
     backoffScope?: ProviderRetryBackoffScope;
     decisionLabel?: string;
+    retryExecutionPolicyReason?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';
     runtimeScopeExcludedCount?: number;
   };

@@ -21,7 +21,7 @@ import { captureResponsesRequestContextForRequest, clearResponsesConversationByR
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
-import { trackClientConnectionState } from '../utils/client-connection-state.js';
+import { markClientConnectionDisconnected, trackClientConnectionState } from '../utils/client-connection-state.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
@@ -180,7 +180,7 @@ export async function handleResponses(
   const parsedTimeout = Number(rawTimeout);
   const configuredRequestTimeoutMs =
     rawTimeout === ''
-      ? undefined
+      ? DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
       : (Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined);
   let requestTimeoutMs = configuredRequestTimeoutMs;
   let isVideoRequest = false;
@@ -306,10 +306,6 @@ export async function handleResponses(
     }
     const wantsStream = outboundStream;
 
-    if (wantsStream && !isVideoRequest) {
-      requestTimeoutMs = undefined;
-    }
-
     if (!isSubmitToolOutputs && entryEndpoint === '/v1/responses') {
       applySystemPromptOverride(entryEndpoint, payload);
     }
@@ -406,12 +402,9 @@ export async function handleResponses(
         } catch (loggingError) {
           logResponsesHandlerNonBlockingError('timeout.log_request_error', loggingError, { requestId });
         }
-        // Best-effort: notify pipeline/servertool via shared connection state object.
+        // Notify pipeline/servertool/provider transport via shared connection state object.
         try {
-          const state = clientConnectionState as unknown as { disconnected?: boolean };
-          if (state && typeof state === 'object') {
-            state.disconnected = true;
-          }
+          markClientConnectionDisconnected(clientConnectionState, 'HTTP_REQUEST_TIMEOUT');
         } catch (stateError) {
           logResponsesHandlerNonBlockingError('timeout.mark_connection_disconnected', stateError, { requestId });
         }

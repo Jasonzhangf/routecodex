@@ -6,6 +6,7 @@ export interface ClientConnectionState {
 
 export const CLIENT_CONNECTION_STATE_FIELD = '__clientConnectionState';
 const CLIENT_CONNECTION_ABORT_SIGNAL = Symbol('routecodex.clientConnectionAbortSignal');
+const CLIENT_CONNECTION_MARK_DISCONNECTED = Symbol('routecodex.clientConnectionMarkDisconnected');
 
 function buildClientDisconnectedError(reason: string): Error & { code: string; name: string } {
   return Object.assign(new Error(reason), {
@@ -81,6 +82,12 @@ export function trackClientConnectionState(req: Request, res: Response): ClientC
       }
     }
   };
+  Object.defineProperty(state, CLIENT_CONNECTION_MARK_DISCONNECTED, {
+    value: markDisconnected,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
   req.on('aborted', () => markDisconnected('CLIENT_REQUEST_ABORTED'));
   res.on('finish', clearTimeoutHandle);
   res.on('close', () => {
@@ -110,6 +117,21 @@ export function trackClientConnectionState(req: Request, res: Response): ClientC
     timeoutHandle.unref?.();
   }
   return state;
+}
+
+export function markClientConnectionDisconnected(
+  state: ClientConnectionState | undefined,
+  reason = 'CLIENT_DISCONNECTED'
+): void {
+  if (!state || typeof state !== 'object') {
+    return;
+  }
+  const marker = Reflect.get(state as object, CLIENT_CONNECTION_MARK_DISCONNECTED);
+  if (typeof marker === 'function') {
+    marker(reason);
+    return;
+  }
+  state.disconnected = true;
 }
 
 export function extractClientConnectionState(
