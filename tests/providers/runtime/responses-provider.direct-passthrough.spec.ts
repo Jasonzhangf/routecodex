@@ -5,7 +5,12 @@ import { describe, expect, jest, test } from '@jest/globals';
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   reportProviderErrorToRouterPolicy: async () => {},
+  reportProviderSuccessToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
+  convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+    messages: payload.messages ?? [],
+    tools: payload.tools
+  }),
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => {
     const next = structuredClone(input.payload);
     if (Array.isArray(next.input)) {
@@ -190,6 +195,45 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.metadata).toBeUndefined();
   });
 
+  test('passes Responses no-content timeout into provider SSE transport idle timeout', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-provider-idle-timeout',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    let capturedStreamConfig: { idleTimeoutMs?: number } | undefined;
+    provider.httpClient = {
+      postStream: async (_url: string, _body: any, _headers: Record<string, string>, streamConfig?: { idleTimeoutMs?: number }) => {
+        capturedStreamConfig = streamConfig;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', providerStreamNoContentTimeoutMs: 75 }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 75 });
+  });
+
   test('maps direct HTTP 200 SSE response.failed concurrency to retryable provider error', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-rate-limit',
@@ -296,7 +340,53 @@ describe('ResponsesProvider direct passthrough', () => {
     });
   });
 
-  test('replays direct HTTP 200 SSE normal frames after pre-read', async () => {
+  test('maps direct HTTP 200 SSE codex.rate_limits limit_reached to retryable provider error', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-sse-codex-rate-limits',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: codex.rate_limits\n',
+        `data: ${JSON.stringify({ type: 'codex.rate_limits', limit_reached: true })}\n\n`,
+        'event: response.created\n',
+        `data: ${JSON.stringify({ type: 'response.created', response: { id: 'resp_after_limit', status: 'in_progress' } })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 429,
+      status: 429,
+      code: 'PROVIDER_TRAFFIC_SATURATED',
+      upstreamCode: 'codex.rate_limits',
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.http'
+    });
+  });
+
+  test('replays direct HTTP 200 SSE normal frames after filtering advisory codex rate-limit frames', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-normal',
       type: 'responses-http-provider',
@@ -315,6 +405,8 @@ describe('ResponsesProvider direct passthrough', () => {
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
     provider.httpClient = {
       postStream: async () => Readable.from([
+        'event: codex.rate_limits\n',
+        `data: ${JSON.stringify({ type: 'codex.rate_limits', limit_reached: false })}\n\n`,
         'event: response.created\n',
         `data: ${JSON.stringify({ type: 'response.created', response: { id: 'resp_ok', status: 'in_progress' } })}\n\n`,
         'event: response.completed\n',
@@ -338,6 +430,7 @@ describe('ResponsesProvider direct passthrough', () => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const text = Buffer.concat(chunks).toString('utf8');
+    expect(text).not.toContain('event: codex.rate_limits');
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
     expect(text).toContain('resp_ok');

@@ -88,6 +88,16 @@ export function inspectResponsesSseBlockForProviderRateLimit(block: string): { c
   const parsed = parseResponsesSseFrame(block);
   const payload = readErrorPayload(parsed.data);
   const type = pickString(parsed.data?.type);
+  if (parsed.eventName === 'codex.rate_limits') {
+    const limitReached = parsed.data?.limit_reached;
+    if (limitReached === true || limitReached === 'true') {
+      return {
+        code: pickString(parsed.data?.code) ?? 'codex.rate_limits',
+        message: pickString(parsed.data?.message) ?? 'upstream Responses SSE rate limit reached'
+      };
+    }
+    return null;
+  }
   if (
     parsed.eventName !== 'error'
     && parsed.eventName !== 'response.failed'
@@ -103,4 +113,13 @@ export function inspectResponsesSseBlockForProviderRateLimit(block: string): { c
     message: payload.message ?? 'upstream Responses SSE rate limit error',
     ...(payload.code ? { code: payload.code } : {})
   };
+}
+
+export function isResponsesSseAdvisoryRateLimitsBlock(block: string): boolean {
+  const parsed = parseResponsesSseFrame(block);
+  if (parsed.eventName !== 'codex.rate_limits') {
+    return false;
+  }
+  const limitReached = parsed.data?.limit_reached;
+  return limitReached !== true && limitReached !== 'true';
 }

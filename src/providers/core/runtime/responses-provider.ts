@@ -23,7 +23,7 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
-import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { emitProviderErrorAndWait, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 import {
   buildSubmitToolOutputsEndpoint,
@@ -42,7 +42,8 @@ import {
 } from './responses-provider-helpers.js';
 import {
   buildResponsesSseProviderError,
-  inspectResponsesSseBlockForProviderRateLimit
+  inspectResponsesSseBlockForProviderRateLimit,
+  isResponsesSseAdvisoryRateLimitsBlock
 } from './responses-sse-error-guard.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
@@ -55,9 +56,52 @@ type ResponsesSseConverter = {
   }): Promise<unknown>;
 };
 
+const buildProviderSseStreamConfig = (context: ProviderContext): {
+  idleTimeoutMs?: number;
+} => {
+  const meta = context.metadata && typeof context.metadata === 'object'
+    ? context.metadata as Record<string, unknown>
+    : undefined;
+  const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
+    ? context.runtimeMetadata as Record<string, unknown>
+    : undefined;
+  const candidate =
+    meta?.providerStreamNoContentTimeoutMs
+    ?? meta?.streamNoContentTimeoutMs
+    ?? meta?.noContentTimeoutMs
+    ?? runtimeMeta?.providerStreamNoContentTimeoutMs
+    ?? runtimeMeta?.streamNoContentTimeoutMs
+    ?? runtimeMeta?.noContentTimeoutMs;
+  if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+    return { idleTimeoutMs: Math.floor(candidate) };
+  }
+  const profileCandidate = context.profile?.extensions?.providerStreamNoContentTimeoutMs;
+  if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
+    return { idleTimeoutMs: Math.floor(profileCandidate) };
+  }
+  return {};
+};
+
+function applyRequestRuntimeMetadataToProviderContext(
+  context: ProviderContext,
+  runtimeMetadata: ProviderRuntimeMetadata | undefined
+): void {
+  if (!runtimeMetadata) {
+    return;
+  }
+  context.runtimeMetadata = context.runtimeMetadata ?? runtimeMetadata;
+  context.metadata = runtimeMetadata.metadata ?? context.metadata;
+  context.providerId = context.providerId ?? runtimeMetadata.providerId ?? runtimeMetadata.providerKey;
+  context.providerKey = context.providerKey ?? runtimeMetadata.providerKey;
+  context.providerProtocol = context.providerProtocol ?? runtimeMetadata.providerProtocol;
+  context.routeName = context.routeName ?? runtimeMetadata.routeName;
+  context.target = context.target ?? runtimeMetadata.target;
+  context.pipelineId = context.pipelineId ?? runtimeMetadata.pipelineId;
+}
+
 async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
   const iterator = stream[Symbol.asyncIterator]();
-  const bufferedChunks: Buffer[] = [];
+  const bufferedFrames: Buffer[] = [];
   let bufferedText = '';
   let sawSemanticFrame = false;
 
@@ -67,13 +111,13 @@ async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.Readabl
       break;
     }
     const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
-    bufferedChunks.push(chunk);
     bufferedText += chunk.toString('utf8');
     const parts = bufferedText.split(/\r?\n\r?\n/);
     bufferedText = parts.pop() ?? '';
     for (const part of parts) {
       const trimmed = part.trim();
       if (!trimmed || trimmed.startsWith(':')) {
+        bufferedFrames.push(Buffer.from(`${part}\n\n`));
         continue;
       }
       const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
@@ -83,26 +127,56 @@ async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.Readabl
         }
         throw buildResponsesSseProviderError(rateLimitPayload);
       }
+      if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
+        continue;
+      }
+      bufferedFrames.push(Buffer.from(`${part}\n\n`));
       sawSemanticFrame = true;
-      break;
     }
-    const bufferedSize = bufferedChunks.reduce((total, item) => total + item.byteLength, 0);
+    const bufferedSize = bufferedFrames.reduce((total, item) => total + item.byteLength, 0) + Buffer.byteLength(bufferedText);
     if (bufferedSize > 64 * 1024) {
       break;
     }
   }
+  if (bufferedText) {
+    bufferedFrames.push(Buffer.from(bufferedText));
+    bufferedText = '';
+  }
 
-  async function* replayAndRead(): AsyncGenerator<Buffer> {
-    for (const chunk of bufferedChunks) {
-      yield chunk;
-    }
+  async function* filterAndRead(): AsyncGenerator<Buffer> {
+    let pending = '';
     while (true) {
       const next = await iterator.next();
       if (next.done) {
         break;
       }
-      yield Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+      pending += (Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value)).toString('utf8');
+      const parts = pending.split(/\r?\n\r?\n/);
+      pending = parts.pop() ?? '';
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (trimmed && !trimmed.startsWith(':')) {
+          const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
+          if (rateLimitPayload) {
+            throw buildResponsesSseProviderError(rateLimitPayload);
+          }
+          if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
+            continue;
+          }
+        }
+        yield Buffer.from(`${part}\n\n`);
+      }
     }
+    if (pending) {
+      yield Buffer.from(pending);
+    }
+  }
+
+  async function* replayAndRead(): AsyncGenerator<Buffer> {
+    for (const chunk of bufferedFrames) {
+      yield chunk;
+    }
+    yield* filterAndRead();
   }
 
   return Readable.from(replayAndRead());
@@ -150,6 +224,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const headers = await this.finalizeRequestHeaders(baseHeaders, request);
 
     const context = this.createProviderContext();
+    applyRequestRuntimeMetadataToProviderContext(context, extractProviderRuntimeMetadata(request));
     const entryEndpoint = extractEntryEndpoint(request) ?? extractEntryEndpoint(context);
 
     const submitPayload =
@@ -254,6 +329,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
     const finalBody = builtBody;
     const runtimeMetadata = extractProviderRuntimeMetadata(directRequest);
+    applyRequestRuntimeMetadataToProviderContext(context, runtimeMetadata);
     const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
       ? runtimeMetadata.metadata as Record<string, unknown>
       : undefined;
@@ -329,7 +405,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const stream = await httpClient.postStream(targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
-    });
+    }, buildProviderSseStreamConfig(context));
 
     const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream);
 
@@ -417,7 +493,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     const stream = await httpClient.postStream(targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
-    });
+    }, buildProviderSseStreamConfig(context));
 
     const captureSse = providerStream === true && shouldCaptureProviderStreamSnapshots();
     const streamForHost = captureSse
@@ -573,10 +649,16 @@ export class ResponsesProvider extends HttpTransportProvider {
     const meta = context.metadata && typeof context.metadata === 'object'
       ? context.metadata as Record<string, unknown>
       : undefined;
+    const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
+      ? context.runtimeMetadata as Record<string, unknown>
+      : undefined;
     const candidate =
       meta?.providerStreamNoContentTimeoutMs
       ?? meta?.streamNoContentTimeoutMs
-      ?? meta?.noContentTimeoutMs;
+      ?? meta?.noContentTimeoutMs
+      ?? runtimeMeta?.providerStreamNoContentTimeoutMs
+      ?? runtimeMeta?.streamNoContentTimeoutMs
+      ?? runtimeMeta?.noContentTimeoutMs;
     if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
       return Math.floor(candidate);
     }
@@ -591,10 +673,16 @@ export class ResponsesProvider extends HttpTransportProvider {
     const meta = context.metadata && typeof context.metadata === 'object'
       ? context.metadata as Record<string, unknown>
       : undefined;
+    const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
+      ? context.runtimeMetadata as Record<string, unknown>
+      : undefined;
     const candidate =
       meta?.providerStreamContentIdleTimeoutMs
       ?? meta?.streamContentIdleTimeoutMs
-      ?? meta?.contentIdleTimeoutMs;
+      ?? meta?.contentIdleTimeoutMs
+      ?? runtimeMeta?.providerStreamContentIdleTimeoutMs
+      ?? runtimeMeta?.streamContentIdleTimeoutMs
+      ?? runtimeMeta?.contentIdleTimeoutMs;
     if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
       return Math.floor(candidate);
     }
