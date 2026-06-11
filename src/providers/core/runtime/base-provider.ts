@@ -11,6 +11,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import {
   emitProviderErrorAndWait,
+  emitProviderSuccessAndWait,
   buildRuntimeFromProviderContext
 } from '../utils/provider-error-reporter.js';
 import { classifyProviderError } from './provider-error-classifier.js';
@@ -150,6 +151,7 @@ export abstract class BaseProvider implements IProviderV2 {
       requestId: context.requestId,
       responseTime: endTime - context.startTime
     });
+    await emitProviderSuccessAndWait(buildRuntimeFromProviderContext(context));
     this.resetRateLimitCounter(context.providerKey);
 
     return finalResponse;
@@ -191,6 +193,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
       const endTime = Date.now();
       this.resetRateLimitCounter(context.providerKey, context.model);
+      await emitProviderSuccessAndWait(buildRuntimeFromProviderContext(context));
       try {
         const usage = extractUsageTokensFromResponse(finalResponse);
         const event: ProviderUsageEvent = {

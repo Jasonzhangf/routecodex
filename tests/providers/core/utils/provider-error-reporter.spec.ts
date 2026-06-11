@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const mockReportProviderErrorToRouterPolicy = jest.fn(async () => undefined);
+const mockReportProviderSuccessToRouterPolicy = jest.fn(async () => undefined);
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  reportProviderErrorToRouterPolicy: mockReportProviderErrorToRouterPolicy
+  reportProviderErrorToRouterPolicy: mockReportProviderErrorToRouterPolicy,
+  reportProviderSuccessToRouterPolicy: mockReportProviderSuccessToRouterPolicy
 }));
 
-const { emitProviderError } = await import('../../../../src/providers/core/utils/provider-error-reporter.js');
+const { emitProviderError, emitProviderSuccessAndWait } = await import('../../../../src/providers/core/utils/provider-error-reporter.js');
 
 describe('provider-error-reporter', () => {
   beforeEach(() => {
     mockReportProviderErrorToRouterPolicy.mockReset();
     mockReportProviderErrorToRouterPolicy.mockResolvedValue(undefined);
+    mockReportProviderSuccessToRouterPolicy.mockReset();
+    mockReportProviderSuccessToRouterPolicy.mockResolvedValue(undefined);
   });
 
   it('requires explicit recoverable and affectsHealth flags', () => {
@@ -67,6 +71,25 @@ describe('provider-error-reporter', () => {
         requestId: 'req-explicit-flags',
         providerKey: 'deepseek.key1.deepseek-v4-pro'
       })
+    }));
+  });
+
+  it('forwards provider success to router policy', async () => {
+    await emitProviderSuccessAndWait({
+      requestId: 'req-success',
+      providerKey: 'asxs.crsa.gpt-5.5',
+      runtimeKey: 'asxs.crsa.gpt-5.5',
+      routeName: 'thinking'
+    });
+
+    expect(mockReportProviderSuccessToRouterPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: expect.objectContaining({
+        requestId: 'req-success',
+        providerKey: 'asxs.crsa.gpt-5.5',
+        runtimeKey: 'asxs.crsa.gpt-5.5',
+        routeName: 'thinking'
+      }),
+      timestamp: expect.any(Number)
     }));
   });
 });

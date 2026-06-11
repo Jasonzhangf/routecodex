@@ -1,8 +1,11 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
-import { reportProviderErrorToRouterPolicy } from '../../../modules/llmswitch/bridge.js';
-import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
+import {
+  reportProviderErrorToRouterPolicy,
+  reportProviderSuccessToRouterPolicy
+} from '../../../modules/llmswitch/bridge.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../modules/llmswitch/bridge.js';
 
 export const ERROR_PIPELINE_CONTRACT_FEATURE_ID = 'feature_id: error.pipeline_contract';
 
@@ -231,6 +234,14 @@ export function emitProviderError(options: EmitOptions): void {
 
 export async function emitProviderErrorAndWait(options: EmitOptions): Promise<void> {
   await report_error_err_02_host_to_router_policy_from_error_err_01_source(options);
+}
+
+export async function emitProviderSuccessAndWait(runtime: ExtendedRuntimeMetadata): Promise<void> {
+  const event: ProviderSuccessEvent = {
+    runtime,
+    timestamp: Date.now()
+  };
+  await reportProviderSuccessToRouterPolicy(event);
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {

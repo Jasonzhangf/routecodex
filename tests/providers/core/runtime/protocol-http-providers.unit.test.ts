@@ -10,6 +10,7 @@ import type { ModuleDependencies } from '../../../../src/modules/pipeline/interf
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   reportProviderErrorToRouterPolicy: async () => {},
+  reportProviderSuccessToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
