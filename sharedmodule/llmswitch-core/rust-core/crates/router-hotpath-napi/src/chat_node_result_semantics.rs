@@ -128,6 +128,27 @@ fn is_tool_result_followup_turn_value(request_semantics: Option<&Value>) -> bool
     {
         return true;
     }
+    let input = row
+        .and_then(|row| row.get("input"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for item in input.iter().rev() {
+        let item_type = item
+            .as_object()
+            .and_then(|row| read_string(row.get("type")))
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        if matches!(
+            item_type.as_str(),
+            "function_call_output" | "tool_result" | "tool_message"
+        ) {
+            return true;
+        }
+        if !item_type.is_empty() {
+            break;
+        }
+    }
     let messages = row
         .and_then(|row| row.get("messages"))
         .and_then(Value::as_array)
@@ -864,6 +885,18 @@ mod request_semantics_tests {
             "messages": [
                 { "role": "assistant", "content": "call tool" },
                 { "role": "tool", "tool_call_id": "call_1", "content": "ok" }
+            ]
+        });
+        assert!(is_tool_result_followup_turn_value(Some(&semantics)));
+        assert!(!is_required_tool_call_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn classifies_responses_input_function_call_output_followup_turn_in_rust() {
+        let semantics = json!({
+            "input": [
+                { "type": "function_call", "call_id": "call_1", "name": "exec_command" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
             ]
         });
         assert!(is_tool_result_followup_turn_value(Some(&semantics)));
