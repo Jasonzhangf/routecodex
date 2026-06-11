@@ -113,6 +113,7 @@
     "verify:responses-token-limit-field-normalization-rust-only": "node scripts/architecture/verify-responses-token-limit-field-normalization-rust-only.mjs",
     "verify:responses-c4m-request-compat-rust-only": "node scripts/architecture/verify-responses-c4m-request-compat-rust-only.mjs",
     "verify:responses-crs-request-compat-rust-only": "node scripts/architecture/verify-responses-crs-request-compat-rust-only.mjs",
+    "verify:runtime-responses-provider-compat": "node scripts/architecture/verify-runtime-responses-provider-compat.mjs",
     "verify:sse-architecture-boundary": "node scripts/architecture/verify-sse-architecture-boundary.mjs",
     "verify:function-map-coverage": "node scripts/architecture/verify-function-map-coverage.mjs",
     "verify:function-map-paths": "node scripts/architecture/verify-function-map-paths.mjs",
