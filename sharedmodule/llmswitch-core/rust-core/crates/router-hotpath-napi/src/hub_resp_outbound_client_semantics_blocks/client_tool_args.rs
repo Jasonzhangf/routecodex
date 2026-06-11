@@ -1041,7 +1041,9 @@ fn synthesize_required_action_for_pending_tool_calls(payload: &Value) -> Value {
             let (Some(call_id), Some(name)) = (call_id, name) else {
                 continue;
             };
-            if resolved_tool_ids.contains(call_id) || resolved_tool_ids.contains(&format!("fc_{}", call_id)) {
+            if resolved_tool_ids.contains(call_id)
+                || resolved_tool_ids.contains(&format!("fc_{}", call_id))
+            {
                 continue;
             }
             pending_calls.push(serde_json::json!({
@@ -1078,7 +1080,8 @@ fn synthesize_required_action_for_pending_tool_calls(payload: &Value) -> Value {
     if has_visible_message_output {
         if let Some(output_items) = out.get_mut("output").and_then(Value::as_array_mut) {
             output_items.retain(|entry| {
-                entry.as_object()
+                entry
+                    .as_object()
                     .and_then(|row| row.get("type"))
                     .and_then(Value::as_str)
                     != Some("message")
@@ -1228,6 +1231,13 @@ fn replace_frame_data(frame: &str, data: &Value) -> String {
     format!("{}\n\n", out.join("\n"))
 }
 
+fn stringify_sse_tool_call_argument_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default())
+}
+
 fn read_data_call_name(data: &Map<String, Value>) -> Option<String> {
     data.get("name")
         .and_then(Value::as_str)
@@ -1272,7 +1282,10 @@ fn read_data_call_id(data: &Map<String, Value>) -> String {
         .unwrap_or_else(|| "call_apply_patch".to_string())
 }
 
-fn project_apply_patch_done_frame(data: &Map<String, Value>, normalized_arguments: String) -> String {
+fn project_apply_patch_done_frame(
+    data: &Map<String, Value>,
+    normalized_arguments: String,
+) -> String {
     let call_id = read_data_call_id(data);
     let custom_tool_done_data = serde_json::json!({
         "type": "response.output_item.done",
@@ -1305,9 +1318,232 @@ fn project_responses_sse_client_payload_deep(value: &Value, tools_raw: &Value) -
                     project_responses_sse_client_payload_deep(child, tools_raw),
                 );
             }
-            project_responses_client_payload_for_client(&Value::Object(out), tools_raw, &Value::Null)
+            project_responses_client_body_for_client_core(&Value::Object(out), tools_raw)
         }
         _ => value.clone(),
+    }
+}
+
+fn project_responses_sse_client_event_payload(
+    data: &Value,
+    tools_raw: &Value,
+    metadata: &Value,
+) -> Value {
+    let projected = project_responses_sse_client_payload_deep(data, tools_raw);
+    restore_client_visible_response_payload(&projected, metadata)
+}
+
+fn mark_response_function_call_outputs_completed(response: &mut Map<String, Value>) {
+    let Some(output) = response.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in output {
+        let Some(item_obj) = item.as_object_mut() else {
+            continue;
+        };
+        if item_obj.get("type").and_then(Value::as_str) == Some("function_call") {
+            item_obj.insert("status".to_string(), Value::String("completed".to_string()));
+        }
+    }
+}
+
+fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
+    let Some(record) = data.as_object() else {
+        return data.clone();
+    };
+    let Some(response) = record.get("response").and_then(Value::as_object) else {
+        return data.clone();
+    };
+    let response_has_required_action = response.get("required_action").is_some();
+    let top_level_has_required_action = record.get("required_action").is_some();
+    let response_requires_action = response
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|value| value.eq_ignore_ascii_case("requires_action"))
+        .unwrap_or(false);
+    if !response_has_required_action && !top_level_has_required_action && !response_requires_action
+    {
+        return data.clone();
+    }
+
+    let mut next = data.clone();
+    if let Some(next_record) = next.as_object_mut() {
+        next_record.remove("required_action");
+        if let Some(next_response) = next_record
+            .get_mut("response")
+            .and_then(Value::as_object_mut)
+        {
+            next_response.remove("required_action");
+            if next_response
+                .get("status")
+                .and_then(Value::as_str)
+                .map(|value| value.eq_ignore_ascii_case("requires_action"))
+                .unwrap_or(false)
+            {
+                next_response.insert("status".to_string(), Value::String("completed".to_string()));
+            }
+            mark_response_function_call_outputs_completed(next_response);
+        }
+    }
+    next
+}
+
+fn build_standard_tool_call_sse_frames_from_required_action_payload(
+    data: &Value,
+) -> Option<String> {
+    let record = data.as_object()?;
+    let required_action = record.get("required_action").and_then(Value::as_object)?;
+    let calls = required_action
+        .get("submit_tool_outputs")
+        .and_then(Value::as_object)
+        .and_then(|submit| submit.get("tool_calls"))
+        .and_then(Value::as_array)?;
+    if calls.is_empty() {
+        return None;
+    }
+    let response = record
+        .get("response")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let output = response.get("output").and_then(Value::as_array);
+    let mut frames = Vec::<String>::new();
+    for (index, call) in calls.iter().enumerate() {
+        let Some(call_obj) = call.as_object() else {
+            continue;
+        };
+        let function = call_obj.get("function").and_then(Value::as_object);
+        let call_id = call_obj
+            .get("id")
+            .or_else(|| call_obj.get("call_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "call_1");
+        let name = function
+            .and_then(|row| row.get("name"))
+            .or_else(|| call_obj.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("function");
+        let arguments = function
+            .and_then(|row| row.get("arguments"))
+            .or_else(|| call_obj.get("arguments"))
+            .map(stringify_sse_tool_call_argument_value)
+            .unwrap_or_default();
+        let output_item = output.and_then(|items| {
+            items.iter().find_map(|item| {
+                let row = item.as_object()?;
+                if row.get("type").and_then(Value::as_str) != Some("function_call") {
+                    return None;
+                }
+                let item_call_id = row
+                    .get("call_id")
+                    .or_else(|| row.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?;
+                if item_call_id == call_id {
+                    Some(item.clone())
+                } else {
+                    None
+                }
+            })
+        });
+        let item_id = output_item
+            .as_ref()
+            .and_then(|item| item.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("fc_{}", call_id));
+        let item_call_id = output_item
+            .as_ref()
+            .and_then(|item| item.get("call_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| call_id.to_string());
+        let item_name = output_item
+            .as_ref()
+            .and_then(|item| item.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| name.to_string());
+        let item_arguments = output_item
+            .as_ref()
+            .and_then(|item| item.get("arguments"))
+            .map(stringify_sse_tool_call_argument_value)
+            .unwrap_or(arguments);
+        frames.push(format!(
+            "event: response.output_item.added\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.output_item.added",
+                "output_index": index,
+                "item": {
+                    "id": item_id,
+                    "type": "function_call",
+                    "call_id": item_call_id,
+                    "name": item_name,
+                    "arguments": "",
+                    "status": "in_progress"
+                }
+            })
+        ));
+        frames.push(format!(
+            "event: response.function_call_arguments.delta\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.function_call_arguments.delta",
+                "output_index": index,
+                "item_id": item_id,
+                "call_id": item_call_id,
+                "delta": item_arguments
+            })
+        ));
+        frames.push(format!(
+            "event: response.function_call_arguments.done\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.function_call_arguments.done",
+                "output_index": index,
+                "item_id": item_id,
+                "call_id": item_call_id,
+                "name": item_name,
+                "arguments": item_arguments
+            })
+        ));
+        let mut done_item = output_item.unwrap_or_else(|| {
+            serde_json::json!({
+                "id": item_id,
+                "type": "function_call",
+                "call_id": item_call_id,
+                "name": item_name,
+                "arguments": item_arguments
+            })
+        });
+        if let Some(done_obj) = done_item.as_object_mut() {
+            done_obj.insert("status".to_string(), Value::String("completed".to_string()));
+            done_obj
+                .entry("arguments".to_string())
+                .or_insert_with(|| Value::String(item_arguments));
+        }
+        frames.push(format!(
+            "event: response.output_item.done\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "output_index": index,
+                "item": done_item
+            })
+        ));
+    }
+    if frames.is_empty() {
+        None
+    } else {
+        Some(frames.join(""))
     }
 }
 
@@ -1340,13 +1576,25 @@ pub(crate) fn project_responses_sse_frame_for_client(
     }
 
     let data_record = data.as_object();
-    if event_name == "response.function_call_arguments.delta" {
+    if event_name == "response.required_action" {
+        if let Some(projected_frame) =
+            build_standard_tool_call_sse_frames_from_required_action_payload(data)
+        {
+            output_frame = projected_frame;
+        }
+    } else if event_name == "response.completed" || event_name == "response.done" {
+        let normalized = project_responses_terminal_event_payload_for_client(data);
+        if normalized != *data {
+            output_frame = replace_frame_data(frame, &normalized);
+        }
+    } else if event_name == "response.function_call_arguments.delta" {
         if let Some(record) = data_record {
             let call_name = record.get("name").and_then(Value::as_str);
             let call_id = read_data_call_id(record);
             let delta = record.get("delta").and_then(Value::as_str);
             if let Some(delta) = delta {
-                if call_name == Some("apply_patch") || state.apply_patch_call_ids.contains(&call_id) {
+                if call_name == Some("apply_patch") || state.apply_patch_call_ids.contains(&call_id)
+                {
                     let entry = state
                         .pending_apply_patch_argument_deltas
                         .entry(call_id)
@@ -1400,7 +1648,10 @@ pub(crate) fn project_responses_sse_frame_for_client(
                         .pending_apply_patch_argument_deltas
                         .remove(call_id.as_str());
                     state.apply_patch_call_ids.remove(call_id.as_str());
-                    if state.emitted_apply_patch_done_call_ids.contains(call_id.as_str()) {
+                    if state
+                        .emitted_apply_patch_done_call_ids
+                        .contains(call_id.as_str())
+                    {
                         emit = false;
                     } else {
                         state
@@ -1410,7 +1661,10 @@ pub(crate) fn project_responses_sse_frame_for_client(
                     }
                 } else if event_name == "response.output_item.done" {
                     let call_id = read_data_call_id(record);
-                    if state.emitted_apply_patch_done_call_ids.contains(call_id.as_str()) {
+                    if state
+                        .emitted_apply_patch_done_call_ids
+                        .contains(call_id.as_str())
+                    {
                         emit = false;
                     } else {
                         state.emitted_apply_patch_done_call_ids.insert(call_id);
@@ -1418,10 +1672,7 @@ pub(crate) fn project_responses_sse_frame_for_client(
                 }
             }
         } else {
-            let normalized = restore_client_visible_response_payload(
-                &project_responses_sse_client_payload_deep(data, tools_raw),
-                metadata,
-            );
+            let normalized = project_responses_sse_client_event_payload(data, tools_raw, metadata);
             if normalized != *data {
                 output_frame = replace_frame_data(frame, &normalized);
             }

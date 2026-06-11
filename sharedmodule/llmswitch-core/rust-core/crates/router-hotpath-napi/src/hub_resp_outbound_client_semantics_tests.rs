@@ -937,7 +937,8 @@ fn project_responses_client_body_for_client_projects_freeform_apply_patch_custom
             }
         }
     });
-    let output = project_responses_client_body_for_client(&payload, &freeform_apply_patch_tool_fixture());
+    let output =
+        project_responses_client_body_for_client(&payload, &freeform_apply_patch_tool_fixture());
 
     assert_eq!(output["output"][0]["type"], "custom_tool_call");
     assert_eq!(output["output"][0]["name"], "apply_patch");
@@ -977,7 +978,8 @@ fn project_responses_client_payload_for_client_restores_client_visible_response_
 }
 
 #[test]
-fn project_responses_client_payload_for_client_synthesizes_required_action_for_pending_function_calls() {
+fn project_responses_client_payload_for_client_synthesizes_required_action_for_pending_function_calls(
+) {
     let payload = json!({
         "type": "response.completed",
         "response": {
@@ -1003,11 +1005,13 @@ fn project_responses_client_payload_for_client_synthesizes_required_action_for_p
         "call_exec_1"
     );
     assert_eq!(
-        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+            ["name"],
         "exec_command"
     );
     assert_eq!(
-        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["arguments"],
+        output["response"]["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+            ["arguments"],
         "{\"cmd\":\"pwd\"}"
     );
 }
@@ -1042,7 +1046,8 @@ fn project_responses_client_payload_for_client_keeps_completed_when_tool_output_
 }
 
 #[test]
-fn project_responses_client_payload_for_client_mixed_message_and_function_calls_uses_standard_requires_action() {
+fn project_responses_client_payload_for_client_mixed_message_and_function_calls_uses_standard_requires_action(
+) {
     let payload = json!({
         "type": "response.completed",
         "response": {
@@ -1195,6 +1200,127 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
 }
 
 #[test]
+fn project_responses_sse_frame_for_client_keeps_completed_function_call_frame_standard() {
+    let frame = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_pending_exec_sse",
+                "object": "response",
+                "status": "completed",
+                "model": "provider-internal-model",
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            }
+        }))
+        .unwrap()
+    );
+
+    let projected = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.completed"),
+        &json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_pending_exec_sse",
+                "object": "response",
+                "status": "completed",
+                "model": "provider-internal-model",
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(projected["emit"], Value::Bool(true));
+    let output_frame = projected["frame"].as_str().expect("frame");
+    assert!(output_frame.contains("event: response.completed"));
+    assert!(output_frame.contains("\"status\":\"completed\""));
+    assert!(!output_frame.contains("\"required_action\""));
+    assert!(!output_frame.contains("\"status\":\"requires_action\""));
+    assert!(output_frame.contains("\"call_exec_sse_1\""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_keeps_completed_when_tool_output_already_present() {
+    let frame = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_completed_exec_sse",
+                "object": "response",
+                "status": "completed",
+                "model": "provider-internal-model",
+                "tool_outputs": [{
+                    "tool_call_id": "call_exec_sse_1",
+                    "output": "/tmp/ws"
+                }],
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            }
+        }))
+        .unwrap()
+    );
+
+    let projected = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.completed"),
+        &json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_completed_exec_sse",
+                "object": "response",
+                "status": "completed",
+                "model": "provider-internal-model",
+                "tool_outputs": [{
+                    "tool_call_id": "call_exec_sse_1",
+                    "output": "/tmp/ws"
+                }],
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(projected["emit"], Value::Bool(true));
+    let output_frame = projected["frame"].as_str().expect("frame");
+    assert!(output_frame.contains("\"status\":\"completed\""));
+    assert!(!output_frame.contains("\"required_action\""));
+}
+
+#[test]
 fn project_responses_sse_frame_for_client_keeps_terminal_frame_unchanged() {
     let frame = "event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_1\"}}\n\n";
     let output = project_responses_sse_frame_for_client(
@@ -1207,6 +1333,163 @@ fn project_responses_sse_frame_for_client_keeps_terminal_frame_unchanged() {
     );
     assert_eq!(output["emit"], true);
     assert_eq!(output["frame"], frame);
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_removes_required_action_from_terminal_done() {
+    let frame = format!(
+        "event: response.done\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.done",
+            "response": {
+                "id": "resp_terminal_tool",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_call_exec_terminal",
+                    "type": "function_call",
+                    "status": "in_progress",
+                    "name": "exec_command",
+                    "call_id": "call_exec_terminal",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_exec_terminal",
+                            "type": "function",
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }]
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    );
+    let output = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.done"),
+        &json!({
+            "type": "response.done",
+            "response": {
+                "id": "resp_terminal_tool",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_call_exec_terminal",
+                    "type": "function_call",
+                    "status": "in_progress",
+                    "name": "exec_command",
+                    "call_id": "call_exec_terminal",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_exec_terminal",
+                            "type": "function",
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }]
+                    }
+                }
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(output["emit"], true);
+    let output_frame = output["frame"].as_str().expect("frame");
+    assert!(output_frame.contains("event: response.done"));
+    assert!(output_frame.contains("\"status\":\"completed\""));
+    assert!(output_frame.contains("\"type\":\"function_call\""));
+    assert!(!output_frame.contains("\"required_action\""));
+    assert!(!output_frame.contains("\"status\":\"requires_action\""));
+    assert!(!output_frame.contains("\"status\":\"in_progress\""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_keeps_required_action_terminal_frame_visible() {
+    let frame = format!(
+        "event: response.required_action\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.required_action",
+            "response": {
+                "id": "resp_required_action_visible",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            },
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_exec_sse_1",
+                        "type": "function",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }]
+                }
+            }
+        }))
+        .unwrap()
+    );
+    let output = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.required_action"),
+        &json!({
+            "type": "response.required_action",
+            "response": {
+                "id": "resp_required_action_visible",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_call_exec_sse_1",
+                    "type": "function_call",
+                    "status": "completed",
+                    "name": "exec_command",
+                    "call_id": "call_exec_sse_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            },
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_exec_sse_1",
+                        "type": "function",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }]
+                }
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+    assert_eq!(output["emit"], true);
+    let output_frame = output["frame"].as_str().expect("frame");
+    assert!(!output_frame.contains("event: response.required_action"));
+    assert!(!output_frame.contains("\"required_action\""));
+    assert!(output_frame.contains("event: response.output_item.added"));
+    assert!(output_frame.contains("event: response.function_call_arguments.delta"));
+    assert!(output_frame.contains("event: response.function_call_arguments.done"));
+    assert!(output_frame.contains("event: response.output_item.done"));
+    assert!(output_frame.contains("\"call_exec_sse_1\""));
+    assert!(output_frame.contains("\"exec_command\""));
 }
 
 #[test]
