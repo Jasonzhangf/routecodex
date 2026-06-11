@@ -2607,3 +2607,40 @@ fn convert_bridge_input_skips_overlong_responses_function_calls() {
     let output = convert_bridge_input_to_chat_messages(input).unwrap();
     assert!(output.messages.is_empty());
 }
+
+#[test]
+fn responses_submit_tool_outputs_roundtrip_keeps_function_call_before_output_in_same_batch() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "id": "fc_submit_1",
+                "call_id": "call_submit_1",
+                "name": "exec_command",
+                "arguments": { "cmd": "pwd" }
+            }),
+            json!({
+                "type": "function_call_output",
+                "id": "fc_submit_1",
+                "call_id": "call_submit_1",
+                "output": "ok"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 2);
+    assert_eq!(output.messages[0]["role"], json!("assistant"));
+    assert_eq!(
+        output.messages[0]["tool_calls"][0]["id"],
+        json!("call_submit_1")
+    );
+    assert_eq!(output.messages[1]["role"], json!("tool"));
+    assert_eq!(output.messages[1]["tool_call_id"], json!("call_submit_1"));
+    assert_eq!(output.messages[1]["content"], json!("ok"));
+}
