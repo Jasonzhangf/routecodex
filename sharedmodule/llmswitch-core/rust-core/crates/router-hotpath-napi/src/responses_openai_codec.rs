@@ -196,6 +196,7 @@ pub fn run_responses_openai_response_codec_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json;
     use serde_json::json;
 
     #[test]
@@ -278,6 +279,137 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("orphan_tool_result"));
         assert!(err.to_string().contains("native:run_command:3"));
+    }
+
+    #[test]
+    fn request_codec_preserves_paired_responses_tool_continuation() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-4.1",
+                "previous_response_id": "resp_prev_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "name": "probe_tool",
+                        "arguments": "{\"query\":\"routecodex_probe\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "output": "TOOL_RESULT_ROUTE_CODEX_OK"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "probe_tool",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_paired_tool_continuation" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let messages = value["request"]["messages"]
+            .as_array()
+            .expect("request messages");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], Value::String("assistant".to_string()));
+        assert_eq!(
+            messages[0]["tool_calls"][0]["id"],
+            Value::String("call_probe_1".to_string())
+        );
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            Value::String("probe_tool".to_string())
+        );
+        assert_eq!(messages[1]["role"], Value::String("tool".to_string()));
+        assert_eq!(
+            messages[1]["tool_call_id"],
+            Value::String("call_probe_1".to_string())
+        );
+        assert_eq!(
+            messages[1]["content"],
+            Value::String("TOOL_RESULT_ROUTE_CODEX_OK".to_string())
+        );
+    }
+
+    #[test]
+    fn request_codec_then_anthropic_codec_preserves_responses_tool_pair_order() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "router-gpt-5.5",
+                "previous_response_id": "resp_prev_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "name": "probe_tool",
+                        "arguments": "{\"query\":\"routecodex_probe\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "output": "TOOL_RESULT_ROUTE_CODEX_OK"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "probe_tool",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_to_anthropic_tool_pair" }).to_string()),
+        )
+        .unwrap();
+
+        let openai_chat: Value = serde_json::from_str(&raw).unwrap();
+        let anthropic_raw =
+            build_anthropic_from_openai_chat_json(openai_chat["request"].to_string(), None)
+                .expect("anthropic build success");
+        let anthropic: Value = serde_json::from_str(&anthropic_raw).unwrap();
+        let messages = anthropic["messages"]
+            .as_array()
+            .expect("anthropic messages");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(messages[0]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(messages[0]["content"][0]["id"], json!("call_probe_1"));
+        assert_eq!(messages[0]["content"][0]["name"], json!("probe_tool"));
+        assert_eq!(messages[1]["role"], json!("user"));
+        assert_eq!(messages[1]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(
+            messages[1]["content"][0]["tool_use_id"],
+            json!("call_probe_1")
+        );
+        assert_eq!(
+            messages[1]["content"][0]["content"],
+            json!("TOOL_RESULT_ROUTE_CODEX_OK")
+        );
+        assert_eq!(messages[2]["role"], json!("user"));
+        assert_eq!(messages[2]["content"][0]["type"], json!("text"));
+        assert_eq!(messages[2]["content"][0]["text"], json!("继续"));
     }
 
     #[test]
