@@ -544,6 +544,48 @@ fn normalize_provider_outbound_tools(protocol: &str, payload: &mut Map<String, V
     *tools = normalized;
 }
 
+fn normalize_openai_responses_content_part(part: &mut Value) {
+    let Some(row) = part.as_object_mut() else {
+        return;
+    };
+    let part_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if part_type.eq_ignore_ascii_case("image_url") {
+        row.insert("type".to_string(), Value::String("input_image".to_string()));
+    }
+    if row.get("type").and_then(Value::as_str) == Some("input_image") {
+        if let Some(url) = row
+            .get("image_url")
+            .and_then(Value::as_object)
+            .and_then(|image_url| image_url.get("url"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        {
+            row.insert("image_url".to_string(), Value::String(url));
+        }
+    }
+}
+
+fn normalize_openai_responses_input_items(payload: &mut Map<String, Value>) {
+    let Some(Value::Array(input_items)) = payload.get_mut("input") else {
+        return;
+    };
+    for item in input_items.iter_mut() {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(Value::Array(content)) = row.get_mut("content") else {
+            continue;
+        };
+        for part in content.iter_mut() {
+            normalize_openai_responses_content_part(part);
+        }
+    }
+}
+
 fn default_allowlists_for_input() -> HubProtocolAllowlists {
     let allowlists = build_default_allowlists();
     HubProtocolAllowlists {
@@ -579,6 +621,9 @@ fn apply_provider_outbound_policy(
     }
 
     normalize_provider_outbound_tools(protocol, &mut payload);
+    if protocol == "openai-responses" {
+        normalize_openai_responses_input_items(&mut payload);
+    }
 
     if !spec.provider_outbound.enforce_enabled {
         return payload;
@@ -942,6 +987,39 @@ mod tests {
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let reasoning = input_items[0].as_object().unwrap();
         assert!(reasoning.contains_key("content"));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_normalizes_responses_image_url_parts() {
+        let payload = serde_json::json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "<image name=[Image #1]>" },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,AAA",
+                            "detail": "high"
+                        }
+                    },
+                    { "type": "input_text", "text": "[Image #1]" }
+                ]
+            }]
+        });
+        let Value::Object(payload) = payload else {
+            panic!("object payload expected");
+        };
+        let output = apply_provider_outbound_policy("openai-responses", None, payload);
+        let input_items = output.get("input").and_then(Value::as_array).unwrap();
+        let content = input_items[0]
+            .get("content")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(content[1]["type"], serde_json::json!("input_image"));
+        assert_eq!(content[1]["image_url"], serde_json::json!("data:image/png;base64,AAA"));
     }
 
     #[test]

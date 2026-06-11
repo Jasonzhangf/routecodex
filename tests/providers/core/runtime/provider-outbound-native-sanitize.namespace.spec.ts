@@ -2,6 +2,36 @@ import { describe, expect, test } from '@jest/globals';
 import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 describe('provider outbound native sanitize namespace guard', () => {
+  test('normalizes OpenAI Responses image_url parts into input_image wire parts', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [{
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '<image name=[Image #1]>' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'data:image/png;base64,AAA',
+                detail: 'high'
+              }
+            },
+            { type: 'input_text', text: '[Image #1]' }
+          ]
+        }]
+      }
+    });
+
+    const content = (output.input as Array<{ content: Array<Record<string, unknown>> }>)[0].content;
+    expect(content[1]).toEqual({
+      type: 'input_image',
+      image_url: 'data:image/png;base64,AAA'
+    });
+  });
+
   test('flattens namespace tool aggregate before provider transport', () => {
     const output = sanitizeProviderOutboundPayloadWithNative({
       protocol: 'openai-responses',

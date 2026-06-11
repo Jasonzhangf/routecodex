@@ -6,13 +6,21 @@ import { afterEach, describe, expect, test } from '@jest/globals';
 import { jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
+import { __flushProviderSnapshotQueueForTests, __resetProviderSnapshotErrorBufferForTests } from '../../../../src/providers/core/utils/snapshot-writer.js';
+import { allowSnapshotLocalDiskWrite, __resetSnapshotLocalDiskGateForTests } from '../../../../src/utils/snapshot-local-disk-gate.js';
+import { runtimeFlags, setRuntimeFlag } from '../../../../src/runtime/runtime-flags.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   reportProviderErrorToRouterPolicy: async () => {},
   reportProviderSuccessToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
-  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
+  sanitizeProviderOutboundPayload: async (input: {
+    protocol?: string;
+    compatibilityProfile?: string;
+    payload: Record<string, unknown>;
+  }) => sanitizeProviderOutboundPayloadWithNative(input),
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
     request: {
       model: payload.model,
@@ -239,6 +247,226 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(messages.length).toBeGreaterThanOrEqual(2);
     expect(messages.some((message) => message.role === 'assistant' && Array.isArray(message.tool_calls))).toBe(true);
     expect(messages.some((message) => message.role === 'tool' && message.tool_call_id === 'call_1')).toBe(true);
+  });
+
+  test('HTTP TRANSPORT RED: openai responses provider-request snapshot preserves tool continuation wire shape', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-openai-responses-provider-request-snapshot',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'asxs',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+    const previousCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
+    const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-provider-snapshot-'));
+    process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+    process.env.RCC_SNAPSHOT_DIR = tempDir;
+    setRuntimeFlag('snapshotsEnabled', true);
+    __resetProviderSnapshotErrorBufferForTests();
+    __resetSnapshotLocalDiskGateForTests();
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.createProviderContext = () => ({
+      requestId: 'req_openai_responses_provider_request_snapshot',
+      providerType: 'responses',
+      startTime: Date.now(),
+      profile: {},
+      providerId: 'asxs',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      providerProtocol: 'openai-responses',
+      metadata: { entryEndpoint: '/v1/responses', entryPort: 5555, matchedPort: 5555 }
+    });
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any) => {
+        provider.__lastDirect = { body };
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.4-mini',
+      previous_response_id: 'resp_prev',
+      input: [
+        { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'exec_command', arguments: '{"cmd":"pwd"}' },
+        { type: 'function_call_output', call_id: 'call_1', output: 'ok' }
+      ],
+      tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      stream: true
+    } as any;
+
+    allowSnapshotLocalDiskWrite('req_openai_responses_provider_request_snapshot');
+    attachProviderRuntimeMetadata(inbound, {
+      requestId: 'req_openai_responses_provider_request_snapshot',
+      providerType: 'responses',
+      providerProtocol: 'openai-responses',
+      providerId: 'asxs',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      metadata: { entryEndpoint: '/v1/responses', entryPort: 5555, matchedPort: 5555 }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    await __flushProviderSnapshotQueueForTests();
+
+    const snapshotPath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5555',
+      'asxs.crsa.gpt-5.4-mini',
+      'req_openai_responses_provider_request_snapshot',
+      'provider-request.json'
+    );
+    const snapshotRaw = await fs.readFile(snapshotPath, 'utf8');
+    const snapshot = JSON.parse(snapshotRaw) as { body?: Record<string, unknown> };
+    const providerBody = snapshot.body ?? {};
+
+    expect(providerBody).toMatchObject({
+      model: 'gpt-5.4-mini',
+      previous_response_id: 'resp_prev',
+      stream: true
+    });
+    expect(providerBody.input).toEqual([
+      { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'exec_command', arguments: '{"cmd":"pwd"}' },
+      { type: 'function_call_output', call_id: 'call_1', output: 'ok' }
+    ]);
+    expect(providerBody.messages).toBeUndefined();
+
+    __resetSnapshotLocalDiskGateForTests();
+    if (previousSnapshotDir === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_DIR;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_DIR = previousSnapshotDir;
+    }
+    if (previousCompatSnapshotDir === undefined) {
+      delete process.env.RCC_SNAPSHOT_DIR;
+    } else {
+      process.env.RCC_SNAPSHOT_DIR = previousCompatSnapshotDir;
+    }
+    setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  test('HTTP TRANSPORT RED: openai responses provider-request snapshot normalizes image_url parts to input_image wire shape', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-openai-responses-provider-request-image-normalization',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'asxs',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+    const previousCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
+    const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-provider-snapshot-'));
+    process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+    process.env.RCC_SNAPSHOT_DIR = tempDir;
+    setRuntimeFlag('snapshotsEnabled', true);
+    __resetProviderSnapshotErrorBufferForTests();
+    __resetSnapshotLocalDiskGateForTests();
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.createProviderContext = () => ({
+      requestId: 'req_openai_responses_provider_request_image_normalization',
+      providerType: 'responses',
+      startTime: Date.now(),
+      profile: {},
+      providerId: 'asxs',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      providerProtocol: 'openai-responses',
+      metadata: { entryEndpoint: '/v1/responses', entryPort: 5555, matchedPort: 5555 }
+    });
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any) => {
+        provider.__lastDirect = { body };
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.4-mini',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '<image name=[Image #1]>' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'data:image/png;base64,AAA',
+                detail: 'high'
+              }
+            },
+            { type: 'input_text', text: '[Image #1]' }
+          ]
+        }
+      ],
+      stream: true
+    } as any;
+
+    allowSnapshotLocalDiskWrite('req_openai_responses_provider_request_image_normalization');
+    attachProviderRuntimeMetadata(inbound, {
+      requestId: 'req_openai_responses_provider_request_image_normalization',
+      providerType: 'responses',
+      providerProtocol: 'openai-responses',
+      providerId: 'asxs',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      metadata: { entryEndpoint: '/v1/responses', entryPort: 5555, matchedPort: 5555 }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    await __flushProviderSnapshotQueueForTests();
+
+    const snapshotPath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5555',
+      'asxs.crsa.gpt-5.4-mini',
+      'req_openai_responses_provider_request_image_normalization',
+      'provider-request.json'
+    );
+    const snapshotRaw = await fs.readFile(snapshotPath, 'utf8');
+    const snapshot = JSON.parse(snapshotRaw) as { body?: Record<string, unknown> };
+    const providerBody = snapshot.body ?? {};
+    const input = providerBody.input as Array<Record<string, unknown>>;
+    const content = input[0]?.content as Array<Record<string, unknown>>;
+
+    expect(content[1]).toEqual({
+      type: 'input_image',
+      image_url: 'data:image/png;base64,AAA'
+    });
+    expect(JSON.stringify(providerBody)).not.toContain('"type":"image_url"');
+
+    __resetSnapshotLocalDiskGateForTests();
+    if (previousSnapshotDir === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_DIR;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_DIR = previousSnapshotDir;
+    }
+    if (previousCompatSnapshotDir === undefined) {
+      delete process.env.RCC_SNAPSHOT_DIR;
+    } else {
+      process.env.RCC_SNAPSHOT_DIR = previousCompatSnapshotDir;
+    }
+    setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   test('ResponsesProvider forces providerType=responses', () => {
