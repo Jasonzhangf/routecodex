@@ -1575,6 +1575,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
       expect(output).toContain('event: response.done');
       expect(output).not.toContain('upstream_stream_incomplete');
       expect(output).toContain('"status":"completed"');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('request req-terminal-message-only completed'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response][req-terminal-message-only] completed'));
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('finish_reason=unknown'));
     } finally {
       if (previousTerminalTimeout === undefined) {
         delete process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;

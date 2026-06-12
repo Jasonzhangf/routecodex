@@ -2283,6 +2283,42 @@ export async function sendPipelineResponse(
         finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined
       });
     };
+    const resolveTerminalProbeFinishReason = (): string | undefined => {
+      if (finishTracker.finishReason && finishTracker.finishReason.trim()) {
+        return finishTracker.finishReason.trim();
+      }
+      if (!contractProbe.probe || typeof contractProbe.probe !== 'object' || Array.isArray(contractProbe.probe)) {
+        return undefined;
+      }
+      const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
+      const derived = deriveFinishReason(sanitizedProbeBody);
+      if (derived && derived.trim()) {
+        finishTracker.finishReason = derived.trim();
+        return finishTracker.finishReason;
+      }
+      return undefined;
+    };
+    const finalizeSyntheticTerminalClose = (): void => {
+      const resolvedFinishReason = resolveTerminalProbeFinishReason();
+      if (resolvedFinishReason) {
+        finishTracker.finishReason = resolvedFinishReason;
+      }
+      finishTracker.seenTerminalEvent = true;
+      terminalWatch.sawTerminalChunk = true;
+      streamEnded = true;
+      getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
+        finishReason: finishTracker.finishReason,
+        terminal: true
+      });
+      logStreamRequestCompleteOnce(
+        completionLogState,
+        entryEndpoint,
+        requestLabel,
+        status,
+        finishTracker.finishReason,
+        requestLogContext
+      );
+    };
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
       for (const name of names) {
@@ -2636,17 +2672,19 @@ export async function sendPipelineResponse(
       const framesToWrite = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
       if (framesToWrite.length === 0) {
         if (terminalWatch.sawAssistantMessageDoneTerminal || finishTracker.seenTerminalEvent) {
-          finishTracker.seenTerminalEvent = true;
-          ended = true;
-          clearTimers();
-          detachOutboundStream();
-          try {
-            res.end();
-          } catch (endError) {
-            logResponseNonBlockingError(`${stage}.end:${requestLabel}`, endError);
+          finalizeSyntheticTerminalClose();
+          if (!res.writableEnded && !res.destroyed) {
+            ended = true;
+            clearTimers();
+            detachOutboundStream();
+            try {
+              res.end();
+            } catch (endError) {
+              logResponseNonBlockingError(`${stage}.end:${requestLabel}`, endError);
+            }
+            clientSseSnapshotRecorder?.flush();
+            destroySourceStream();
           }
-          clientSseSnapshotRecorder?.flush();
-          destroySourceStream();
           return;
         }
         endWithSseError(
@@ -2682,6 +2720,7 @@ export async function sendPipelineResponse(
         return;
       }
       if (!res.writableEnded && !res.destroyed) {
+        finalizeSyntheticTerminalClose();
         ended = true;
         clearTimers();
         detachOutboundStream();

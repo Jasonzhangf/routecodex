@@ -292,7 +292,10 @@ fn has_output_function_calls(value: Option<&Value>) -> bool {
             .and_then(|row| read_string(row.get("type")))
             .map(|value| value.to_ascii_lowercase())
             .unwrap_or_default();
-        matches!(item_type.as_str(), "function_call" | "tool_call")
+        matches!(
+            item_type.as_str(),
+            "function_call" | "tool_call" | "custom_tool_call"
+        )
     })
 }
 
@@ -428,7 +431,10 @@ fn has_responses_tool_call(record: &Map<String, Value>) -> bool {
                     .and_then(|row| read_string(row.get("type")))
                     .map(|value| value.to_ascii_lowercase())
                     .unwrap_or_default();
-                matches!(item_type.as_str(), "function_call" | "tool_call")
+                matches!(
+                    item_type.as_str(),
+                    "function_call" | "tool_call" | "custom_tool_call"
+                )
             })
         })
 }
@@ -947,6 +953,15 @@ mod request_semantics_tests {
         });
         assert_eq!(
             derive_finish_reason_value(&responses).as_deref(),
+            Some("tool_calls")
+        );
+
+        let responses_custom_tool = json!({
+            "status": "completed",
+            "output": [{ "type": "custom_tool_call", "call_id": "call_custom_1" }]
+        });
+        assert_eq!(
+            derive_finish_reason_value(&responses_custom_tool).as_deref(),
             Some("tool_calls")
         );
 
