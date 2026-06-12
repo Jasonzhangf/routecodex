@@ -11,9 +11,6 @@
         "action": "dto_unwrap"
       },
       {
-        "action": "lmstudio_responses_input_stringify"
-      },
-      {
         "action": "normalize_tool_call_ids"
       },
       {
