@@ -99,18 +99,79 @@ function applyRequestRuntimeMetadataToProviderContext(
   context.pipelineId = context.pipelineId ?? runtimeMetadata.pipelineId;
 }
 
-async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
+function buildDirectResponsesSemanticTimeoutError(code: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'): Error & { code: string } {
+  return Object.assign(new Error(code), { code });
+}
+
+function computeSemanticTimeoutRemainingMs(
+  timeoutMs: number | undefined,
+  lastSemanticActivityAt: number
+): number | undefined {
+  if (!Number.isFinite(timeoutMs) || (timeoutMs ?? 0) <= 0) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor((timeoutMs as number) - (Date.now() - lastSemanticActivityAt)));
+}
+
+async function readDirectResponsesChunkWithSemanticTimeout(
+  iterator: AsyncIterator<unknown>,
+  timeoutMs: number | undefined,
+  lastSemanticActivityAt: number,
+  timeoutCode: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+): Promise<IteratorResult<unknown>> {
+  const remainingMs = computeSemanticTimeoutRemainingMs(timeoutMs, lastSemanticActivityAt);
+  if (remainingMs === undefined) {
+    return await iterator.next();
+  }
+  let timeoutId: NodeJS.Timeout | null = null;
+  const timeoutError = buildDirectResponsesSemanticTimeoutError(timeoutCode);
+  try {
+    const result = await Promise.race([
+      iterator.next(),
+      new Promise<IteratorResult<unknown>>((_, reject) => {
+        timeoutId = setTimeout(() => reject(timeoutError), remainingMs);
+        timeoutId.unref?.();
+      })
+    ]);
+    return result;
+  } catch (error) {
+    if (error === timeoutError) {
+      await iterator.return?.();
+    }
+    throw error;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function prepareDirectResponsesSsePassthroughStream(
+  stream: NodeJS.ReadableStream,
+  options?: {
+    noContentTimeoutMs?: number;
+    contentIdleTimeoutMs?: number;
+  }
+): Promise<NodeJS.ReadableStream> {
   const iterator = stream[Symbol.asyncIterator]();
   const bufferedFrames: Buffer[] = [];
   let bufferedText = '';
   let sawSemanticFrame = false;
+  let lastSemanticActivityAt = Date.now();
 
   while (!sawSemanticFrame) {
-    const next = await iterator.next();
+    const next = await readDirectResponsesChunkWithSemanticTimeout(
+      iterator,
+      options?.noContentTimeoutMs,
+      lastSemanticActivityAt,
+      'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+    );
     if (next.done) {
       break;
     }
-    const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+    const chunk = Buffer.isBuffer(next.value)
+      ? next.value
+      : Buffer.from(String(next.value));
     bufferedText += chunk.toString('utf8');
     const parts = bufferedText.split(/\r?\n\r?\n/);
     bufferedText = parts.pop() ?? '';
@@ -132,6 +193,7 @@ async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.Readabl
       }
       bufferedFrames.push(Buffer.from(`${part}\n\n`));
       sawSemanticFrame = true;
+      lastSemanticActivityAt = Date.now();
     }
     const bufferedSize = bufferedFrames.reduce((total, item) => total + item.byteLength, 0) + Buffer.byteLength(bufferedText);
     if (bufferedSize > 64 * 1024) {
@@ -146,11 +208,18 @@ async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.Readabl
   async function* filterAndRead(): AsyncGenerator<Buffer> {
     let pending = '';
     while (true) {
-      const next = await iterator.next();
+      const next = await readDirectResponsesChunkWithSemanticTimeout(
+        iterator,
+        options?.contentIdleTimeoutMs,
+        lastSemanticActivityAt,
+        'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+      );
       if (next.done) {
         break;
       }
-      pending += (Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value)).toString('utf8');
+      pending += (Buffer.isBuffer(next.value)
+        ? next.value
+        : Buffer.from(String(next.value))).toString('utf8');
       const parts = pending.split(/\r?\n\r?\n/);
       pending = parts.pop() ?? '';
       for (const part of parts) {
@@ -163,6 +232,7 @@ async function prepareDirectResponsesSsePassthroughStream(stream: NodeJS.Readabl
           if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
             continue;
           }
+          lastSemanticActivityAt = Date.now();
         }
         yield Buffer.from(`${part}\n\n`);
       }
@@ -407,7 +477,10 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: 'text/event-stream'
     }, buildProviderSseStreamConfig(context));
 
-    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream);
+    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream, {
+      noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
+      contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
+    });
 
     const streamForHost = shouldCaptureProviderStreamSnapshots()
       ? attachProviderSseSnapshotStream(preparedStream, {

@@ -119,6 +119,48 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
+  it('does not reroute provider-owned continuation failures across providers', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const transientRetryTracker = createRequestLocalTransientRetryTracker();
+    const error = Object.assign(new Error('HTTP 502: SSE_TO_JSON_ERROR'), {
+      statusCode: 502,
+      code: 'SSE_TO_JSON_ERROR',
+      upstreamCode: 'upstream_error'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'SSE_TO_JSON_ERROR',
+        upstreamCode: 'upstream_error',
+        reason: 'HTTP 502: SSE_TO_JSON_ERROR'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: '1token.key1.gpt-5.5',
+      runtimeKey: '1token.key1',
+      logicalRequestChainKey: 'req-provider-owned-continuation',
+      logicalChainRetryLimitStageRequestId: 'req-provider-owned-continuation',
+      routePool: ['1token.key1.gpt-5.5', 'minimax.key1.MiniMax-M3'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      transientRetryTracker,
+      isStreamingRequest: true,
+      providerOwnedContinuation: true
+    });
+
+    expect(plan.shouldRetry).toBe(false);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.backoffScope).toBeUndefined();
+    expect(plan.retryBackoffMs).toBe(0);
+    expect(plan.recoverableBackoffMs).toBe(0);
+    expect(Array.from(excludedProviderKeys)).toEqual(['1token.key1.gpt-5.5']);
+  });
+
   it('does not retry the same provider for streaming recoverable pre-response failures', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();

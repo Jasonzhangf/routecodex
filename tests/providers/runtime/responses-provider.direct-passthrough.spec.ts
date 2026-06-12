@@ -1,4 +1,5 @@
-import { Readable } from 'node:stream';
+import { once } from 'node:events';
+import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, jest, test } from '@jest/globals';
 
@@ -232,6 +233,209 @@ describe('ResponsesProvider direct passthrough', () => {
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 75 });
+  });
+
+  test('direct passthrough no-content timeout ignores keepalive-only SSE traffic', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-semantic-no-content-timeout',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        const interval = setInterval(() => {
+          stream.write(': keepalive\n\n');
+        }, 5);
+        interval.unref?.();
+        stream.on('close', () => clearInterval(interval));
+        stream.on('error', () => clearInterval(interval));
+        return stream;
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        __responsesDirectPassthrough: true,
+        providerStreamNoContentTimeoutMs: 40
+      }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+    });
+  });
+
+  test('direct passthrough content-idle timeout ignores keepalive after first semantic frame', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-semantic-content-idle-timeout',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        queueMicrotask(() => {
+          stream.write('event: response.created\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.created',
+            response: { id: 'resp_1', object: 'response', status: 'in_progress', output: [] }
+          })}\n\n`);
+          stream.write('event: response.output_item.added\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.output_item.added',
+            item: { id: 'rs_1', type: 'reasoning', content: [], summary: [] },
+            output_index: 0
+          })}\n\n`);
+        });
+        const interval = setInterval(() => {
+          stream.write(': keepalive\n\n');
+        }, 5);
+        interval.unref?.();
+        stream.on('close', () => clearInterval(interval));
+        stream.on('error', () => clearInterval(interval));
+        return stream;
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        __responsesDirectPassthrough: true,
+        providerStreamNoContentTimeoutMs: 40,
+        providerStreamContentIdleTimeoutMs: 40
+      }
+    });
+
+    const result = await provider.sendRequestInternal(inbound) as { __sse_responses: NodeJS.ReadableStream };
+    const passthrough = result.__sse_responses;
+    passthrough.resume();
+    const [error] = (await once(passthrough, 'error')) as [Error & { code?: string }];
+    expect(error.message).toContain('UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT');
+    expect(error.code).toBe('UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT');
+  });
+
+  test('direct passthrough semantic frames reset content-idle timer and allow terminal completion', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-semantic-idle-control',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        setTimeout(() => {
+          stream.write('event: response.created\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.created',
+            response: { id: 'resp_ok', object: 'response', status: 'in_progress', output: [] }
+          })}\n\n`);
+        }, 0);
+        setTimeout(() => {
+          stream.write('event: response.output_item.added\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.output_item.added',
+            item: { id: 'msg_ok', type: 'message', role: 'assistant', status: 'in_progress', content: [] },
+            output_index: 0
+          })}\n\n`);
+        }, 10);
+        setTimeout(() => {
+          stream.write('event: response.output_text.delta\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.output_text.delta',
+            item_id: 'msg_ok',
+            content_index: 0,
+            delta: 'hello'
+          })}\n\n`);
+        }, 20);
+        setTimeout(() => {
+          stream.write('event: response.completed\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.completed',
+            response: { id: 'resp_ok', object: 'response', status: 'completed', output: [] }
+          })}\n\n`);
+        }, 30);
+        setTimeout(() => {
+          stream.write('event: response.done\n');
+          stream.write(`data: ${JSON.stringify({
+            type: 'response.done',
+            response: { id: 'resp_ok', object: 'response', status: 'completed', output: [] }
+          })}\n\n`);
+          stream.end();
+        }, 40);
+        return stream;
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        __responsesDirectPassthrough: true,
+        providerStreamNoContentTimeoutMs: 50,
+        providerStreamContentIdleTimeoutMs: 50
+      }
+    });
+
+    const result = await provider.sendRequestInternal(inbound) as { __sse_responses: NodeJS.ReadableStream };
+    const passthrough = result.__sse_responses;
+    let text = '';
+    for await (const chunk of passthrough as AsyncIterable<Buffer | string>) {
+      text += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+    }
+    expect(text).toContain('event: response.completed');
+    expect(text).toContain('event: response.done');
   });
 
   test('maps direct HTTP 200 SSE response.failed concurrency to retryable provider error', async () => {

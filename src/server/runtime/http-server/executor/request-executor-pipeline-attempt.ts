@@ -8,6 +8,48 @@ import type { BlockingRecoverableRouteHoldState } from './request-executor-error
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 
+function normalizeExplicitRoutePool(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    const normalized = entry.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function mergeObservedRoutePoolChain(
+  existing: string[] | null,
+  observed: string[]
+): string[] | null {
+  if (observed.length === 0) {
+    return existing;
+  }
+  if (!existing || existing.length === 0) {
+    return [...observed];
+  }
+  const merged = [...existing];
+  const seen = new Set(existing);
+  for (const candidate of observed) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    merged.push(candidate);
+  }
+  return merged;
+}
+
 export type ResolvedRequestExecutorPipelineAttempt =
   | {
     kind: 'retry_next_attempt';
@@ -58,21 +100,12 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   });
 
   let initialRoutePool = args.initialRoutePool;
-  if (!initialRoutePool && Array.isArray(args.pipelineResult.routingDecision?.pool)) {
-    initialRoutePool = [...args.pipelineResult.routingDecision.pool];
-  }
-  const routePoolForAttempt = (() => {
-    const currentPool = Array.isArray(args.pipelineResult.routingDecision?.pool)
-      ? args.pipelineResult.routingDecision.pool
-      : [];
-    if (!initialRoutePool || initialRoutePool.length === 0) {
-      return currentPool;
-    }
-    if (currentPool.length <= 1 && initialRoutePool.length > currentPool.length) {
-      return initialRoutePool;
-    }
-    return currentPool.length > 0 ? currentPool : initialRoutePool;
-  })();
+  const routingDecision = args.pipelineResult.routingDecision as Record<string, unknown> | undefined;
+  const explicitRoutePool = normalizeExplicitRoutePool(routingDecision?.routePool);
+  initialRoutePool = mergeObservedRoutePoolChain(initialRoutePool, explicitRoutePool);
+  const routePoolForAttempt = initialRoutePool && initialRoutePool.length > 0
+    ? [...initialRoutePool]
+    : [...explicitRoutePool];
 
   const providerPayload = args.pipelineResult.providerPayload;
   const target = args.pipelineResult.target;

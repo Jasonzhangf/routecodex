@@ -71,6 +71,13 @@ export function isPoolExhaustedPipelineError(pipelineError: unknown): boolean {
   );
 }
 
+export const POOL_EXHAUSTED_BACKOFF_ATTEMPTS = 3;
+const POOL_EXHAUSTED_BACKOFF_STEPS_MS = [1_000, 2_000, 3_000] as const;
+
+export function resolvePoolExhaustedBackoffMs(attemptIndex: number): number {
+  return POOL_EXHAUSTED_BACKOFF_STEPS_MS[Math.min(attemptIndex, POOL_EXHAUSTED_BACKOFF_STEPS_MS.length - 1)] ?? 3_000;
+}
+
 const POOL_COOLDOWN_WAIT_MAX_MS = 3 * 60 * 1000;
 
 function coercePositiveMs(value: unknown): number | undefined {

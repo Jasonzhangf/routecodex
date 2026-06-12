@@ -61,7 +61,9 @@ import {
 } from './executor/provider-response-utils.js';
 import {
   isPoolExhaustedPipelineError,
+  POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   mergeMetadataPreservingDefined,
+  resolvePoolExhaustedBackoffMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -87,6 +89,7 @@ import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-wr
 import {
   hasRequestedToolsInSemantics,
   isRequiredToolCallTurn,
+  isProviderNativeResumeContinuation,
   isToolResultFollowupTurn
 } from './executor/request-executor-request-semantics.js';
 import {
@@ -128,7 +131,8 @@ function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runH
     || readString(target?.routeId);
 }
 import {
-  throwIfClientAbortSignalAborted
+  throwIfClientAbortSignalAborted,
+  waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
 import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
@@ -536,10 +540,13 @@ export class HubRequestExecutor implements RequestExecutor {
         let retryProviderKeyForNextAttempt: string | undefined;
         let requestLocalProviderRetryState: RequestLocalProviderRetryState | undefined;
         const transientRetryTracker = createRequestLocalTransientRetryTracker();
+        let poolExhaustedBackoffAttempts = 0;
+        let allowPoolExhaustedBackoffBeyondAttemptBudget = false;
 
-        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget) {
+        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget || allowPoolExhaustedBackoffBeyondAttemptBudget) {
         attempt += 1;
         allowBlockingRecoverableRetryBeyondAttemptBudget = false;
+        allowPoolExhaustedBackoffBeyondAttemptBudget = false;
         const {
           metadataForAttempt,
           clientAbortSignal,
@@ -570,12 +577,30 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
           if (isPoolExhaustedPipelineError(pipelineError)) {
-            if (lastError) {
-              throw lastError;
+            if (poolExhaustedBackoffAttempts < POOL_EXHAUSTED_BACKOFF_ATTEMPTS) {
+              const waitMs = resolvePoolExhaustedBackoffMs(poolExhaustedBackoffAttempts);
+              poolExhaustedBackoffAttempts += 1;
+              logStage('hub.pool_exhausted.backoff_wait', providerRequestId, {
+                waitMs,
+                poolExhaustedBackoffAttempt: poolExhaustedBackoffAttempts,
+                maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
+                excludedProviderKeys: Array.from(excludedProviderKeys),
+                lastError: lastError instanceof Error ? lastError.message : (lastError ? String(lastError) : undefined),
+                poolError: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? 'Unknown error')
+              });
+              await waitWithClientAbortSignal(waitMs, clientAbortSignal, logRequestExecutorNonBlockingError);
+              logStage('hub.pool_exhausted.backoff_wait.completed', providerRequestId, {
+                waitMs,
+                poolExhaustedBackoffAttempt: poolExhaustedBackoffAttempts
+              });
+              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
+              continue;
             }
+            throw lastError ?? pipelineError;
           }
           throw pipelineError;
         }
+        poolExhaustedBackoffAttempts = 0;
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,
@@ -828,6 +853,12 @@ export class HubRequestExecutor implements RequestExecutor {
           || mergedMetadata.stream === true
           || metadataForAttempt.inboundStream === true
           || metadataForAttempt.stream === true;
+        const requestSemanticsForAttempt = resolveRequestSemantics(
+          pipelineResult.processedRequest as Record<string, unknown> | undefined,
+          pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
+          mergedMetadata
+        );
+        const providerOwnedContinuationForAttempt = isProviderNativeResumeContinuation(requestSemanticsForAttempt);
         const providerTransportBackoffKey = buildProviderTransportBackoffKey({
           providerKey: target.providerKey,
           runtimeKey
@@ -1258,6 +1289,7 @@ export class HubRequestExecutor implements RequestExecutor {
             contextOverflowRetries,
             maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES,
             isStreamingRequest: providerRequestedStream === true,
+            providerOwnedContinuation: providerOwnedContinuationForAttempt,
             abortSignal: clientAbortSignal,
             metadata: metadataForAttempt,
             phase: providerFailurePhase,

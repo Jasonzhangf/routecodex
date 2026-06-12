@@ -71,6 +71,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   isStreamingRequest?: boolean;
+  providerOwnedContinuation?: boolean;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
@@ -202,7 +203,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
           skipBackoffWait: shouldSkipBackoffForImmediate429Reroute,
           abortSignal: args.abortSignal,
           logNonBlockingError: args.logNonBlockingError
-        });
+    });
     const retrySwitchPlan = buildProviderRetrySwitchPlan({
       runtimeKey: args.runtimeKey,
       routePool: args.routePool,
@@ -214,6 +215,17 @@ export async function resolveProviderRetryExecutionPlan(args: {
       retryError: args.retryError,
       backoffScope: retryBackoffPlan.backoffScope
     });
+    if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
+      return {
+        shouldRetry: false,
+        blockingRecoverable: eligibilityPlan.blockingRecoverable,
+        excludedCurrentProvider: true,
+        requestLocalTransient,
+        holdOnLastAvailable429,
+        retryBackoffMs: 0,
+        recoverableBackoffMs: 0
+      };
+    }
     return {
       shouldRetry: true,
       blockingRecoverable: false,
@@ -271,6 +283,17 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryError: args.retryError,
     backoffScope: retryBackoffPlan.backoffScope
   });
+  if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
+    return {
+      shouldRetry: false,
+      blockingRecoverable: eligibilityPlan.blockingRecoverable,
+      excludedCurrentProvider: retryExcludedCurrentProvider,
+      requestLocalTransient,
+      holdOnLastAvailable429,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0
+    };
+  }
   if (
     shouldCancelUnrecoverableRerouteWithoutAlternative({
       classification,

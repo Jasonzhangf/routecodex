@@ -64,6 +64,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   isStreamingRequest?: boolean;
+  providerOwnedContinuation?: boolean;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
@@ -109,6 +110,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     status: args.status,
     forceExcludeCurrentProviderOnRetry,
     isStreamingRequest: args.isStreamingRequest,
+    providerOwnedContinuation: args.providerOwnedContinuation,
     transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError

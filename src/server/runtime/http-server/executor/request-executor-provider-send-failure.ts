@@ -82,6 +82,7 @@ type RequestExecutorProviderSendFailureArgs = {
   contextOverflowRetries: number;
   maxContextOverflowRetries: number;
   isStreamingRequest?: boolean;
+  providerOwnedContinuation?: boolean;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
   phase: 'provider_send' | 'provider_response_processing';
@@ -298,6 +299,7 @@ export async function processProviderSendFailure(
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status,
     isStreamingRequest: args.isStreamingRequest,
+    providerOwnedContinuation: args.providerOwnedContinuation,
     transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     metadata: args.metadata,
