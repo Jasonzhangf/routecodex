@@ -373,6 +373,80 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
+  it('materializes full input by session scope even after request payload was released', () => {
+    captureResponsesRequestContext({
+      requestId: 'req-resp-store-release-materialize-1',
+      sessionId: 'sess-release-materialize',
+      payload: {
+        model: 'gpt-5.3-codex',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'world' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: 'req-resp-store-release-materialize-1',
+      response: {
+        id: 'resp-store-release-materialize-1',
+        output: []
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-release-materialize-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: 'req-resp-store-release-materialize-2',
+      sessionId: 'sess-release-materialize',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'hello' }]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'world' }]
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next turn' }]
+      }
+    ]);
+    expect(materialized?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-store-release-materialize-1',
+      materialized: true,
+      materializedMode: 'local_full_input'
+    });
+  });
+
   it('detaches superseded scoped entries so requestMap/responseIndex do not grow unbounded per session', () => {
     captureResponsesRequestContext({
       requestId: 'req-resp-store-1',
@@ -448,9 +522,12 @@ describe('responses conversation store plain continuation restore', () => {
       scopeIndex?: Map<string, unknown>;
     };
 
-    expect(rawStore.requestMap?.size).toBe(1);
-    expect(rawStore.responseIndex?.size).toBe(1);
-    expect(rawStore.scopeIndex?.size).toBe(2);
+    expect(rawStore.requestMap?.has('req-resp-store-1')).toBe(false);
+    expect(rawStore.requestMap?.has('req-resp-store-2')).toBe(true);
+    expect(rawStore.responseIndex?.has('resp-store-supersede-1')).toBe(false);
+    expect(rawStore.responseIndex?.has('resp-store-supersede-2')).toBe(true);
+    expect(rawStore.scopeIndex?.has('session:sess-supersede')).toBe(true);
+    expect(rawStore.scopeIndex?.has('conversation:conv-supersede')).toBe(true);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-3',

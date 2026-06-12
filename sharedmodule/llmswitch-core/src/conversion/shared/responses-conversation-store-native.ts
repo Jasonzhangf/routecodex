@@ -81,11 +81,15 @@ export function restoreContinuationPayload(
   requestId: string | undefined,
   scopeKey: string
 ): { payload: AnyRecord; meta: AnyRecord } | null {
+  const continuationInput = Array.isArray(entry.input) && entry.input.length > 0
+    ? entry.input
+    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
   const restored = restoreResponsesContinuationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: entry.input,
+      input: continuationInput,
+      releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       providerKey: entry.providerKey,
@@ -110,11 +114,15 @@ export function materializeContinuationPayload(
   requestId: string | undefined,
   scopeKey: string
 ): { payload: AnyRecord; meta: AnyRecord } | null {
+  const continuationInput = Array.isArray(entry.input) && entry.input.length > 0
+    ? entry.input
+    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
   const materialized = materializeResponsesContinuationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: entry.input,
+      input: continuationInput,
+      releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       providerKey: entry.providerKey,

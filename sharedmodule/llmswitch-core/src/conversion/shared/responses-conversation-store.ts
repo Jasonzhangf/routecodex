@@ -330,9 +330,9 @@ class ResponsesConversationStore {
     if (existing) {
       this.detachEntry(existing);
     }
-    const prepared = prepareConversationEntry(payload, context);
     const scopeKeys = buildScopeKeys(args);
     const portScopeKey = readPortScopeKey(args);
+    const prepared = prepareConversationEntry(payload, context);
     for (const candidate of scopeKeys.length ? this.requestMap.values() : []) {
       if (
         candidate
@@ -448,16 +448,31 @@ class ResponsesConversationStore {
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
-    if (collectPendingToolCallIds(entry.input).length > 0) {
+    if (entry.allowContinuation === true && collectPendingToolCallIds(entry.input).length > 0) {
       entry.allowContinuation = true;
     }
-    if (args.allowScopeContinuation === true && entry.scopeKeys.length > 0) {
+    if (entry.allowContinuation === true && args.allowScopeContinuation === true && entry.scopeKeys.length > 0) {
       entry.allowContinuation = true;
     }
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
+    for (const scopeKey of entry.scopeKeys) {
+      const previous = this.scopeIndex.get(scopeKey);
+      if (previous && previous !== entry && previous.lastResponseId && previous.requestId !== entry.requestId) {
+        this.detachEntry(previous);
+      }
+    }
     this.attachEntryScopes(entry);
+    for (const [requestKey, candidate] of this.requestMap.entries()) {
+      if (candidate === entry) continue;
+      if (!candidate.lastResponseId) continue;
+      if (!candidate.scopeKeys.some((scopeKey) => entry.scopeKeys.includes(scopeKey))) continue;
+      this.detachEntry(candidate);
+      if (requestKey === candidate.requestId) {
+        break;
+      }
+    }
     this.flushPersistence();
   }
 
