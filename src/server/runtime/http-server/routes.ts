@@ -6,10 +6,8 @@ import { handleMessages } from '../../handlers/messages-handler.js';
 import { handleResponses } from '../../handlers/responses-handler.js';
 import type { HandlerContext } from '../../handlers/types.js';
 import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-utils.js';
-import type { ServerConfigV2 } from './types.js';
-import { renderTokenPortalPage } from '../../../token-portal/render.js';
-import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { isLocalRequest, registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
+import type { ServerConfigV2 } from './types.js';
 import { registerSessionClientRoutes } from './session-client-routes.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
@@ -19,6 +17,18 @@ import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { runWithPortRequestContext } from './port-log-context.js';
 
+type TokenPortalRenderModule = typeof import('../../../token-portal/render.js');
+type TokenPortalFingerprintModule = typeof import('../../../token-portal/fingerprint-summary.js');
+let renderTokenPortalPage: TokenPortalRenderModule['renderTokenPortalPage'] | undefined;
+let loadTokenPortalFingerprintSummary: TokenPortalFingerprintModule['loadTokenPortalFingerprintSummary'] | undefined;
+async function ensureTokenPortalDeps(): Promise<void> {
+  if (!renderTokenPortalPage || !loadTokenPortalFingerprintSummary) {
+    const renderMod = (await import('../../../token-portal/render.js')) as TokenPortalRenderModule;
+    const fingerprintMod = (await import('../../../token-portal/fingerprint-summary.js')) as TokenPortalFingerprintModule;
+    renderTokenPortalPage = renderMod.renderTokenPortalPage;
+    loadTokenPortalFingerprintSummary = fingerprintMod.loadTokenPortalFingerprintSummary;
+  }
+}
 
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -60,6 +70,7 @@ interface RouteOptions {
   getManagerDaemon?: () => unknown | null;
   getHubPipeline?: (routingPolicyGroup?: string) => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
+  getUserConfig?: () => Record<string, unknown> | null;
   getServerId?: () => string;
   getServerHost?: () => string;
   getServerPort?: () => number | undefined;
@@ -128,7 +139,8 @@ export function registerOAuthPortalRoute(app: Application): void {
     const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : 'demo-session';
     const displayName =
       typeof req.query.displayName === 'string' && req.query.displayName.trim() ? req.query.displayName : undefined;
-    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch((error) => {
+    await ensureTokenPortalDeps();
+    const fingerprint = await loadTokenPortalFingerprintSummary!(provider, alias).catch((error) => {
       logRoutesNonBlockingError('registerOAuthPortalRoute.loadTokenPortalFingerprintSummary', error, {
         provider,
         alias,
@@ -136,7 +148,8 @@ export function registerOAuthPortalRoute(app: Application): void {
       });
       return null;
     });
-    const html = renderTokenPortalPage({
+    await ensureTokenPortalDeps();
+    const html = renderTokenPortalPage!({
       provider,
       alias,
       tokenFile,
@@ -338,6 +351,115 @@ async function collectConfiguredModelItems(): Promise<ModelListItem[]> {
   return items;
 }
 
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+    : [];
+}
+
+function readModelDisplayAlias(modelNode: Record<string, unknown>): string | undefined {
+  const aliases = readStringArray(modelNode.aliases);
+  return aliases[0];
+}
+
+function collectPortVisibleModelRefs(args: {
+  userConfig: Record<string, unknown>;
+  routingPolicyGroup: string;
+}): Array<{ providerId: string; modelId: string }> {
+  const vrNode = isRecord(args.userConfig.virtualrouter) ? args.userConfig.virtualrouter : null;
+  const groupsNode = vrNode && isRecord(vrNode.routingPolicyGroups) ? vrNode.routingPolicyGroups : null;
+  const groupNode = groupsNode && isRecord(groupsNode[args.routingPolicyGroup]) ? groupsNode[args.routingPolicyGroup] : null;
+  const routingNode = groupNode && isRecord((groupNode as Record<string, unknown>).routing)
+    ? ((groupNode as Record<string, unknown>).routing as Record<string, unknown>)
+    : null;
+  const forwardersNode = vrNode && isRecord(vrNode.forwarders) ? vrNode.forwarders : null;
+  const out: Array<{ providerId: string; modelId: string }> = [];
+  const seen = new Set<string>();
+
+  const pushRef = (providerId: string, modelId: string) => {
+    const pid = providerId.trim();
+    const mid = modelId.trim();
+    if (!pid || !mid) {
+      return;
+    }
+    const key = `${pid}::${mid}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push({ providerId: pid, modelId: mid });
+  };
+
+  const collectFromTarget = (target: string) => {
+    const trimmed = target.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (trimmed.startsWith('fwd.') && forwardersNode && isRecord(forwardersNode[trimmed])) {
+      const forwarder = forwardersNode[trimmed] as Record<string, unknown>;
+      const targets = Array.isArray(forwarder.targets) ? forwarder.targets : [];
+      for (const targetNode of targets) {
+        if (!isRecord(targetNode)) {
+          continue;
+        }
+        const providerId = typeof targetNode.providerId === 'string' ? targetNode.providerId : '';
+        const modelId = typeof targetNode.modelId === 'string'
+          ? targetNode.modelId
+          : (typeof targetNode.model === 'string' ? targetNode.model : '');
+        pushRef(providerId, modelId);
+      }
+      return;
+    }
+    const parts = trimmed.split('.').map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) {
+      return;
+    }
+    pushRef(parts[0], parts.length >= 3 ? parts.slice(2).join('.') : parts.slice(1).join('.'));
+  };
+
+  if (!routingNode) {
+    return out;
+  }
+  for (const routeEntry of Object.values(routingNode)) {
+    const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
+    for (const pool of pools) {
+      if (!isRecord(pool)) {
+        continue;
+      }
+      for (const target of readStringArray(pool.targets)) {
+        collectFromTarget(target);
+      }
+      if (typeof pool.target === 'string') {
+        collectFromTarget(pool.target);
+      }
+    }
+  }
+  return out;
+}
+
+async function collectPortScopedModelItems(args: {
+  userConfig: Record<string, unknown>;
+  routingPolicyGroup: string;
+}): Promise<ModelListItem[]> {
+  const providerConfigs = await loadProviderConfigsV2();
+  const refs = collectPortVisibleModelRefs(args);
+  const items: ModelListItem[] = [];
+  for (const ref of refs) {
+    const cfg = providerConfigs[ref.providerId];
+    const providerNode = isRecord(cfg?.provider) ? cfg.provider : null;
+    if (!providerNode || readBoolean(providerNode.enabled) === false) {
+      continue;
+    }
+    const modelsNode = isRecord(providerNode.models) ? providerNode.models : null;
+    const modelNode = modelsNode && isRecord(modelsNode[ref.modelId])
+      ? (modelsNode[ref.modelId] as Record<string, unknown>)
+      : {};
+    const aliasId = readModelDisplayAlias(modelNode) ?? ref.modelId;
+    items.push(buildCodexModelMetadata(ref.providerId, ref.modelId, aliasId, providerNode, modelNode));
+  }
+  return items;
+}
+
 export function registerHttpRoutes(options: RouteOptions): void {
   const {
     app,
@@ -393,20 +515,46 @@ export function registerHttpRoutes(options: RouteOptions): void {
       const codexAdvancedModel = buildCodexAdvancedModelMetadata();
       seen.add(codexAdvancedModel.id);
       items.push(codexAdvancedModel);
-      for (const item of await collectConfiguredModelItems()) {
+      const localPort = typeof req.socket?.localPort === 'number' ? req.socket.localPort : undefined;
+      const portConfigs = typeof options.getPortConfigs === 'function' ? options.getPortConfigs() : [];
+      const localMatchedPort = typeof localPort === 'number' && Array.isArray(portConfigs)
+        ? portConfigs.find((entry) => isRecord(entry) && entry.port === localPort)
+        : undefined;
+      const configuredMatchedPort = Array.isArray(portConfigs) && typeof config?.server?.port === 'number'
+          ? portConfigs.find((entry) => isRecord(entry) && entry.port === config.server.port)
+          : undefined;
+      const matchedPort = localMatchedPort ?? configuredMatchedPort;
+      const routingPolicyGroup = matchedPort && typeof matchedPort.routingPolicyGroup === 'string'
+        ? matchedPort.routingPolicyGroup.trim()
+        : '';
+      const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
+      const optionUserConfig = typeof options.getUserConfig === 'function' ? options.getUserConfig() : null;
+      const userConfig = isPlainRecord(artifacts) && isPlainRecord((artifacts as Record<string, unknown>).userConfig)
+        ? ((artifacts as Record<string, unknown>).userConfig as Record<string, unknown>)
+        : (isPlainRecord(optionUserConfig)
+            ? optionUserConfig
+            : {});
+      const configuredItems = routingPolicyGroup
+        ? await collectPortScopedModelItems({
+            userConfig,
+            routingPolicyGroup
+          })
+        : await collectConfiguredModelItems();
+      for (const item of configuredItems) {
         if (seen.has(item.id)) {
           continue;
         }
         seen.add(item.id);
         items.push(item);
       }
-      const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
-      for (const item of collectArtifactModelAliases(artifacts)) {
-        if (seen.has(item.id)) {
-          continue;
+      if (!routingPolicyGroup) {
+        for (const item of collectArtifactModelAliases(artifacts)) {
+          if (seen.has(item.id)) {
+            continue;
+          }
+          seen.add(item.id);
+          items.push(item);
         }
-        seen.add(item.id);
-        items.push(item);
       }
       items.sort((a, b) => a.id.localeCompare(b.id));
       const remoteIp = req.socket?.remoteAddress || '';

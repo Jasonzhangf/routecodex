@@ -226,4 +226,147 @@ describe('http routes invalid json handling', () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it('projects /v1/models instead of raw provider.models while keeping gpt and deepseek v4 pro visible', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-visible-filter-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const providerDir = path.join(providerRoot, 'deepseek-web');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.json'),
+      JSON.stringify(
+        {
+          version: '2.0.0',
+          providerId: 'deepseek-web',
+          provider: {
+            id: 'deepseek-web',
+            enabled: true,
+            type: 'openai',
+            baseURL: 'https://chat.deepseek.com',
+            models: {
+              'deepseek-v4-pro': { supportsStreaming: true },
+              'deepseek-v4-flash': { supportsStreaming: true },
+              'gpt-5.5': { supportsStreaming: true }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 5520, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {}
+    });
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        const ids = Array.isArray(body?.data) ? body.data.map((item: any) => item?.id).filter(Boolean) : [];
+        expect(ids).toContain('gpt-5.5');
+        expect(ids).toContain('deepseek-web.deepseek-v4-pro');
+        expect(ids).toContain('deepseek-web.deepseek-v4-flash');
+        expect(ids).not.toEqual(expect.arrayContaining(['deepseek-v4-pro', 'deepseek-v4-flash', 'gpt-5.5']));
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('lists only the current port models and uses alias when configured', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-port-scoped-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const providerDir = path.join(providerRoot, 'DF');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "DF"',
+        '',
+        '[provider]',
+        'id = "DF"',
+        'enabled = true',
+        'type = "openai"',
+        'baseURL = "https://www.dreamfield.top/v1"',
+        '',
+        '[provider.auth]',
+        'type = "apikey"',
+        'entries = [',
+        '  { alias = "key1", apiKey = "test" }',
+        ']',
+        '',
+        '[provider.models."deepseek-v4-pro"]',
+        'supportsStreaming = true',
+        'aliases = ["deepseek-v4-pro"]',
+        '',
+        '[provider.models."deepseek-v4-flash"]',
+        'supportsStreaming = true'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 10000, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 10000, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {},
+      getPortConfigs: () => [{ port: 10000, routingPolicyGroup: 'gateway_coding_10000' }],
+      getUserConfig: () => ({
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_coding_10000: {
+              routing: {
+                coding: [{ targets: ['DF.key1.deepseek-v4-pro'] }],
+                tools: [{ targets: ['DF.key1.deepseek-v4-flash'] }]
+              }
+            }
+          }
+        }
+      })
+    } as any);
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        const ids = Array.isArray(body?.data) ? body.data.map((item: any) => item.id).sort() : [];
+        expect(ids).toContain('deepseek-v4-pro');
+        expect(ids).toContain('deepseek-v4-flash');
+        expect(ids).not.toContain('DF.deepseek-v4-pro');
+        expect(ids).not.toContain('DF.deepseek-v4-flash');
+        expect(ids).not.toContain('1token-deepseek.DeepSeek-V4-Pro');
+        expect(ids).not.toContain('1token-deepseek.DeepSeek-V4-Flash');
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
