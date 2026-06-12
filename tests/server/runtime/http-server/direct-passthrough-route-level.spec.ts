@@ -1,5 +1,27 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
+jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
+  resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
+    classification?: string;
+    isStreamingRequest?: boolean;
+    hostContractFailure?: boolean;
+    forceExcludeCurrentProviderOnRetry?: boolean;
+    promptTooLong?: boolean;
+    existingExclusion?: boolean;
+  }) => {
+    if (input.hostContractFailure) {
+      return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
+    }
+    if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
+      return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
+    }
+    if (input.classification === 'recoverable' && !input.promptTooLong) {
+      return { excludeCurrentProvider: true, reason: 'recoverable_reroute' };
+    }
+    return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
+  }),
+}));
+
 describe('direct passthrough route-level', () => {
   it('HTTP BLACKBOX: provider-mode keyless chat binding preserves client model', async () => {
     jest.resetModules();
@@ -175,6 +197,7 @@ describe('direct passthrough route-level', () => {
   it('provider-mode direct sends current request body and ignores metadata.__raw_request_body', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
 
     const server = new RouteCodexHttpServer({
       configPath: '/tmp/routecodex-test-config.json',
@@ -242,11 +265,13 @@ describe('direct passthrough route-level', () => {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
     expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
+    expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
   it('router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
 
     const server = new RouteCodexHttpServer({
       configPath: '/tmp/routecodex-test-config.json',
@@ -336,9 +361,10 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
     expect(routerRoute).toHaveBeenCalledTimes(1);
     expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
+    expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
-  it('router same-protocol direct does not runtime-reject chat-style function tools', async () => {
+  it('router same-protocol direct skips client tools so caller can relay through Hub', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -370,7 +396,7 @@ describe('direct passthrough route-level', () => {
     };
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
     (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      execute: jest.fn(async () => ({ status: 200, body: { object: 'response', id: 'resp_relay_chat_style_tool' } })),
       getVirtualRouter: jest.fn(() => ({
         route: jest.fn(() => ({
           target: {
@@ -418,10 +444,10 @@ describe('direct passthrough route-level', () => {
         },
       );
 
-      expect(outcome.used).toBe(true);
-      expect(directSend).toHaveBeenCalledTimes(1);
+      expect(outcome.used).toBe(false);
+      expect(outcome.reason).toBe('client_tools_require_hub_relay');
+      expect(directSend).not.toHaveBeenCalled();
       expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
-      expect(outcome.response?.body).toMatchObject({ object: 'response', id: 'resp_direct_chat_style_tool' });
     }
   });
 
@@ -592,6 +618,92 @@ describe('direct passthrough route-level', () => {
         sessionDir: expect.stringContaining('ports/gateway_priority_5555'),
       }),
     }));
+  });
+
+  it('router same-protocol client tools request relays through Hub', async () => {
+    jest.resetModules();
+    jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => ({
+      resolveRawPayloadForDirect: (body: unknown) => body as Record<string, unknown>,
+      applyMinimalDirectOverrides: (payload: Record<string, unknown>) => payload,
+      assertDirectRouteDecision: () => undefined,
+      evaluateDirectRouteDecision: (args: {
+        payload?: Record<string, unknown>;
+        metadata?: Record<string, unknown>;
+        inboundProtocol?: string;
+      }) => {
+        const payload = args?.payload ?? {};
+        const metadata = args?.metadata ?? {};
+        const tools = Array.isArray(payload.tools) ? payload.tools : [];
+        const hasClientTool = tools.some((tool) => {
+          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+            return false;
+          }
+          const toolType = typeof (tool as Record<string, unknown>).type === 'string'
+            ? String((tool as Record<string, unknown>).type).trim()
+            : '';
+          return toolType === 'function';
+        });
+        return {
+          providerWireValid: true,
+          requiresHubRelay: hasClientTool,
+          reason: hasClientTool ? 'client_tools_require_hub_relay' : undefined,
+          hasDeclaredApplyPatchTool: false,
+        };
+      },
+    }));
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { ok: true, mode: 'direct' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay_tools_stopmessage' },
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+
+    const result = await (server as any).executePortAwarePipeline(5520, {
+      requestId: 'openai-responses-router-gpt-5.5-tools-stopmessage',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
+      },
+      metadata: {},
+    });
+
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_tools_stopmessage' });
   });
 
   it('router port metadata exposes only its routing policy group providers', async () => {
