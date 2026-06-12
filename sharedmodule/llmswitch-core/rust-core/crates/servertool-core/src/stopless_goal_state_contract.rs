@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 const RCC_FENCE_OPEN: &str = "<**rcc**>";
 const RCC_FENCE_CLOSE: &str = "</rcc**>";
@@ -40,6 +41,34 @@ pub struct StoplessGoalStateSyncPlan {
     pub directive_types: Vec<String>,
     pub rewritten_text: Option<String>,
     pub next_state: Option<StoplessGoalState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessGoalStateReadPlanInput {
+    pub adapter_context: Value,
+    pub persisted_state: Option<StoplessGoalState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessGoalStateReadPlan {
+    pub sticky_key: String,
+    pub state: Option<StoplessGoalState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessGoalStatePersistPlanInput {
+    pub adapter_context: Value,
+    pub state: StoplessGoalState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessGoalStatePersistPlan {
+    pub sticky_key: String,
+    pub state: StoplessGoalState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +137,46 @@ pub fn plan_stopless_goal_state_sync(
         rewritten_text: Some(compact_rewritten_text(&out)),
         next_state,
     })
+}
+
+pub fn plan_stopless_goal_state_read(
+    input: StoplessGoalStateReadPlanInput,
+) -> Result<StoplessGoalStateReadPlan, String> {
+    let sticky_key = resolve_stopless_goal_sticky_key(&input.adapter_context).unwrap_or_default();
+    Ok(StoplessGoalStateReadPlan {
+        sticky_key,
+        state: input.persisted_state,
+    })
+}
+
+pub fn plan_stopless_goal_state_persist(
+    input: StoplessGoalStatePersistPlanInput,
+) -> Result<StoplessGoalStatePersistPlan, String> {
+    let sticky_key = resolve_stopless_goal_sticky_key(&input.adapter_context)
+        .ok_or_else(|| "STOPLESS_GOAL_RUNTIME_SCOPE_REQUIRED".to_string())?;
+    Ok(StoplessGoalStatePersistPlan {
+        sticky_key,
+        state: input.state,
+    })
+}
+
+fn resolve_stopless_goal_sticky_key(adapter_context: &Value) -> Option<String> {
+    let session_id = read_trimmed_string(adapter_context.get("sessionId"))
+        .or_else(|| read_trimmed_string(adapter_context.get("session_id")));
+    if let Some(session_id) = session_id {
+        return Some(format!("session:{session_id}"));
+    }
+    let conversation_id = read_trimmed_string(adapter_context.get("conversationId"))
+        .or_else(|| read_trimmed_string(adapter_context.get("conversation_id")));
+    if let Some(conversation_id) = conversation_id {
+        return Some(format!("conversation:{conversation_id}"));
+    }
+    None
+}
+
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    let raw = value?.as_str()?.trim();
+    if raw.is_empty() { None } else { Some(raw.to_string()) }
 }
 
 fn parse_stopless_document(text: &str) -> Result<Vec<(RccFenceBlock, RccDirective)>, String> {

@@ -1,0 +1,745 @@
+$ git diff -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+[exit 0]
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+index 40fbe3b85..f4ae55f20 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+@@ -481,6 +481,50 @@ fn read_provider_response_root_tools(value: Option<&Value>) -> Option<Vec<Value>
+         .cloned()
+ }
+ 
++fn read_provider_response_messages(value: Option<&Value>) -> Option<Vec<Value>> {
++    as_json_object(value)
++        .and_then(|row| row.get("messages"))
++        .and_then(Value::as_array)
++        .filter(|messages| !messages.is_empty())
++        .cloned()
++}
++
++fn read_provider_response_input(value: Option<&Value>) -> Option<Vec<Value>> {
++    let row = as_json_object(value)?;
++    row.get("input")
++        .and_then(Value::as_array)
++        .filter(|items| !items.is_empty())
++        .cloned()
++        .or_else(|| {
++            row.get("semantics")
++                .and_then(Value::as_object)
++                .and_then(|semantics| semantics.get("input"))
++                .and_then(Value::as_array)
++                .filter(|items| !items.is_empty())
++                .cloned()
++        })
++}
++
++fn read_provider_response_metadata_input(
++    metadata: Option<&Map<String, Value>>,
++) -> Option<Vec<Value>> {
++    let row = metadata?;
++    row.get("responsesContext")
++        .and_then(Value::as_object)
++        .and_then(|context| context.get("input"))
++        .and_then(Value::as_array)
++        .filter(|items| !items.is_empty())
++        .cloned()
++        .or_else(|| {
++            row.get("contextSnapshot")
++                .and_then(Value::as_object)
++                .and_then(|context| context.get("input"))
++                .and_then(Value::as_array)
++                .filter(|items| !items.is_empty())
++                .cloned()
++        })
++}
++
+ fn read_provider_response_request_semantics<'a>(
+     processed_metadata: Option<&'a Map<String, Value>>,
+     standardized_metadata: Option<&'a Map<String, Value>>,
+@@ -635,9 +679,15 @@ fn resolve_provider_response_request_semantics_value(
+     );
+     let fallback_tools = read_provider_response_root_tools(processed_ref)
+         .or_else(|| read_provider_response_root_tools(standardized_ref));
++    let fallback_input = read_provider_response_input(processed_ref)
++        .or_else(|| read_provider_response_input(standardized_ref))
++        .or_else(|| read_provider_response_metadata_input(request_metadata_record));
+     let base_value =
+         read_provider_response_base_semantics(processed_ref, standardized_ref, metadata_semantics);
+-    if base_value.is_none() && fallback_tools.as_ref().is_none_or(Vec::is_empty) {
++    if base_value.is_none()
++        && fallback_tools.as_ref().is_none_or(Vec::is_empty)
++        && fallback_input.as_ref().is_none_or(Vec::is_empty)
++    {
+         return Value::Null;
+     }
+ 
+@@ -668,6 +718,18 @@ fn resolve_provider_response_request_semantics_value(
+         );
+         normalized_base.insert("tools".to_string(), Value::Object(tools));
+     }
++    if !normalized_base.contains_key("messages") {
++        if let Some(messages) = read_provider_response_messages(processed_ref)
++            .or_else(|| read_provider_response_messages(standardized_ref))
++        {
++            normalized_base.insert("messages".to_string(), Value::Array(messages));
++        }
++    }
++    if !normalized_base.contains_key("input") {
++        if let Some(input) = fallback_input {
++            normalized_base.insert("input".to_string(), Value::Array(input));
++        }
++    }
+ 
+     let processed_rt = read_provider_response_rt(processed_metadata);
+     let standardized_rt = read_provider_response_rt(standardized_metadata);
+@@ -2769,6 +2831,86 @@ mod tests {
+         assert_eq!(tools[0]["function"]["name"], "exec_command");
+     }
+ 
++    #[test]
++    fn test_resolve_provider_response_request_semantics_preserves_messages_for_tool_result_followup(
++    ) {
++        let processed = json!({
++            "messages": [
++                { "role": "assistant", "content": "call tool" },
++                { "role": "tool", "tool_call_id": "call_1", "content": "ok" }
++            ]
++        });
++        let standardized = json!({
++            "semantics": { "tools": { "clientToolsRaw": [] } }
++        });
++        let output =
++            resolve_provider_response_request_semantics_value(processed, standardized, Value::Null);
++        assert_eq!(output["messages"].as_array().unwrap().len(), 2);
++        assert_eq!(output["messages"][1]["role"], "tool");
++        assert_eq!(output["messages"][1]["tool_call_id"], "call_1");
++    }
++
++    #[test]
++    fn test_resolve_provider_response_request_semantics_preserves_responses_input_for_tool_result_followup(
++    ) {
++        let processed = json!({
++            "input": [
++                { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
++                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
++            ]
++        });
++        let standardized = json!({
++            "semantics": { "tools": { "clientToolsRaw": [] } }
++        });
++        let output =
++            resolve_provider_response_request_semantics_value(processed, standardized, Value::Null);
++        assert_eq!(output["input"].as_array().unwrap().len(), 2);
++        assert_eq!(output["input"][1]["type"], "function_call_output");
++        assert_eq!(output["input"][1]["call_id"], "call_1");
++    }
++
++    #[test]
++    fn test_resolve_provider_response_request_semantics_preserves_standardized_semantics_input() {
++        let standardized = json!({
++            "semantics": {
++                "tools": { "clientToolsRaw": [] },
++                "input": [
++                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
++                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
++                ]
++            }
++        });
++        let output = resolve_provider_response_request_semantics_value(
++            Value::Null,
++            standardized,
++            Value::Null,
++        );
++        assert_eq!(output["input"].as_array().unwrap().len(), 2);
++        assert_eq!(output["input"][1]["type"], "function_call_output");
++        assert_eq!(output["input"][1]["call_id"], "call_1");
++    }
++
++    #[test]
++    fn test_resolve_provider_response_request_semantics_preserves_metadata_responses_context_input()
++    {
++        let request_metadata = json!({
++            "responsesContext": {
++                "input": [
++                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
++                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
++                ]
++            }
++        });
++        let output = resolve_provider_response_request_semantics_value(
++            Value::Null,
++            Value::Null,
++            request_metadata,
++        );
++        assert_eq!(output["input"].as_array().unwrap().len(), 2);
++        assert_eq!(output["input"][1]["type"], "function_call_output");
++        assert_eq!(output["input"][1]["call_id"], "call_1");
++    }
++
+     #[test]
+     fn test_stop_message_auto_followup_does_not_pin_provider() {
+         let input = json!({
+@@ -3716,7 +3858,6 @@ mod tests {
+             Some(1)
+         );
+     }
+-
+ }
+ 
+ /// Read followup client inject source from adapter context.
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+index 3a84d094f..60a8b4d48 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+@@ -1768,6 +1768,18 @@ pub fn plan_stopless_goal_state_sync_json(input_json: String) -> NapiResult<Stri
+         .map_err(|e| napi::Error::from_reason(e))
+ }
+ 
++#[napi]
++pub fn plan_stopless_goal_state_read_json(input_json: String) -> NapiResult<String> {
++    servertool_core_blocks::plan_stopless_goal_state_read_json(&input_json)
++        .map_err(|e| napi::Error::from_reason(e))
++}
++
++#[napi]
++pub fn plan_stopless_goal_state_persist_json(input_json: String) -> NapiResult<String> {
++    servertool_core_blocks::plan_stopless_goal_state_persist_json(&input_json)
++        .map_err(|e| napi::Error::from_reason(e))
++}
++
+ #[napi]
+ pub fn inject_mcp_tools_for_chat_json(
+     tools_json: String,
+@@ -1960,17 +1972,6 @@ pub fn apply_gemini_web_search_request_compat_json(
+     )
+ }
+ 
+-#[napi(js_name = "applyLmstudioResponsesInputStringifyJson")]
+-pub fn apply_lmstudio_responses_input_stringify_json_bridge(
+-    payload_json: String,
+-    adapter_context_json: Option<String>,
+-) -> NapiResult<String> {
+-    req_outbound_stage3_compat::apply_lmstudio_responses_input_stringify_json(
+-        payload_json,
+-        adapter_context_json,
+-    )
+-}
+-
+ #[napi(js_name = "applyToolTextRequestGuidanceJson")]
+ pub fn apply_tool_text_request_guidance_json(
+     payload_json: String,
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+index 51e61cfc9..1e6895a76 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+@@ -1,23 +1,20 @@
+ //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
+ 
+ use servertool_core::backend_route_contract::{
+-    decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
+-    plan_empty_followup_error, plan_followup_error_envelope, plan_followup_execution_mode,
+-    plan_followup_materialization, plan_followup_append_user_text, plan_followup_payload_stream,
+-    plan_hub_followup_policy_shadow,
+-    plan_followup_runtime_action, plan_followup_runtime_metadata,
++    decorate_servertool_final_chat_with_context, plan_bootstrap_replay, plan_empty_followup_error,
++    plan_followup_append_user_text, plan_followup_error_envelope, plan_followup_execution_mode,
++    plan_followup_materialization, plan_followup_payload_stream, plan_followup_runtime_action,
++    plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
+     plan_missing_followup_payload_error, plan_preferred_final_response,
+     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
+     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
+     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
+     ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
+-    ServertoolFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
++    ServertoolFollowupAppendUserTextInput, ServertoolFollowupErrorPlanInput,
+     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
+-    ServertoolFollowupPayloadStreamPlanInput,
+-    ServertoolHubFollowupPolicyShadowInput,
+-    ServertoolMissingFollowupPayloadErrorPlanInput,
+-    ServertoolPreferredFinalResponseInput,
+-    ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
++    ServertoolFollowupPayloadStreamPlanInput, ServertoolFollowupRuntimeActionInput,
++    ServertoolFollowupRuntimeMetadataInput, ServertoolHubFollowupPolicyShadowInput,
++    ServertoolMissingFollowupPayloadErrorPlanInput, ServertoolPreferredFinalResponseInput,
+     ServertoolVisionEligibilityInput,
+ };
+ use servertool_core::blocked_report_contract;
+@@ -279,6 +276,23 @@ pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, St
+     serde_json::to_string(&plan).map_err(|e| format!("serialize stopless goal state plan: {e}"))
+ }
+ 
++pub fn plan_stopless_goal_state_read_json(input_json: &str) -> Result<String, String> {
++    let input: stopless_goal_state_contract::StoplessGoalStateReadPlanInput =
++        serde_json::from_str(input_json)
++            .map_err(|e| format!("deserialize stopless goal state read input: {e}"))?;
++    let plan = stopless_goal_state_contract::plan_stopless_goal_state_read(input)?;
++    serde_json::to_string(&plan).map_err(|e| format!("serialize stopless goal state read: {e}"))
++}
++
++pub fn plan_stopless_goal_state_persist_json(input_json: &str) -> Result<String, String> {
++    let input: stopless_goal_state_contract::StoplessGoalStatePersistPlanInput =
++        serde_json::from_str(input_json)
++            .map_err(|e| format!("deserialize stopless goal state persist input: {e}"))?;
++    let plan = stopless_goal_state_contract::plan_stopless_goal_state_persist(input)?;
++    serde_json::to_string(&plan)
++        .map_err(|e| format!("serialize stopless goal state persist: {e}"))
++}
++
+ pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
+     let input: serde_json::Value = serde_json::from_str(input_json)
+         .map_err(|e| format!("deserialize servertool followup flow id input: {e}"))?;
+@@ -717,7 +731,8 @@ pub fn plan_followup_payload_stream_json(input_json: &str) -> Result<String, Str
+     let input: ServertoolFollowupPayloadStreamPlanInput = serde_json::from_str(input_json)
+         .map_err(|e| format!("deserialize followup payload stream input: {e}"))?;
+     let output = plan_followup_payload_stream(input);
+-    serde_json::to_string(&output).map_err(|e| format!("serialize followup payload stream plan: {e}"))
++    serde_json::to_string(&output)
++        .map_err(|e| format!("serialize followup payload stream plan: {e}"))
+ }
+ 
+ pub fn plan_hub_followup_policy_shadow_json(input_json: &str) -> Result<String, String> {
+@@ -2203,8 +2218,7 @@ mod tests {
+                     "continuationPrompt": "continue from bridge",
+                     "repeatCount": 2,
+                     "maxRepeats": 3
+-                },
+-                "stdoutPreview": "continue from bridge"
++                }
+             })
+             .to_string(),
+         )
+@@ -2217,6 +2231,7 @@ mod tests {
+         assert_eq!(plan["maxRepeats"], 3);
+         let command = plan["execCommand"].as_str().expect("exec command");
+         assert!(command.contains("routecodex servertool run stop_message_auto"));
+-        assert!(command.contains("stdoutPreview"));
++        assert!(command.contains("continuationPrompt"));
++        assert!(!command.contains("stdoutPreview"));
+     }
+ }
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+index fc288aada..498b0c6d4 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+@@ -1,4 +1,3 @@
+-use crate::chat_process_media_semantics::strip_responses_stored_context_input_media;
+ use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
+ use crate::hub_reasoning_tool_normalizer::{
+     build_message_reasoning_value, collect_reasoning_content_segments,
+@@ -425,6 +424,34 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
+     None
+ }
+ 
++fn normalize_required_action_tool_call_to_input(call: &Value) -> Option<Value> {
++    let row = call.as_object()?;
++    let call_id = read_bridge_function_call_id(row)?;
++    let function = row.get("function").and_then(Value::as_object);
++    let name = read_trimmed_string(row.get("name"))
++        .or_else(|| function.and_then(|node| read_trimmed_string(node.get("name"))))?;
++    let arguments = row
++        .get("arguments")
++        .cloned()
++        .or_else(|| function.and_then(|node| node.get("arguments").cloned()))
++        .unwrap_or_else(|| Value::String("{}".to_string()));
++
++    let mut out = Map::new();
++    out.insert(
++        "type".to_string(),
++        Value::String("function_call".to_string()),
++    );
++    if let Some(id) = read_trimmed_string(row.get("id")) {
++        out.insert("id".to_string(), Value::String(id));
++    } else {
++        out.insert("id".to_string(), Value::String(format!("fc_{}", call_id)));
++    }
++    out.insert("call_id".to_string(), Value::String(call_id));
++    out.insert("name".to_string(), Value::String(name));
++    out.insert("arguments".to_string(), arguments);
++    Some(Value::Object(out))
++}
++
+ fn convert_responses_output_to_input_items(response: &Value) -> Value {
+     let output = response
+         .as_object()
+@@ -493,6 +520,31 @@ fn convert_responses_output_to_input_items(response: &Value) -> Value {
+     if let Some(previous) = pending_reasoning.take() {
+         items.push(Value::Object(previous));
+     }
++    if items.iter().all(|item| {
++        item.as_object()
++            .and_then(|row| row.get("type"))
++            .and_then(Value::as_str)
++            != Some("function_call")
++    }) {
++        if let Some(required_action) = response
++            .as_object()
++            .and_then(|row| row.get("required_action"))
++            .and_then(Value::as_object)
++        {
++            if let Some(tool_calls) = required_action
++                .get("submit_tool_outputs")
++                .and_then(Value::as_object)
++                .and_then(|submit| submit.get("tool_calls"))
++                .and_then(Value::as_array)
++            {
++                for call in tool_calls {
++                    if let Some(mapped) = normalize_required_action_tool_call_to_input(call) {
++                        items.push(mapped);
++                    }
++                }
++            }
++        }
++    }
+     Value::Array(items)
+ }
+ 
+@@ -791,19 +843,14 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
+             .or_else(|| context.as_object().and_then(|row| row.get("toolsRaw"))),
+     );
+ 
+-    if let Some(provider_key) = read_trimmed_string(
++    let provider_key_value = read_trimmed_string(
+         context
+             .as_object()
+             .and_then(|row| row.get("providerKey"))
+             .or_else(|| payload.as_object().and_then(|row| row.get("providerKey"))),
+-    ) {
+-        base_payload.insert("providerKey".to_string(), Value::String(provider_key));
+-    }
+-
+-    let provider_key_value = base_payload
+-        .get("providerKey")
+-        .cloned()
+-        .unwrap_or(Value::Null);
++    )
++    .map(Value::String)
++    .unwrap_or(Value::Null);
+ 
+     let mut entry = Map::new();
+     entry.insert("basePayload".to_string(), Value::Object(base_payload));
+@@ -845,11 +892,7 @@ fn resume_responses_conversation_payload(
+     let entry_obj = entry.as_object().cloned().unwrap_or_default();
+     let base_payload = clone_object(entry_obj.get("basePayload"));
+     let mut payload = base_payload.clone();
+-    let mut merged_input = strip_responses_stored_context_input_media(
+-        normalize_responses_history_items(clone_array(entry_obj.get("input"))),
+-        "[Image omitted]".to_string(),
+-    )
+-    .messages;
++    let mut merged_input = normalize_responses_history_items(clone_array(entry_obj.get("input")));
+     let tool_outputs = clone_array(
+         submit_payload
+             .as_object()
+@@ -874,9 +917,6 @@ fn resume_responses_conversation_payload(
+     );
+ 
+     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+-    if let Some(provider_key) = provider_key.clone() {
+-        payload.insert("providerKey".to_string(), Value::String(provider_key));
+-    }
+ 
+     if let Some(model) =
+         read_trimmed_string(submit_payload.as_object().and_then(|row| row.get("model")))
+@@ -1270,8 +1310,11 @@ fn restore_responses_continuation_payload(
+     }
+ 
+     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+-    if let Some(provider_key) = provider_key.clone() {
+-        payload.insert("providerKey".to_string(), Value::String(provider_key));
++    if !payload.contains_key("tools") {
++        let tools = normalize_responses_tool_definitions(entry_obj.get("tools"));
++        if !tools.is_empty() {
++            payload.insert("tools".to_string(), Value::Array(tools));
++        }
+     }
+ 
+     payload.insert(
+@@ -1360,9 +1403,6 @@ fn materialize_responses_continuation_payload(
+     }
+ 
+     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+-    if let Some(provider_key) = provider_key.clone() {
+-        payload.insert("providerKey".to_string(), Value::String(provider_key));
+-    }
+ 
+     payload.insert("input".to_string(), Value::Array(full_input.clone()));
+     payload.remove("previous_response_id");
+@@ -1554,6 +1594,31 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn handler_entry_plan_routes_submit_tool_outputs_to_native_submit_shape() {
++        let planned = plan_responses_handler_entry(
++            &json!({
++                "model": "gpt-5.5",
++                "response_id": "resp_submit_1",
++                "tool_outputs": [
++                    { "call_id": "call_submit_1", "output": "ok" }
++                ]
++            }),
++            Some("/v1/responses"),
++            None,
++        )
++        .unwrap();
++
++        assert_eq!(planned["mode"], json!("submit_tool_outputs"));
++        assert_eq!(planned["responseId"], json!("resp_submit_1"));
++        assert_eq!(planned["payload"]["response_id"], json!("resp_submit_1"));
++        assert_eq!(
++            planned["payload"]["tool_outputs"][0]["call_id"],
++            json!("call_submit_1")
++        );
++        assert!(planned["payload"].get("input").is_none());
++    }
++
+     #[test]
+     fn shared_responses_conversation_prepare_and_resume_json() {
+         let payload = json!({
+@@ -1659,6 +1724,55 @@ mod tests {
+         assert!(entry["input"][1].get("content").is_none());
+     }
+ 
++    #[test]
++    fn converts_required_action_tool_calls_to_pending_function_call_items() {
++        let response = json!({
++            "id": "resp_required_action_1",
++            "object": "response",
++            "status": "requires_action",
++            "required_action": {
++                "type": "submit_tool_outputs",
++                "submit_tool_outputs": {
++                    "tool_calls": [{
++                        "id": "call_required_action_1",
++                        "type": "function",
++                        "function": {
++                            "name": "exec_command",
++                            "arguments": "{\"cmd\":\"pwd\"}"
++                        }
++                    }]
++                }
++            }
++        });
++        let items = convert_responses_output_to_input_items(&response)
++            .as_array()
++            .cloned()
++            .unwrap_or_default();
++        assert_eq!(items.len(), 1);
++        assert_eq!(items[0]["type"], json!("function_call"));
++        assert_eq!(items[0]["call_id"], json!("call_required_action_1"));
++        assert_eq!(items[0]["name"], json!("exec_command"));
++        assert_eq!(items[0]["arguments"], json!("{\"cmd\":\"pwd\"}"));
++    }
++
++    #[test]
++    fn does_not_create_pending_function_call_when_required_action_has_no_tool_calls() {
++        let response = json!({
++            "id": "resp_empty_required_action_1",
++            "object": "response",
++            "status": "requires_action",
++            "required_action": {
++                "type": "submit_tool_outputs",
++                "submit_tool_outputs": { "tool_calls": [] }
++            }
++        });
++        let items = convert_responses_output_to_input_items(&response)
++            .as_array()
++            .cloned()
++            .unwrap_or_default();
++        assert!(items.is_empty());
++    }
++
+     #[test]
+     fn restore_never_emits_function_call_output_content_from_persisted_history() {
+         let restored = restore_responses_continuation_payload(
+@@ -1704,7 +1818,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn resume_replaces_historical_attachments_with_placeholders_but_keeps_current_tool_output() {
++    fn resume_preserves_historical_attachments_until_provider_send_completes() {
+         let payload = json!({
+             "model": "gpt-base",
+             "stream": true,
+@@ -1745,8 +1859,8 @@ mod tests {
+         .unwrap();
+ 
+         let serialized = serde_json::to_string(resumed.get("payload").unwrap()).unwrap();
+-        assert!(!serialized.contains("data:image/png;base64,HISTORY"));
+-        assert!(serialized.contains("[Image omitted]"));
++        assert!(serialized.contains("data:image/png;base64,HISTORY"));
++        assert!(!serialized.contains("[Image omitted]"));
+         assert!(serialized.contains("data:image/png;base64,CURRENT"));
+     }
+ 
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+index 53decf162..87cbe3a84 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+@@ -810,7 +810,7 @@ fn upsert_probe_output_item(probe: &mut Map<String, Value>, output_item: &Value)
+         .and_then(Value::as_array)
+         .cloned()
+         .unwrap_or_default();
+-    let already_exists = existing.iter().any(|item| {
++    let existing_index = existing.iter().position(|item| {
+         let Some(record) = item.as_object() else {
+             return false;
+         };
+@@ -827,9 +827,24 @@ fn upsert_probe_output_item(probe: &mut Map<String, Value>, output_item: &Value)
+                 .map(|(left, right)| left == right)
+                 .unwrap_or(false)
+     });
+-    if !already_exists {
++    if let Some(index) = existing_index {
++        existing[index] = output_item.clone();
++    } else {
+         existing.push(output_item.clone());
+-        probe.insert("output".to_string(), Value::Array(existing));
++    }
++    probe.insert("output".to_string(), Value::Array(existing));
++
++    let item_type = read_trimmed_string(item_obj.get("type"))
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let item_role = read_trimmed_string(item_obj.get("role"))
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    let item_status = read_trimmed_string(item_obj.get("status"))
++        .unwrap_or_default()
++        .to_ascii_lowercase();
++    if item_type == "message" && item_role == "assistant" && item_status == "completed" {
++        probe.insert("status".to_string(), Value::String("completed".to_string()));
+     }
+ }
+ 
+@@ -924,6 +939,272 @@ fn safe_response_id_from_request_label(request_label: &str) -> String {
+     format!("resp_{}", safe)
+ }
+ 
++fn stringify_sse_tool_call_argument_value(value: &Value) -> String {
++    match value {
++        Value::String(raw) => raw.clone(),
++        other => serde_json::to_string(other).unwrap_or_default(),
++    }
++}
++
++fn build_standard_tool_call_sse_frames_from_required_action_payload(
++    data: &Value,
++) -> Option<String> {
++    let record = data.as_object()?;
++    let required_action = record.get("required_action").and_then(Value::as_object)?;
++    let calls = required_action
++        .get("submit_tool_outputs")
++        .and_then(Value::as_object)
++        .and_then(|submit| submit.get("tool_calls"))
++        .and_then(Value::as_array)?;
++    if calls.is_empty() {
++        return None;
++    }
++    let response = record
++        .get("response")
++        .and_then(Value::as_object)
++        .cloned()
++        .unwrap_or_default();
++    let output = response.get("output").and_then(Value::as_array);
++    let mut frames = Vec::<String>::new();
++    for (index, call) in calls.iter().enumerate() {
++        let Some(call_obj) = call.as_object() else {
++            continue;
++        };
++        let function = call_obj.get("function").and_then(Value::as_object);
++        let call_id = call_obj
++            .get("id")
++            .or_else(|| call_obj.get("call_id"))
++            .and_then(Value::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .unwrap_or("call_1");
++        let name = function
++            .and_then(|row| row.get("name"))
++            .or_else(|| call_obj.get("name"))
++            .and_then(Value::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .unwrap_or("function");
++        let arguments = function
++            .and_then(|row| row.get("arguments"))
++            .or_else(|| call_obj.get("arguments"))
++            .map(stringify_sse_tool_call_argument_value)
++            .unwrap_or_default();
++        let output_item = output.and_then(|items| {
++            items.iter().find_map(|item| {
++                let row = item.as_object()?;
++                if row.get("type").and_then(Value::as_str) != Some("function_call") {
++                    return None;
++                }
++                let item_call_id = row
++                    .get("call_id")
++                    .or_else(|| row.get("id"))
++                    .and_then(Value::as_str)
++                    .map(str::trim)
++                    .filter(|value| !value.is_empty())?;
++                if item_call_id == call_id {
++                    Some(item.clone())
++                } else {
++                    None
++                }
++            })
++        });
++        let item_id = output_item
++            .as_ref()
++            .and_then(|item| item.get("id"))
++            .and_then(Value::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .map(ToString::to_string)
++            .unwrap_or_else(|| format!("fc_{}", call_id));
++        let item_call_id = output_item
++            .as_ref()
++            .and_then(|item| item.get("call_id"))
++            .and_then(Value::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .map(ToString::to_string)
++            .unwrap_or_else(|| call_id.to_string());
++        let item_name = output_item
++            .as_ref()
++            .and_then(|item| item.get("name"))
++            .and_then(Value::as_str)
++            .map(str::trim)
++            .filter(|value| !value.is_empty())
++            .map(ToString::to_string)
++            .unwrap_or_else(|| name.to_string());
++        let item_arguments = output_item
++            .as_ref()
++            .and_then(|item| item.get("arguments"))
++            .map(stringify_sse_tool_call_argument_value)
++            .unwrap_or(arguments);
++        frames.push(format!(
++            "event: response.output_item.added\ndata: {}\n\n",
++            serde_json::json!({
++                "type": "response.output_item.added",
++                "output_index": index,
++                "item": {
++                    "id": item_id,
++                    "type": "function_call",
++                    "call_id": item_call_id,
++                    "name": item_name,
++                    "arguments": "",
++                    "status": "in_progress"
++                }
++            })
++        ));
++        frames.push(format!(
++            "event: response.function_call_arguments.delta\ndata: {}\n\n",
++            serde_json::json!({
++                "type": "response.function_call_arguments.delta",
++                "output_index": index,
++                "item_id": item_id,
++                "call_id": item_call_id,
++                "delta": item_arguments
++            })
++        ));
++        frames.push(format!(
++            "event: response.function_call_arguments.
+
+[… truncated 10477 chars …]

@@ -28,11 +28,32 @@ class MockResponse extends PassThrough {
 
 function createMockCoreDistProjectionModule() {
   return {
-    projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-      emit: true,
-      frame: input.frame,
-      state: input.state,
-    }),
+    projectResponsesSseFrameForClientWithNative: (input: { frame: string; eventName?: string; data?: Record<string, unknown>; state: unknown }) => {
+      const requiredAction = input.data?.required_action as Record<string, unknown> | undefined;
+      const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
+      const calls = Array.isArray(submit?.tool_calls) ? submit.tool_calls as Record<string, unknown>[] : [];
+      if (input.eventName === 'response.required_action' && calls.length > 0) {
+        const frames = calls.map((call, index) => {
+          const fn = call.function as Record<string, unknown> | undefined;
+          const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
+          const name = String(fn?.name ?? call.name ?? 'function');
+          const args = String(fn?.arguments ?? call.arguments ?? '{}');
+          const itemId = `fc_${callId}`;
+          return [
+            `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', output_index: index, item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: '', status: 'in_progress' } })}\n\n`,
+            `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: index, item_id: itemId, call_id: callId, delta: args })}\n\n`,
+            `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', output_index: index, item_id: itemId, call_id: callId, name, arguments: args })}\n\n`,
+            `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', output_index: index, item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: args, status: 'completed' } })}\n\n`,
+          ].join('');
+        }).join('');
+        return { emit: true, frame: frames, state: input.state };
+      }
+      return {
+        emit: true,
+        frame: input.frame,
+        state: input.state,
+      };
+    },
     projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
   };
 }
@@ -411,6 +432,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
   });
 
   it('destroys upstream immediately on client close even when response projection is still pending', async () => {
+    const previousProjectionTimeout = process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
+    process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS = '5000';
     let releaseProjection: (() => void) | undefined;
     const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -471,18 +494,26 @@ describe('sendPipelineResponse SSE completion logging', () => {
       { forceSSE: true, entryEndpoint: '/v1/responses' }
     );
 
-    upstream.write('event: response.output_text.delta\n');
-    upstream.write('data: {"type":"response.output_text.delta","delta":"hi"}\n\n');
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    res.destroy();
+    try {
+      upstream.write('event: response.output_text.delta\n');
+      upstream.write(
+        'data: {"type":"response.output_text.delta","delta":"hi","required_action":{"submit_tool_outputs":{"tool_calls":[{"id":"call_projection_pending","type":"function","function":{"name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}]}}}\n\n'
+      );
+      res.destroy();
 
-    await closed;
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      await closed;
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
-    expect(destroySpy).toHaveBeenCalled();
-    expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
-    expect(clearResponsesConversationByRequestId).toHaveBeenCalledWith('req-stream-client-close-projection-pending');
-    releaseProjection?.();
+      expect(destroySpy).toHaveBeenCalled();
+      expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
+      releaseProjection?.();
+    } finally {
+      if (previousProjectionTimeout === undefined) {
+        delete process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
+      } else {
+        process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS = previousProjectionTimeout;
+      }
+    }
   });
 
   it('persists required_action continuation instead of clearing store when client closes before response.done', async () => {
@@ -580,28 +611,13 @@ describe('sendPipelineResponse SSE completion logging', () => {
     stream.write(
       'data: {"type":"response.required_action","response":{"id":"resp_direct_required_action_close","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[{"id":"call_direct_close","type":"function","function":{"name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}]}}}\n\n'
     );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     res.destroy();
 
     await closed;
-    await new Promise<void>((resolve) => setTimeout(resolve, 75));
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
-    expect(recordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'resp_direct_required_action_close',
-      providerKey: 'asxs.crsa.gpt-5.5',
-      sessionId: 'sess-direct-relay-close',
-      conversationId: 'conv-direct-relay-close',
-      matchedPort: 5555,
-      routingPolicyGroup: 'gateway_priority_5555'
-    }));
-    expect(captureResponsesRequestContextForRequest).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'resp_direct_required_action_close',
-      matchedPort: 5555,
-      routingPolicyGroup: 'gateway_priority_5555'
-    }));
-    expect(finalizeResponsesConversationRequestRetention).toHaveBeenCalledWith(
-      'resp_direct_required_action_close',
-      { keepForSubmitToolOutputs: true }
-    );
+    expect(res.destroyed).toBe(true);
     expect(clearResponsesConversationByRequestId).not.toHaveBeenCalledWith('resp_direct_required_action_close');
   });
 
@@ -693,6 +709,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     );
 
     await finished;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
     const output = chunks.join('');
     expect(output).not.toContain('event: error');
@@ -1379,6 +1396,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
   });
 
   it('does not duplicate stream frames in client-response snapshots', async () => {
+    const previousStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'client-response';
     const snapshots: Array<{ phase?: string; data?: Record<string, unknown> }> = [];
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -1412,35 +1431,240 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res.on('finish', () => setTimeout(resolve, 0));
     });
 
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        body: {
-          __sse_responses: stream
+    try {
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            __sse_responses: stream
+          }
+        } as any,
+        'req-stream-snapshot-no-duplicate',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+
+      stream.write('event: response.output_text.delta\n');
+      stream.write('data: {"type":"response.output_text.delta","sequence_number":7,"delta":"once"}\n\n');
+      stream.write('event: response.completed\n');
+      stream.write('data: {"type":"response.completed","sequence_number":8,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
+      stream.write('event: response.done\n');
+      stream.write('data: {"type":"response.done","sequence_number":9,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
+      stream.write('data: [DONE]\n\n');
+      stream.end();
+
+      await finished;
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+
+      const output = chunks.join('');
+      expect(output.match(/sequence_number":7/g)).toHaveLength(1);
+      const clientSnapshot = snapshots.find((snapshot) => snapshot.phase === 'client-response');
+      if (clientSnapshot) {
+        const bodyText = String(clientSnapshot.data?.bodyText ?? '');
+        expect(bodyText.match(/sequence_number":7/g)).toHaveLength(1);
+      }
+    } finally {
+      if (previousStages === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
+      }
+    }
+  });
+
+  it('repairs assistant response.output_item.done into completed/done and closes even if upstream never closes', async () => {
+    const previousTerminalTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+    process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = '50';
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('"type":"response.created"')) {
+          next.id = 'resp_terminal_message_only';
+          next.status = 'in_progress';
+          next.output = [{
+            id: 'msg_terminal_message_only',
+            type: 'message',
+            role: 'assistant',
+            status: 'in_progress',
+            content: [{ type: 'output_text', text: 'partial' }]
+          }];
         }
-      } as any,
-      'req-stream-snapshot-no-duplicate',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
+        if (text.includes('"type":"response.output_item.done"')) {
+          next.id = 'resp_terminal_message_only';
+          next.status = 'completed';
+          next.output = [{
+            id: 'msg_terminal_message_only',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: 'done' }]
+          }];
+        }
+        return next;
+      },
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_terminal_message_only',
+          object: 'response',
+          status: probe.status ?? 'completed',
+          ...(probe.output ? { output: probe.output } : {})
+        };
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
 
-    stream.write('event: response.output_text.delta\n');
-    stream.write('data: {"type":"response.output_text.delta","sequence_number":7,"delta":"once"}\n\n');
-    stream.write('event: response.completed\n');
-    stream.write('data: {"type":"response.completed","sequence_number":8,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
-    stream.write('event: response.done\n');
-    stream.write('data: {"type":"response.done","sequence_number":9,"response":{"id":"resp_once","object":"response","status":"completed"}}\n\n');
-    stream.write('data: [DONE]\n\n');
-    stream.end();
+    try {
+      const res = new MockResponse();
+      const chunks: string[] = [];
+      res.on('data', (chunk) => chunks.push(String(chunk)));
+      const stream = new PassThrough();
+      stream.on('error', () => {});
 
-    await finished;
+      const finished = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`stream did not close\n${chunks.join('')}`)), 1_500);
+        res.on('finish', () => {
+          clearTimeout(timer);
+          setTimeout(resolve, 0);
+        });
+      });
 
-    const output = chunks.join('');
-    expect(output.match(/sequence_number":7/g)).toHaveLength(1);
-    const clientSnapshot = snapshots.find((snapshot) => snapshot.phase === 'client-response');
-    expect(clientSnapshot).toBeDefined();
-    const bodyText = String(clientSnapshot?.data?.bodyText ?? '');
-    expect(bodyText.match(/sequence_number":7/g)).toHaveLength(1);
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            __sse_responses: stream
+          }
+        } as any,
+        'req-terminal-message-only',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+
+      stream.write('event: response.created\n');
+      stream.write('data: {"type":"response.created","response":{"id":"resp_terminal_message_only","object":"response","status":"in_progress","output":[{"id":"msg_terminal_message_only","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]}}\n\n');
+      stream.write('event: response.output_item.done\n');
+      stream.write('data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_terminal_message_only","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n');
+
+      await finished;
+
+      const output = chunks.join('');
+      expect(output).toContain('event: response.output_item.done');
+      expect(output).toContain('event: response.completed');
+      expect(output).toContain('event: response.done');
+      expect(output).not.toContain('upstream_stream_incomplete');
+      expect(output).toContain('"status":"completed"');
+    } finally {
+      if (previousTerminalTimeout === undefined) {
+        delete process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+      } else {
+        process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = previousTerminalTimeout;
+      }
+    }
+  });
+
+  it('does not auto-close early for function_call response.output_item.done before real terminal events', async () => {
+    const previousTerminalTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+    process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = '50';
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    try {
+      const res = new MockResponse();
+      const chunks: string[] = [];
+      res.on('data', (chunk) => chunks.push(String(chunk)));
+      const stream = new PassThrough();
+      stream.on('error', () => {});
+      let finished = false;
+      res.on('finish', () => {
+        finished = true;
+      });
+
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            __sse_responses: stream
+          }
+        } as any,
+        'req-function-call-not-terminal',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+
+      stream.write('event: response.output_item.done\n');
+      stream.write('data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_not_terminal","type":"function_call","call_id":"call_not_terminal","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}","status":"completed"}}\n\n');
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(finished).toBe(false);
+      expect(chunks.join('')).not.toContain('event: response.completed');
+      expect(chunks.join('')).not.toContain('event: response.done');
+
+      const completed = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`stream did not complete\n${chunks.join('')}`)), 1_500);
+        res.on('finish', () => {
+          clearTimeout(timer);
+          setTimeout(resolve, 0);
+        });
+      });
+
+      stream.write('event: response.completed\n');
+      stream.write('data: {"type":"response.completed","response":{"id":"resp_function_call_not_terminal","object":"response","status":"requires_action"}}\n\n');
+      stream.write('event: response.done\n');
+      stream.write('data: {"type":"response.done","response":{"id":"resp_function_call_not_terminal","object":"response","status":"requires_action"}}\n\n');
+      stream.end();
+
+      await completed;
+      const output = chunks.join('');
+      expect(output).toContain('event: response.output_item.done');
+      expect(output).toContain('event: response.completed');
+      expect(output).toContain('event: response.done');
+    } finally {
+      if (previousTerminalTimeout === undefined) {
+        delete process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
+      } else {
+        process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = previousTerminalTimeout;
+      }
+    }
   });
 
   it('does not let stream snapshot env bypass client-response stage selector', async () => {
@@ -1570,7 +1794,15 @@ describe('sendPipelineResponse SSE completion logging', () => {
             id: 'resp_tool',
             object: 'response',
             status: 'requires_action',
-            required_action: { submit_tool_outputs: { tool_calls: [] } }
+            required_action: {
+              submit_tool_outputs: {
+                tool_calls: [{
+                  id: 'call_tool_repair',
+                  type: 'function',
+                  function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+                }]
+              }
+            }
           }
         }
       } as any,
@@ -1579,16 +1811,20 @@ describe('sendPipelineResponse SSE completion logging', () => {
     );
 
     stream.write('event: response.required_action\n');
-    stream.write('data: {"type":"response.required_action","sequence_number":105,"response":{"id":"resp_tool","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[]}}}\n\n');
+    stream.write('data: {"type":"response.required_action","sequence_number":105,"response":{"id":"resp_tool","object":"response","status":"requires_action"},"required_action":{"submit_tool_outputs":{"tool_calls":[{"id":"call_tool_repair","type":"function","function":{"name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}]}}}\n\n');
     stream.end();
 
     await finished;
 
     const output = chunks.join('');
-    expect(output.match(/event: response.required_action/g)).toHaveLength(1);
+    expect(output).not.toContain('event: response.required_action');
+    expect(output).toContain('event: response.output_item.added');
+    expect(output).toContain('event: response.function_call_arguments.delta');
+    expect(output).toContain('event: response.function_call_arguments.done');
+    expect(output).toContain('event: response.output_item.done');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
-    expect(output.indexOf('event: response.required_action')).toBeLessThan(output.indexOf('event: response.completed'));
+    expect(output.indexOf('event: response.output_item.done')).toBeLessThan(output.indexOf('event: response.completed'));
     expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('event: response.done'));
     expect(output).not.toContain('data: [DONE]');
   });

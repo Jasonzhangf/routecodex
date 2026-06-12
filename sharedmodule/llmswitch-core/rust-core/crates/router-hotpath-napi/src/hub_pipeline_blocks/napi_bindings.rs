@@ -60,16 +60,6 @@ fn evaluate_responses_direct_route_decision(
     let _ = apply_patch_mode;
     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
     if inbound_protocol == "openai-responses"
-        && requires_hub_relay_for_stopless_servertool(payload, metadata)
-    {
-        return Ok(serde_json::json!({
-            "providerWireValid": true,
-            "requiresHubRelay": true,
-            "reason": "stopless_servertool_requires_hub_relay",
-            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
-        }));
-    }
-    if inbound_protocol == "openai-responses"
         && requires_hub_relay_for_servertool_followup(payload, metadata)
     {
         return Ok(serde_json::json!({
@@ -97,13 +87,6 @@ fn evaluate_responses_direct_route_decision(
     }))
 }
 
-fn requires_hub_relay_for_stopless_servertool(payload: &Value, metadata: &Value) -> bool {
-    if !stop_message_excludes_direct(metadata) {
-        return false;
-    }
-    has_declared_client_tool(payload)
-}
-
 fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value) -> bool {
     if has_stop_message_cli_result(payload) {
         return true;
@@ -117,34 +100,6 @@ fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value)
 fn has_stop_message_cli_result(value: &Value) -> bool {
     let mut seen = 0usize;
     scan_stop_message_cli_result(value, 0, &mut seen)
-}
-
-fn has_declared_client_tool(payload: &Value) -> bool {
-    let Some(root) = payload.as_object() else {
-        return false;
-    };
-    let Some(tools) = root.get("tools").and_then(Value::as_array) else {
-        return false;
-    };
-    tools.iter().any(is_declared_client_tool)
-}
-
-fn is_declared_client_tool(value: &Value) -> bool {
-    let Some(record) = value.as_object() else {
-        return false;
-    };
-    let tool_type = record
-        .get("type")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or("");
-    if tool_type.is_empty() {
-        return false;
-    }
-    !matches!(
-        tool_type,
-        "web_search_preview" | "file_search" | "computer_use_preview" | "code_interpreter"
-    )
 }
 
 fn scan_stop_message_cli_result(value: &Value, depth: usize, seen: &mut usize) -> bool {
@@ -367,7 +322,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn responses_tools_do_not_require_hub_relay_on_direct_path() {
+    fn responses_client_tools_stay_direct_on_same_protocol_path() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -387,7 +342,7 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("direct tool declarations should remain direct payload");
+        .expect("same-protocol client tool declarations should stay direct");
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);
@@ -395,7 +350,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn responses_client_tools_require_hub_relay_when_stop_message_excludes_direct() {
+    fn responses_client_tools_stay_direct_when_stop_message_excludes_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -418,11 +373,39 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("stopMessage direct exclusion should produce explicit relay decision");
+        .expect("same-protocol client tools must stay direct when stopless is only configured");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
+    }
+
+    #[test]
+    fn responses_hosted_tools_remain_direct_on_direct_path() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    { "type": "web_search_preview" }
+                ]
+            }),
+            &Value::Null,
+            "openai-responses",
+            "client",
+        )
+        .expect("hosted Responses tools can stay same-protocol direct");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 
     #[test]

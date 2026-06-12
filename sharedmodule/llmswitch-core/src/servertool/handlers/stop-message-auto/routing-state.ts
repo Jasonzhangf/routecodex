@@ -68,6 +68,7 @@ export function applyStopMessageSnapshotToState(
     disabledModels: new Map<string, Set<string>>(),
     stopMessageSource: undefined,
     stopMessageText: undefined,
+    stopMessageProviderKey: undefined,
     stopMessageMaxRepeats: undefined,
     stopMessageUsed: undefined,
     stopMessageUpdatedAt: undefined,
@@ -83,6 +84,7 @@ export function applyStopMessageSnapshotToState(
   const plan = planStopMessageRoutingStateApplyWithNative(snapshot);
   next.stopMessageSource = plan.source;
   next.stopMessageText = plan.text;
+  next.stopMessageProviderKey = plan.providerKey;
   next.stopMessageMaxRepeats = plan.maxRepeats;
   next.stopMessageUsed = plan.used;
   next.stopMessageUpdatedAt = plan.updatedAt;
@@ -97,6 +99,7 @@ export function applyStopMessageSnapshotToState(
 export function clearStopMessageState(state: RoutingInstructionState, now: number): void {
   const plan = planStopMessageRoutingStateClearWithNative(now);
   state.stopMessageText = undefined;
+  state.stopMessageProviderKey = undefined;
   state.stopMessageMaxRepeats = undefined;
   state.stopMessageUsed = undefined;
   state.stopMessageSource = undefined;

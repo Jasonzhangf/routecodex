@@ -126,6 +126,7 @@ pub struct ProviderPin {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StopMessageSnapshot {
     pub text: String,
+    pub provider_key: Option<String>,
     pub max_repeats: u32,
     pub used: u32,
     pub source: SnapshotSource,
@@ -1038,17 +1039,45 @@ fn normalize_trigger_max_repeats(snapshot: &StopMessageSnapshot, default_max_rep
 // ── Snapshot resolution ────────────────────────────────────────────────────
 
 fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnapshot> {
+    let current_provider_key = ctx
+        .provider_pin
+        .as_ref()
+        .and_then(|pin| pin.provider_key.as_ref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+
+    let mut reset_seed: Option<StopMessageSnapshot> = None;
+
     // 1. Try persisted snapshot first
     if let Some(snapshot) = &ctx.persisted_snapshot {
-        return Some(snapshot.clone());
+        if is_provider_continuous(snapshot.provider_key.as_deref(), current_provider_key) {
+            return Some(snapshot.clone());
+        }
+        reset_seed = Some(reset_snapshot_for_current_provider(
+            snapshot,
+            current_provider_key,
+        ));
     }
 
     // 2. Try runtime snapshot
     if let Some(snapshot) = &ctx.runtime_snapshot {
-        return Some(snapshot.clone());
+        if is_provider_continuous(snapshot.provider_key.as_deref(), current_provider_key) {
+            return Some(snapshot.clone());
+        }
+        if reset_seed.is_none() {
+            reset_seed = Some(reset_snapshot_for_current_provider(
+                snapshot,
+                current_provider_key,
+            ));
+        }
     }
 
-    // 3. Try default snapshot when no snapshot exists and goal is not active.
+    if let Some(snapshot) = reset_seed {
+        return Some(snapshot);
+    }
+
+    // 3. Try default snapshot when no usable snapshot exists and goal is not active.
+    // Provider mismatch intentionally resets the consecutive-stop budget.
     let should_use_default = !ctx.goal_status.is_active();
 
     if should_use_default {
@@ -1059,6 +1088,7 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
             let next_used = 0; // default starts at 0
             return Some(StopMessageSnapshot {
                 text: ctx.default_text.clone(),
+                provider_key: current_provider_key.map(str::to_string),
                 max_repeats: ctx.default_max_repeats,
                 used: next_used,
                 source: SnapshotSource::Default,
@@ -1068,6 +1098,32 @@ fn resolve_snapshot(ctx: &StopMessageDecisionContext) -> Option<StopMessageSnaps
     }
 
     None
+}
+
+fn reset_snapshot_for_current_provider(
+    snapshot: &StopMessageSnapshot,
+    current_provider_key: Option<&str>,
+) -> StopMessageSnapshot {
+    let mut next = snapshot.clone();
+    next.provider_key = current_provider_key.map(str::to_string);
+    next.used = 0;
+    next
+}
+
+fn is_provider_continuous(
+    snapshot_provider_key: Option<&str>,
+    current_provider_key: Option<&str>,
+) -> bool {
+    match (
+        snapshot_provider_key
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        current_provider_key,
+    ) {
+        (Some(snapshot_provider), Some(current_provider)) => snapshot_provider == current_provider,
+        (Some(_), None) => false,
+        _ => true,
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1186,6 +1242,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1201,6 +1258,7 @@ mod tests {
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 1,
             source: SnapshotSource::Persisted,
@@ -1215,6 +1273,7 @@ mod tests {
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 2,
             source: SnapshotSource::Persisted,
@@ -1228,6 +1287,7 @@ mod tests {
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行，不要中断总结".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1245,6 +1305,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 1,
             source: SnapshotSource::Default,
@@ -1268,6 +1329,7 @@ mod tests {
         ctx.followup_flow_id = None;
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1283,6 +1345,7 @@ mod tests {
         ctx.goal_status = GoalStatus::Active;
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1313,6 +1376,7 @@ mod tests {
             ctx.goal_status = status;
             ctx.persisted_snapshot = Some(StopMessageSnapshot {
                 text: "继续执行".to_string(),
+                provider_key: None,
                 max_repeats: 3,
                 used: 0,
                 source: SnapshotSource::Persisted,
@@ -1337,6 +1401,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 3,
             source: SnapshotSource::Persisted,
@@ -1352,6 +1417,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 4,
             source: SnapshotSource::Persisted,
@@ -1367,6 +1433,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1382,6 +1449,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 0,
             source: SnapshotSource::Persisted,
@@ -1480,6 +1548,7 @@ mod tests {
         ctx.persisted_snapshot = None;
         ctx.runtime_snapshot = Some(StopMessageSnapshot {
             text: "继续".to_string(),
+            provider_key: None,
             max_repeats: 2,
             used: 1,
             source: SnapshotSource::Default,
@@ -1496,6 +1565,7 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "persisted".to_string(),
+            provider_key: None,
             max_repeats: 5,
             used: 2,
             source: SnapshotSource::Persisted,
@@ -1503,6 +1573,7 @@ mod tests {
         });
         ctx.runtime_snapshot = Some(StopMessageSnapshot {
             text: "runtime".to_string(),
+            provider_key: None,
             max_repeats: 2,
             used: 0,
             source: SnapshotSource::Default,
@@ -1522,6 +1593,7 @@ mod tests {
         ctx.followup_flow_id = Some("stop_message_flow".to_string());
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "persisted".to_string(),
+            provider_key: None,
             max_repeats: 1,
             used: 1,
             source: SnapshotSource::Persisted,
@@ -1529,6 +1601,7 @@ mod tests {
         });
         ctx.runtime_snapshot = Some(StopMessageSnapshot {
             text: "runtime".to_string(),
+            provider_key: None,
             max_repeats: 3,
             used: 1,
             source: SnapshotSource::Default,
@@ -1538,6 +1611,56 @@ mod tests {
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
         assert_eq!(result.skip_reason.unwrap(), "skip_reached_max_repeats");
+    }
+
+    #[test]
+    fn provider_change_resets_persisted_snapshot_budget() {
+        let mut ctx = base_ctx();
+        ctx.provider_pin = Some(ProviderPin {
+            provider_key: Some("provider.current".to_string()),
+            model_id: None,
+            routecodex_port_mode: None,
+        });
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            provider_key: Some("provider.previous".to_string()),
+            max_repeats: 3,
+            used: 2,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.used, 0);
+        assert!(result
+            .followup_text
+            .expect("followup text")
+            .contains("第一轮核对"));
+    }
+
+    #[test]
+    fn provider_match_preserves_persisted_snapshot_budget() {
+        let mut ctx = base_ctx();
+        ctx.provider_pin = Some(ProviderPin {
+            provider_key: Some("provider.same".to_string()),
+            model_id: None,
+            routecodex_port_mode: None,
+        });
+        ctx.persisted_snapshot = Some(StopMessageSnapshot {
+            text: "继续执行".to_string(),
+            provider_key: Some("provider.same".to_string()),
+            max_repeats: 3,
+            used: 2,
+            source: SnapshotSource::Persisted,
+            stage_mode: StageMode::On,
+        });
+        let result = decide(&ctx);
+        assert_eq!(result.action, Action::Trigger);
+        assert_eq!(result.used, 2);
+        assert!(result
+            .followup_text
+            .expect("followup text")
+            .contains("第三轮最终收尾"));
     }
 
     #[test]

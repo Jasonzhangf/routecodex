@@ -90,4 +90,163 @@ describe('request-executor excluded provider reselection plan', () => {
       ]
     });
   });
+
+  it('keeps excluded provider excluded when later-pool/default alternatives still exist', () => {
+    expect(__requestExecutorTestables.resolveExcludedProviderReselectionPlan({
+      providerKey: 'minimax.key1.MiniMax-M3',
+      routePool: ['minimax.key1.MiniMax-M3', 'asxs.crsa.gpt-5.4', 'default.key1.gpt-5.4'],
+      excludedProviderKeys: new Set(['minimax.key1.MiniMax-M3']),
+      lastError: Object.assign(new Error('HTTP 429: quota exhausted'), {
+        statusCode: 429,
+        code: 'HTTP_429',
+        retryable: true
+      })
+    })).toEqual({
+      hasAlternativeCandidate: true,
+      keepExcludedForNextAttempt: true
+    });
+  });
+
+
+  it('reads full routePool chain when routingDecision.pool is only the narrowed current pool', () => {
+    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-routepool-contract',
+      providerRequestId: 'req-routepool-contract',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'search',
+          pool: ['minimax.key1.MiniMax-M3'],
+          routePool: ['minimax.key1.MiniMax-M3', 'asxs.crsa.gpt-5.4', 'default.key1.gpt-5.4']
+        },
+        providerPayload: { body: { model: 'gpt-test' } },
+        target: {
+          providerKey: 'minimax.key1.MiniMax-M3',
+          runtimeKey: 'minimax.key1',
+          compatibilityProfile: 'openai:responses'
+        },
+        metadata: {}
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-routepool-contract',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set(['minimax.key1.MiniMax-M3']),
+      lastError: Object.assign(new Error('HTTP 429: quota exhausted'), {
+        status: 429,
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        retryable: true
+      }),
+      blockingRecoverableRouteHoldState: null,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved).toEqual({
+      kind: 'retry_next_attempt',
+      initialRoutePool: [
+        'minimax.key1.MiniMax-M3',
+        'asxs.crsa.gpt-5.4',
+        'default.key1.gpt-5.4'
+      ]
+    });
+  });
+
+  it('does not infer fallback routePool from pool when explicit routePool is missing', () => {
+    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-no-explicit-routepool',
+      providerRequestId: 'req-no-explicit-routepool',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'search',
+          pool: ['minimax.key1.MiniMax-M3']
+        },
+        providerPayload: { body: { model: 'gpt-test' } },
+        target: {
+          providerKey: 'minimax.key1.MiniMax-M3',
+          runtimeKey: 'minimax.key1',
+          compatibilityProfile: 'openai:responses'
+        },
+        metadata: {}
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-no-explicit-routepool',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set(['minimax.key1.MiniMax-M3']),
+      lastError: Object.assign(new Error('HTTP 429: quota exhausted'), {
+        status: 429,
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        retryable: true
+      }),
+      blockingRecoverableRouteHoldState: null,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved).toEqual({
+      kind: 'retry_next_attempt',
+      initialRoutePool: null
+    });
+  });
+
+  it('keeps fallback routePool chain available when current pool is exhausted', () => {
+    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-fallback-chain',
+      providerRequestId: 'req-fallback-chain',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'search',
+          pool: ['minimax.key1.MiniMax-M3'],
+          routePool: ['minimax.key1.MiniMax-M3', 'asxs.crsa.gpt-5.4', 'default.key1.gpt-5.4']
+        },
+        providerPayload: { body: { model: 'gpt-test' } },
+        target: {
+          providerKey: 'minimax.key1.MiniMax-M3',
+          runtimeKey: 'minimax.key1',
+          compatibilityProfile: 'openai:responses'
+        },
+        metadata: {}
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-fallback-chain',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set(['minimax.key1.MiniMax-M3']),
+      lastError: Object.assign(new Error('HTTP 429: quota exhausted'), {
+        status: 429,
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        retryable: true
+      }),
+      blockingRecoverableRouteHoldState: null,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved).toEqual({
+      kind: 'retry_next_attempt',
+      initialRoutePool: [
+        'minimax.key1.MiniMax-M3',
+        'asxs.crsa.gpt-5.4',
+        'default.key1.gpt-5.4'
+      ]
+    });
+  });
 });

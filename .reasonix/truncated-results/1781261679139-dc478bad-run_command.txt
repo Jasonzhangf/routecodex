@@ -1,0 +1,760 @@
+$ git diff -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/ sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/ sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/
+[exit 0]
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
+index 4d2387527..adcb941f9 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
+@@ -59,16 +59,6 @@ fn evaluate_responses_direct_route_decision(
+ ) -> Result<Value, String> {
+     let _ = apply_patch_mode;
+     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
+-    if inbound_protocol == "openai-responses"
+-        && requires_hub_relay_for_stopless_servertool(payload, metadata)
+-    {
+-        return Ok(serde_json::json!({
+-            "providerWireValid": true,
+-            "requiresHubRelay": true,
+-            "reason": "stopless_servertool_requires_hub_relay",
+-            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+-        }));
+-    }
+     if inbound_protocol == "openai-responses"
+         && requires_hub_relay_for_servertool_followup(payload, metadata)
+     {
+@@ -97,13 +87,6 @@ fn evaluate_responses_direct_route_decision(
+     }))
+ }
+ 
+-fn requires_hub_relay_for_stopless_servertool(payload: &Value, metadata: &Value) -> bool {
+-    if !stop_message_excludes_direct(metadata) {
+-        return false;
+-    }
+-    has_declared_client_tool(payload)
+-}
+-
+ fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value) -> bool {
+     if has_stop_message_cli_result(payload) {
+         return true;
+@@ -119,34 +102,6 @@ fn has_stop_message_cli_result(value: &Value) -> bool {
+     scan_stop_message_cli_result(value, 0, &mut seen)
+ }
+ 
+-fn has_declared_client_tool(payload: &Value) -> bool {
+-    let Some(root) = payload.as_object() else {
+-        return false;
+-    };
+-    let Some(tools) = root.get("tools").and_then(Value::as_array) else {
+-        return false;
+-    };
+-    tools.iter().any(is_declared_client_tool)
+-}
+-
+-fn is_declared_client_tool(value: &Value) -> bool {
+-    let Some(record) = value.as_object() else {
+-        return false;
+-    };
+-    let tool_type = record
+-        .get("type")
+-        .and_then(Value::as_str)
+-        .map(str::trim)
+-        .unwrap_or("");
+-    if tool_type.is_empty() {
+-        return false;
+-    }
+-    !matches!(
+-        tool_type,
+-        "web_search_preview" | "file_search" | "computer_use_preview" | "code_interpreter"
+-    )
+-}
+-
+ fn scan_stop_message_cli_result(value: &Value, depth: usize, seen: &mut usize) -> bool {
+     if depth > 10 {
+         return false;
+@@ -367,7 +322,7 @@ mod responses_direct_route_decision_tests {
+     }
+ 
+     #[test]
+-    fn responses_tools_do_not_require_hub_relay_on_direct_path() {
++    fn responses_client_tools_stay_direct_on_same_protocol_path() {
+         let decision = evaluate_responses_direct_route_decision(
+             &serde_json::json!({
+                 "model": "gpt-5.5",
+@@ -387,7 +342,7 @@ mod responses_direct_route_decision_tests {
+             "openai-responses",
+             "client",
+         )
+-        .expect("direct tool declarations should remain direct payload");
++        .expect("same-protocol client tool declarations should stay direct");
+ 
+         assert_eq!(decision["providerWireValid"], true);
+         assert_eq!(decision["requiresHubRelay"], false);
+@@ -395,7 +350,7 @@ mod responses_direct_route_decision_tests {
+     }
+ 
+     #[test]
+-    fn responses_client_tools_require_hub_relay_when_stop_message_excludes_direct() {
++    fn responses_client_tools_stay_direct_when_stop_message_excludes_direct() {
+         let decision = evaluate_responses_direct_route_decision(
+             &serde_json::json!({
+                 "model": "gpt-5.5",
+@@ -418,11 +373,39 @@ mod responses_direct_route_decision_tests {
+             "openai-responses",
+             "client",
+         )
+-        .expect("stopMessage direct exclusion should produce explicit relay decision");
++        .expect("same-protocol client tools must stay direct when stopless is only configured");
+ 
+         assert_eq!(decision["providerWireValid"], true);
+-        assert_eq!(decision["requiresHubRelay"], true);
+-        assert_eq!(decision["reason"], "stopless_servertool_requires_hub_relay");
++        assert_eq!(decision["requiresHubRelay"], false);
++        assert_eq!(decision["reason"], Value::Null);
++    }
++
++    #[test]
++    fn responses_hosted_tools_remain_direct_on_direct_path() {
++        let decision = evaluate_responses_direct_route_decision(
++            &serde_json::json!({
++                "model": "gpt-5.5",
++                "input": [
++                    {
++                        "role": "user",
++                        "content": [
++                            { "type": "input_text", "text": "hello" }
++                        ]
++                    }
++                ],
++                "tools": [
++                    { "type": "web_search_preview" }
++                ]
++            }),
++            &Value::Null,
++            "openai-responses",
++            "client",
++        )
++        .expect("hosted Responses tools can stay same-protocol direct");
++
++        assert_eq!(decision["providerWireValid"], true);
++        assert_eq!(decision["requiresHubRelay"], false);
++        assert_eq!(decision["reason"], Value::Null);
+     }
+ 
+     #[test]
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+index 1e8eb2d04..b2f2d0ee1 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+@@ -7,12 +7,17 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
+     let row = input
+         .as_object()
+         .ok_or_else(|| "coerce standardized request input must be object".to_string())?;
+-    let payload = row
++    let raw_payload = row
+         .get("payload")
+         .cloned()
+         .ok_or_else(|| "payload must be object".to_string())?;
+-    let payload = normalize_chat_envelope_tool_calls(&payload).map_err(|err| err.to_string())?;
+-    let payload = payload
++    let raw_payload = raw_payload
++        .as_object()
++        .ok_or_else(|| "payload must be object".to_string())?;
++    let normalized_payload_value =
++        normalize_chat_envelope_tool_calls(&Value::Object(raw_payload.clone()))
++            .map_err(|err| err.to_string())?;
++    let payload = normalized_payload_value
+         .as_object()
+         .ok_or_else(|| "payload must be object".to_string())?;
+     let normalized = row
+@@ -176,6 +181,11 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
+             }
+         }
+     }
++    if let Some(input_array) = raw_payload.get("input").and_then(Value::as_array) {
++        if !input_array.is_empty() && !semantics.contains_key("input") {
++            semantics.insert("input".to_string(), Value::Array(input_array.clone()));
++        }
++    }
+ 
+     let mut standardized_request = Map::<String, Value>::new();
+     standardized_request.insert("model".to_string(), Value::String(model.clone()));
+@@ -397,6 +407,32 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn responses_standardization_preserves_input_in_semantics_for_tool_result_followup() {
++        let input = json!({
++            "payload": {
++                "model": "gpt-test",
++                "input": [
++                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
++                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
++                ]
++            },
++            "normalized": {
++                "id": "req_test",
++                "entryEndpoint": "/v1/responses",
++                "stream": true,
++                "processMode": "chat"
++            }
++        });
++
++        let output = coerce_standardized_request_from_payload(&input).unwrap();
++        let semantics_input = output["standardizedRequest"]["semantics"]["input"]
++            .as_array()
++            .expect("semantics input");
++        assert_eq!(semantics_input.len(), 2);
++        assert_eq!(semantics_input[1]["type"], json!("function_call_output"));
++    }
++
+     #[test]
+     fn takes_internal_metadata_from_normalized_carrier_not_payload() {
+         let input = json!({
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+index e32321ca7..faeb55331 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+@@ -748,6 +748,20 @@ fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
+         .map(str::to_string)
+ }
+ 
++fn read_metadata_value(metadata: &Value, key: &str) -> Option<Value> {
++    metadata
++        .get(key)
++        .cloned()
++        .or_else(|| metadata.get("target").and_then(Value::as_object)?.get(key).cloned())
++}
++
++fn read_trimmed_metadata_string_with_target_fallback(metadata: &Value, key: &str) -> Option<String> {
++    read_metadata_value(metadata, key)
++        .and_then(|value| value.as_str().map(str::to_string))
++        .map(|value| value.trim().to_string())
++        .filter(|value| !value.is_empty())
++}
++
+ fn build_response_record_effect_payload(
+     metadata: &Value,
+     payload: &Value,
+@@ -935,6 +949,10 @@ fn build_adapter_context(
+     request_id: &str,
+ ) -> AdapterContext {
+     AdapterContext {
++        compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
++            metadata,
++            "compatibilityProfile",
++        ),
+         provider_protocol: Some(provider_protocol.to_string()),
+         request_id: Some(request_id.to_string()),
+         entry_endpoint: metadata
+@@ -946,6 +964,11 @@ fn build_adapter_context(
+             .and_then(Value::as_str)
+             .map(str::to_string),
+         rt: metadata.get("__rt").cloned(),
++        claude_code: read_metadata_value(metadata, "claudeCode"),
++        anthropic_thinking: read_trimmed_metadata_string_with_target_fallback(
++            metadata,
++            "anthropicThinking",
++        ),
+         model_id: metadata
+             .get("assignedModelId")
+             .and_then(Value::as_str)
+@@ -982,29 +1005,10 @@ fn build_adapter_context(
+             .get("conversationId")
+             .and_then(Value::as_str)
+             .map(str::to_string),
+-        ..AdapterContext {
+-            compatibility_profile: None,
+-            provider_protocol: None,
+-            request_id: None,
+-            entry_endpoint: None,
+-            route_id: None,
+-            rt: None,
+-            captured_chat_request: None,
+-            deepseek: None,
+-            claude_code: None,
+-            anthropic_thinking: None,
+-            estimated_input_tokens: None,
+-            model_id: None,
+-            client_model_id: None,
+-            original_model_id: None,
+-            provider_id: None,
+-            provider_key: None,
+-            runtime_key: None,
+-            client_request_id: None,
+-            group_request_id: None,
+-            session_id: None,
+-            conversation_id: None,
+-        }
++        captured_chat_request: None,
++        deepseek: None,
++        estimated_input_tokens: None,
++        provider_id: None,
+     }
+ }
+ 
+@@ -1053,7 +1057,7 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
+     let output = match engine.execute(input.request) {
+         Ok(output) => output,
+         Err(error) => HubPipelineExecutionOutput {
+-            request_id,
++            request_id: request_id.clone(),
+             success: false,
+             payload: None,
+             metadata: None,
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+index 588517b4d..57812b9c6 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+@@ -319,6 +319,102 @@ fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_
+     );
+ }
+ 
++#[test]
++fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_relay() {
++    let input = json!({
++        "config": {
++            "virtualRouter": {
++                "providers": {
++                    "minimax.key1.MiniMax-M3": {
++                        "providerKey": "minimax.key1.MiniMax-M3",
++                        "providerType": "anthropic",
++                        "runtimeKey": "minimax.key1",
++                        "modelId": "MiniMax-M3",
++                        "endpoint": "mock://minimax",
++                        "auth": { "type": "apikey", "apiKey": "minimax-key" },
++                        "outboundProfile": "anthropic-messages",
++                        "compatibilityProfile": "anthropic:claude-code"
++                    }
++                },
++                "routing": {
++                    "thinking": [{
++                        "id": "thinking-priority",
++                        "mode": "priority",
++                        "targets": ["minimax.key1.MiniMax-M3"]
++                    }]
++                }
++            }
++        },
++        "request": {
++            "requestId": "req-responses-to-minimax-compat",
++            "endpoint": "/v1/responses",
++            "entryEndpoint": "/v1/responses",
++            "providerProtocol": "openai-responses",
++            "payload": {
++                "model": "gpt-5.5",
++                "input": [{
++                    "type": "message",
++                    "role": "user",
++                    "content": [{ "type": "input_text", "text": "read files" }]
++                }],
++                "tools": [{
++                    "type": "function",
++                    "name": "exec_command",
++                    "description": "execute command",
++                    "parameters": {
++                        "type": "object",
++                        "properties": { "cmd": { "type": "string" } },
++                        "required": ["cmd"]
++                    }
++                }],
++                "tool_choice": "auto"
++            },
++            "metadata": {
++                "__routecodexPreselectedRoute": {
++                    "target": {
++                        "providerKey": "minimax.key1.MiniMax-M3",
++                        "providerType": "anthropic",
++                        "runtimeKey": "minimax.key1",
++                        "modelId": "MiniMax-M3",
++                        "outboundProfile": "anthropic-messages",
++                        "compatibilityProfile": "anthropic:claude-code"
++                    },
++                    "decision": { "routeName": "thinking" },
++                    "diagnostics": {}
++                }
++            },
++            "processMode": "chat",
++            "direction": "request",
++            "stage": "inbound"
++        }
++    });
++    let output: serde_json::Value =
++        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
++
++    assert_eq!(
++        output.get("success").and_then(|value| value.as_bool()),
++        Some(true)
++    );
++    assert_eq!(
++        output
++            .pointer("/payload/system/0/text")
++            .and_then(|value| value.as_str()),
++        Some("You are Claude Code, Anthropic's official CLI for Claude.")
++    );
++    assert_eq!(
++        output
++            .pointer("/payload/thinking/type")
++            .and_then(|value| value.as_str()),
++        Some("adaptive")
++    );
++    assert_eq!(
++        output
++            .pointer("/payload/output_config/effort")
++            .and_then(|value| value.as_str()),
++        Some("medium")
++    );
++}
++
+ #[test]
+ fn execute_request_path_preserves_client_tool_surface() {
+     let input = json!({
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs
+index a169835a8..267a86711 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs
+@@ -90,19 +90,12 @@ impl VirtualRouterEngineCore {
+                 return;
+             }
+         }
+-        // Single policy gate:
+-        // - HTTP 503 triggers a persisted daily cooldown immediately (not the
+-        //   recoverable-failure ladder). This matches extract_recoverable_cooldown_ms.
+-        // - all other failures: consecutive threshold handling in health.rs
++        // HTTP 503 is recoverable. It must not create a cross-restart daily
++        // cooldown; after restart the provider should be probed again through
++        // the normal three-failure recoverable ladder.
+         if matches!(status_code, Some(503)) {
+-            let cooldown_ms = extract_cooldown_override_ms(event)
+-                .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
+-            self.health_manager.trip_provider(
+-                &provider_key,
+-                Some("__http_503_daily_cooldown__".to_string()),
+-                Some(cooldown_ms),
+-                now,
+-            );
++            self.health_manager
++                .record_recoverable_failure(&provider_key, reason, now);
+             self.persist_provider_health();
+             return;
+         }
+@@ -203,14 +196,8 @@ impl VirtualRouterEngineCore {
+                     return true;
+                 }
+                 if status == Some(503) {
+-                    let cooldown_ms = extract_cooldown_override_ms(event)
+-                        .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
+-                    self.health_manager.trip_provider(
+-                        provider_key,
+-                        Some("__http_503_daily_cooldown__".to_string()),
+-                        Some(cooldown_ms),
+-                        now,
+-                    );
++                    self.health_manager
++                        .record_recoverable_failure(provider_key, reason, now);
+                     self.persist_provider_health();
+                     return true;
+                 }
+@@ -1273,7 +1260,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn persisted_503_daily_cooldown_is_cleared_by_provider_success_and_not_reimported() {
++    fn http_503_uses_recoverable_three_strike_chain_and_is_not_persisted() {
+         let unique = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+             .unwrap()
+@@ -1289,26 +1276,41 @@ mod tests {
+                 (backup_key, "mimo-v2.5-pro"),
+             ]);
+ 
+-            // Step-1: simulate three consecutive HTTP 503 failures on primary -> persisted cooldown.
+-            for idx in 0..3 {
+-                core.handle_provider_failure(&json!({
++            let mk_503 = |request_id: &str| {
++                json!({
+                     "code": "HTTP_503",
+                     "message": "upstream unavailable",
+                     "stage": "provider.send",
+                     "status": 503,
+                     "runtime": {
+-                        "requestId": format!("req-503-{idx}"),
++                        "requestId": request_id,
+                         "providerKey": provider_key
+                     },
+                     "details": {
+                         "routePoolSize": 2
+                     }
+-                }));
+-            }
++                })
++            };
++
++            core.handle_provider_failure(&mk_503("req-503-1"));
++            let first = provider_state(&core, provider_key);
++            assert_eq!(first.state, "healthy");
++            assert_eq!(first.cooldown_expires_at, None);
++
++            core.handle_provider_failure(&mk_503("req-503-2"));
++            let second = provider_state(&core, provider_key);
++            assert_eq!(second.state, "healthy");
++            assert_eq!(second.cooldown_expires_at, None);
++
++            core.handle_provider_failure(&mk_503("req-503-3"));
+ 
+             let tripped = provider_state(&core, provider_key);
+             assert_eq!(tripped.state, "tripped");
+-            assert!(tripped.cooldown_expires_at.is_some());
++            let ttl = tripped.cooldown_expires_at.expect("cooldown expiry") - now_ms();
++            assert!(
++                ttl > 29 * 60_000 && ttl <= 31 * 60_000,
++                "third 503 should use first recoverable cooldown, ttl={ttl}"
++            );
+ 
+             let persisted = load_provider_health_state().expect("provider-health persisted");
+             let persisted_entries = persisted
+@@ -1316,15 +1318,11 @@ mod tests {
+                 .and_then(|v| v.as_array())
+                 .expect("providerCooldowns array");
+             assert!(
+-                persisted_entries.iter().any(|entry| {
+-                    entry.get("providerKey").and_then(|v| v.as_str()) == Some("sdfv.1.gpt-5.4")
+-                        && entry.get("reason").and_then(|v| v.as_str())
+-                            == Some("__http_503_daily_cooldown__")
+-                }),
+-                "persisted cooldown for canonical primary key not found"
++                persisted_entries.is_empty(),
++                "503 recoverable cooldown must not persist across restart"
+             );
+ 
+-            // Step-2: simulate startup reprobe success -> should clear persisted cooldown.
++            // Success still clears in-memory runtime health.
+             core.handle_provider_success(&json!({
+                 "runtime": {
+                     "requestId": "startup_reprobe",
+@@ -1338,18 +1336,7 @@ mod tests {
+             assert_eq!(healed.state, "healthy");
+             assert_eq!(healed.cooldown_expires_at, None);
+ 
+-            let persisted_after_success =
+-                load_provider_health_state().expect("provider-health persisted after success");
+-            let entries_after_success = persisted_after_success
+-                .get("providerCooldowns")
+-                .and_then(|v| v.as_array())
+-                .expect("providerCooldowns array after success");
+-            assert!(
+-                entries_after_success.is_empty(),
+-                "persisted cooldown should be cleared after provider success"
+-            );
+-
+-            // Step-3: simulate a new engine restart/import cycle: no persisted cooldown should come back.
++            // Simulate a new engine restart/import cycle: no 503 cooldown should come back.
+             let mut restarted = build_test_core_with_providers(&[
+                 (provider_key, "gpt-5.4"),
+                 (backup_key, "mimo-v2.5-pro"),
+@@ -1359,38 +1346,17 @@ mod tests {
+             assert_eq!(restarted_state.state, "healthy");
+             assert_eq!(restarted_state.cooldown_expires_at, None);
+ 
+-            // Step-4: if first live request after restart still hits 503, it starts a fresh
+-            // recoverable series; without persisted reprobe state it does not instantly trip.
+-            restarted.handle_provider_failure(&json!({
+-                "code": "HTTP_503",
+-                "message": "upstream unavailable again",
+-                "stage": "provider.send",
+-                "status": 503,
+-                "runtime": {
+-                    "requestId": "req-503-again",
+-                    "providerKey": provider_key
+-                },
+-                "details": {
+-                    "routePoolSize": 2
+-                }
+-            }));
+-            let retripped = provider_state(&restarted, provider_key);
+-            // 503 always calls trip_provider directly (not recoverable ladder), so state=tripped
+-            assert_eq!(retripped.state, "tripped");
+-            assert_eq!(retripped.failure_count, 3);
+-            // 503 calls trip_provider directly; cooldown is computed fresh to next midnight.
+-            assert!(
+-                retripped.cooldown_expires_at.is_some(),
+-                "503 should set cooldown to next midnight"
+-            );
++            restarted.handle_provider_failure(&mk_503("req-503-after-restart-1"));
++            let after_restart_first = provider_state(&restarted, provider_key);
++            assert_eq!(after_restart_first.state, "healthy");
++            assert_eq!(after_restart_first.cooldown_expires_at, None);
+         });
+ 
+         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+     }
+ 
+     #[test]
+-    fn first_request_success_clears_persisted_503_cooldown() {
+-        // RED: After first request success, persisted 503 cooldown should be cleared.
++    fn provider_success_clears_runtime_cooldown() {
+         let provider_key = "sdfv.key1.gpt-5.5";
+         let mut core = build_test_core_with_providers(&[
+             (provider_key, "gpt-5.5"),
+@@ -1400,14 +1366,13 @@ mod tests {
+         // Trip with persisted 503 cooldown
+         core.health_manager.trip_provider(
+             provider_key,
+-            Some("__http_503_daily_cooldown__".to_string()),
++            None,
+             Some(86_400_000),
+             now_ms(),
+         );
+         let tripped = provider_state(&core, provider_key);
+         assert_eq!(tripped.state, "tripped");
+ 
+-        // Simulate first request success
+         core.handle_provider_success(&json!({
+             "runtime": {
+                 "requestId": "first-live-request",
+@@ -1429,45 +1394,45 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn first_request_503_failure_reapplies_cooldown() {
+-        // RED: After first request fails 503, cooldown should be reapplied.
++    fn first_503_after_restart_does_not_reapply_cooldown_until_third_failure() {
+         let provider_key = "sdfv.key1.gpt-5.5";
+         let mut core = build_test_core_with_providers(&[
+             (provider_key, "gpt-5.5"),
+             ("cc.key1.gpt-5.5", "gpt-5.5"),
+         ]);
+ 
+-        // Trip with persisted 503 cooldown
+-        core.health_manager.trip_provider(
+-            provider_key,
+-            Some("__http_503_daily_cooldown__".to_string()),
+-            Some(86_400_000),
+-            now_ms(),
+-        );
++        let mk_503 = |request_id: &str| {
++            json!({
++                "code": "HTTP_503",
++                "message": "upstream unavailable",
++                "stage": "provider.send",
++                "status": 503,
++                "runtime": {
++                    "requestId": request_id,
++                    "providerKey": provider_key
++                },
++                "details": {
++                    "routePoolSize": 2
++                }
++            })
++        };
+ 
+-        // Simulate first request failure
+-        core.handle_provider_failure(&json!({
+-            "code": "HTTP_503",
+-            "message": "upstream unavailable",
+-            "stage": "provider.send",
+-            "status": 503,
+-            "runtime": {
+-                "requestId": "first-live-request-fail",
+-                "providerKey": provider_key
+-            },
+-            "details": {
+-                "routePoolSize": 2
+-            }
+-        }));
++        core.handle_provider_failure(&mk_503("first-live-request-fail"));
++        let first = provider_state(&core, provider_key);
++        assert_eq!(first.state, "healthy");
++        assert_eq!(first.cooldown_expires_at, None);
+ 
+-        let retripped = provider_state(&core, provider_key);
+-        assert_eq!(
+-            retripped.state, "tripped",
+-            "first request failure should reapply cooldown"
+-        );
++        core.handle_provider_failure(&mk_503("second-live-request-fail"));
++        let second = provider_state(&core, provider_key);
++        assert_eq!(second.state, "healthy");
++        assert_eq!(second.cooldown_expires_at, None);
++
++        core.handle_provider_failure(&mk_503("third-live-request-fail"));
++        let third = provider_state(&core, provider_key);
++        assert_eq!(third.state, "tripped");
+         assert!(
+-            retripped.cooldown_expires_at.is_some(),
+-            "cooldown should be set"
++            third.cooldown_expires_at.is_some(),
++            "third 503 should set recoverable cooldown"
+         );
+     }
+ }
+diff --git a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+index 8af47f680..c80073669 100644
+--- a/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
++++ b/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+@@ -78,12 +78,9 @@ fn normalize_instruction_target_against_registry(
+     let Some(model) = target.model.clone() else {
+         return target.clone();
+     };
+-    if registry
+-        .resolve_runtime_key_by_model(&provider, &model)
+-        .is_some()
+-    {
++    let Some(canonical_model) = registry.resolve_canonical_model_id(&provider, &model) else {
+         return target.clone();
+-    }
++    };
+     for provider_key in registry.list_provider_keys(&provider) {
+         let Some(alias) = extract_key_alias(&provider_key) else {
+             continue;
+@@ -94,16 +91,18 @@ fn normalize_instruction_target_against_registry(
+         let Some(model_id) = profile.model_id.clone() else {
+             continue;
+         };
+-        let composite = format!("{}.{}", alias, model_id);
+-        if composite == model {
++        let canonical_composite = format!("{}.{}", alias, model_id);
++        if canonical_composite == model || model_id == canonical_model {
+             let mut normalized = target.clone();
+             normalized.key_alias = Some(alias);
+-            normalized.model = Some(model_id);
++            normalized.model = Some(canonical_model);
+             normalized.path_length = Some(3);
+             return normalized;
+         }
+     }
+-    target.clone()
++    let mut normalized = target.clone();
++    normalized.model = Some(canonical_model);
++    normalized
+ }
+ 
+ fn normalize_parsed_instructions_against_registry(
+@@ -467,26 +466,31 @@ impl VirtualRouterEngineCore {
+         let direct_model =
+             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
+         if let Some((provider_id, model_id)) = direct_model {
+-            let has_model = self
++            let Some(canonical_model_id) = self
+                 .provider_registry
+-                .list_provider_keys(&provider_id)
+-                .iter()
+-                .any(|key| {
+-                    self.provider_registry
+-                        .get(key)
+-                        .and_then(|profile| profile.model_id.clone())
+-                        .map(|candidate| candidate == model_id)
+-                        .unwrap_or(false)
+-                });
+-            if !has_model {
++                .resolve_canonical_model_id(&provider_id, &model_id)
++            else {
+                 return Err(format_virtual_router_error(
+                     "CONFIG_ERROR",
+                     format!("Unknown model {} for provider {}", model_id, provider_id),
+                 ));
++            };
++            if self
++                .provider_registry
++                .
+
+[… truncated 45708 chars …]

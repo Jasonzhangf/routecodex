@@ -200,6 +200,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   })();
 
   const failedRuntimeKeys = new Set<string>();
+  const aliasScopedProviderKeyToRuntimeKey = new Map<string, string>();
   for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
     const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
     if (!providerKey) {
@@ -369,6 +370,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       const providerKeyParts = providerKey.split('.');
       if (providerKeyParts.length >= 3) {
         const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
+        aliasScopedProviderKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
         if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
           server.providerKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
         }
@@ -376,6 +378,8 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         const aliasDenormalized = providerKeyParts[1].match(/^\d+$/) ? `key${providerKeyParts[1]}` : providerKeyParts[1];
         const normalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasNormalized}`;
         const denormalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasDenormalized}`;
+        aliasScopedProviderKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
+        aliasScopedProviderKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
         if (!server.providerKeyToRuntimeKey.has(normalizedAliasScopedKey)) {
           server.providerKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
         }
@@ -383,6 +387,15 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
           server.providerKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
         }
       }
+    }
+  }
+
+  for (const [aliasScopedKey, runtimeKey] of aliasScopedProviderKeyToRuntimeKey.entries()) {
+    if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
+      server.providerKeyToRuntimeKey.set(aliasScopedKey, runtimeKey);
+    }
+    if (!server.providerHandles.has(aliasScopedKey) && server.providerHandles.has(runtimeKey)) {
+      server.providerHandles.set(aliasScopedKey, server.providerHandles.get(runtimeKey));
     }
   }
 }

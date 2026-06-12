@@ -70,17 +70,13 @@ impl VirtualRouterEngineCore {
         let health_cooldown_remaining_ms = self
             .health_manager
             .cooldown_remaining_ms(&target.provider_key, now);
-        let persisted_503_reprobe_available = self
-            .health_manager
-            .has_persisted_503_reprobe_available(&target.provider_key, now);
         let health_state = self.health_manager.describe_state(&target.provider_key);
-        let health_available = persisted_503_reprobe_available
-            || (health_cooldown_remaining_ms.is_none()
-                && health_state
-                    .as_ref()
-                    .and_then(|state| state.get("state").and_then(|value| value.as_str()))
-                    .map(|state| state == "healthy")
-                    .unwrap_or(true));
+        let health_available = health_cooldown_remaining_ms.is_none()
+            && health_state
+                .as_ref()
+                .and_then(|state| state.get("state").and_then(|value| value.as_str()))
+                .map(|state| state == "healthy")
+                .unwrap_or(true);
         let available = !target.disabled
             && provider_enabled
             && concurrency_busy_remaining_ms.is_none()
@@ -97,7 +93,6 @@ impl VirtualRouterEngineCore {
             "quotaBlocks": quota_blocks,
             "healthState": health_state,
             "healthCooldownRemainingMs": health_cooldown_remaining_ms,
-            "persisted503ReprobeAvailable": persisted_503_reprobe_available,
             "available": available,
         })
     }

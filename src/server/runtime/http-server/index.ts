@@ -78,7 +78,12 @@ import {
   finalizeResponsesConversationRequestRetention,
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
-import { isPoolExhaustedPipelineError } from './executor/request-executor-core-utils.js';
+import {
+  isPoolExhaustedPipelineError,
+  POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
+  resolvePoolExhaustedBackoffMs,
+} from './executor/request-executor-core-utils.js';
+import { waitWithClientAbortSignal } from './executor/request-executor-abort.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
@@ -199,6 +204,7 @@ type RouterDirectRetryState = {
   transientRetryTracker: ReturnType<typeof createRequestLocalTransientRetryTracker>;
   retryProviderKey?: string;
   lastError?: unknown;
+  poolExhaustedBackoffAttempts: number;
 };
 
 function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDirectRetryState {
@@ -212,6 +218,7 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
     maxAttempts: resolveMaxProviderAttempts(),
     excludedProviderKeys,
     transientRetryTracker: createRequestLocalTransientRetryTracker(),
+    poolExhaustedBackoffAttempts: 0,
   };
 }
 
@@ -242,6 +249,7 @@ function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
   return message.startsWith('protocol mismatch:')
     || message === 'direct_payload_requires_hub_relay'
+    || message === 'client_tools_require_hub_relay'
     || message === 'stopless_servertool_requires_hub_relay'
     || message === 'servertool_followup_requires_hub_relay';
 }
@@ -1101,6 +1109,25 @@ export class RouteCodexHttpServer {
     input: PipelineExecutionInput,
   ): Promise<PipelineExecutionResult> {
     const portConfig = this.getPortConfigForLocalPort(localPort);
+    this.logStage('port_pipeline.resolve', input.requestId, {
+      localPort,
+      resolvedPort: typeof portConfig?.port === 'number' ? portConfig.port : undefined,
+      mode: typeof portConfig?.mode === 'string' ? portConfig.mode : undefined,
+      routingPolicyGroup:
+        typeof portConfig?.routingPolicyGroup === 'string' ? portConfig.routingPolicyGroup : undefined,
+      sameProtocolBehavior:
+        typeof portConfig?.sameProtocolBehavior === 'string' ? portConfig.sameProtocolBehavior : undefined,
+      metadataMatchedPort:
+        input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+          && typeof (input.metadata as Record<string, unknown>).matchedPort === 'number'
+          ? (input.metadata as Record<string, unknown>).matchedPort
+          : undefined,
+      metadataRoutingPolicyGroup:
+        input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+          && typeof (input.metadata as Record<string, unknown>).routingPolicyGroup === 'string'
+          ? (input.metadata as Record<string, unknown>).routingPolicyGroup
+          : undefined,
+    });
     const routeHintHeader = (input.headers as Record<string, unknown> | undefined)?.['x-route-hint'];
     const routeHint = typeof routeHintHeader === 'string' && routeHintHeader.trim()
       ? routeHintHeader.trim()
@@ -1178,7 +1205,18 @@ export class RouteCodexHttpServer {
       const value = (resume as Record<string, unknown>).providerKey;
       return typeof value === 'string' && value.trim() ? value.trim() : undefined;
     })();
-    if (resumeProviderKey && portConfig?.mode === 'router' && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct') {
+    const resumeContinuationOwner = (() => {
+      const resume = metadata.responsesResume;
+      if (!resume || typeof resume !== 'object' || Array.isArray(resume)) return undefined;
+      const value = (resume as Record<string, unknown>).continuationOwner;
+      return value === 'direct' || value === 'relay' ? value : undefined;
+    })();
+    if (
+      resumeProviderKey
+      && resumeContinuationOwner === 'direct'
+      && portConfig?.mode === 'router'
+      && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
+    ) {
       metadata.__shadowCompareForcedProviderKey = resumeProviderKey;
     }
     const nextInput: PipelineExecutionInput = {
@@ -1399,6 +1437,7 @@ export class RouteCodexHttpServer {
       routeResult = routerEngine.route(rawDirectPayload as never, metadataForHub as never) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
+        const exhaustedAttempt = retryState.poolExhaustedBackoffAttempts;
         this.logStage('router-direct.pool_exhausted', input.requestId, {
           error: error instanceof Error ? error.message : String(error),
           code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
@@ -1410,10 +1449,32 @@ export class RouteCodexHttpServer {
           model: input.body && typeof input.body === 'object' && !Array.isArray(input.body) && typeof (input.body as Record<string, unknown>).model === 'string'
             ? (input.body as Record<string, unknown>).model
             : undefined,
+          poolExhaustedBackoffAttempt: exhaustedAttempt,
+          maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
         });
-        if (retryState.lastError) {
-          throw retryState.lastError;
+        if (exhaustedAttempt < POOL_EXHAUSTED_BACKOFF_ATTEMPTS) {
+          const waitMs = resolvePoolExhaustedBackoffMs(exhaustedAttempt);
+          retryState.poolExhaustedBackoffAttempts += 1;
+          this.logStage('router-direct.pool_exhausted.backoff_wait', input.requestId, {
+            waitMs,
+            poolExhaustedBackoffAttempt: retryState.poolExhaustedBackoffAttempts,
+            maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
+            excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
+            lastError: retryState.lastError instanceof Error ? retryState.lastError.message : (retryState.lastError ? String(retryState.lastError) : undefined),
+            poolError: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+          });
+          await waitWithClientAbortSignal(
+            waitMs,
+            getClientConnectionAbortSignal(metadataForHub),
+            logRouterDirectNonBlockingError,
+          );
+          this.logStage('router-direct.pool_exhausted.backoff_wait.completed', input.requestId, {
+            waitMs,
+            poolExhaustedBackoffAttempt: retryState.poolExhaustedBackoffAttempts,
+          });
+          return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt);
         }
+        throw retryState.lastError ?? error;
       }
       this.logStage('router-direct.route_failed', input.requestId, {
         error: error instanceof Error ? error.message : String(error),
@@ -1423,12 +1484,11 @@ export class RouteCodexHttpServer {
       });
       throw error;
     }
+    retryState.poolExhaustedBackoffAttempts = 0;
 
     const target = routeResult.target;
     const routingDecision = routeResult.decision;
-    const providerPayload = {
-      ...(typeof target?.modelId === 'string' && target.modelId.trim() ? { model: target.modelId.trim() } : {}),
-    } as Record<string, unknown>;
+    const providerPayload = {} as Record<string, unknown>;
 
     if (!target || typeof target.providerKey !== 'string' || !target.providerKey.trim()) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'no-target-from-router' });
@@ -1470,6 +1530,36 @@ export class RouteCodexHttpServer {
     }
 
     const requestPayload = applyMinimalDirectOverrides(rawDirectPayload);
+    const directProviderHandle = this.resolveProviderHandleForBinding(providerKey, metadataForHub)
+      ?? this.resolveProviderHandleForBinding(runtimeKey, metadataForHub);
+    if (!directProviderHandle) {
+      throw new Error(`Provider not found for runtimeKey: ${runtimeKey}`);
+    }
+    attachProviderRuntimeMetadata(requestPayload, {
+      requestId: input.requestId,
+      providerId: directProviderHandle.providerId,
+      providerKey,
+      providerType: directProviderHandle.providerType,
+      providerFamily: directProviderHandle.providerFamily,
+      providerProtocol: directProviderHandle.providerProtocol,
+      pipelineId: providerKey,
+      routeName: typeof routingDecision?.routeName === 'string' ? routingDecision.routeName : undefined,
+      runtimeKey,
+      target: {
+        providerKey,
+        providerType,
+        runtimeKey,
+        model: typeof target.modelId === 'string' ? target.modelId : undefined,
+      },
+      metadata: {
+        ...(metadataForHub ?? {}),
+        ...(directProviderHandle.providerProtocol === 'openai-responses'
+          ? { __responsesDirectPassthrough: true }
+          : {}),
+      },
+      compatibilityProfile: directProviderHandle.runtime?.compatibilityProfile,
+      abortSignal: getClientConnectionAbortSignal(metadataForHub),
+    });
     try {
       const finalDirectPayloadDecision = evaluateDirectRouteDecision({
         payload: requestPayload,
@@ -1477,7 +1567,13 @@ export class RouteCodexHttpServer {
         inboundProtocol,
       });
       if (finalDirectPayloadDecision.requiresHubRelay) {
-        throw new Error(finalDirectPayloadDecision.reason ?? 'requires_hub_relay');
+        const reason = finalDirectPayloadDecision.reason ?? 'direct_payload_requires_hub_relay';
+        this.logStage('router-direct.skipped', input.requestId, {
+          reason,
+          detail: reason,
+          stage: 'final_request_payload',
+        });
+        return { used: false, reason };
       }
       assertDirectRouteDecision({
         payload: requestPayload,
@@ -1528,6 +1624,9 @@ export class RouteCodexHttpServer {
           : undefined;
       },
       onSnapshotBefore: (payload, ctx) => {
+        if (typeof target.modelId === 'string' && target.modelId.trim()) {
+          payload.model = target.modelId.trim();
+        }
         this.logStage('router-direct.send.start', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1603,12 +1702,15 @@ export class RouteCodexHttpServer {
           stage: 'provider.send',
           logicalRequestChainKey: input.requestId,
           logicalChainRetryLimitStageRequestId: input.requestId,
-          routePool: Array.isArray(ctx.routingDecision?.pool) ? ctx.routingDecision?.pool : undefined,
+          routePool: Array.isArray((ctx.routingDecision as { routePool?: unknown } | undefined)?.routePool)
+            ? ((ctx.routingDecision as { routePool?: string[] }).routePool)
+            : undefined,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
           routeHint: typeof metadataForHub.routeHint === 'string' ? metadataForHub.routeHint : undefined,
           transientRetryTracker: retryState.transientRetryTracker,
+          isStreamingRequest: metadataForHub.stream === true || metadataForHub.inboundStream === true,
           logNonBlockingError: logRouterDirectNonBlockingError,
           metadata: {
             ...metadataForHub,
@@ -1856,7 +1958,7 @@ export class RouteCodexHttpServer {
         || '__sse_responses' in (responseBody as Record<string, unknown>)
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
-      } else {
+      } else if (finishReason === 'tool_calls') {
         await recordResponsesResponseForRequest({
           requestId: input.requestId,
           response: responseBody as Record<string, unknown>,
@@ -1868,6 +1970,8 @@ export class RouteCodexHttpServer {
         await finalizeResponsesConversationRequestRetention(input.requestId, {
           keepForSubmitToolOutputs: finishReason === 'tool_calls',
         });
+      } else {
+        await clearResponsesConversationByRequestId(input.requestId);
       }
     }
     return {
@@ -1962,6 +2066,10 @@ export class RouteCodexHttpServer {
           if (!handle) {
             throw new Error(`Provider not found for binding: ${context.providerKey}`);
           }
+          const runtimeModel = this.currentRouterArtifacts?.targetRuntime?.[context.providerKey]?.defaultModel;
+          if (typeof runtimeModel === 'string' && runtimeModel.trim()) {
+            providerPayload.model = runtimeModel.trim();
+          }
           attachProviderRuntimeMetadata(providerPayload, {
             requestId: input.requestId,
             providerId: handle.providerId,
@@ -1971,7 +2079,14 @@ export class RouteCodexHttpServer {
             providerProtocol: handle.providerProtocol,
             pipelineId: context.providerKey,
             runtimeKey: this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata),
-            metadata: input.metadata,
+            metadata: {
+              ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+                ? (input.metadata as Record<string, unknown>)
+                : {}),
+              ...(handle.providerProtocol === 'openai-responses'
+                ? { __responsesDirectPassthrough: true }
+                : {}),
+            },
             compatibilityProfile: handle.runtime?.compatibilityProfile,
           });
         },
@@ -2054,6 +2169,7 @@ export class RouteCodexHttpServer {
             recordAttempt: () => {},
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
             routeHint: typeof metadata?.routeHint === 'string' ? metadata.routeHint : undefined,
+            isStreamingRequest: metadata?.stream === true || metadata?.inboundStream === true,
             logNonBlockingError: logRouterDirectNonBlockingError,
             metadata: {
               ...(metadata ?? {}),

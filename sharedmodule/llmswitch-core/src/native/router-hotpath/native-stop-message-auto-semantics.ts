@@ -13,6 +13,7 @@ export type DecisionAction = 'skip' | 'trigger';
 
 export interface StopMessageSnapshot {
   text: string;
+  provider_key?: string;
   max_repeats: number;
   used: number;
   source: SnapshotSource;

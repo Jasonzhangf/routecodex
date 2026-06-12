@@ -94,6 +94,7 @@ export async function initializeHttpServer(server: any): Promise<void> {
       getManagerDaemon: () => server.managerDaemon,
       getHubPipeline: () => server.hubPipeline,
       getVirtualRouterArtifacts: () => server.currentRouterArtifacts,
+      getUserConfig: () => server.userConfig,
       getStatsSnapshot: () => ({
         session: server.stats.snapshot(Math.round(process.uptime() * 1000)),
         historical: server.stats.snapshotHistorical(),

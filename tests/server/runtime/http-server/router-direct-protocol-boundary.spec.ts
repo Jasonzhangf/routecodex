@@ -241,7 +241,8 @@ describe('router direct protocol boundary', () => {
     expect(directSend).not.toHaveBeenCalled();
   });
 
-  it('does not double-record storm backoff inside router-direct route failure', async () => {
+  it('backs off direct route pool exhaustion three times before surfacing the original error', async () => {
+    jest.useFakeTimers();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());
     attachRouterPort(server as any);
@@ -263,7 +264,7 @@ describe('router direct protocol boundary', () => {
     ]);
     const logStageSpy = jest.spyOn(server as any, 'logStage');
 
-    await expect((server as any).executeRouterDirectPipelineForPort(
+    const pending = (server as any).executeRouterDirectPipelineForPort(
       {
         port: 5555,
         host: '127.0.0.1',
@@ -272,9 +273,19 @@ describe('router direct protocol boundary', () => {
         sameProtocolBehavior: 'direct',
       },
       buildResponsesInput('req_router_direct_route_failed_no_inner_record'),
-    )).rejects.toThrow('All providers unavailable for model mini27.MiniMax-M2.7');
+    );
+    const expectation = expect(pending).rejects.toThrow('All providers unavailable for model mini27.MiniMax-M2.7');
 
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.route_failed')).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(999);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait.completed')).toHaveLength(0);
+    await jest.advanceTimersByTimeAsync(1);
+    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await expectation;
+
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait')).toHaveLength(3);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait.completed')).toHaveLength(3);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.route_failed')).toHaveLength(0);
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
   });
 });

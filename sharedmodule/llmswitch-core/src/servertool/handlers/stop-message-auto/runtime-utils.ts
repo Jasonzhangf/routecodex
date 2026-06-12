@@ -19,6 +19,7 @@ import {
   resolveImplicitGeminiStopMessageSnapshotWithNative,
   resolveRuntimeStopMessageStateFromAdapterContextWithNative,
   resolveRuntimeStopMessageStateWithNative,
+  resolveAdapterContextProviderKeyWithNative,
   resolveServertoolStateKeyWithNative,
   resolveStopMessageFollowupToolContentMaxCharsWithNative,
   resolveStopMessageFollowupProviderKeyWithNative,
@@ -95,6 +96,7 @@ export function planStopMessagePersistedLookup(
 export function planStopMessagePersistedStateSelection(candidateKeys: string[]): {
   snapshot?: {
     text: string;
+    providerKey?: string;
     maxRepeats: number;
     used: number;
     source?: string;
@@ -137,6 +139,7 @@ export function resolveStopMessageSessionScope(
 
 export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   source?: string;
@@ -150,6 +153,7 @@ export function resolveRuntimeStopMessageState(runtimeMetadata: unknown): {
 
 export function resolveRuntimeStopMessageStateFromAdapterContext(adapterContext: unknown): {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   source?: string;
@@ -215,6 +219,7 @@ export function planStopMessagePersistSnapshot(args: {
   stateUpdate?: unknown;
   defaultText?: string;
   schemaUsedBeforeCount?: unknown;
+  currentProviderKey?: string;
 }): {
   compareMaxRepeats: number;
   compareRemaining: number;
@@ -222,6 +227,7 @@ export function planStopMessagePersistSnapshot(args: {
   nextUsed: number;
   snapshot: {
     text: string;
+    providerKey?: string;
     maxRepeats: number;
     used: number;
     source: string;
@@ -230,6 +236,10 @@ export function planStopMessagePersistSnapshot(args: {
   };
 } {
   return planStopMessagePersistSnapshotWithNative(args);
+}
+
+export function resolveAdapterContextProviderKey(adapterContext: unknown): string {
+  return resolveAdapterContextProviderKeyWithNative(adapterContext);
 }
 
 function buildServertoolRoutingMetadata(

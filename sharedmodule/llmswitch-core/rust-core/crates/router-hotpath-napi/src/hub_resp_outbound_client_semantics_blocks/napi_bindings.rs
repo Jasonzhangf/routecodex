@@ -269,9 +269,10 @@ pub fn project_responses_client_payload_for_client_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let tools_raw: Value = serde_json::from_str(&tools_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let metadata: Value =
-        serde_json::from_str(&metadata_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = project_responses_client_payload_for_client(&responses_payload, &tools_raw, &metadata);
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output =
+        project_responses_client_payload_for_client(&responses_payload, &tools_raw, &metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -284,16 +285,16 @@ pub fn project_responses_sse_frame_for_client_json(
     metadata_json: String,
     state_json: String,
 ) -> NapiResult<String> {
-    let frame: Value = serde_json::from_str(&frame_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let frame: Value =
+        serde_json::from_str(&frame_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let event_name: Value = serde_json::from_str(&event_name_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let data: Value =
         serde_json::from_str(&data_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let tools_raw: Value = serde_json::from_str(&tools_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let metadata: Value =
-        serde_json::from_str(&metadata_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let state: Value =
         serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = project_responses_sse_frame_for_client(

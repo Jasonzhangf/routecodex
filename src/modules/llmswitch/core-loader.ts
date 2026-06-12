@@ -203,9 +203,10 @@ export async function importCoreModule<T = unknown>(subpath: string, impl: LlmsI
     return (await import(moduleUrl)) as T;
   } catch (error) {
     const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
-    const sourcePath = isJestRuntime() ? resolveBuiltinSourceModulePath(subpath, impl) : null;
+    const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
     if (
       sourcePath
+      && !isJestRuntime()
       && (
         code === 'MODULE_NOT_FOUND'
         || code === 'ERR_MODULE_NOT_FOUND'

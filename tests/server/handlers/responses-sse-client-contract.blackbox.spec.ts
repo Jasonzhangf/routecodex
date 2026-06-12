@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
+import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 
 type SseEventRecord = {
@@ -16,13 +18,25 @@ const mockBridgeModule = () => ({
     if (!probe?.required_action) {
       return [];
     }
-    const response = {
-      ...probe,
-      object: 'response',
-      status: 'requires_action',
+    const submit = (probe.required_action as Record<string, unknown>).submit_tool_outputs as Record<string, unknown> | undefined;
+    const calls = Array.isArray(submit?.tool_calls) ? submit.tool_calls as Record<string, unknown>[] : [];
+    const call = calls[0] ?? {};
+    const callId = String(call.id ?? call.call_id ?? 'call_contract_1');
+    const name = String(call.name ?? 'exec_command');
+    const args = String(call.arguments ?? '{"cmd":"pwd"}');
+    const item = {
+      id: `fc_${callId.replace(/^call_/, '')}`,
+      type: 'function_call',
+      call_id: callId,
+      name,
+      arguments: args,
+      status: 'completed',
     };
+    const response = { ...probe, object: 'response', status: 'completed', output: [item] };
     return [
-      `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+      `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } })}\n\n`,
+      `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', output_index: 0, item_id: item.id, call_id: callId, name, arguments: args })}\n\n`,
+      `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', output_index: 0, item })}\n\n`,
       `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
       `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
     ];
@@ -235,13 +249,14 @@ describe('Responses SSE client contract blackbox', () => {
         stopOnEvent: 'response.done'
       });
       const names = events.map((entry) => entry.event);
-      const requiredActionIndex = names.indexOf('response.required_action');
+      const outputDoneIndex = names.indexOf('response.output_item.done');
       const completedIndex = names.indexOf('response.completed');
       const doneIndex = names.indexOf('response.done');
 
       expect(response.status).toBe(200);
-      expect(requiredActionIndex).toBeGreaterThanOrEqual(0);
-      expect(completedIndex).toBeGreaterThan(requiredActionIndex);
+      expect(names).not.toContain('response.required_action');
+      expect(outputDoneIndex).toBeGreaterThanOrEqual(0);
+      expect(completedIndex).toBeGreaterThan(outputDoneIndex);
       expect(doneIndex).toBeGreaterThan(completedIndex);
       expect(rawText).not.toContain('event: error');
       expect(rawText).not.toContain('HTTP_SSE_TIMEOUT');
@@ -311,6 +326,256 @@ describe('Responses SSE client contract blackbox', () => {
       expect(rawText).not.toContain('response.required_action');
       expect(rawText).not.toContain('event: error');
       expect(semanticNames.indexOf('response.done')).toBeGreaterThan(semanticNames.indexOf('response.completed'));
+    });
+  });
+
+  it('rejects direct passthrough provider-specific SSE events instead of passing them to Responses clients', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_nonstandard_event_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: codex.rate_limits\n');
+      upstream.write('data: {"type":"codex.rate_limits","limit_reached":true}\n\n');
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).toContain('event: error');
+      expect(rawText).toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect(rawText).not.toContain('event: codex.rate_limits');
+    });
+  });
+
+  it('accepts direct passthrough standard Responses custom tool input delta events', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_custom_tool_input_delta_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.custom_tool_call_input.delta\n');
+      upstream.write('data: {"type":"response.custom_tool_call_input.delta","item_id":"ctc_123","delta":"ls"}\n\n');
+      upstream.write('event: response.completed\n');
+      upstream.write('data: {"type":"response.completed","response":{"id":"resp_custom_tool_contract","object":"response","status":"completed"}}\n\n');
+      upstream.write('event: response.done\n');
+      upstream.write('data: {"type":"response.done","response":{"id":"resp_custom_tool_contract","object":"response","status":"completed"}}\n\n');
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).toContain('event: response.custom_tool_call_input.delta');
+      expect(rawText).toContain('"type":"response.custom_tool_call_input.delta"');
+      expect(rawText).toContain('event: response.done');
+      expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect(rawText).not.toContain('event: error');
+    });
+  });
+
+  it('drops direct passthrough transport keepalive events but preserves terminal Responses events', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_keepalive_transport_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: keepalive\n');
+      upstream.write('data: {"type":"keepalive"}\n\n');
+      upstream.write('event: response.completed\n');
+      upstream.write('data: {"type":"response.completed","response":{"id":"resp_keepalive_contract","object":"response","status":"completed"}}\n\n');
+      upstream.write('event: response.done\n');
+      upstream.write('data: {"type":"response.done","response":{"id":"resp_keepalive_contract","object":"response","status":"completed"}}\n\n');
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).not.toContain('event: keepalive');
+      expect(rawText).toContain('event: response.completed');
+      expect(rawText).toContain('event: response.done');
+      expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect(rawText).not.toContain('event: error');
+    });
+  });
+
+  it('accepts direct passthrough standard Responses image partial events', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_image_partial_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.image_generation_call.in_progress\n');
+      upstream.write('data: {"type":"response.image_generation_call.in_progress","item_id":"ig_123","output_index":0}\n\n');
+      upstream.write('event: response.image_generation_call.partial_image\n');
+      upstream.write('data: {"type":"response.image_generation_call.partial_image","item_id":"ig_123","output_index":0,"partial_image_b64":"ZmFrZQ==","partial_image_index":0}\n\n');
+      upstream.write('event: response.image_generation_call.completed\n');
+      upstream.write('data: {"type":"response.image_generation_call.completed","item_id":"ig_123","output_index":0}\n\n');
+      upstream.write('event: response.completed\n');
+      upstream.write('data: {"type":"response.completed","response":{"id":"resp_image_partial_contract","object":"response","status":"completed"}}\n\n');
+      upstream.write('event: response.done\n');
+      upstream.write('data: {"type":"response.done","response":{"id":"resp_image_partial_contract","object":"response","status":"completed"}}\n\n');
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).toContain('event: response.image_generation_call.partial_image');
+      expect(rawText).toContain('"partial_image_b64":"ZmFrZQ=="');
+      expect(rawText).toContain('event: response.done');
+      expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect(rawText).not.toContain('event: error');
+    });
+  });
+
+  it('accepts every standard direct passthrough Responses event from local OpenAI SDK typings', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const sdkResponsesTypings = fs.readFileSync(
+      path.join(process.cwd(), 'node_modules/openai/resources/responses/responses.d.ts'),
+      'utf8'
+    );
+    const sdkResponseEvents = [...sdkResponsesTypings.matchAll(/type:\s*'([^']+)'/g)]
+      .map((match) => match[1])
+      .filter((eventName) => eventName.startsWith('response.'))
+      .filter((eventName, index, list) => list.indexOf(eventName) === index);
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_sdk_events_contract',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      for (const eventName of sdkResponseEvents) {
+        upstream.write(`event: ${eventName}\n`);
+        upstream.write(`data: ${JSON.stringify({ type: eventName })}\n\n`);
+      }
+      upstream.write('event: response.done\n');
+      upstream.write('data: {"type":"response.done","response":{"id":"resp_sdk_events_contract","object":"response","status":"completed"}}\n\n');
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+        stopOnEvent: 'response.done'
+      });
+
+      expect(response.status).toBe(200);
+      for (const eventName of sdkResponseEvents) {
+        expect(rawText).toContain(`event: ${eventName}`);
+      }
+      expect(rawText).toContain('event: response.done');
+      expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect(rawText).not.toContain('event: error');
     });
   });
 

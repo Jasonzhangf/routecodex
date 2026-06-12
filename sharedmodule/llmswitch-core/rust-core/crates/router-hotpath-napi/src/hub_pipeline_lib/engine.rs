@@ -748,6 +748,20 @@ fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn read_metadata_value(metadata: &Value, key: &str) -> Option<Value> {
+    metadata
+        .get(key)
+        .cloned()
+        .or_else(|| metadata.get("target").and_then(Value::as_object)?.get(key).cloned())
+}
+
+fn read_trimmed_metadata_string_with_target_fallback(metadata: &Value, key: &str) -> Option<String> {
+    read_metadata_value(metadata, key)
+        .and_then(|value| value.as_str().map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn build_response_record_effect_payload(
     metadata: &Value,
     payload: &Value,
@@ -935,6 +949,10 @@ fn build_adapter_context(
     request_id: &str,
 ) -> AdapterContext {
     AdapterContext {
+        compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
+            metadata,
+            "compatibilityProfile",
+        ),
         provider_protocol: Some(provider_protocol.to_string()),
         request_id: Some(request_id.to_string()),
         entry_endpoint: metadata
@@ -946,6 +964,11 @@ fn build_adapter_context(
             .and_then(Value::as_str)
             .map(str::to_string),
         rt: metadata.get("__rt").cloned(),
+        claude_code: read_metadata_value(metadata, "claudeCode"),
+        anthropic_thinking: read_trimmed_metadata_string_with_target_fallback(
+            metadata,
+            "anthropicThinking",
+        ),
         model_id: metadata
             .get("assignedModelId")
             .and_then(Value::as_str)
@@ -982,29 +1005,10 @@ fn build_adapter_context(
             .get("conversationId")
             .and_then(Value::as_str)
             .map(str::to_string),
-        ..AdapterContext {
-            compatibility_profile: None,
-            provider_protocol: None,
-            request_id: None,
-            entry_endpoint: None,
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        }
+        captured_chat_request: None,
+        deepseek: None,
+        estimated_input_tokens: None,
+        provider_id: None,
     }
 }
 
@@ -1053,7 +1057,7 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
     let output = match engine.execute(input.request) {
         Ok(output) => output,
         Err(error) => HubPipelineExecutionOutput {
-            request_id,
+            request_id: request_id.clone(),
             success: false,
             payload: None,
             metadata: None,

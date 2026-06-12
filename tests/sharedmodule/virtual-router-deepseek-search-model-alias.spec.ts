@@ -32,7 +32,7 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
     expect(providerKeys.some((key) => key.endsWith('.deepseek-chat-search'))).toBe(true);
   });
 
-  it('routes direct provider.model request to deepseek-chat-search alias', async () => {
+  it('routes direct provider.model request to canonical deepseek-chat model', async () => {
     const result = bootstrapVirtualRouterConfig(input);
     const engine = new VirtualRouterEngine();
     engine.initialize(result.config);
@@ -53,10 +53,10 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
     );
 
     expect(routed.target?.providerKey).toMatch(/deepseek-web/);
-    expect(routed.target?.modelId).toBe('deepseek-chat-search');
+    expect(routed.target?.modelId).toBe('deepseek-chat');
   });
 
-  it('accepts deepseek-v4-flash-search alias in routing/web_search and routes to that alias', async () => {
+  it('routes alias model input to configured canonical DeepSeek-V4-Pro model', async () => {
     const v4Input: any = {
       virtualrouter: {
         providers: {
@@ -68,11 +68,11 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
             compatibilityProfile: 'chat:deepseek-web',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
-              'deepseek-chat': {
+              'DeepSeek-V4-Flash': {
                 capabilities: ['web_search', 'multimodal'],
                 aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-search', 'deepseek-v4-vision']
               },
-              'deepseek-reasoner': {
+              'DeepSeek-V4-Pro': {
                 capabilities: ['web_search', 'multimodal'],
                 aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-search']
               }
@@ -94,11 +94,11 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
 
     const routed = await engine.route(
       {
-        model: 'deepseek-web.deepseek-v4-flash-search',
+        model: 'deepseek-web.deepseek-v4-pro',
         messages: [{ role: 'user', content: 'Search latest updates' }]
       },
       {
-        requestId: 'req-deepseek-v4-flash-search-alias',
+        requestId: 'req-deepseek-v4-pro-alias',
         entryEndpoint: '/v1/chat/completions',
         processMode: 'chat',
         stream: false,
@@ -108,6 +108,6 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
     );
 
     expect(routed.target?.providerKey).toMatch(/deepseek-web/);
-    expect(routed.target?.modelId).toBe('deepseek-v4-flash-search');
+    expect(routed.target?.modelId).toBe('DeepSeek-V4-Pro');
   });
 });

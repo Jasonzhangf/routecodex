@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::virtual_router_engine::profile_utils::{normalize_capability_list, read_context_tokens};
 
@@ -21,6 +21,7 @@ pub(crate) struct ProviderProfile {
     pub server_tools_disabled: bool,
     pub series: Option<String>,
     pub auth_family: Option<String>,
+    pub alias_to_model: Option<BTreeMap<String, String>>,
     pub provider_specific_config: HashMap<String, Value>,
 }
 
@@ -111,6 +112,26 @@ impl ProviderRegistry {
         provider_id: &str,
         model_id: &str,
     ) -> Option<String> {
+        let canonical_model_id = self.resolve_canonical_model_id(provider_id, model_id)?;
+        for key in self.list_provider_keys(provider_id) {
+            if let Some(profile) = self.providers.get(&key) {
+                let candidate = profile
+                    .model_id
+                    .clone()
+                    .unwrap_or_else(|| derive_model_id(&profile.provider_key));
+                if candidate == canonical_model_id {
+                    return Some(key);
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn resolve_canonical_model_id(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Option<String> {
         if provider_id.is_empty() || model_id.is_empty() {
             return None;
         }
@@ -125,7 +146,14 @@ impl ProviderRegistry {
                     .clone()
                     .unwrap_or_else(|| derive_model_id(&profile.provider_key));
                 if candidate == normalized_model {
-                    return Some(key);
+                    return Some(candidate);
+                }
+                if let Some(alias_to_model) = profile.alias_to_model.as_ref() {
+                    if let Some(canonical) = alias_to_model.get(normalized_model) {
+                        if !canonical.trim().is_empty() {
+                            return Some(canonical.clone());
+                        }
+                    }
                 }
             }
         }
@@ -273,6 +301,7 @@ impl ProviderRegistry {
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
+        let alias_to_model = read_model_alias_map(map.get("aliasToModel"));
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
             "providerKey",
@@ -289,6 +318,7 @@ impl ProviderRegistry {
             "modelCapabilities",
             "series",
             "authFamily",
+            "aliasToModel",
             "maxContext",
             "max_context",
             "contextWindow",
@@ -322,6 +352,7 @@ impl ProviderRegistry {
             server_tools_disabled,
             series,
             auth_family,
+            alias_to_model,
             provider_specific_config,
         })
     }
@@ -438,6 +469,30 @@ mod tests {
         assert!(!registry.has_capability("dibittai.crsa.gpt-5.4", "multimodal"));
         assert!(!registry.has_capability("dibittai.crsa.gpt-5.4", "web_search"));
     }
+
+    #[test]
+    fn alias_to_model_canonicalization_preserves_configured_case() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "DF.key1.DeepSeek-V4-Pro": {
+                "providerKey": "DF.key1.DeepSeek-V4-Pro",
+                "providerType": "openai",
+                "modelId": "DeepSeek-V4-Pro",
+                "aliasToModel": {
+                    "deepseek-v4-pro": "DeepSeek-V4-Pro"
+                }
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+        assert_eq!(
+            registry.resolve_canonical_model_id("DF", "deepseek-v4-pro"),
+            Some("DeepSeek-V4-Pro".to_string())
+        );
+        assert_eq!(
+            registry.resolve_runtime_key_by_model("DF", "deepseek-v4-pro"),
+            Some("DF.key1.DeepSeek-V4-Pro".to_string())
+        );
+    }
 }
 
 pub(crate) fn derive_model_id(provider_key: &str) -> String {
@@ -502,4 +557,22 @@ fn read_model_capabilities_map(value: Option<&Value>) -> Option<HashMap<String, 
     } else {
         Some(out)
     }
+}
+
+fn read_model_alias_map(value: Option<&Value>) -> Option<BTreeMap<String, String>> {
+    let Some(map) = value.and_then(|v| v.as_object()) else {
+        return None;
+    };
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for (alias, canonical_value) in map {
+        let alias = alias.trim();
+        let Some(canonical) = canonical_value.as_str().map(str::trim) else {
+            continue;
+        };
+        if alias.is_empty() || canonical.is_empty() {
+            continue;
+        }
+        out.insert(alias.to_string(), canonical.to_string());
+    }
+    if out.is_empty() { None } else { Some(out) }
 }

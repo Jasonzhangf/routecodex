@@ -27,7 +27,7 @@ describe('responses handler attachment history placeholder blackbox', () => {
     await clearAllResponsesConversationState();
   });
 
-  it('keeps current submit_tool_outputs attachment and replaces stored history attachment', async () => {
+  it('preserves stored and current attachments before provider send', async () => {
     await clearAllResponsesConversationState();
 
     const requestId = 'req_http_attachment_history_1';
@@ -142,8 +142,8 @@ describe('responses handler attachment history placeholder blackbox', () => {
       expect(text).toContain('resp_http_attachment_2');
 
       const serialized = JSON.stringify(capturedPipelineBody);
-      expect(serialized).toContain('[Image omitted]');
-      expect(serialized).not.toContain('data:image/png;base64,HISTORYHTTP');
+      expect(serialized).not.toContain('[Image omitted]');
+      expect(serialized).toContain('data:image/png;base64,HISTORYHTTP');
       expect(serialized).toContain('data:image/png;base64,CURRENTHTTP');
     } finally {
       await closeServer(server);

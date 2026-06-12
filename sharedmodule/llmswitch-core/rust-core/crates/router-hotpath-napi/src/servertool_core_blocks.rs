@@ -1,23 +1,20 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use servertool_core::backend_route_contract::{
-    decorate_servertool_final_chat_with_context, plan_bootstrap_replay,
-    plan_empty_followup_error, plan_followup_error_envelope, plan_followup_execution_mode,
-    plan_followup_materialization, plan_followup_append_user_text, plan_followup_payload_stream,
-    plan_hub_followup_policy_shadow,
-    plan_followup_runtime_action, plan_followup_runtime_metadata,
+    decorate_servertool_final_chat_with_context, plan_bootstrap_replay, plan_empty_followup_error,
+    plan_followup_append_user_text, plan_followup_error_envelope, plan_followup_execution_mode,
+    plan_followup_materialization, plan_followup_payload_stream, plan_followup_runtime_action,
+    plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
     plan_missing_followup_payload_error, plan_preferred_final_response,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
     ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
-    ServertoolFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
+    ServertoolFollowupAppendUserTextInput, ServertoolFollowupErrorPlanInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
-    ServertoolFollowupPayloadStreamPlanInput,
-    ServertoolHubFollowupPolicyShadowInput,
-    ServertoolMissingFollowupPayloadErrorPlanInput,
-    ServertoolPreferredFinalResponseInput,
-    ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
+    ServertoolFollowupPayloadStreamPlanInput, ServertoolFollowupRuntimeActionInput,
+    ServertoolFollowupRuntimeMetadataInput, ServertoolHubFollowupPolicyShadowInput,
+    ServertoolMissingFollowupPayloadErrorPlanInput, ServertoolPreferredFinalResponseInput,
     ServertoolVisionEligibilityInput,
 };
 use servertool_core::blocked_report_contract;
@@ -277,6 +274,23 @@ pub fn plan_stopless_goal_state_sync_json(input_json: &str) -> Result<String, St
             .map_err(|e| format!("deserialize stopless goal state sync input: {e}"))?;
     let plan = stopless_goal_state_contract::plan_stopless_goal_state_sync(input)?;
     serde_json::to_string(&plan).map_err(|e| format!("serialize stopless goal state plan: {e}"))
+}
+
+pub fn plan_stopless_goal_state_read_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_goal_state_contract::StoplessGoalStateReadPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless goal state read input: {e}"))?;
+    let plan = stopless_goal_state_contract::plan_stopless_goal_state_read(input)?;
+    serde_json::to_string(&plan).map_err(|e| format!("serialize stopless goal state read: {e}"))
+}
+
+pub fn plan_stopless_goal_state_persist_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_goal_state_contract::StoplessGoalStatePersistPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless goal state persist input: {e}"))?;
+    let plan = stopless_goal_state_contract::plan_stopless_goal_state_persist(input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize stopless goal state persist: {e}"))
 }
 
 pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
@@ -717,7 +731,8 @@ pub fn plan_followup_payload_stream_json(input_json: &str) -> Result<String, Str
     let input: ServertoolFollowupPayloadStreamPlanInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize followup payload stream input: {e}"))?;
     let output = plan_followup_payload_stream(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize followup payload stream plan: {e}"))
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize followup payload stream plan: {e}"))
 }
 
 pub fn plan_hub_followup_policy_shadow_json(input_json: &str) -> Result<String, String> {
@@ -2203,8 +2218,7 @@ mod tests {
                     "continuationPrompt": "continue from bridge",
                     "repeatCount": 2,
                     "maxRepeats": 3
-                },
-                "stdoutPreview": "continue from bridge"
+                }
             })
             .to_string(),
         )
@@ -2217,6 +2231,7 @@ mod tests {
         assert_eq!(plan["maxRepeats"], 3);
         let command = plan["execCommand"].as_str().expect("exec command");
         assert!(command.contains("routecodex servertool run stop_message_auto"));
-        assert!(command.contains("stdoutPreview"));
+        assert!(command.contains("continuationPrompt"));
+        assert!(!command.contains("stdoutPreview"));
     }
 }

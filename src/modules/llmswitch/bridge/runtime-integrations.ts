@@ -206,6 +206,7 @@ export async function recordResponsesResponseForRequest(args: {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
   allowScopeContinuation?: boolean;

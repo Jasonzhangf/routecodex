@@ -5,14 +5,14 @@ import * as path from 'node:path';
 /**
  * RED TESTS: Provider Startup Health
  *
- * These tests verify the new startup health design:
- * 1. Startup reprobe must NOT be called (replaced by persisted_503_reprobe_available)
- * 2. provider-startup-reprobe.ts file should be deleted
+ * These tests verify the startup health baseline:
+ * 1. Startup reprobe must NOT be called
+ * 2. persisted 503 cooldown/reprobe semantics must not remain in the routing truth
  *
  * All tests should FAIL before code changes, PASS after.
  */
 
-describe('provider startup health (no reprobe)', () => {
+describe('provider startup health (no persisted reprobe)', () => {
   it('RED: startup reprobe is no longer imported in http-server-runtime-providers', async () => {
     const providersPath = path.join(
       __dirname,
@@ -29,5 +29,16 @@ describe('provider startup health (no reprobe)', () => {
       '../../../src/server/runtime/http-server/provider-startup-reprobe.ts'
     );
     await expect(fs.access(reprobePath)).rejects.toThrow();
+  });
+
+  it('RED: persisted 503 reprobe truth is no longer projected into health status', async () => {
+    const healthPath = path.join(
+      __dirname,
+      '../../../sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs'
+    );
+    const content = await fs.readFile(healthPath, 'utf-8');
+    expect(content).not.toContain('persisted_503_reprobe_available');
+    expect(content).not.toContain('persisted_503_reprobe_state');
+    expect(content).not.toContain('persisted_503_reprobe_at');
   });
 });

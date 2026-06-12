@@ -1408,12 +1408,7 @@ Tags: errorsamples, apply_patch, guidance, prompt, samefile, provider-429, provi
 
 Tags: routecodex-3.11.1, gemini-mapper, tool_calls, null-guard, malformed-history, semantic-mappers, shadow-gate, rust-migration
 
-- 2026-03-19: 继续推进 `routecodex-267.5`，完成 `lmstudio_responses_input_stringify` 的 native 化收口：
-  - TS action `lmstudio-responses-input-stringify.ts` 改为 native thin wrapper（调用 `applyLmstudioResponsesInputStringifyWithNative`）；
-  - Rust 新增专用导出 `applyLmstudioResponsesInputStringifyJson`（`req_outbound_stage3_compat/lmstudio/request.rs` + `req_outbound_stage3_compat.rs` + `lib.rs`）；
-  - 为避免 test/runtime 场景中 env 可见性差异，在 adapter context 的 `__rt` 增加 `lmstudioStringifyInputEnabled` 覆盖开关；Rust `core_utils.rs` 读取该开关优先于环境变量；
-  - 兼容语义保持不变：仅在 `LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT=1` / `ROUTECODEX_LMSTUDIO_STRINGIFY_INPUT=1` 且 `providerProtocol=openai-responses` 时生效。
-  - 验证通过：`sharedmodule npm run build:ci`、lmstudio/field-mapping/harvest 三个 action 测试、`verify:shadow-gate:hub-req-outbound-compat`（100/100）、根仓 `npm run build:dev`、`/health`=0.90.514。
+- 2026-06-11: 进一步确认 `chat:lmstudio` 旧 `lmstudio_responses_input_stringify` action / native capability / rt 开关均应物理删除；它们会把 `openai-responses` 结构化 `input` 打平成文本，和当前 direct/tool continuity contract 冲突。已删除 Rust 实现与 NAPI 导出、TS action 文件、profile 注入项，并去掉 Rust test 里的 rt 开关。新的验证点是：`cargo test -p router-hotpath-napi lmstudio_profile_preserves_openai_responses_structured_tool_input -- --nocapture` 证明结构化 `input` 保持原样 passthrough，旧“可 stringify”结论作废。
 
 Tags: rust-migration, routecodex-267.5, lmstudio, responses-input-stringify, native-wrapper, req-outbound-compat, shadow-gate
 
@@ -3166,3 +3161,20 @@ Tags: hub-pipeline, servertool, continuation, dead-code, napi-export, rust-only,
 - Removed the zero-consumer TS wrappers, required-export entries, Rust public NAPI JSON bridge bodies, and `#[napi]` JSON shells. TS `BridgeNativeEnvelope` is redefined as `Record<string, unknown>` to drop the deleted wrapper type dependency. The Hub internal `apply_req_inbound_semantic_lift` (Type: `Value`) remains the live semantic-lift owner for the active Hub req_inbound pipeline.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` and `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` block the retired reasoning / semantic-lift public wrapper/export names from returning.
 Tags: hub-pipeline, req-inbound, reasoning, semantic-lift, dead-code, napi-export, rust-only, residue-gate, 2026-06-10
+
+## Learning (2026-06-11)
+- Trigger: VR audit found tmux-scoped stopMessage state still visible on first fresh user turn.
+- Pattern: fresh user messages were allowed to read persisted stopMessage state, so active=yes could leak before any stopless followup.
+- Future rule: fresh user turns must not surface stopMessage state unless the current turn itself contains stopless/stopMessage markers; route hit logs may only show current-turn activation, not stale persisted state.
+- Target: project MEMORY.md
+Tags: #learning #vr #stopmessage #latest-turn
+
+- 2026-06-11: VR / servertool latest-turn activation truth is now evidenced: VR Rust feature gate `previous_turn_tool_signals_ignore_older_message_history_before_latest_user_boundary` plus `classifier.rs` current-turn-only logic keep history from re-triggering route selection; servertool fresh-user non-stopless turns return `null` stopMessage state in `native-virtual-router-runtime.ts`. Verification: `tests/sharedmodule/virtual-router-web-search-route-selection.spec.ts` PASS, `tests/servertool/stopmessage-session-scope.spec.ts` PASS, `npm run verify:servertool-rust-only` PASS, `npm run verify:vr-no-ts-runtime` PASS, and live smoke on fresh user non-stopless turn produced `snapshot: null` with no `active=yes` in hit log. `npm run verify:architecture-ci` still fails on existing forbidden-path growth residue unrelated to this latest-turn rule; do not treat that as a regression of the latest-turn semantics.
+
+- 2026-06-11: Latest-turn VR/servertool gate survived real build/install/restart. `npm run build:min` passed. `npm run install:global` is env-gated by Node engines and failed under Node v26, then passed under Node v22.22.2. `routecodex restart --port 5520` came back healthy (`ready=true`, `pipelineReady=true`, version `0.90.3055`). Two live smoke probes using a fresh non-stopless user turn and a fresh user turn with stale tmux stopMessage state both produced `snapshot:null` and no `active=yes` in hit log. This is the online proof that history does not re-activate stopMessage on fresh turns.
+
+- 2026-06-11: Stopless budget truth is provider-continuous inside the existing session/tmux scope. A persisted/runtime stopMessage snapshot may continue `stopMessageUsed` only when `stopMessageProviderKey` matches current routed provider; provider changes reset the consecutive budget to `used=0` and then continue from the first followup. Session/tmux isolation remains unchanged. Gates: `stop-message-core` provider reset/preserve tests, `tests/servertool/stop-message-auto.spec.ts` native bridge provider tests, and `verify:servertool-rust-only` static provider-continuity checks.
+
+- 2026-06-11: 5555 图片请求“被吞”根因不是 route 声明缺失，而是 ProviderForwarder 真实 target 选择阶段未对视觉请求做 target-level capability gate。Rust `virtual_router_engine::forwarder::ForwarderRegistry::select` 现在接受 `target_check`，`engine/selection.rs::resolve_forwarder_candidate_for_pool` 在 image/video 场景下强制过滤 non-visual real targets；红测 `image_request_skips_text_only_forwarder_target_in_multimodal_route` 已通过。Live smoke on port 5555 with a real `input_image` returned 200 and provider-request preserved `imageCount=1`, proving no image crop in transport.
+
+- 2026-06-12: Release snapshot garbage truth: `install-global.sh` / snapshot refresh can copy `node_modules/rcc-llmswitch-core/rust-core/target` into `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`; this is rebuildable Rust cache, not runtime truth. If release size explodes, first confirm `dist/native/router_hotpath_napi.node` exists, then remove only `node_modules/rcc-llmswitch-core/rust-core/target` and recheck `/health`. Do not rerun the full snapshot installer until the copy script excludes Rust target/cache directories.

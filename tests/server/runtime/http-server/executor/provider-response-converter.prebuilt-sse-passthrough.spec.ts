@@ -218,4 +218,5 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     expect(wrappedBody.output_text).toBeUndefined();
     expect(wrappedBody.status).toBeUndefined();
   });
+
 });

@@ -67,7 +67,6 @@ finish_reason == stop
      v
   exec_command: routecodex servertool run stop_message_auto
               --input-json '{"flowId":"stop_message_flow",
-                "continuationPrompt":"<heuristic multi-segment audit>",
                 "repeatCount":N,"maxRepeats":M}'
      |
      v
@@ -94,14 +93,14 @@ Only `exec_command` is projected for `stop_message_auto`. No other tool name, no
 ```json
 {
   "flowId": "stop_message_flow",
-  "continuationPrompt": "<heuristic multi-segment audit prompt>",
   "repeatCount": N,
-  "maxRepeats": M,
-  "stdoutPreview": "<short summary>"
+  "maxRepeats": M
 }
 ```
 
-### 4.3 Continuation Prompt Must Include
+`continuationPrompt`, schema guidance, prompt preview, and full internal input are forbidden in client-visible `exec_command` and CLI stdout. Request-side injection must derive the actual prompt from stopless status and schema gate reason.
+
+### 4.3 Request-Side Continuation Prompt Must Include
 
 The prompt must require the model to address ALL of:
 
@@ -187,7 +186,7 @@ Required logs:
 
 2. CLI projection:
    - tool name (`exec_command`)
-   - continuationPrompt length
+   - no continuationPrompt / schema guidance / prompt preview in client-visible command or stdout
    - repeatCount / maxRepeats
 
 3. schema gate result:
@@ -206,7 +205,7 @@ Required logs:
 3. Missing schema and invalid/provided schema both consume their respective 3-round budget paths.
 4. Budget resets on non-stop or tool call response.
 5. `exec_command` CLI projection is returned (not chat completion / not followup request).
-6. `continuationPrompt` contains heuristic multi-segment audit, not fixed "continue".
+6. Request-side continuation prompt contains heuristic multi-segment audit, not fixed "continue"; prompt text is not visible in `exec_command`.
 7. Stop schema parsing: only JSON with `stopreason` is a candidate.
 8. `note.md` write only on `allow_stop` + non-empty `learned`.
 9. Budget exhausted: final stop summary returned, no loop.

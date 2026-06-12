@@ -412,4 +412,93 @@ describe('responses handler virtual-router empty-pool guard', () => {
       pipeline.dispose();
     }
   });
+
+  it('normalizes chat image_url parts to responses input_image before provider wire send', async () => {
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
+    const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
+    const providerPayloads: Array<Record<string, unknown>> = [];
+    const executor = new HubRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: (providerKey?: string) => artifacts.targetRuntime?.[providerKey ?? '']?.runtimeKey,
+        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'primary.key1'
+          ? {
+              runtimeKey: 'primary.key1',
+              providerId: 'primary',
+              providerType: 'openai',
+              providerFamily: 'openai',
+              providerProtocol: 'openai-responses',
+              runtime: { runtimeKey: 'primary.key1' },
+              instance: {
+                initialize: async () => undefined,
+                cleanup: async () => undefined,
+                processIncoming: async (payload: Record<string, unknown>) => {
+                  providerPayloads.push(payload);
+                  return {
+                    status: 200,
+                    data: {
+                      id: 'resp_image_1',
+                      object: 'response',
+                      status: 'completed',
+                      model: 'gpt-test',
+                      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+                    }
+                  };
+                }
+              }
+            }
+          : undefined,
+        getHandleByProviderKey: () => undefined,
+        disposeAll: async () => undefined,
+        initialize: async () => undefined
+      },
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: async () => undefined
+        }
+      }),
+      logStage: () => undefined,
+      stats: new StatsManager()
+    } as any);
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) =>
+      handleResponses(req, res, {
+        executePipeline: async (input) => executor.execute(input),
+        errorHandling: null
+      })
+    );
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/responses`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-test',
+            input: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'describe image' },
+                  { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }
+                ]
+              }
+            ]
+          })
+        });
+
+        expect(response.status).toBe(200);
+        expect(providerPayloads).toHaveLength(1);
+        const input = providerPayloads[0].input as Array<Record<string, unknown>>;
+        const content = input[0].content as Array<Record<string, unknown>>;
+        expect(content[0]).toMatchObject({ type: 'input_text', text: 'describe image' });
+        expect(content[1]).toMatchObject({ type: 'input_image', image_url: 'data:image/png;base64,AAA' });
+        expect(JSON.stringify(providerPayloads[0])).not.toContain('"type":"image_url"');
+      });
+    } finally {
+      pipeline.dispose();
+    }
+  });
 });

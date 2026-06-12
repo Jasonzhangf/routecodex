@@ -1,0 +1,221 @@
+$ git diff
+[exit 0]
+diff --git a/.agents/skills/rcc-dev-skills/SKILL.md b/.agents/skills/rcc-dev-skills/SKILL.md
+index 612edaabb..a9b41c92e 100644
+--- a/.agents/skills/rcc-dev-skills/SKILL.md
++++ b/.agents/skills/rcc-dev-skills/SKILL.md
+@@ -16,8 +16,8 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
+ - 字段守恒规则：正常传输链路不得丢字段、不得把工具语义/`thinking`/`reasoning`/`tool_use`/`tool_result` 降级成普通文本；协议不支持的字段必须进入明确 canonical carrier 或 fail-fast，不允许静默删除、合并、清理、fallback。
+ - Anthropic reasoning 映射规则：入口 Anthropic `thinking` block / `reasoning_content` 必须先由 `req_inbound` 保留原始语义，再在 `req_chatprocess` 唯一映射为 Hub Chat canonical reasoning part；`req_outbound` 只编码为 provider wire 的 Anthropic `thinking` block / 合法字段；响应链同构在 `resp_chatprocess` 映射回 canonical reasoning，再由 `resp_outbound` 投影到 Responses reasoning，provider runtime 不得补做 reasoning/history 转换。
+ - `rawBody` 只能用于 snapshot/debug/errorsample 取证，不能作为正常请求/响应构造输入；provider runtime 只能发送 `req_outbound` 已生成的 provider wire payload，不能读取 `rawBody.messages`、不能从 raw history restore/coalesce/sanitize/prune/rebuild 上下文。
+-- stopless/servertool CLI projection（2026-06-06）：迁移后的 servertool 不走私有 server-side execution + followup/reenter，而是投影为客户端可见 `exec_command: routecodex servertool run <toolName> --input-json <json>`；`stop_message_auto` 必须把被拦截 stop 文本映射到 reasoning，并在 CLI input 中带 `repeatCount/maxRepeats/continuationPrompt`。`continuationPrompt` 必须是启发式多段核对（目标、已完成、完成/阻塞状态、下一步、证据、根因、排除项、排查顺序、learned），禁止只注入固定“继续执行”。
+-- stopless CLI projection reasoning（2026-06-07）：reasoning 真源顺序必须是 `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default`；continuationPrompt/stop schema guidance 只放 CLI `--input-json`，不得替换可见 reasoning。client-visible Responses replay history 只能投影 reasoning `summary`，不得生成非空 `reasoning.content` 数组；看到 upstream `input[n].content array too long` 时修 servertool projection owner，不修 direct/relay。测试 repeatCount/prompt 层级前必须清理对应 session/tmux state，避免旧 `stopMessageUsed` 残留伪造后续轮次。
++- stopless/servertool CLI projection（2026-06-11 更新）：迁移后的 servertool 不走私有 server-side execution + followup/reenter，而是投影为客户端可见 `exec_command: routecodex servertool run <toolName> --input-json <json>`；`stop_message_auto` 必须把被拦截 stop 文本映射到 reasoning，但 CLI input/stdout 只能带 `flowId/repeatCount/maxRepeats` 状态。`continuationPrompt`、stop schema guidance、prompt preview、完整 input 只能作为内部 seed/request-side 注入材料，禁止进入 client-visible `exec_command` 或 CLI stdout。
++- stopless CLI projection reasoning（2026-06-11 更新）：reasoning 真源顺序必须是 `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default`；continuationPrompt/stop schema guidance 不得放 CLI `--input-json`，不得替换可见 reasoning。client-visible Responses replay history 只能投影 reasoning `summary`，不得生成非空 `reasoning.content` 数组；看到 upstream `input[n].content array too long` 时修 servertool projection owner，不修 direct/relay。测试 repeatCount/prompt 层级前必须清理对应 session/tmux state，避免旧 `stopMessageUsed` 残留伪造后续轮次。
+ - response stream stopless 测试隔离（2026-06-08）：`/v1/responses` stream=true 的 stopless CLI projection 同时依赖 Rust `servertoolRuntimeAction` 与 `streamPipe` effect；单测必须使用唯一 requestId/sessionId，`clientInjectDispatch` mock 必须返回 `{ ok: true }`。固定 session 或 `{ body: ... }` mock 会污染 stopMessage loop / injection contract，伪造成 SSE 仍输出原始 stop 文本。
+ - stopless goal-state 单测隔离（2026-06-09）：`syncStoplessGoalStateFromRequest` / routing-state store 测试必须显式把 `ROUTECODEX_SESSION_DIR` 指到临时目录；只改 `RCC_HOME`/`ROUTECODEX_HOME` 在 Jest/native 组合下可能仍读真实 `~/.rcc/state/routing/session-*.json`，导致 Rust `RCC_STOPLESS_GOAL_INVALID_TRANSITION` 假红。
+ - stop-message routing state key（2026-06-08）：`resolveStateKey` 的顺序 `continuation request_chain -> stop-message session scope -> requestId -> default` 属于 `servertool-core::persisted_lookup::resolve_servertool_state_key`；TS `runtime-utils.ts` 只能 merge metadata 后调用 `resolveServertoolStateKeyWithNative`，禁止恢复 `continuationScope/stickyScope/requestId/default` TS 分支。
+@@ -33,10 +33,10 @@ description: RouteCodex/llmswitch-core 的 PipeDebug 与架构索引技能。用
+ - servertool flow-presentation / fixture handler 删除（2026-06-09）：progress log flow id normalize、tool-name lookup、gold highlight policy 属于 `router-hotpath-napi/src/servertool_skeleton_config.rs::{resolve_servertool_progress_tool_name_json,should_use_servertool_gold_progress_highlight_json}`；TS `flow-presentation-block.ts` 只能调用 native wrappers，禁止恢复 `normalizeFlowId`、`buildServertoolProgressConfig`、`toolNameByFlowId`、`goldHighlightFlowIds` 或 Set highlight。`servertool_fixture` CLI projection dispatch 属于 Rust `chat_servertool_orchestration.rs`，旧 `src/servertool/handlers/fixture.ts` 空 handler 已删，禁止通过 TS registry handler 恢复。
+ - servertool pending-session / pending-injection（2026-06-09）：pending file-name sanitize、pending max-age parse/default、pending save payload coerce、load stale/malformed/drop decision、pending injection session dedupe、persist record planning、persistence error envelope 属于 `servertool-core::pending_session_contract::{resolve_pending_file_name,resolve_pending_max_age_ms,plan_pending_session_save,plan_pending_session_load,plan_pending_injection_persist,plan_pending_injection_persist_error}`；TS `pending-session.ts` 只能读 env/session dir、执行 fs/log IO 并调用 native wrappers，TS `pending-injection-block.ts` 只能调用 native persist/error planners 后执行 save IO，禁止恢复 `DEFAULT_PENDING_MAX_AGE_MS`、local `sanitizeSegment`、`coercePending`、`Number.parseInt` / `Number.isFinite` / `Math.floor`、regex segment sanitizer、stale message assembly、malformed drop decision、`aliasSessionIds` 去重、pending payload 组装或 `SERVERTOOL_PENDING_INJECTION_FAILED` envelope 组装。若 Jest 报 pending-session native unavailable，先 rebuild native hotpath，禁止加 TS fallback。
+ - servertool pre-command hooks（2026-06-09）：pre-command hook config/rule normalization、hook id sanitize、tool-set default/dedupe/normalize、regex source/flags planning、timeout clamp/default、priority parse、runtime pre-command rule planning 属于 `servertool-core::pre_command_hook_contract::{plan_pre_command_hooks_config,plan_runtime_pre_command_rule}`；TS `pre-command-hooks.ts` 只能读 config/env/cache、materialize Rust regex plan、parse current tool args、执行 jq/shell/runtime script IO，禁止恢复 TS normalize/sanitize/timeout/priority/tool-set policy。
+-- servertool stopless CLI projection seed（2026-06-09）：stopless 闭环优先收口小骨架：`stop_message_auto` CLI projection 的 continuationPrompt、reasoningText、repeatCount/maxRepeats、assistant stop text cleanup、finalChatResponse 文本 fallback、followup injection append_user_text 提取属于 `servertool-core::cli_contract::plan_stop_message_cli_projection_seed`；TS `engine.ts` 只能传 `execution/finalChatResponse` 给 `planStopMessageCliProjectionSeedWithNative` 并消费 Rust seed，禁止恢复 `readStopMessageFollowupText`、assistant/chat 文本扫描、loop number parse、stop-schema strip 或固定中文默认提示。
++- servertool stopless CLI projection seed（2026-06-11 更新）：stopless 闭环优先收口小骨架：`stop_message_auto` internal seed 的 continuationPrompt、reasoningText、repeatCount/maxRepeats、assistant stop text cleanup、finalChatResponse 文本 fallback、followup injection append_user_text 提取属于 `servertool-core::cli_contract::plan_stop_message_cli_projection_seed`；TS `engine.ts` 只能传 `execution/finalChatResponse` 给 `planStopMessageCliProjectionSeedWithNative` 并消费 Rust seed。client-visible `build_client_exec_cli_projection_output` 必须剥离 continuationPrompt，只投状态；禁止恢复 `readStopMessageFollowupText`、assistant/chat 文本扫描、loop number parse、stop-schema strip 或固定中文默认提示到 TS。
+ - servertool stopless terminal visible payload（2026-06-09）：`stop_message_auto` 当前 assistant stop text 提取、terminal stop 可见 payload 的 stop schema strip、summary prefix/replace、reasoning 字段剥离属于 `servertool-core::stop_visible_text::{extract_current_assistant_stop_text,build_stop_message_terminal_visible_payload}`；TS `handlers/stop-message-auto.ts` 只能调用 `extractCurrentAssistantStopTextWithNative` / `buildStopMessageTerminalVisiblePayloadWithNative`，禁止恢复 `choices/output` 遍历、`collectTextBlocks`、`prefixChatChoiceContent`、`replaceResponsesOutputContent`、`stripVisibleReasoningFields` 或独立 `stripStopSchemaControlPayload` native export。
+ - servertool stopless orchestration action（2026-06-09）：`stop_message_flow` 的 CLI projection / terminal final / generic followup 分支选择属于 `servertool-core::stopless_orchestration_contract::plan_stopless_orchestration_action`；TS `engine.ts` 只能调用 `planStoplessOrchestrationActionWithNative` 并执行 Rust action，禁止恢复 `flowId === 'stop_message_flow'`、`stopMessageTerminalFinal` 本地判断或 stopless reenter 分支。
+-- servertool CLI projection output（2026-06-09）：client-visible `exec_command` projection output planning belongs to `servertool-core::cli_contract::plan_client_exec_cli_projection_output`; TS `cli-projection.ts` may only pass `flowId/input/stdoutPreview` into `buildClientExecCliProjectionOutputWithNative` and consume native output. Stopless `flowId=stop_message_flow -> toolName=stop_message_auto`, repeatCount/maxRepeats extraction/validation, canonical stopless CLI input, and stdoutPreview merge are Rust-owned; forbid restoring TS `args.flowId === 'stop_message_flow'`, local `toolName`, local repeat/max parsing, or local CLI payload merge.
++- servertool CLI projection output（2026-06-11 更新）：client-visible `exec_command` projection output planning belongs to `servertool-core::cli_contract::plan_client_exec_cli_projection_output`; TS `cli-projection.ts` may only pass Rust seed/status into `buildClientExecCliProjectionOutputWithNative` and consume native output. Stopless `flowId=stop_message_flow -> toolName=stop_message_auto`, repeatCount/maxRepeats extraction/validation, and canonical status-only CLI input are Rust-owned; forbid restoring TS `args.flowId === 'stop_message_flow'`, local `toolName`, local repeat/max parsing, local CLI payload merge, or stdoutPreview/continuationPrompt injection into CLI.
+ - servertool loop-warning / orchestration policy（2026-06-09）：stop-message loop warning text/count injection 属于 `followup-core::inject_loop_warning`，`stop-message-loop-payload-block.ts` 只能 build native seed payload，禁止恢复 `appendStopMessageLoopWarning` TS export、本地 `warningText`、`messages.push`、repeat clamp；servertool timeout parse、timeout watcher、client disconnect 检测/轮询计划、servertool error payload、clientInjectOnly parse、client inject sanitize、followup error compact、adapter providerKey 解析属于 `servertool-core::orchestration_policy_contract::{parse_servertool_timeout_ms,plan_servertool_timeout_watcher,is_adapter_client_disconnected,plan_client_disconnect_watcher,plan_servertool_client_disconnected_error,plan_servertool_timeout_error,plan_stop_message_fetch_failed_error,read_client_inject_only,normalize_client_inject_text,compact_followup_error_reason,resolve_adapter_context_provider_key}`，TS `orchestration-policy-block.ts` 只能读 env/参数并调用 native wrapper；TS `timeout-error-block.ts` 只能执行 timer/Error 对象 glue，禁止恢复本地 `parseTimeoutMs`、`parseBooleanLike`、disconnect watcher policy、timeout/error payload builder、`sanitizeFollowupText`、HTTP/HTML regex compaction、providerKey walker 或 stop-gateway wrapper。
+ - servertool stop-gateway（2026-06-09）：`inspectStopGatewaySignal` / `isStopEligibleForServerTool` / `readStopGatewayContext` 的响应 stop inspect、eligibility、embedded tool marker、reasoning-only empty、Responses tool-like output、metadata context normalize 属于 `servertool-core::stop_gateway_context::{inspect,is_stop_eligible,normalize_stop_gateway_context}`；TS `stop-gateway-context.ts` 只能做 native call + runtime metadata IO，禁止恢复 fallback inspect、本地 marker/tool-like/reasoning-only 扫描、local normalize 或吞 metadata write failure。
+ - servertool stop-message compare-context（2026-06-09）：`attachStopMessageCompareContext` / `readStopMessageCompareContext` / `formatStopMessageCompareContext` 的 compare context normalize、mode/decision 归一、数字 floor/clamp、remaining 计算、progress summary 格式属于 `servertool-core::stop_message_compare_context::{normalize_stop_message_compare_context,format_stop_message_compare_context}`；TS `stop-message-compare-context.ts` 只能做 native call + runtime metadata IO，禁止恢复 local normalize/format、Boolean/numeric policy 或吞 metadata write failure。
+@@ -109,6 +109,8 @@ ServerReqInbound01 -> HubReqInbound02 -> HubReqChatProcess03 -> VrRoute04
+ 
+ 错误本身与错误风暴必须拆开处理：错误本身按唯一协议/路由/Provider/error-chain owner 修复或 fail-fast 暴露；错误风暴只治理重复触发、重复投递、重复日志、client reconnect 放大与 session backoff，不得把原始错误改写成 empty reply、成功响应、relay fallback 或 payload sanitizer。先判定第一个错误在哪个契约节点发生，再判定风暴是否由客户端重连、请求内 retry、provider-switch、日志双上报或 session storm backoff 缺口放大。session storm backoff 是节流阀：所有 surfaced error 都可进入，但等待上限硬锁 3 秒，环境变量只能调低不能调高。
+ 
++Provider-owned continuation/tool-result 请求的 ErrorErr05 决策必须保持 provider ownership：provider.send 失败时禁止 `exclude_and_reroute` 跨 provider 重放工具结果；只能同 provider retry（若策略允许）或 fail-fast 暴露原错误，禁止通过 payload 裁剪/转文本/重建上下文补偿。
++
+ Responses SSE client-close 挂起排障（2026-06-10）：看到 `response.sse.client_close` 且 `streamEnded=false`、`sawTerminalEvent=false`、`closeBeforeStreamEnd=true`，同时 Responses store 计数不降时，优先查 `handler-response-utils.ts` 的 client-close cleanup 是否被 `clientWriteQueue` / native projection 卡住。非 continuation `/v1/responses` 断连必须立即清 abandoned store；只有 required_action/tool-call continuation 可等待投影队列后持久化 continuation。
+ 
+ ```text
+@@ -158,6 +160,13 @@ ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified
+ - L276-L375 `stopless-skeleton`: servertool stopless CLI projection 骨架、契约、测试矩阵（2026-06-06 reenter/followup 旧契约已废弃）
+ - L376+ `hard-guard`: fallback / 静默失败治理硬规则
+ 
++## Hub Pipeline Rust closeout 分片原则（新增）
++
++- HubPipeline Rust 化只允许按 owner-map 分片推进；若 diff 同时卷入 servertool/VR/http-server/direct-passthrough，先恢复无关 owner 文件，再重切 slice。
++- 复用规则：先看 `feature_id`/`owner`/`required tests`/`required gates`，再决定唯一修改点；禁止先改一圈再靠门禁筛。
++- 触发信号：本次改动若超过 hub core 真源且扩散到旁支 owner，说明 slice 过激，必须收缩。
++- 边界：单次 commit 只允许改动一个 owner-family；多 owner slice 必须拆 commit。
++
+ ## 标准重构 / 修复闭环（强制顺序）
+ ## RCC 配置真源（新增，强制）
+ 
+@@ -1749,7 +1758,7 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
+ 
+ ## 2026-06-07 servertool CLI / stopless closeout 精华
+ 
+-- `stop_message_auto` migrated path 必须同时锁 projection 和 CLI executor：projection 生成 `exec_command routecodex servertool run stop_message_auto --input-json <json>`；CLI executor 必须强制 `flowId=stop_message_flow`、`continuationPrompt`、`repeatCount`、`maxRepeats`，缺失直接 fail-fast，禁止默认 summary 或固定“继续执行”兜底。
++- `stop_message_auto` migrated path 必须同时锁 projection 和 CLI executor：projection 生成 `exec_command routecodex servertool run stop_message_auto --input-json <json>`；CLI executor 必须强制 `flowId=stop_message_flow`、`repeatCount`、`maxRepeats`，但禁止 `continuationPrompt` / schemaGuidance / prompt preview / 完整 input 出现在 client-visible command/stdout。真实 continuation prompt 由请求端按状态注入。
+ - stopless CLI counters 读取必须按字段级优先级：`metadata.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.serverToolLoopState.repeatCount/maxRepeats` -> `metadata.__rt.stopMessageState.stopMessageUsed/stopMessageMaxRepeats`；禁止对象级 `??` 短路，否则顶层 loopState 缺字段会遮住 `__rt` 真值。
+ - 旧 ticket/restoration 审计要分两层扫：精确 marker (`--ticket|stcli_|rcc_cli_|cli-ticket|ServertoolCliTicket|tryRestoreServertoolCliToolOutputs`) 用于证明 runtime/src/tests 无旧 ticket；宽词 `restore/restoration` 必须分类为 servertool 禁止性 marker、Responses continuation 正常语义、或无关 git restore 文案，不能把宽词命中误当旧设计复活。
+ 
+@@ -1757,8 +1766,8 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
+ 
+ - servertool 最终执行形态是独立 Rust binary `routecodex-servertool`（`sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/`），不是 TS command handler；`servertool-core` 是 lib，提供 decision/contract/builder/gate/prompt/budget/projection。
+ - CLI contract 入口：`routecodex-servertool run <toolName> --input-json <json> [--flow <flowId>] [--repeat-count N --max-repeats N]`；输出 schema 由 Rust `servertool-core` owner，TS 不得发明字段。
+-- stopless schema 闭环 Rust owner：`stopless_schema_guidance()` 返回 `schemaGuidance`（required_fields 含 stopreason/reason/has_evidence/evidence/issue_cause/excluded_factors/diagnostic_order/done_steps/next_step/next_suggested_path/learned；stopreason_values: 0=finished/1=blocked/2=continue_needed）。
+-- projection schema Rust owner：`build_client_exec_cli_projection_output()` 构建 execCommand + schemaGuidance + repeatCount + maxRepeats；旧 `--ticket` / `stcli_` / `rcc_cli_` 标记在 Rust unit test 中被显式拒绝。
++- stopless schema 闭环 Rust owner：schema gate 和 request-side prompt seed 属于 Rust；`schemaGuidance` 不得进入 `stop_message_auto` CLI stdout。
++- projection schema Rust owner：`build_client_exec_cli_projection_output()` 构建 status-only execCommand + repeatCount + maxRepeats；旧 `--ticket` / `stcli_` / `rcc_cli_` 标记在 Rust unit test 中被显式拒绝。
+ - exec result validation Rust guard：`validate_client_exec_command_result()` 在 exec result 进入 req_chatprocess 前校验 tool_name=stop_message_auto + flow_id=stop_message_flow；错误返回 SERVERTOOL_UNSUPPORTED_TOOL / SERVERTOOL_CLI_MISSING_FIELD / SERVERTOOL_CLI_INVALID_FIELD。
+ - TS 红线（Phase 1 已锁定）：TS 不得写 servertool 业务逻辑，不得 fallback 默认 summary，不得从 exec_command stdout 恢复 model tool identity；TS 只允许 spawn routecodex-servertool / parse stdout/stderr / write exec_command result / emit error event。旧 TS CLI handler 在 Rust binary parity 后物理删除。
+ - Phase 1 验证命令：`cargo build -p servertool-cli` / `cargo test -p servertool-core`（32/32）/ `cargo test -p servertool-cli`（3/3）/ `node scripts/tests/servertool-cli-binary-blackbox.mjs`（5/5）/ `node scripts/verify-servertool-rust-only.mjs`（全 PASS）。
+@@ -1801,3 +1810,20 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
+ - 当 live 样本显示 provider outbound 已经是 `Accept:text/event-stream` + `stream:true`，但 `provider.send` / `hub.response` 很短而 `response=` 超长时，优先查 `src/server/handlers/handler-response-utils.ts` 的 SSE terminal-close state machine；这类挂起不是 provider/router SSE 意图问题。
+ - `/v1/responses` tool-call continuation 可以等 native terminal probe / repair frames，但必须成对验证：正向证明 terminal 会收口，反向证明 non-terminal 不会被提前关闭、already-terminal 空 repair probe 不会卡死或静默失败。
+ - 若 terminal repair 无法 materialize，必须显式 SSE `event:error` 并结束；不要用静默等待、空 reply、或改 provider intent 来绕过。
++
++## 2026-06-11 Responses standard tool SSE 精华
++
++- OpenAI Responses 流式工具调用客户端事件必须使用标准序列：`response.output_item.added -> response.function_call_arguments.done -> response.output_item.done -> response.completed -> response.done`；禁止把 JSON 合约里的 `required_action` 直接发成 `event: response.required_action` SSE。
++- 响应侧 terminal repair 真源是 Rust `build_responses_terminal_sse_frames_from_probe_json`；它必须能从 `required_action` 或 pending `output[].function_call` 合成标准工具帧。TS handler 只做写流、超时、诊断日志和错误投影，不能发明第二套工具事件。
++- live 验证时不要用 forbidden client metadata（如 `metadata.routeHint`）硬改路由；入口会 fail-fast。工具 SSE 验证必须直接断言客户端收到标准工具事件、`response.completed`、`response.done`，且无 `response.required_action`、无 `event:error`、无挂起。
++- 若 raw SSE 事件名已经标准但客户端仍不执行工具，继续检查 terminal `response.completed/response.done` 的 data payload：不得含 `required_action` / `status:"requires_action"`，terminal `output[].function_call.status` 必须是 `completed`。修点是 Rust `project_responses_sse_frame_for_client`，不是 TS writer 或 provider。
++
++## 2026-06-11 LMStudio stringify residue 精华
++
++- `chat:lmstudio` 兼容只应保留 tool id / shape 归一，不应再注入 `lmstudio_responses_input_stringify` 这类把 Responses 结构化 `input` 打平的旧动作；一旦发现 action/profile/native capability/rt 开关同时存在，必须物理删除四处，不要只删其一。
++- 验证信号：`openai-responses` 的 `input` 保持数组/对象结构不变，`cargo test -p router-hotpath-napi lmstudio_profile_preserves_openai_responses_structured_tool_input -- --nocapture` 必须为绿；若 profile 仍引用旧 action，residue audit 应直接红。
++
++## 2026-06-11 Stopless provider-continuity 精华
++
++- Stopless `stopMessageUsed` 只允许在同一 session/tmux scope 且同一 routed provider 上连续；provider key 变化必须 reset budget 后继续第一轮。修点属于 Rust `stop-message-core` decision + `servertool-core` persisted snapshot/providerKey carrier，TS 只传当前 provider 与执行 state IO。
++- Gate 必须成对：provider mismatch resets, provider match preserves；同时锁 `stopMessageProviderKey` 在 routing-state serialize/deserialize/merge 中不丢失，避免跨 provider 继承旧 budget。
+diff --git a/MEMORY.md b/MEMORY.md
+index 68617fe19..47c641de5 100644
+--- a/MEMORY.md
++++ b/MEMORY.md
+@@ -1408,12 +1408,7 @@ Tags: errorsamples, apply_patch, guidance, prompt, samefile, provider-429, provi
+ 
+ Tags: routecodex-3.11.1, gemini-mapper, tool_calls, null-guard, malformed-history, semantic-mappers, shadow-gate, rust-migration
+ 
+-- 2026-03-19: 继续推进 `routecodex-267.5`，完成 `lmstudio_responses_input_stringify` 的 native 化收口：
+-  - TS action `lmstudio-responses-input-stringify.ts` 改为 native thin wrapper（调用 `applyLmstudioResponsesInputStringifyWithNative`）；
+-  - Rust 新增专用导出 `applyLmstudioResponsesInputStringifyJson`（`req_outbound_stage3_compat/lmstudio/request.rs` + `req_outbound_stage3_compat.rs` + `lib.rs`）；
+-  - 为避免 test/runtime 场景中 env 可见性差异，在 adapter context 的 `__rt` 增加 `lmstudioStringifyInputEnabled` 覆盖开关；Rust `core_utils.rs` 读取该开关优先于环境变量；
+-  - 兼容语义保持不变：仅在 `LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT=1` / `ROUTECODEX_LMSTUDIO_STRINGIFY_INPUT=1` 且 `providerProtocol=openai-responses` 时生效。
+-  - 验证通过：`sharedmodule npm run build:ci`、lmstudio/field-mapping/harvest 三个 action 测试、`verify:shadow-gate:hub-req-outbound-compat`（100/100）、根仓 `npm run build:dev`、`/health`=0.90.514。
++- 2026-06-11: 进一步确认 `chat:lmstudio` 旧 `lmstudio_responses_input_stringify` action / native capability / rt 开关均应物理删除；它们会把 `openai-responses` 结构化 `input` 打平成文本，和当前 direct/tool continuity contract 冲突。已删除 Rust 实现与 NAPI 导出、TS action 文件、profile 注入项，并去掉 Rust test 里的 rt 开关。新的验证点是：`cargo test -p router-hotpath-napi lmstudio_profile_preserves_openai_responses_structured_tool_input -- --nocapture` 证明结构化 `input` 保持原样 passthrough，旧“可 stringify”结论作废。
+ 
+ Tags: rust-migration, routecodex-267.5, lmstudio, responses-input-stringify, native-wrapper, req-outbound-compat, shadow-gate
+ 
+@@ -3166,3 +3161,20 @@ Tags: hub-pipeline, servertool, continuation, dead-code, napi-export, rust-only,
+ - Removed the zero-consumer TS wrappers, required-export entries, Rust public NAPI JSON bridge bodies, and `#[napi]` JSON shells. TS `BridgeNativeEnvelope` is redefined as `Record<string, unknown>` to drop the deleted wrapper type dependency. The Hub internal `apply_req_inbound_semantic_lift` (Type: `Value`) remains the live semantic-lift owner for the active Hub req_inbound pipeline.
+ - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` and `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` block the retired reasoning / semantic-lift public wrapper/export names from returning.
+ Tags: hub-pipeline, req-inbound, reasoning, semantic-lift, dead-code, napi-export, rust-only, residue-gate, 2026-06-10
++
++## Learning (2026-06-11)
++- Trigger: VR audit found tmux-scoped stopMessage state still visible on first fresh user turn.
++- Pattern: fresh user messages were allowed to read persisted stopMessage state, so active=yes could leak before any stopless followup.
++- Future rule: fresh user turns must not surface stopMessage state unless the current turn itself contains stopless/stopMessage markers; route hit logs may only show current-turn activation, not stale persisted state.
++- Target: project MEMORY.md
++Tags: #learning #vr #stopmessage #latest-turn
++
++- 2026-06-11: VR / servertool latest-turn activation truth is now evidenced: VR Rust feature gate `previous_turn_tool_signals_ignore_older_message_history_before_latest_user_boundary` plus `classifier.rs` current-turn-only logic keep history from re-triggering route selection; servertool fresh-user non-stopless turns return `null` stopMessage state in `native-virtual-router-runtime.ts`. Verification: `tests/sharedmodule/virtual-router-web-search-route-selection.spec.ts` PASS, `tests/servertool/stopmessage-session-scope.spec.ts` PASS, `npm run verify:servertool-rust-only` PASS, `npm run verify:vr-no-ts-runtime` PASS, and live smoke on fresh user non-stopless turn produced `snapshot: null` with no `active=yes` in hit log. `npm run verify:architecture-ci` still fails on existing forbidden-path growth residue unrelated to this latest-turn rule; do not treat that as a regression of the latest-turn semantics.
++
++- 2026-06-11: Latest-turn VR/servertool gate survived real build/install/restart. `npm run build:min` passed. `npm run install:global` is env-gated by Node engines and failed under Node v26, then passed under Node v22.22.2. `routecodex restart --port 5520` came back healthy (`ready=true`, `pipelineReady=true`, version `0.90.3055`). Two live smoke probes using a fresh non-stopless user turn and a fresh user turn with stale tmux stopMessage state both produced `snapshot:null` and no `active=yes` in hit log. This is the online proof that history does not re-activate stopMessage on fresh turns.
++
++- 2026-06-11: Stopless budget truth is provider-continuous inside the existing session/tmux scope. A persisted/runtime stopMessage snapshot may continue `stopMessageUsed` only when `stopMessageProviderKey` matches current routed provider; provider changes reset the consecutive budget to `used=0` and then continue from the first followup. Session/tmux isolation remains unchanged. Gates: `stop-message-core` provider reset/preserve tests, `tests/servertool/stop-message-auto.spec.ts` native bridge provider tests, and `verify:servertool-rust-only` static provider-continuity checks.
++
++- 2026-06-11: 5555 图片请求“被吞”根因不是 route 声明缺失，而是 ProviderForwarder 真实 target 选择阶段未对视觉请求做 target-level capability gate。Rust `virtual_router_engine::forwarder::ForwarderRegistry::select` 现在接受 `target_check`，`engine/selection.rs::resolve_forwarder_candidate_for_pool` 在 image/video 场景下强制过滤 non-visual real targets；红测 `image_request_skips_text_only_forwarder_target_in_multimodal_route` 已通过。Live smoke on port 5555 with a real `input_image` returned 200 and provider-request preserved `imageCount=1`, proving no image crop in transport.
++
++- 2026-06-12: Release snapshot garbage truth: `install-global.sh` / snapshot refresh can copy `node_modules/rcc-llmswitch-core/rust-core/target` into `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`; this is rebuildable Rust cache, not runtime truth. If release size explodes, first confirm `dist/native/router_hotpath_napi.node` exists, then remove only `node_modules/rcc-llmswitch-core/rust-core/target` and recheck `/health`. Do not rerun the full snapshot installer until the copy script excludes Rust target/cache directories.
+diff --git a/docs/architecture/function-map.yml b/docs/architecture/function-map.yml
+index 175837b12..331d4b5ed 100644
+--- a/docs/architecture/function-map.yml
++++ b/docs/architecture/function-map.yml
+@@ -160,7 +160,7 @@ owners:
+ 
+   - feature_id: hub.servertool_cli_projection
+     status: active
+-    summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input
++    summary: servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input
+     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+     canonical_types:
+       - ServertoolCliProjection01Planned
+@@ -190,7 +190,7 @@ owners:
+     notes:
+       - Phase 1 keeps existing injection/interception but projects execution to real client exec_command.
+       - CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used.
+-      - stop_message_auto CLI input must include continuationPrompt, repeatCount, and maxRepeats when stopless state is available.
++      - stop_message_auto CLI input must include only flowId, repeatCount, and maxRepeats when stopless state is available; continuationPrompt/schema guidance/prompt preview are request-side internal material and must not be client-visible.
+       - CLI execution path must not call server-side followup/reenter for migrated flows.
+       - `apply_patch` is excluded; it remains native/freeform client tooling.
+       - `servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted.
+@@ -226,7 +226,7 @@ owners:
+       - npm run verify:function-map-compile-gate
+     migration_target: rust
+     notes:
+-      - servertool-core owns stopless CLI projection seed planning for continuationPrompt, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction.
++      - servertool-core owns stopless CLI projection seed planning for internal continuationPrompt seed, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction; client-visible CLI projection remains status-only.
+       - TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell.
+       - Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS.
+ 
+@@ -574,7 +574,7 @@ owners:
+ 
+   - feature_id: vr.provider_forwarder_runtime
+     status: active
+-    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown reprobe, and runtime diagnostics stay in Rust Virtual Router
++    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router
+     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+     canonical_types:
+       - ForwarderRegistry
+@@ -606,7 +606,7 @@ owners:
+     migration_target: rust
+     notes:
+       - Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys.
+-      - Forwarder availability must inspect real targets, including startup persisted cooldown reprobe, without consuming unselected targets.
++      - Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.
+       - HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.
+ 
+   - feature_id: hub.metadata_boundary
+@@ -1503,7 +1503,7 @@ owners:
+       - Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust.
+   - feature_id: manager.health_runtime
+     status: active
+-    summary: provider health / cooldown / persisted 503 family managed by Rust Virtual Router health; TS modules/health is persistence bridge
++    summary: provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge
+     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+     canonical_types:
+       - ProviderHealthState
+@@ -1512,10 +1512,11 @@ owners:
+       - record_failure
+       - cooldown_provider
+       - cooldown_provider_until_midnight_persisted
+-      - consume_persisted_503_reprobe_if_available
+       - trip_provider
+       - is_available
+-      - is_persisted_503_daily_cooldown_active
++      - record_http_502_failure
++      - record_http_429_failure
++      - record_recoverable_failure
+     allowed_paths:
+       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+       - src/manager/modules/health
+@@ -1533,8 +1534,8 @@ owners:
+       - npm run verify:architecture-ci
+     migration_target: rust
+     notes:
+-      - Health truth (success/failure/cooldown/persisted 503 family) lives in Rust health.rs.
+-      - TS HealthManagerModule is jsonl persistence bridge only; must not redefine cooldown/persisted semantics.
++      - Health truth (success/failure/runtime cooldown ladder) lives in Rust health.rs.
++      - Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics.
+   - feature_id: manager.token_runtime
+     status: active
+     summary: OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin
+diff --git a/docs/architecture/verification-map.yml b/docs/architecture/verification-map.yml
+index 8fb92dda5..901a6ff18 100644
+--- a/docs/architecture/verif
+
+[… truncated 217726 chars …]

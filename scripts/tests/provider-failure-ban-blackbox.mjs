@@ -313,6 +313,32 @@ function summarizeHealthFile(parsed) {
   };
 }
 
+function findHealthEntry(entries, prefix) {
+  if (!Array.isArray(entries)) {
+    return undefined;
+  }
+  return entries.find((entry) => {
+    const key = typeof entry?.provider_key === 'string'
+      ? entry.provider_key
+      : typeof entry?.providerKey === 'string'
+        ? entry.providerKey
+        : undefined;
+    return typeof key === 'string' && key.startsWith(prefix);
+  });
+}
+
+function readHealthState(entry) {
+  return typeof entry?.state === 'string' ? entry.state : undefined;
+}
+
+function readHealthCooldownExpiresAt(entry) {
+  return typeof entry?.cooldown_expires_at === 'number'
+    ? entry.cooldown_expires_at
+    : typeof entry?.cooldownExpiresAt === 'number'
+      ? entry.cooldownExpiresAt
+      : undefined;
+}
+
 async function withScenarioRuntime(options, fn) {
   const maxProviderAttempts =
     typeof options?.maxProviderAttempts === 'number' && Number.isFinite(options.maxProviderAttempts)
@@ -415,19 +441,28 @@ async function run503Scenario() {
     const second = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(second.status, 200);
     assert.match(second.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 1);
+    assert.equal(primaryHits, 2);
     assert.equal(backupHits, 2);
+
+    const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
+    assert.equal(thirdBeforeRestart.status, 200);
+    assert.match(thirdBeforeRestart.body, /ok-from-backup-503/);
+    assert.equal(primaryHits, 3);
+    assert.equal(backupHits, 3);
+
+    const fourthBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
+    assert.equal(fourthBeforeRestart.status, 200);
+    assert.match(fourthBeforeRestart.body, /ok-from-backup-503/);
+    assert.equal(primaryHits, 3, 'fourth request should bypass runtime-cooled primary');
+    assert.equal(backupHits, 4);
 
     const providerHealthPath = path.join(ctx.sessionDir, 'provider-health.json');
     const persisted = JSON.parse(await fs.readFile(providerHealthPath, 'utf8'));
     const healthSummary = summarizeHealthFile(persisted);
-    assert.ok(
-      healthSummary.providerCooldowns.some(
-        (entry) =>
-          typeof entry.providerKey === 'string'
-          && entry.providerKey.startsWith('primary.')
-          && entry.reason === '__http_503_daily_cooldown__'
-      )
+    assert.equal(
+      healthSummary.providerCooldowns.length,
+      0,
+      '503 recoverable cooldown must not persist across restart'
     );
 
     await closeServer(firstServer.httpHarness.server);
@@ -451,11 +486,13 @@ async function run503Scenario() {
     assert.match(third.body, /ok-from-backup-503/);
     assert.equal(primaryHits - beforeRestartPrimaryHits, 1);
     assert.equal(backupHits - beforeRestartBackupHits, 1);
-    assert.equal(primaryHits, 2, '503 scenario should hit primary once initially plus one passive-reprobe failure after restart');
+    assert.equal(primaryHits, 4, 'restart should clear runtime cooldown so primary is probed once again');
 
     return {
       firstRequest: { primaryHits: 1, backupHits: 1 },
-      secondRequestTotals: { primaryHits: beforeRestartPrimaryHits, backupHits: beforeRestartBackupHits },
+      secondRequestTotals: { primaryHits: 2, backupHits: 2 },
+      thirdRequestTotals: { primaryHits: 3, backupHits: 3 },
+      fourthRequestTotals: { primaryHits: beforeRestartPrimaryHits, backupHits: beforeRestartBackupHits },
       restartRequest: {
         primaryHitsDelta: primaryHits - beforeRestartPrimaryHits,
         backupHitsDelta: backupHits - beforeRestartBackupHits
@@ -574,15 +611,30 @@ async function runPortIsolationScenario() {
     assert.match(aFirst.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 0, backupb: 0 }, 'port 5555 must not see group B pool');
 
+    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    assert.equal(aSecond.status, 200, 'second 503 in group A should still probe primarya before backup');
+    assert.match(aSecond.body, /ok-from-backup-a/);
+    assert.deepEqual(hits, { primarya: 2, backupa: 2, primaryb: 0, backupb: 0 }, 'group A should accumulate runtime-only failures locally');
+
+    const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    assert.equal(aThird.status, 200, 'third 503 in group A should still recover within the same request');
+    assert.match(aThird.body, /ok-from-backup-a/);
+    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should trip runtime cooldown after the request');
+
     const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bFirst.status, 200, 'port 6666 should route within group B');
     assert.match(bFirst.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 1, backupb: 0 }, 'group A cooldown must not affect group B');
+    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
 
-    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
-    assert.equal(aSecond.status, 200, 'port 5555 should keep using group A backup while primarya cooled');
-    assert.match(aSecond.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 1, backupa: 2, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after cooldown');
+    const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    assert.equal(aFourth.status, 200, 'fourth group A request should skip runtime-cooled primarya');
+    assert.match(aFourth.body, /ok-from-backup-a/);
+    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
+
+    const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
+    assert.equal(bSecond.status, 200, 'group B should remain unaffected after group A cooldown is active');
+    assert.match(bSecond.body, /ok-from-primary-b/);
+    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');
 
     return { hits };
   });

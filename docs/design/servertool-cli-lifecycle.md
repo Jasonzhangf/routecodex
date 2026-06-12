@@ -53,10 +53,9 @@ Common fields:
 `stop_message_auto` fields:
 
 - `flowId`: must be `stop_message_flow`.
-- `stdoutPreview`: short folded display text.
-- `continuationPrompt`: exact prompt text extracted from the existing stopless followup injection plan.
 - `repeatCount`: current consecutive stop count after this projection is consumed.
 - `maxRepeats`: active stopless repeat cap.
+- `continuationPrompt`, `stdoutPreview`, schema guidance, and full internal input are forbidden in client-visible CLI input.
 
 ## CLI Output Contract
 
@@ -68,14 +67,12 @@ CLI stdout is a single JSON object:
   "kind": "stop_message_auto",
   "tool": "stop_message_auto",
   "summary": "stopless continuation ready",
-  "continuationPrompt": "...",
   "repeatCount": 1,
-  "maxRepeats": 3,
-  "injectedPromptPreview": "..."
+  "maxRepeats": 3
 }
 ```
 
-The stdout object is intentionally ordinary `exec_command` output. It is not remapped to private servertool metadata.
+The stdout object is intentionally ordinary `exec_command` output. It is not remapped to private servertool metadata and must not echo prompt text, schema guidance, preview text, or full input.
 
 ## Guards
 
@@ -83,6 +80,7 @@ The stdout object is intentionally ordinary `exec_command` output. It is not rem
 - The guard only scans tool-result-like records (`function_call_output`, `tool_result`, `tool_message`, or `role=tool`) and must not trigger on tool declarations or ordinary JSON fields.
 - Unsupported CLI tool names fail fast.
 - CLI input must be a JSON object.
+- Request-side injection owns the heuristic continuation prompt based on state; CLI projection only carries status.
 
 ## Verification
 

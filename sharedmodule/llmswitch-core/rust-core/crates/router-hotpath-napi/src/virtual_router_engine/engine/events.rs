@@ -90,19 +90,12 @@ impl VirtualRouterEngineCore {
                 return;
             }
         }
-        // Single policy gate:
-        // - HTTP 503 triggers a persisted daily cooldown immediately (not the
-        //   recoverable-failure ladder). This matches extract_recoverable_cooldown_ms.
-        // - all other failures: consecutive threshold handling in health.rs
+        // HTTP 503 is recoverable. It must not create a cross-restart daily
+        // cooldown; after restart the provider should be probed again through
+        // the normal three-failure recoverable ladder.
         if matches!(status_code, Some(503)) {
-            let cooldown_ms = extract_cooldown_override_ms(event)
-                .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
-            self.health_manager.trip_provider(
-                &provider_key,
-                Some("__http_503_daily_cooldown__".to_string()),
-                Some(cooldown_ms),
-                now,
-            );
+            self.health_manager
+                .record_recoverable_failure(&provider_key, reason, now);
             self.persist_provider_health();
             return;
         }
@@ -203,14 +196,8 @@ impl VirtualRouterEngineCore {
                     return true;
                 }
                 if status == Some(503) {
-                    let cooldown_ms = extract_cooldown_override_ms(event)
-                        .unwrap_or(compute_cooldown_until_next_local_midnight_ms(now));
-                    self.health_manager.trip_provider(
-                        provider_key,
-                        Some("__http_503_daily_cooldown__".to_string()),
-                        Some(cooldown_ms),
-                        now,
-                    );
+                    self.health_manager
+                        .record_recoverable_failure(provider_key, reason, now);
                     self.persist_provider_health();
                     return true;
                 }
@@ -1273,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_503_daily_cooldown_is_cleared_by_provider_success_and_not_reimported() {
+    fn http_503_uses_recoverable_three_strike_chain_and_is_not_persisted() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1289,26 +1276,41 @@ mod tests {
                 (backup_key, "mimo-v2.5-pro"),
             ]);
 
-            // Step-1: simulate three consecutive HTTP 503 failures on primary -> persisted cooldown.
-            for idx in 0..3 {
-                core.handle_provider_failure(&json!({
+            let mk_503 = |request_id: &str| {
+                json!({
                     "code": "HTTP_503",
                     "message": "upstream unavailable",
                     "stage": "provider.send",
                     "status": 503,
                     "runtime": {
-                        "requestId": format!("req-503-{idx}"),
+                        "requestId": request_id,
                         "providerKey": provider_key
                     },
                     "details": {
                         "routePoolSize": 2
                     }
-                }));
-            }
+                })
+            };
+
+            core.handle_provider_failure(&mk_503("req-503-1"));
+            let first = provider_state(&core, provider_key);
+            assert_eq!(first.state, "healthy");
+            assert_eq!(first.cooldown_expires_at, None);
+
+            core.handle_provider_failure(&mk_503("req-503-2"));
+            let second = provider_state(&core, provider_key);
+            assert_eq!(second.state, "healthy");
+            assert_eq!(second.cooldown_expires_at, None);
+
+            core.handle_provider_failure(&mk_503("req-503-3"));
 
             let tripped = provider_state(&core, provider_key);
             assert_eq!(tripped.state, "tripped");
-            assert!(tripped.cooldown_expires_at.is_some());
+            let ttl = tripped.cooldown_expires_at.expect("cooldown expiry") - now_ms();
+            assert!(
+                ttl > 29 * 60_000 && ttl <= 31 * 60_000,
+                "third 503 should use first recoverable cooldown, ttl={ttl}"
+            );
 
             let persisted = load_provider_health_state().expect("provider-health persisted");
             let persisted_entries = persisted
@@ -1316,15 +1318,11 @@ mod tests {
                 .and_then(|v| v.as_array())
                 .expect("providerCooldowns array");
             assert!(
-                persisted_entries.iter().any(|entry| {
-                    entry.get("providerKey").and_then(|v| v.as_str()) == Some("sdfv.1.gpt-5.4")
-                        && entry.get("reason").and_then(|v| v.as_str())
-                            == Some("__http_503_daily_cooldown__")
-                }),
-                "persisted cooldown for canonical primary key not found"
+                persisted_entries.is_empty(),
+                "503 recoverable cooldown must not persist across restart"
             );
 
-            // Step-2: simulate startup reprobe success -> should clear persisted cooldown.
+            // Success still clears in-memory runtime health.
             core.handle_provider_success(&json!({
                 "runtime": {
                     "requestId": "startup_reprobe",
@@ -1338,18 +1336,7 @@ mod tests {
             assert_eq!(healed.state, "healthy");
             assert_eq!(healed.cooldown_expires_at, None);
 
-            let persisted_after_success =
-                load_provider_health_state().expect("provider-health persisted after success");
-            let entries_after_success = persisted_after_success
-                .get("providerCooldowns")
-                .and_then(|v| v.as_array())
-                .expect("providerCooldowns array after success");
-            assert!(
-                entries_after_success.is_empty(),
-                "persisted cooldown should be cleared after provider success"
-            );
-
-            // Step-3: simulate a new engine restart/import cycle: no persisted cooldown should come back.
+            // Simulate a new engine restart/import cycle: no 503 cooldown should come back.
             let mut restarted = build_test_core_with_providers(&[
                 (provider_key, "gpt-5.4"),
                 (backup_key, "mimo-v2.5-pro"),
@@ -1359,38 +1346,17 @@ mod tests {
             assert_eq!(restarted_state.state, "healthy");
             assert_eq!(restarted_state.cooldown_expires_at, None);
 
-            // Step-4: if first live request after restart still hits 503, it starts a fresh
-            // recoverable series; without persisted reprobe state it does not instantly trip.
-            restarted.handle_provider_failure(&json!({
-                "code": "HTTP_503",
-                "message": "upstream unavailable again",
-                "stage": "provider.send",
-                "status": 503,
-                "runtime": {
-                    "requestId": "req-503-again",
-                    "providerKey": provider_key
-                },
-                "details": {
-                    "routePoolSize": 2
-                }
-            }));
-            let retripped = provider_state(&restarted, provider_key);
-            // 503 always calls trip_provider directly (not recoverable ladder), so state=tripped
-            assert_eq!(retripped.state, "tripped");
-            assert_eq!(retripped.failure_count, 3);
-            // 503 calls trip_provider directly; cooldown is computed fresh to next midnight.
-            assert!(
-                retripped.cooldown_expires_at.is_some(),
-                "503 should set cooldown to next midnight"
-            );
+            restarted.handle_provider_failure(&mk_503("req-503-after-restart-1"));
+            let after_restart_first = provider_state(&restarted, provider_key);
+            assert_eq!(after_restart_first.state, "healthy");
+            assert_eq!(after_restart_first.cooldown_expires_at, None);
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
 
     #[test]
-    fn first_request_success_clears_persisted_503_cooldown() {
-        // RED: After first request success, persisted 503 cooldown should be cleared.
+    fn provider_success_clears_runtime_cooldown() {
         let provider_key = "sdfv.key1.gpt-5.5";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-5.5"),
@@ -1400,14 +1366,13 @@ mod tests {
         // Trip with persisted 503 cooldown
         core.health_manager.trip_provider(
             provider_key,
-            Some("__http_503_daily_cooldown__".to_string()),
+            None,
             Some(86_400_000),
             now_ms(),
         );
         let tripped = provider_state(&core, provider_key);
         assert_eq!(tripped.state, "tripped");
 
-        // Simulate first request success
         core.handle_provider_success(&json!({
             "runtime": {
                 "requestId": "first-live-request",
@@ -1429,45 +1394,45 @@ mod tests {
     }
 
     #[test]
-    fn first_request_503_failure_reapplies_cooldown() {
-        // RED: After first request fails 503, cooldown should be reapplied.
+    fn first_503_after_restart_does_not_reapply_cooldown_until_third_failure() {
         let provider_key = "sdfv.key1.gpt-5.5";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-5.5"),
             ("cc.key1.gpt-5.5", "gpt-5.5"),
         ]);
 
-        // Trip with persisted 503 cooldown
-        core.health_manager.trip_provider(
-            provider_key,
-            Some("__http_503_daily_cooldown__".to_string()),
-            Some(86_400_000),
-            now_ms(),
-        );
+        let mk_503 = |request_id: &str| {
+            json!({
+                "code": "HTTP_503",
+                "message": "upstream unavailable",
+                "stage": "provider.send",
+                "status": 503,
+                "runtime": {
+                    "requestId": request_id,
+                    "providerKey": provider_key
+                },
+                "details": {
+                    "routePoolSize": 2
+                }
+            })
+        };
 
-        // Simulate first request failure
-        core.handle_provider_failure(&json!({
-            "code": "HTTP_503",
-            "message": "upstream unavailable",
-            "stage": "provider.send",
-            "status": 503,
-            "runtime": {
-                "requestId": "first-live-request-fail",
-                "providerKey": provider_key
-            },
-            "details": {
-                "routePoolSize": 2
-            }
-        }));
+        core.handle_provider_failure(&mk_503("first-live-request-fail"));
+        let first = provider_state(&core, provider_key);
+        assert_eq!(first.state, "healthy");
+        assert_eq!(first.cooldown_expires_at, None);
 
-        let retripped = provider_state(&core, provider_key);
-        assert_eq!(
-            retripped.state, "tripped",
-            "first request failure should reapply cooldown"
-        );
+        core.handle_provider_failure(&mk_503("second-live-request-fail"));
+        let second = provider_state(&core, provider_key);
+        assert_eq!(second.state, "healthy");
+        assert_eq!(second.cooldown_expires_at, None);
+
+        core.handle_provider_failure(&mk_503("third-live-request-fail"));
+        let third = provider_state(&core, provider_key);
+        assert_eq!(third.state, "tripped");
         assert!(
-            retripped.cooldown_expires_at.is_some(),
-            "cooldown should be set"
+            third.cooldown_expires_at.is_some(),
+            "third 503 should set recoverable cooldown"
         );
     }
 }

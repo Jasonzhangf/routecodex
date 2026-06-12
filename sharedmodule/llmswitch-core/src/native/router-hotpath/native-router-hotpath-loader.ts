@@ -47,7 +47,7 @@ function resolveLoaderModulePath(): string {
     return rawPath;
   }
 
-  return path.join(process.cwd(), "src/native/router-hotpath/native-router-hotpath-loader.ts");
+  return path.join(process.cwd(), "src/native/router-hotpath/native-router-hotpath-loader.js");
 }
 
 const loaderModulePath = resolveLoaderModulePath();

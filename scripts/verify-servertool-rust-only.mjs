@@ -776,7 +776,7 @@ function checkStandaloneServertoolBinary() {
   }
   assertContains('servertool-cli-private-carrier-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'SERVERTOOL_DENIED_INTERNAL_CARRIER: serverToolFollowup');
   for (const needle of [
-    'fn missing_continuation_prompt_fails_fast',
+    'fn missing_continuation_prompt_still_succeeds_status_only',
     'fn invalid_stop_message_flow_id_fails_fast',
     'fn invalid_stop_message_repeat_budget_fails_fast',
     'fn invalid_explicit_repeat_args_fail_fast',
@@ -784,7 +784,7 @@ function checkStandaloneServertoolBinary() {
     'fn explicit_flow_arg_overrides_input_json_flow_id',
     'fn non_object_input_json_fails_fast',
     'fn malformed_input_json_fails_fast',
-    'SERVERTOOL_CLI_MISSING_FIELD: continuationPrompt',
+    'assert!(value.get("continuationPrompt").is_none());',
     'SERVERTOOL_CLI_INVALID_FIELD: flowId',
     'SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats',
     'SERVERTOOL_CLI_INVALID_FIELD: inputJson',
@@ -956,6 +956,38 @@ function checkStopMessagePersistedLookupRustOwner() {
     RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN,
     readRequired(RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN),
     'pub fn plan_stop_message_persist_snapshot'
+  );
+  const stopMessageCore = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`);
+  const stopMessagePersistPlan = readRequired(RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN);
+  const routingStateStore = readRequired(`${RUST_SRC_DIR}/virtual_router_engine/routing_state_store.rs`);
+  for (const needle of [
+    'provider_change_resets_persisted_snapshot_budget',
+    'provider_match_preserves_persisted_snapshot_budget',
+    'fn is_provider_continuous',
+  ]) {
+    assertContains(
+      'stop-message-provider-continuity-rust-gate',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`,
+      stopMessageCore,
+      needle
+    );
+  }
+  for (const needle of [
+    'current_provider_key',
+    'provider_key',
+  ]) {
+    assertContains(
+      'stop-message-provider-continuity-persist-gate',
+      RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN,
+      stopMessagePersistPlan,
+      needle
+    );
+  }
+  assertContains(
+    'stop-message-provider-continuity-routing-state-gate',
+    `${RUST_SRC_DIR}/virtual_router_engine/routing_state_store.rs`,
+    routingStateStore,
+    'stopMessageProviderKey'
   );
   for (const needle of [
     'resolveServertoolStateKeyWithNative',

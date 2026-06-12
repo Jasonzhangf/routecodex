@@ -180,6 +180,8 @@ struct ProviderProfileJson {
     server_tools_disabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alias_to_model: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -189,6 +191,8 @@ struct ModelIndexEntry {
     declared: bool,
     #[serde(default)]
     models: Vec<String>,
+    #[serde(default)]
+    alias_to_model: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -337,7 +341,7 @@ pub(crate) fn bootstrap_virtual_router_provider_profiles_json(
 
     let expanded_target_keys = expand_target_keys(&routed_target_keys, &alias_index, &model_index);
     let (profiles, target_runtime) =
-        build_provider_profiles(&expanded_target_keys, &runtime_entries).map_err(|error| {
+        build_provider_profiles(&expanded_target_keys, &model_index, &runtime_entries).map_err(|error| {
             napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
         })?;
     let output = ProviderProfilesBootstrapOutput {
@@ -366,7 +370,7 @@ fn build_provider_runtime_entries(
             .as_object()
             .ok_or_else(|| format!("Provider {} must be an object", provider_id))?;
         let normalized_provider = normalize_provider(provider_id, provider)?;
-        let collected_models = collect_provider_models(provider);
+        let collected_models = collect_provider_models(provider)?;
         let auth_entries = extract_provider_auth_entries(provider_id, provider)?;
         if auth_entries.is_empty() {
             return Err(format!(
@@ -458,6 +462,7 @@ fn build_provider_runtime_entries(
 
 fn build_provider_profiles(
     target_keys: &BTreeSet<String>,
+    model_index: &BTreeMap<String, ModelIndexEntry>,
     runtime_entries: &BTreeMap<String, ProviderRuntimeProfileJson>,
 ) -> Result<
     (
@@ -479,23 +484,35 @@ fn build_provider_profiles(
                 target_key, runtime_key
             )
         })?;
+        let model_info = model_index.get(&parsed.provider_id).ok_or_else(|| {
+            format!(
+                "Routing target {} references unknown model index for provider {}",
+                target_key, parsed.provider_id
+            )
+        })?;
+        let canonical_model_id = resolve_canonical_model_id(&parsed.model_id, model_info).ok_or_else(|| {
+            format!(
+                "Routing target {} references unknown model {} for provider {}",
+                target_key, parsed.model_id, parsed.provider_id
+            )
+        })?;
 
         let model_streaming_pref = runtime
             .model_streaming
             .as_ref()
-            .and_then(|map| map.get(&parsed.model_id))
+            .and_then(|map| map.get(&canonical_model_id))
             .cloned();
         let streaming_pref = match runtime.streaming.as_deref() {
             Some("always") | Some("never") => runtime.streaming.clone(),
             _ => model_streaming_pref.or_else(|| runtime.streaming.clone()),
         };
-        let context_tokens = resolve_context_tokens(runtime, &parsed.model_id);
-        let output_tokens = resolve_output_tokens(runtime, &parsed.model_id);
+        let context_tokens = resolve_context_tokens(runtime, &canonical_model_id);
+        let output_tokens = resolve_output_tokens(runtime, &canonical_model_id);
         let anthropic_thinking_config =
-            resolve_anthropic_thinking_config(runtime, &parsed.model_id).cloned();
-        let anthropic_thinking = resolve_anthropic_thinking(runtime, &parsed.model_id);
+            resolve_anthropic_thinking_config(runtime, &canonical_model_id).cloned();
+        let anthropic_thinking = resolve_anthropic_thinking(runtime, &canonical_model_id);
         let anthropic_thinking_budgets =
-            resolve_anthropic_thinking_budgets(runtime, &parsed.model_id).cloned();
+            resolve_anthropic_thinking_budgets(runtime, &canonical_model_id).cloned();
 
         profiles.insert(
             target_key.clone(),
@@ -508,7 +525,7 @@ fn build_provider_profiles(
                 outbound_profile: runtime.outbound_profile.clone(),
                 compatibility_profile: runtime.compatibility_profile.clone(),
                 runtime_key: Some(runtime_key.clone()),
-                model_id: Some(parsed.model_id.clone()),
+                model_id: Some(canonical_model_id.clone()),
                 process_mode: runtime
                     .process_mode
                     .clone()
@@ -524,15 +541,20 @@ fn build_provider_profiles(
                 extensions: runtime.extensions.clone(),
                 server_tools_disabled: runtime.server_tools_disabled,
                 model_capabilities: runtime.model_capabilities.clone(),
+                alias_to_model: if model_info.alias_to_model.is_empty() {
+                    None
+                } else {
+                    Some(model_info.alias_to_model.clone())
+                },
             },
         );
 
         let mut resolved_runtime = runtime.clone();
-        resolved_runtime.model_id = Some(parsed.model_id.clone());
+        resolved_runtime.model_id = Some(canonical_model_id.clone());
         resolved_runtime.streaming = streaming_pref;
         resolved_runtime.max_context_tokens = Some(context_tokens);
         resolved_runtime.anthropic_thinking_config = anthropic_thinking_config;
-        resolved_runtime.anthropic_thinking = resolve_anthropic_thinking(runtime, &parsed.model_id);
+        resolved_runtime.anthropic_thinking = resolve_anthropic_thinking(runtime, &canonical_model_id);
         resolved_runtime.anthropic_thinking_budgets = anthropic_thinking_budgets;
         target_runtime.insert(target_key.clone(), resolved_runtime);
     }
@@ -570,6 +592,17 @@ fn expand_target_keys(
         }
     }
     expanded
+}
+
+fn resolve_canonical_model_id(model_id: &str, model_index: &ModelIndexEntry) -> Option<String> {
+    let trimmed = model_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if model_index.models.iter().any(|candidate| candidate == trimmed) {
+        return Some(trimmed.to_string());
+    }
+    model_index.alias_to_model.get(trimmed).cloned()
 }
 
 fn normalize_provider(
@@ -660,9 +693,10 @@ fn normalize_provider(
     })
 }
 
-fn collect_provider_models(provider: &Map<String, Value>) -> ModelIndexEntry {
+fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEntry, String> {
     let models_declared = provider.contains_key("models");
     let mut collected: Vec<String> = Vec::new();
+    let mut alias_to_model: BTreeMap<String, String> = BTreeMap::new();
     let mut seen = HashSet::new();
 
     if let Some(models_value) = provider.get("models") {
@@ -675,14 +709,23 @@ fn collect_provider_models(provider: &Map<String, Value>) -> ModelIndexEntry {
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
                         push_unique_string(&mut collected, &mut seen, model_id);
                     }
+                    if let Some(model_id) = read_optional_string(model_obj.get("id")) {
+                        if let Some(alias) = read_optional_string(model_obj.get("alias")) {
+                            push_model_alias(&mut alias_to_model, alias.trim(), model_id.trim())?;
+                        }
+                    }
                     if let Some(aliases) = model_obj.get("aliases").and_then(Value::as_array) {
                         for alias in aliases {
                             if let Some(value) = alias.as_str() {
-                                push_unique_string(
-                                    &mut collected,
-                                    &mut seen,
-                                    value.trim().to_string(),
-                                );
+                                push_model_alias(
+                                    &mut alias_to_model,
+                                    value.trim(),
+                                    model_obj
+                                        .get("id")
+                                        .and_then(Value::as_str)
+                                        .map(str::trim)
+                                        .unwrap_or(""),
+                                )?;
                             }
                         }
                     }
@@ -690,16 +733,17 @@ fn collect_provider_models(provider: &Map<String, Value>) -> ModelIndexEntry {
             }
             Value::Object(models_map) => {
                 for (model_name, model_raw) in models_map {
-                    push_unique_string(&mut collected, &mut seen, model_name.trim().to_string());
+                    let canonical_model_id = model_name.trim().to_string();
+                    push_unique_string(&mut collected, &mut seen, canonical_model_id.clone());
                     if let Some(model_obj) = model_raw.as_object() {
                         if let Some(aliases) = model_obj.get("aliases").and_then(Value::as_array) {
                             for alias in aliases {
                                 if let Some(value) = alias.as_str() {
-                                    push_unique_string(
-                                        &mut collected,
-                                        &mut seen,
-                                        value.trim().to_string(),
-                                    );
+                                    push_model_alias(
+                                        &mut alias_to_model,
+                                        value.trim(),
+                                        &canonical_model_id,
+                                    )?;
                                 }
                             }
                         }
@@ -710,10 +754,34 @@ fn collect_provider_models(provider: &Map<String, Value>) -> ModelIndexEntry {
         }
     }
 
-    ModelIndexEntry {
+    Ok(ModelIndexEntry {
         declared: models_declared,
         models: collected,
+        alias_to_model,
+    })
+}
+
+fn push_model_alias(
+    alias_to_model: &mut BTreeMap<String, String>,
+    alias: &str,
+    canonical_model_id: &str,
+) -> Result<(), String> {
+    let alias = alias.trim();
+    let canonical = canonical_model_id.trim();
+    if alias.is_empty() || canonical.is_empty() {
+        return Ok(());
     }
+    if let Some(existing) = alias_to_model.get(alias) {
+        if existing != canonical {
+            return Err(format!(
+                "Model alias {} already maps to {} and cannot also map to {}",
+                alias, existing, canonical
+            ));
+        }
+        return Ok(());
+    }
+    alias_to_model.insert(alias.to_string(), canonical.to_string());
+    Ok(())
 }
 
 fn extract_provider_auth_entries(
@@ -1476,8 +1544,8 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::bootstrap_virtual_router_providers_json;
+mod alias_tests {
+    use super::{bootstrap_virtual_router_provider_profiles_json, bootstrap_virtual_router_providers_json};
     use serde_json::{json, Value};
 
     #[test]
@@ -1530,6 +1598,53 @@ mod tests {
         assert_eq!(auth["type"], "apiKey");
         assert_eq!(auth["rawType"], "qwenchat-guest");
         assert_eq!(auth["value"], "guest");
+    }
+
+    #[test]
+    fn provider_bootstrap_preserves_canonical_model_ids_when_alias_is_used() {
+        let providers = json!({
+            "DF": {
+                "id": "DF",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "DeepSeek-V4-Pro": {
+                        "aliases": ["deepseek-v4-pro"],
+                        "supportsStreaming": true,
+                        "maxContext": 1048576
+                    },
+                    "DeepSeek-V4-Flash": {
+                        "aliases": ["deepseek-v4-flash"],
+                        "supportsStreaming": true,
+                        "maxContext": 1048576
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap = bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let alias_index = providers_bootstrap_json["aliasIndex"].clone();
+        let model_index = providers_bootstrap_json["modelIndex"].clone();
+        let runtime_entries = providers_bootstrap_json["runtimeEntries"].clone();
+
+        let routed_target_keys = json!(["DF.key1.deepseek-v4-pro"]);
+        let profiles = bootstrap_virtual_router_provider_profiles_json(
+            routed_target_keys.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+            runtime_entries.to_string(),
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&profiles).unwrap();
+
+        assert_eq!(output["profiles"]["DF.key1.deepseek-v4-pro"]["modelId"], json!("DeepSeek-V4-Pro"));
+        assert_eq!(output["targetRuntime"]["DF.key1.deepseek-v4-pro"]["modelId"], json!("DeepSeek-V4-Pro"));
     }
 }
 

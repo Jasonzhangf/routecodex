@@ -979,7 +979,9 @@ pub fn plan_empty_followup_error(
         details.insert("originalResponseWasEmpty".to_string(), Value::Bool(true));
     }
     ServertoolEmptyFollowupErrorPlan {
-        message: format!("[servertool] Followup returned empty response for flow {message_flow_id}"),
+        message: format!(
+            "[servertool] Followup returned empty response for flow {message_flow_id}"
+        ),
         code: "SERVERTOOL_EMPTY_FOLLOWUP".to_string(),
         category: "EXTERNAL_ERROR".to_string(),
         status: 502,
@@ -992,7 +994,8 @@ pub fn plan_missing_followup_payload_error(
 ) -> ServertoolMissingFollowupPayloadErrorPlan {
     let followup_plan_record = input.followup_plan.as_object();
     let adapter_record = input.adapter_context.as_object();
-    let captured_entry_request = adapter_record.and_then(|record| record.get("capturedEntryRequest"));
+    let captured_entry_request =
+        adapter_record.and_then(|record| record.get("capturedEntryRequest"));
     let captured_chat_request = adapter_record.and_then(|record| record.get("capturedChatRequest"));
     let seed_available = captured_entry_request
         .into_iter()
@@ -2468,14 +2471,14 @@ mod tests {
 
     #[test]
     fn followup_payload_stream_plan_preserves_requested_stream_flag() {
-        let streaming = plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput {
-            stream: true,
-        });
+        let streaming =
+            plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput { stream: true });
         assert!(streaming.stream);
 
-        let non_streaming = plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput {
-            stream: false,
-        });
+        let non_streaming =
+            plan_followup_payload_stream(ServertoolFollowupPayloadStreamPlanInput {
+                stream: false,
+            });
         assert!(!non_streaming.stream);
     }
 
@@ -2559,11 +2562,12 @@ mod tests {
 
     #[test]
     fn preferred_final_response_selects_followup_for_requires_action_or_non_empty_body() {
-        let requires_action = plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
-            has_followup_body: true,
-            has_requires_action_shape: true,
-            is_empty_client_response_payload: true,
-        });
+        let requires_action =
+            plan_preferred_final_response(ServertoolPreferredFinalResponseInput {
+                has_followup_body: true,
+                has_requires_action_shape: true,
+                is_empty_client_response_payload: true,
+            });
         assert_eq!(
             requires_action.source,
             ServertoolPreferredFinalResponseSource::FollowupBody
@@ -2653,7 +2657,10 @@ mod tests {
             last_error_message: Some("upstream empty".to_string()),
             original_response_was_empty: true,
         });
-        assert_eq!(plan.message, "[servertool] Followup returned empty response for flow web_search_flow");
+        assert_eq!(
+            plan.message,
+            "[servertool] Followup returned empty response for flow web_search_flow"
+        );
         assert_eq!(plan.code, "SERVERTOOL_EMPTY_FOLLOWUP");
         assert_eq!(plan.category, "EXTERNAL_ERROR");
         assert_eq!(plan.status, 502);
@@ -2665,15 +2672,19 @@ mod tests {
 
     #[test]
     fn missing_followup_payload_error_plan_reports_plan_and_seed_state() {
-        let plan = plan_missing_followup_payload_error(ServertoolMissingFollowupPayloadErrorPlanInput {
-            flow_id: Some("vision_auto_flow".to_string()),
-            request_id: "req-2".to_string(),
-            followup_plan: json!({ "injection": {}, "metadata": {} }),
-            adapter_context: json!({
-                "capturedEntryRequest": { "messages": [{ "role": "user", "content": "hi" }] }
-            }),
-        });
-        assert_eq!(plan.message, "[servertool] followup payload missing for non-clientInject flow");
+        let plan =
+            plan_missing_followup_payload_error(ServertoolMissingFollowupPayloadErrorPlanInput {
+                flow_id: Some("vision_auto_flow".to_string()),
+                request_id: "req-2".to_string(),
+                followup_plan: json!({ "injection": {}, "metadata": {} }),
+                adapter_context: json!({
+                    "capturedEntryRequest": { "messages": [{ "role": "user", "content": "hi" }] }
+                }),
+            });
+        assert_eq!(
+            plan.message,
+            "[servertool] followup payload missing for non-clientInject flow"
+        );
         assert_eq!(plan.code, "SERVERTOOL_FOLLOWUP_FAILED");
         assert_eq!(plan.category, "INTERNAL_ERROR");
         assert_eq!(plan.status, 502);

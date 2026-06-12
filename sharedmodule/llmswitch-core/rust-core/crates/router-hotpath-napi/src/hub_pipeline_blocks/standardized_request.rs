@@ -7,12 +7,17 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     let row = input
         .as_object()
         .ok_or_else(|| "coerce standardized request input must be object".to_string())?;
-    let payload = row
+    let raw_payload = row
         .get("payload")
         .cloned()
         .ok_or_else(|| "payload must be object".to_string())?;
-    let payload = normalize_chat_envelope_tool_calls(&payload).map_err(|err| err.to_string())?;
-    let payload = payload
+    let raw_payload = raw_payload
+        .as_object()
+        .ok_or_else(|| "payload must be object".to_string())?;
+    let normalized_payload_value =
+        normalize_chat_envelope_tool_calls(&Value::Object(raw_payload.clone()))
+            .map_err(|err| err.to_string())?;
+    let payload = normalized_payload_value
         .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;
     let normalized = row
@@ -174,6 +179,11 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                     );
                 }
             }
+        }
+    }
+    if let Some(input_array) = raw_payload.get("input").and_then(Value::as_array) {
+        if !input_array.is_empty() && !semantics.contains_key("input") {
+            semantics.insert("input".to_string(), Value::Array(input_array.clone()));
         }
     }
 
@@ -395,6 +405,32 @@ mod tests {
             standardized["messages"][0]["tool_call_id"],
             json!("call_function_snr978zyv21w_1")
         );
+    }
+
+    #[test]
+    fn responses_standardization_preserves_input_in_semantics_for_tool_result_followup() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let semantics_input = output["standardizedRequest"]["semantics"]["input"]
+            .as_array()
+            .expect("semantics input");
+        assert_eq!(semantics_input.len(), 2);
+        assert_eq!(semantics_input[1]["type"], json!("function_call_output"));
     }
 
     #[test]

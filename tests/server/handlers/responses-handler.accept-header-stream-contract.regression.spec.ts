@@ -18,7 +18,16 @@ describe('responses-handler accept header vs client stream contract', () => {
     }
   }
 
-  it('does not upgrade stream=false responses request into client-visible SSE only because Accept advertises SSE', async () => {
+  function createApp(executePipeline: ReturnType<typeof jest.fn>): express.Express {
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, { executePipeline, errorHandling: null });
+    });
+    return app;
+  }
+
+  it('defaults an SSE-capable responses request to client-visible SSE when stream is omitted', async () => {
     const executePipeline = jest.fn(async (input: any) => ({
       status: 200,
       headers: {
@@ -39,13 +48,54 @@ describe('responses-handler accept header vs client stream contract', () => {
       }
     }));
 
-    const app = express();
-    app.use(express.json());
-    app.post('/v1/responses', async (req, res) => {
-      await handleResponses(req as any, res as any, { executePipeline, errorHandling: null });
-    });
+    await withServer(createApp(executePipeline), async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'text/event-stream'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.3-codex',
+          input: 'Reply with OK only.'
+        })
+      });
+      const text = await response.text();
 
-    await withServer(app, async (baseUrl) => {
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type') || '').toContain('text/event-stream');
+      expect(text).toContain('event: response.completed');
+
+      const pipelineInput = executePipeline.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.body?.stream).toBe(true);
+      expect(pipelineInput.metadata?.stream).toBe(true);
+      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(pipelineInput.metadata?.clientStream).toBe(true);
+    });
+  });
+
+  it('does not upgrade explicit stream=false responses request only because Accept advertises SSE', async () => {
+    const executePipeline = jest.fn(async (input: any) => ({
+      status: 200,
+      headers: {
+        'x-upstream-mode': 'sse',
+        'x-provider-stream-requested': '1'
+      },
+      body: {
+        __sse_responses: Readable.from([
+          'event: response.output_text.delta\n',
+          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
+          'event: response.completed\n',
+          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
+        ]),
+        id: 'resp_accept_only',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'output_text', text: 'OK' }]
+      }
+    }));
+
+    await withServer(createApp(executePipeline), async (baseUrl) => {
       const response = await fetch(`${baseUrl}/v1/responses`, {
         method: 'POST',
         headers: {

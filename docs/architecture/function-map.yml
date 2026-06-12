@@ -160,7 +160,7 @@ owners:
 
   - feature_id: hub.servertool_cli_projection
     status: active
-    summary: servertool execution migrates to client-visible exec_command CLI projection with direct CLI input
+    summary: servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - ServertoolCliProjection01Planned
@@ -190,7 +190,7 @@ owners:
     notes:
       - Phase 1 keeps existing injection/interception but projects execution to real client exec_command.
       - CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used.
-      - stop_message_auto CLI input must include continuationPrompt, repeatCount, and maxRepeats when stopless state is available.
+      - stop_message_auto CLI input must include only flowId, repeatCount, and maxRepeats when stopless state is available; continuationPrompt/schema guidance/prompt preview are request-side internal material and must not be client-visible.
       - CLI execution path must not call server-side followup/reenter for migrated flows.
       - `apply_patch` is excluded; it remains native/freeform client tooling.
       - `servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted.
@@ -226,7 +226,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns stopless CLI projection seed planning for continuationPrompt, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction.
+      - servertool-core owns stopless CLI projection seed planning for internal continuationPrompt seed, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction; client-visible CLI projection remains status-only.
       - TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell.
       - Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS.
 
@@ -574,7 +574,7 @@ owners:
 
   - feature_id: vr.provider_forwarder_runtime
     status: active
-    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown reprobe, and runtime diagnostics stay in Rust Virtual Router
+    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
     canonical_types:
       - ForwarderRegistry
@@ -606,7 +606,7 @@ owners:
     migration_target: rust
     notes:
       - Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys.
-      - Forwarder availability must inspect real targets, including startup persisted cooldown reprobe, without consuming unselected targets.
+      - Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.
       - HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.
 
   - feature_id: hub.metadata_boundary
@@ -1503,7 +1503,7 @@ owners:
       - Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust.
   - feature_id: manager.health_runtime
     status: active
-    summary: provider health / cooldown / persisted 503 family managed by Rust Virtual Router health; TS modules/health is persistence bridge
+    summary: provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
     canonical_types:
       - ProviderHealthState
@@ -1512,10 +1512,11 @@ owners:
       - record_failure
       - cooldown_provider
       - cooldown_provider_until_midnight_persisted
-      - consume_persisted_503_reprobe_if_available
       - trip_provider
       - is_available
-      - is_persisted_503_daily_cooldown_active
+      - record_http_502_failure
+      - record_http_429_failure
+      - record_recoverable_failure
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
       - src/manager/modules/health
@@ -1533,8 +1534,8 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - Health truth (success/failure/cooldown/persisted 503 family) lives in Rust health.rs.
-      - TS HealthManagerModule is jsonl persistence bridge only; must not redefine cooldown/persisted semantics.
+      - Health truth (success/failure/runtime cooldown ladder) lives in Rust health.rs.
+      - Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics.
   - feature_id: manager.token_runtime
     status: active
     summary: OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin

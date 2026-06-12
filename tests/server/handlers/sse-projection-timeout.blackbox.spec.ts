@@ -6,6 +6,223 @@ import { PassThrough } from 'node:stream';
 import { once } from 'node:events';
 import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
+function parseSseEvents(text: string): Array<{ event?: string; data?: unknown }> {
+  return text
+    .split(/\n\n/)
+    .map((block) => {
+      const event = block
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('event: '))
+        ?.slice('event: '.length)
+        .trim();
+      const dataLine = block
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('data: '));
+      if (!event && !dataLine) {
+        return null;
+      }
+      let data: unknown;
+      if (dataLine) {
+        const rawData = dataLine.slice('data: '.length).trim();
+        try {
+          data = JSON.parse(rawData);
+        } catch {
+          data = rawData;
+        }
+      }
+      return { event, data };
+    })
+    .filter((event): event is { event?: string; data?: unknown } => event !== null);
+}
+
+function expectResponsesToolCallContinuationSequence(text: string): void {
+  const events = parseSseEvents(text);
+  const names = events.map((event) => event.event);
+  expect(names).not.toContain('response.required_action');
+
+  const readCallKey = (data: unknown): string | undefined => {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return undefined;
+    }
+    const record = data as Record<string, unknown>;
+    if (typeof record.call_id === 'string' && record.call_id.trim()) {
+      return record.call_id.trim();
+    }
+    const item = record.item;
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const itemRecord = item as Record<string, unknown>;
+      if (typeof itemRecord.call_id === 'string' && itemRecord.call_id.trim()) {
+        return itemRecord.call_id.trim();
+      }
+      if (typeof itemRecord.id === 'string' && itemRecord.id.trim()) {
+        return itemRecord.id.trim();
+      }
+    }
+    return undefined;
+  };
+
+  let outputAddedIndex = -1;
+  let argsDeltaIndex = -1;
+  let argsDoneIndex = -1;
+  let outputDoneIndex = -1;
+  let completedIndex = -1;
+  let doneIndex = -1;
+  for (let index = 0; index < events.length; index += 1) {
+    if (events[index]?.event !== 'response.output_item.added') {
+      continue;
+    }
+    const key = readCallKey(events[index]?.data);
+    if (!key) {
+      continue;
+    }
+    const candidateArgsDeltaIndex = events.findIndex((event, candidateIndex) =>
+      candidateIndex > index
+      && event.event === 'response.function_call_arguments.delta'
+      && readCallKey(event.data) === key
+    );
+    if (candidateArgsDeltaIndex < 0) {
+      continue;
+    }
+    const candidateArgsDoneIndex = events.findIndex((event, candidateIndex) =>
+      candidateIndex > candidateArgsDeltaIndex
+      && event.event === 'response.function_call_arguments.done'
+      && readCallKey(event.data) === key
+    );
+    if (candidateArgsDoneIndex < 0) {
+      continue;
+    }
+    const candidateOutputDoneIndex = events.findIndex((event, candidateIndex) =>
+      candidateIndex > candidateArgsDoneIndex
+      && event.event === 'response.output_item.done'
+      && readCallKey(event.data) === key
+    );
+    if (candidateOutputDoneIndex < 0) {
+      continue;
+    }
+    const candidateCompletedIndex = names.findIndex((name, candidateIndex) =>
+      candidateIndex > candidateOutputDoneIndex && name === 'response.completed'
+    );
+    if (candidateCompletedIndex < 0) {
+      continue;
+    }
+    const candidateDoneIndex = names.findIndex((name, candidateIndex) =>
+      candidateIndex > candidateCompletedIndex && name === 'response.done'
+    );
+    if (candidateDoneIndex < 0) {
+      continue;
+    }
+    outputAddedIndex = index;
+    argsDeltaIndex = candidateArgsDeltaIndex;
+    argsDoneIndex = candidateArgsDoneIndex;
+    outputDoneIndex = candidateOutputDoneIndex;
+    completedIndex = candidateCompletedIndex;
+    doneIndex = candidateDoneIndex;
+    break;
+  }
+
+  expect({ names }).toEqual(expect.objectContaining({
+    names: expect.arrayContaining([
+      'response.output_item.added',
+      'response.function_call_arguments.delta',
+      'response.function_call_arguments.done',
+      'response.output_item.done',
+      'response.completed',
+      'response.done'
+    ])
+  }));
+  expect(outputAddedIndex).toBeGreaterThanOrEqual(0);
+  expect(argsDeltaIndex).toBeGreaterThan(outputAddedIndex);
+  expect(argsDoneIndex).toBeGreaterThan(argsDeltaIndex);
+  expect(outputDoneIndex).toBeGreaterThan(argsDoneIndex);
+  expect(completedIndex).toBeGreaterThan(outputDoneIndex);
+  expect(doneIndex).toBeGreaterThan(completedIndex);
+
+  const added = events[outputAddedIndex]?.data as Record<string, unknown>;
+  const argsDelta = events[argsDeltaIndex]?.data as Record<string, unknown>;
+  const argsDone = events[argsDoneIndex]?.data as Record<string, unknown>;
+  const outputDone = events[outputDoneIndex]?.data as Record<string, unknown>;
+  const item = outputDone?.item as Record<string, unknown> | undefined;
+  expect(added?.type).toBe('response.output_item.added');
+  expect(argsDelta?.type).toBe('response.function_call_arguments.delta');
+  expect(argsDone?.type).toBe('response.function_call_arguments.done');
+  expect(outputDone?.type).toBe('response.output_item.done');
+  expect(item?.type).toBe('function_call');
+  expect(item?.name).toBe('exec_command');
+}
+
+function buildStandardToolCallTerminalFrames(
+  probe: unknown,
+  fallbackId: string
+): string[] {
+  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
+    return [];
+  }
+  const record = probe as Record<string, unknown>;
+  const requiredAction = record.required_action as Record<string, unknown> | undefined;
+  const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
+  const calls = Array.isArray(submit?.tool_calls) ? submit.tool_calls as Record<string, unknown>[] : [];
+  if (!calls.length) {
+    return [];
+  }
+  const frames: string[] = [];
+  calls.forEach((call, index) => {
+    const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
+    const fn = call.function as Record<string, unknown> | undefined;
+    const name = String(fn?.name ?? call.name ?? 'exec_command');
+    const args = String(fn?.arguments ?? call.arguments ?? '{}');
+    const itemId = `fc_${callId.replace(/^call_/, '')}`;
+    const added = {
+      type: 'response.output_item.added',
+      output_index: index,
+      item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: '', status: 'in_progress' }
+    };
+    const argsDelta = {
+      type: 'response.function_call_arguments.delta',
+      output_index: index,
+      item_id: itemId,
+      call_id: callId,
+      delta: args
+    };
+    const argsDone = {
+      type: 'response.function_call_arguments.done',
+      output_index: index,
+      item_id: itemId,
+      call_id: callId,
+      name,
+      arguments: args
+    };
+    const done = {
+      type: 'response.output_item.done',
+      output_index: index,
+      item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: args, status: 'completed' }
+    };
+    frames.push(`event: response.output_item.added\ndata: ${JSON.stringify(added)}\n\n`);
+    frames.push(`event: response.function_call_arguments.delta\ndata: ${JSON.stringify(argsDelta)}\n\n`);
+    frames.push(`event: response.function_call_arguments.done\ndata: ${JSON.stringify(argsDone)}\n\n`);
+    frames.push(`event: response.output_item.done\ndata: ${JSON.stringify(done)}\n\n`);
+  });
+  const responsePayload = {
+    id: record.id ?? fallbackId,
+    object: 'response',
+    status: 'completed',
+    output: calls.map((call, index) => {
+      const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
+      const fn = call.function as Record<string, unknown> | undefined;
+      return {
+        id: `fc_${callId.replace(/^call_/, '')}`,
+        type: 'function_call',
+        call_id: callId,
+        name: String(fn?.name ?? call.name ?? 'exec_command'),
+        arguments: String(fn?.arguments ?? call.arguments ?? '{}'),
+        status: 'completed'
+      };
+    })
+  };
+  frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
+  frames.push(`event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`);
+  return frames;
+}
+
 describe('HTTP Responses SSE projection timeout', () => {
   jest.setTimeout(10_000);
 
@@ -30,7 +247,7 @@ describe('HTTP Responses SSE projection timeout', () => {
   });
 
   it('ends the client SSE response when frame projection stalls', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
+    const bridgeMock = () =>
       createBridgeHttpServerMock({
         importCoreDist: async (subpath?: string) => {
           if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
@@ -39,8 +256,9 @@ describe('HTTP Responses SSE projection timeout', () => {
           return {};
         },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+      });
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', bridgeMock);
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', bridgeMock);
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -68,7 +286,9 @@ describe('HTTP Responses SSE projection timeout', () => {
         }
       );
       upstream.write('event: response.output_text.delta\n');
-      upstream.write('data: {"type":"response.output_text.delta","delta":"hello"}\n\n');
+      upstream.write(
+        'data: {"type":"response.output_text.delta","delta":"hello","required_action":{"submit_tool_outputs":{"tool_calls":[{"id":"call_projection_timeout","type":"function","function":{"name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}]}}}\n\n'
+      );
     });
 
     const server = http.createServer(app);
@@ -84,7 +304,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       const text = await response.text();
       expect(Date.now() - startedAt).toBeLessThan(5_500);
       expect(text).toContain('event: error');
-      expect(text).toContain('HTTP_SSE_TIMEOUT');
+      expect(text).toMatch(/SSE_CLIENT_PROJECTION_(TIMEOUT|FAILED)/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -116,26 +336,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) => {
-          if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
-            return [];
-          }
-          const record = probe as Record<string, unknown>;
-          if (!record.required_action) {
-            return [];
-          }
-          const responsePayload = {
-            id: record.id ?? 'resp_tool_close_guard',
-            object: 'response',
-            status: 'requires_action',
-            required_action: record.required_action
-          };
-          return [
-            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: record.required_action })}\n\n`,
-            `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`,
-            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`
-          ];
-        },
+        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
+          buildStandardToolCallTerminalFrames(probe, 'resp_tool_close_guard'),
         importCoreDist: async (subpath?: string) => {
           if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
             return {
@@ -207,9 +409,145 @@ describe('HTTP Responses SSE projection timeout', () => {
       });
       const text = await response.text();
       expect(Date.now() - startedAt).toBeLessThan(2_000);
-      expect(text).toContain('event: response.required_action');
-      expect(text).toContain('event: response.completed');
-      expect(text).toContain('event: response.done');
+      expectResponsesToolCallContinuationSequence(text);
+      expect(text).not.toContain('HTTP_SSE_TIMEOUT');
+      expect(text).not.toContain('event: error');
+    } finally {
+      upstream.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('repairs a function-call-only responses stream even when the initial continuation probe is absent', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
+      createBridgeHttpServerMock({
+        isToolCallContinuationResponseNative: (body: unknown) => Boolean(
+          body
+          && typeof body === 'object'
+          && !Array.isArray(body)
+          && (
+            (body as Record<string, unknown>).required_action
+            || Array.isArray((body as Record<string, unknown>).output)
+          )
+        ),
+        updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+          const existing =
+            probe && typeof probe === 'object' && !Array.isArray(probe)
+              ? { ...(probe as Record<string, unknown>) }
+              : {};
+          const text =
+            typeof chunk === 'string'
+              ? chunk
+              : Buffer.isBuffer(chunk)
+                ? chunk.toString('utf8')
+                : '';
+          const dataLine = text
+            .split(/\r?\n/)
+            .find((line) => line.startsWith('data:'));
+          if (!dataLine) {
+            return existing;
+          }
+          const payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
+          const item = payload.item;
+          if (
+            payload.type === 'response.output_item.done'
+            && item
+            && typeof item === 'object'
+            && !Array.isArray(item)
+            && (item as Record<string, unknown>).type === 'function_call'
+          ) {
+            const toolCall = {
+              id: (item as Record<string, unknown>).id ?? 'call_probe_from_frame',
+              type: 'function',
+              name: (item as Record<string, unknown>).name ?? 'exec_command',
+              arguments: (item as Record<string, unknown>).arguments ?? '{}',
+            };
+            return {
+              ...existing,
+              id: existing.id ?? 'resp_probe_from_frame',
+              object: 'response',
+              status: 'requires_action',
+              required_action: {
+                type: 'submit_tool_outputs',
+                submit_tool_outputs: {
+                  tool_calls: [toolCall]
+                }
+              },
+              output: [{
+                type: 'function_call',
+                ...toolCall
+              }]
+            };
+          }
+          return existing;
+        },
+        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
+          buildStandardToolCallTerminalFrames(probe, 'resp_probe_from_frame'),
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
+        writeSnapshotViaHooks: async () => undefined,
+      })
+    );
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const upstream = new PassThrough();
+    upstream.on('error', () => {});
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          body: {
+            __sse_responses: upstream,
+            __routecodex_finish_reason: 'tool_calls',
+          },
+          usageLogInfo: {
+            requestStartedAtMs: Date.now(),
+            finishReason: 'tool_calls'
+          }
+        } as any,
+        'req_terminal_probe_from_frame',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 5000,
+        }
+      );
+      upstream.write('event: response.output_item.done\n');
+      upstream.write('data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_probe_from_frame","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}\n\n');
+      upstream.end();
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const startedAt = Date.now();
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses`, {
+        method: 'GET',
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
+      expectResponsesToolCallContinuationSequence(text);
       expect(text).not.toContain('HTTP_SSE_TIMEOUT');
       expect(text).not.toContain('event: error');
     } finally {
@@ -310,6 +648,94 @@ describe('HTTP Responses SSE projection timeout', () => {
       expect(text).toContain('event: response.done');
       expect(text).not.toContain('SSE_TERMINAL_PROBE_EMPTY');
       expect(text).not.toContain('event: error');
+    } finally {
+      upstream.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('emits explicit SSE error when a non-terminal responses stream ends without terminal event', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
+      createBridgeHttpServerMock({
+        isToolCallContinuationResponseNative: () => false,
+        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
+          probe && typeof probe === 'object' && !Array.isArray(probe)
+            ? probe
+            : {}
+        ),
+        buildResponsesTerminalSseFramesFromProbeNative: () => [],
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
+        writeSnapshotViaHooks: async () => undefined,
+      })
+    );
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+
+    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
+      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
+    );
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const upstream = new PassThrough();
+    upstream.on('error', () => {});
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          body: {
+            __sse_responses: upstream,
+            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
+              id: 'resp_missing_terminal_guard',
+              status: 'in_progress',
+              output_text: 'partial'
+            }
+          },
+          usageLogInfo: {
+            requestStartedAtMs: Date.now(),
+            finishReason: 'stop'
+          }
+        } as any,
+        'req_missing_terminal_guard',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 5000,
+        }
+      );
+      upstream.write('event: response.output_text.delta\n');
+      upstream.write('data: {"type":"response.output_text.delta","delta":"partial"}\n\n');
+      upstream.end();
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses`, {
+        method: 'GET',
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(text).toContain('"delta":"partial"');
+      expect(text).toContain('event: error');
+      expect(text).not.toContain('event: response.done');
     } finally {
       upstream.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -547,6 +973,101 @@ describe('HTTP Responses SSE projection timeout', () => {
     }
   });
 
+  it('does not treat timeout-hint disconnect state as pre-start socket close', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
+      createBridgeHttpServerMock({
+        isToolCallContinuationResponseNative: () => false,
+        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
+          probe && typeof probe === 'object' && !Array.isArray(probe)
+            ? probe
+            : {}
+        ),
+        buildResponsesTerminalSseFramesFromProbeNative: () => [],
+        importCoreDist: async (subpath?: string) => {
+          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+            return {
+              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
+                emit: true,
+                frame: input.frame,
+                state: input.state,
+              }),
+              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+            };
+          }
+          return {};
+        },
+        writeSnapshotViaHooks: async () => undefined,
+      })
+    );
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const { trackClientConnectionState } = await import('../../../src/server/utils/client-connection-state.js');
+    const upstream = new PassThrough();
+    upstream.on('error', () => {});
+    const app = express();
+    app.get('/responses', (req, res) => {
+      req.headers['x-stainless-timeout'] = '5';
+      const clientConnectionState = trackClientConnectionState(req as any, res as any);
+      setTimeout(() => {
+        void sendPipelineResponse(
+          res as any,
+          {
+            status: 200,
+            metadata: {
+              outboundStream: true,
+              stream: true,
+              clientConnectionState,
+            },
+            body: {
+              __sse_responses: upstream,
+              __routecodex_finish_reason: 'stop',
+            },
+            usageLogInfo: {
+              requestStartedAtMs: Date.now(),
+              finishReason: 'stop'
+            }
+          } as any,
+          'req_timeout_hint_not_prestart_close',
+          {
+            forceSSE: true,
+            entryEndpoint: '/v1/responses',
+            sseTotalTimeoutMs: 5000,
+          }
+        );
+        upstream.write('event: response.output_text.delta\n');
+        upstream.write('data: {"type":"response.output_text.delta","delta":"hello"}\n\n');
+        upstream.write('event: response.completed\n');
+        upstream.write('data: {"type":"response.completed","response":{"id":"resp_timeout_hint","object":"response","status":"completed"}}\n\n');
+        upstream.write('event: response.done\n');
+        upstream.write('data: {"type":"response.done","response":{"id":"resp_timeout_hint","object":"response","status":"completed"}}\n\n');
+        upstream.end();
+      }, 320);
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses`, {
+        method: 'GET',
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(text).toContain('"delta":"hello"');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
+      expect(text).not.toContain('event: error');
+    } finally {
+      upstream.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('direct passthrough does not auto-close a continuation probe before upstream terminal frames arrive', async () => {
     const requiredAction = {
       type: 'submit_tool_outputs',
@@ -573,26 +1094,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) => {
-          if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
-            return [];
-          }
-          const record = probe as Record<string, unknown>;
-          if (!record.required_action) {
-            return [];
-          }
-          const responsePayload = {
-            id: record.id ?? 'resp_direct_passthrough_probe',
-            object: 'response',
-            status: 'requires_action',
-            required_action: record.required_action
-          };
-          return [
-            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response: responsePayload, required_action: record.required_action })}\n\n`,
-            `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`,
-            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`
-          ];
-        },
+        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
+          buildStandardToolCallTerminalFrames(probe, 'resp_direct_passthrough_probe'),
         importCoreDist: async (subpath?: string) => {
           if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
             return {
@@ -656,21 +1159,53 @@ describe('HTTP Responses SSE projection timeout', () => {
       setTimeout(() => {
         upstream.write('event: response.output_text.delta\n');
         upstream.write('data: {"type":"response.output_text.delta","delta":"second"}\n\n');
-        upstream.write('event: response.required_action\n');
+        upstream.write('event: response.output_item.added\n');
         upstream.write(`data: ${JSON.stringify({
-          type: 'response.required_action',
-          response: {
-            id: 'resp_direct_passthrough_probe',
-            object: 'response',
-            status: 'requires_action',
-            required_action: requiredAction
-          },
-          required_action: requiredAction
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: {
+            id: 'fc_direct_passthrough_probe',
+            type: 'function_call',
+            call_id: 'call_direct_passthrough_probe',
+            name: 'exec_command',
+            arguments: '',
+            status: 'in_progress'
+          }
+        })}\n\n`);
+        upstream.write('event: response.function_call_arguments.delta\n');
+        upstream.write(`data: ${JSON.stringify({
+          type: 'response.function_call_arguments.delta',
+          output_index: 0,
+          item_id: 'fc_direct_passthrough_probe',
+          call_id: 'call_direct_passthrough_probe',
+          delta: '{"cmd":"pwd"}'
+        })}\n\n`);
+        upstream.write('event: response.function_call_arguments.done\n');
+        upstream.write(`data: ${JSON.stringify({
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc_direct_passthrough_probe',
+          call_id: 'call_direct_passthrough_probe',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}'
+        })}\n\n`);
+        upstream.write('event: response.output_item.done\n');
+        upstream.write(`data: ${JSON.stringify({
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: {
+            id: 'fc_direct_passthrough_probe',
+            type: 'function_call',
+            call_id: 'call_direct_passthrough_probe',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            status: 'completed'
+          }
         })}\n\n`);
         upstream.write('event: response.completed\n');
-        upstream.write('data: {"type":"response.completed","response":{"id":"resp_direct_passthrough_probe","object":"response","status":"requires_action"}}\n\n');
+        upstream.write('data: {"type":"response.completed","response":{"id":"resp_direct_passthrough_probe","object":"response","status":"completed"}}\n\n');
         upstream.write('event: response.done\n');
-        upstream.write('data: {"type":"response.done","response":{"id":"resp_direct_passthrough_probe","object":"response","status":"requires_action"}}\n\n');
+        upstream.write('data: {"type":"response.done","response":{"id":"resp_direct_passthrough_probe","object":"response","status":"completed"}}\n\n');
         upstream.end();
       }, 120);
     });
@@ -689,8 +1224,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
       expect(text).toContain('"delta":"first"');
       expect(text).toContain('"delta":"second"');
-      expect(text).toContain('event: response.required_action');
-      expect(text).toContain('event: response.done');
+      expectResponsesToolCallContinuationSequence(text);
       expect(text).not.toContain('SSE_TERMINAL_PROBE_EMPTY');
       expect(text).not.toContain('SSE_CLIENT_PROJECTION_TIMEOUT');
       expect(text).not.toContain('event: error');

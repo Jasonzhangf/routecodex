@@ -314,11 +314,11 @@ describe('http routes invalid json handling', () => {
         '  { alias = "key1", apiKey = "test" }',
         ']',
         '',
-        '[provider.models."deepseek-v4-pro"]',
+        '[provider.models."DeepSeek-V4-Pro"]',
         'supportsStreaming = true',
         'aliases = ["deepseek-v4-pro"]',
         '',
-        '[provider.models."deepseek-v4-flash"]',
+        '[provider.models."DeepSeek-V4-Flash"]',
         'supportsStreaming = true'
       ].join('\n'),
       'utf8'
@@ -357,8 +357,8 @@ describe('http routes invalid json handling', () => {
         expect(ids).toContain('deepseek-v4-flash');
         expect(ids).not.toContain('DF.deepseek-v4-pro');
         expect(ids).not.toContain('DF.deepseek-v4-flash');
-        expect(ids).not.toContain('1token-deepseek.DeepSeek-V4-Pro');
-        expect(ids).not.toContain('1token-deepseek.DeepSeek-V4-Flash');
+        expect(ids).not.toContain('DeepSeek-V4-Pro');
+        expect(ids).not.toContain('DeepSeek-V4-Flash');
       });
     } finally {
       if (restoreRccHome === undefined) {

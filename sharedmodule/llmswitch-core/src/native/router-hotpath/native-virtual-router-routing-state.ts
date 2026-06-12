@@ -82,6 +82,7 @@ export interface RoutingInstructionState {
   disabledModels: Map<string, Set<string>>;
   stopMessageSource?: string;
   stopMessageText?: string;
+  stopMessageProviderKey?: string;
   stopMessageMaxRepeats?: number;
   stopMessageUsed?: number;
   stopMessageUpdatedAt?: number;
@@ -204,6 +205,7 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     state.disabledKeys.size === 0 &&
     state.disabledModels.size === 0 &&
     !stopText &&
+    !(typeof state.stopMessageProviderKey === 'string' && state.stopMessageProviderKey.trim()) &&
     state.stopMessageMaxRepeats === undefined &&
     state.stopMessageUsed === undefined &&
     state.stopMessageStageMode === undefined &&

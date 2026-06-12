@@ -43,12 +43,12 @@ if (!ciJest.includes('tests/server/runtime/http-server/direct-passthrough-route-
   failures.push('ci-jest must include tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts');
 }
 
-if (directSpec && !directSpec.includes('does not runtime-reject chat-style function tools on responses direct')) {
-  failures.push('direct passthrough spec must assert chat-style tools are not runtime-rejected');
+if (directSpec && !directSpec.includes('allows chat-style function tools on responses same-protocol direct')) {
+  failures.push('direct passthrough spec must assert same-protocol chat-style client tools stay on direct');
 }
 
-if (directSpec && !directSpec.includes('does not runtime-reject historical responses tool input content on direct')) {
-  failures.push('direct passthrough spec must assert historical tool content is not runtime-rejected');
+if (directSpec && !directSpec.includes('rejects historical responses tool input content on direct')) {
+  failures.push('direct passthrough spec must assert invalid historical tool content stays fail-fast on direct');
 }
 
 if (providerSpec && !providerSpec.includes('direct passthrough sends chat-style response tools to transport')) {
@@ -106,4 +106,4 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:responses-direct-tool-shape-contract] ok');
-console.log('- checked provider runtime, direct payload contract, CI jest wiring, and regressions');
+console.log('- checked provider runtime, same-protocol direct contract, CI jest wiring, and regressions');

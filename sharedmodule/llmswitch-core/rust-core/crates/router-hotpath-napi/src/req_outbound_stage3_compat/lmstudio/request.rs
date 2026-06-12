@@ -9,7 +9,6 @@ include!("request/core_utils.rs");
 include!("request/tool_ids.rs");
 include!("request/tools.rs");
 include!("request/function_call_ids.rs");
-include!("request/input_stringify.rs");
 include!("request/pipeline.rs");
 
 fn empty_adapter_context() -> AdapterContext {
@@ -36,24 +35,4 @@ fn empty_adapter_context() -> AdapterContext {
         session_id: None,
         conversation_id: None,
     }
-}
-
-pub(crate) fn apply_lmstudio_responses_input_stringify_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-) -> NapiResult<String> {
-    let mut payload: Value =
-        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let adapter_context: AdapterContext = match adapter_context_json {
-        Some(raw) if !raw.trim().is_empty() => {
-            serde_json::from_str(&raw).map_err(|e| napi::Error::from_reason(e.to_string()))?
-        }
-        _ => empty_adapter_context(),
-    };
-
-    if let Some(root) = payload.as_object_mut() {
-        apply_lmstudio_responses_input_stringify(root, &adapter_context);
-    }
-
-    serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

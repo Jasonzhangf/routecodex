@@ -55,8 +55,23 @@ fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Value 
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
-        if is_assistant && (part_type.is_empty() || part_type == "input_text") {
+        if part_type == "text" || (!is_assistant && part_type.is_empty()) {
+            row.insert("type".to_string(), Value::String("input_text".to_string()));
+        } else if is_assistant && (part_type.is_empty() || part_type == "input_text") {
             row.insert("type".to_string(), Value::String("output_text".to_string()));
+        } else if part_type == "image_url" {
+            row.insert("type".to_string(), Value::String("input_image".to_string()));
+        }
+        if row.get("type").and_then(Value::as_str) == Some("input_image") {
+            if let Some(url) = row
+                .get("image_url")
+                .and_then(Value::as_object)
+                .and_then(|image_url| image_url.get("url"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+            {
+                row.insert("image_url".to_string(), Value::String(url));
+            }
         }
     }
     normalized
@@ -194,6 +209,63 @@ fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
     )
 }
 
+fn normalize_openai_chat_message_content_part(part: &Value) -> Value {
+    let mut normalized = strip_private_fields(part);
+    let Some(row) = normalized.as_object_mut() else {
+        return normalized;
+    };
+    let part_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match part_type.as_str() {
+        "input_text" | "output_text" | "commentary" => {
+            row.insert("type".to_string(), Value::String("text".to_string()));
+        }
+        "input_image" => {
+            row.insert("type".to_string(), Value::String("image_url".to_string()));
+            let image_url_value = match row.get("image_url").cloned() {
+                Some(Value::String(url)) => Some(Value::Object(Map::from_iter([(
+                    "url".to_string(),
+                    Value::String(url),
+                )]))),
+                Some(Value::Object(existing)) => Some(Value::Object(existing)),
+                _ => None,
+            };
+            if let Some(image_url) = image_url_value {
+                row.insert("image_url".to_string(), image_url);
+            }
+        }
+        _ => {}
+    }
+    normalized
+}
+
+fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
+    let mut normalized = strip_private_fields(payload);
+    let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
+        return normalized;
+    };
+    for message in messages.iter_mut() {
+        let Some(message_row) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(content) = message_row.get_mut("content") else {
+            continue;
+        };
+        if let Value::Array(parts) = content {
+            let normalized_parts = parts
+                .iter()
+                .map(normalize_openai_chat_message_content_part)
+                .collect::<Vec<_>>();
+            *content = Value::Array(normalized_parts);
+        }
+    }
+    normalized
+}
+
 fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, String> {
     let mut payload = format_envelope
         .get("payload")
@@ -261,7 +333,7 @@ fn build_openai_chat_request(format_envelope: &Value) -> Result<Value, String> {
             .ok_or_else(|| "responses-openai request codec returned no request".to_string());
     }
     if payload.get("messages").is_some() {
-        return Ok(strip_private_fields(&payload));
+        return Ok(normalize_openai_chat_messages_payload(&payload));
     }
     Ok(strip_private_fields(&payload))
 }
@@ -412,6 +484,36 @@ mod tests {
     }
 
     #[test]
+    fn test_build_openai_responses_request_normalizes_chat_image_url_parts() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": "describe" },
+                            { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAA" } }
+                        ]
+                    }]
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let content = result.payload["input"][0]["content"]
+            .as_array()
+            .expect("responses content");
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "describe");
+        assert_eq!(content[1]["type"], "input_image");
+        assert_eq!(content[1]["image_url"], "data:image/png;base64,AAA");
+    }
+
+    #[test]
     fn test_build_openai_responses_request_preserves_tool_semantics_from_messages() {
         let input = FormatBuildInput {
             format_envelope: serde_json::json!({
@@ -499,6 +601,42 @@ mod tests {
             "search latest"
         );
         assert!(result.payload.get("metadata").is_none());
+    }
+
+    #[test]
+    fn test_build_openai_chat_request_normalizes_responses_text_parts_inside_messages() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-chat",
+                "version": "v1",
+                "payload": {
+                    "model": "DeepSeek-V4-Pro",
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "<image name=[Image #1]>" },
+                            { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAA" } },
+                            { "type": "input_text", "text": "</image>" },
+                            { "type": "input_text", "text": "[Image #1]继续" }
+                        ]
+                    }]
+                }
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let content = result.payload["messages"][0]["content"]
+            .as_array()
+            .expect("chat content");
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "<image name=[Image #1]>");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAA");
+        assert_eq!(content[2]["type"], "text");
+        assert_eq!(content[2]["text"], "</image>");
+        assert_eq!(content[3]["type"], "text");
+        assert_eq!(content[3]["text"], "[Image #1]继续");
     }
 
     #[test]

@@ -85,7 +85,7 @@ describe('HTTP Responses client tool contract', () => {
     }
   }
 
-  it('HTTP blackbox: pending function_call response must surface response.required_action before terminal completion', async () => {
+  it('HTTP blackbox: pending function_call response must surface standard tool events before terminal completion', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/responses?mode=pending`, {
         headers: { accept: 'text/event-stream' },
@@ -96,10 +96,10 @@ describe('HTTP Responses client tool contract', () => {
       expect(response.headers.get('content-type') || '').toContain('text/event-stream');
       expect(text).toContain('event: response.output_item.added');
       expect(text).toContain('event: response.function_call_arguments.done');
+      expect(text).toContain('event: response.output_item.done');
       expect(text).toContain('"name":"exec_command"');
-      expect(text).toContain('event: response.required_action');
-      expect(text).toContain('"status":"requires_action"');
-      expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
+      expect(text).not.toContain('event: response.required_action');
+      expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
     });
   });
 

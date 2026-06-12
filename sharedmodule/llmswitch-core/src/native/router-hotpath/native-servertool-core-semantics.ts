@@ -480,6 +480,7 @@ export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMe
 
 export interface RuntimeStopMessageStateSnapshot {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   source?: string;
@@ -501,6 +502,7 @@ export interface StopMessagePersistedStateSelectionPlan {
 export interface StopMessageRoutingStateApplyPlan {
   source: string;
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   updatedAt?: number;
@@ -534,6 +536,7 @@ export interface StopMessageDefaultConfigPlan {
 
 export interface StopMessagePersistSnapshotPlan {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   source: string;
@@ -969,6 +972,7 @@ function parseRuntimeStopMessageStateSnapshotPayload(
   const aiMode = readStopMessageAiModeField(record.aiMode, `${capability} aiMode`);
   return {
     text: record.text.trim(),
+    ...(typeof record.providerKey === 'string' && record.providerKey.trim() ? { providerKey: record.providerKey.trim() } : {}),
     maxRepeats: record.maxRepeats as number,
     used: record.used as number,
     ...(typeof record.source === 'string' && record.source.trim() ? { source: record.source.trim() } : {}),
@@ -1223,6 +1227,7 @@ export function planStopMessagePersistSnapshotWithNative(input: {
   stateUpdate?: unknown;
   defaultText?: string;
   schemaUsedBeforeCount?: unknown;
+  currentProviderKey?: string;
 }): StopMessagePersistPlan {
   const capability = 'planStopMessagePersistSnapshotJson';
   const fn = readNativeFunction(capability);
@@ -1360,6 +1365,7 @@ function parseStopMessageRoutingStateApplyPayload(
   return {
     source: record.source.trim(),
     text: record.text.trim(),
+    ...(typeof record.providerKey === 'string' && record.providerKey.trim() ? { providerKey: record.providerKey.trim() } : {}),
     maxRepeats: record.maxRepeats as number,
     used: record.used as number,
     ...(typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) ? { updatedAt: record.updatedAt } : {}),

@@ -1,4 +1,3 @@
-use crate::chat_process_media_semantics::strip_responses_stored_context_input_media;
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, collect_reasoning_content_segments,
@@ -425,6 +424,34 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
     None
 }
 
+fn normalize_required_action_tool_call_to_input(call: &Value) -> Option<Value> {
+    let row = call.as_object()?;
+    let call_id = read_bridge_function_call_id(row)?;
+    let function = row.get("function").and_then(Value::as_object);
+    let name = read_trimmed_string(row.get("name"))
+        .or_else(|| function.and_then(|node| read_trimmed_string(node.get("name"))))?;
+    let arguments = row
+        .get("arguments")
+        .cloned()
+        .or_else(|| function.and_then(|node| node.get("arguments").cloned()))
+        .unwrap_or_else(|| Value::String("{}".to_string()));
+
+    let mut out = Map::new();
+    out.insert(
+        "type".to_string(),
+        Value::String("function_call".to_string()),
+    );
+    if let Some(id) = read_trimmed_string(row.get("id")) {
+        out.insert("id".to_string(), Value::String(id));
+    } else {
+        out.insert("id".to_string(), Value::String(format!("fc_{}", call_id)));
+    }
+    out.insert("call_id".to_string(), Value::String(call_id));
+    out.insert("name".to_string(), Value::String(name));
+    out.insert("arguments".to_string(), arguments);
+    Some(Value::Object(out))
+}
+
 fn convert_responses_output_to_input_items(response: &Value) -> Value {
     let output = response
         .as_object()
@@ -492,6 +519,31 @@ fn convert_responses_output_to_input_items(response: &Value) -> Value {
     }
     if let Some(previous) = pending_reasoning.take() {
         items.push(Value::Object(previous));
+    }
+    if items.iter().all(|item| {
+        item.as_object()
+            .and_then(|row| row.get("type"))
+            .and_then(Value::as_str)
+            != Some("function_call")
+    }) {
+        if let Some(required_action) = response
+            .as_object()
+            .and_then(|row| row.get("required_action"))
+            .and_then(Value::as_object)
+        {
+            if let Some(tool_calls) = required_action
+                .get("submit_tool_outputs")
+                .and_then(Value::as_object)
+                .and_then(|submit| submit.get("tool_calls"))
+                .and_then(Value::as_array)
+            {
+                for call in tool_calls {
+                    if let Some(mapped) = normalize_required_action_tool_call_to_input(call) {
+                        items.push(mapped);
+                    }
+                }
+            }
+        }
     }
     Value::Array(items)
 }
@@ -791,19 +843,14 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
             .or_else(|| context.as_object().and_then(|row| row.get("toolsRaw"))),
     );
 
-    if let Some(provider_key) = read_trimmed_string(
+    let provider_key_value = read_trimmed_string(
         context
             .as_object()
             .and_then(|row| row.get("providerKey"))
             .or_else(|| payload.as_object().and_then(|row| row.get("providerKey"))),
-    ) {
-        base_payload.insert("providerKey".to_string(), Value::String(provider_key));
-    }
-
-    let provider_key_value = base_payload
-        .get("providerKey")
-        .cloned()
-        .unwrap_or(Value::Null);
+    )
+    .map(Value::String)
+    .unwrap_or(Value::Null);
 
     let mut entry = Map::new();
     entry.insert("basePayload".to_string(), Value::Object(base_payload));
@@ -845,11 +892,7 @@ fn resume_responses_conversation_payload(
     let entry_obj = entry.as_object().cloned().unwrap_or_default();
     let base_payload = clone_object(entry_obj.get("basePayload"));
     let mut payload = base_payload.clone();
-    let mut merged_input = strip_responses_stored_context_input_media(
-        normalize_responses_history_items(clone_array(entry_obj.get("input"))),
-        "[Image omitted]".to_string(),
-    )
-    .messages;
+    let mut merged_input = normalize_responses_history_items(clone_array(entry_obj.get("input")));
     let tool_outputs = clone_array(
         submit_payload
             .as_object()
@@ -874,9 +917,6 @@ fn resume_responses_conversation_payload(
     );
 
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
-    if let Some(provider_key) = provider_key.clone() {
-        payload.insert("providerKey".to_string(), Value::String(provider_key));
-    }
 
     if let Some(model) =
         read_trimmed_string(submit_payload.as_object().and_then(|row| row.get("model")))
@@ -1270,8 +1310,11 @@ fn restore_responses_continuation_payload(
     }
 
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
-    if let Some(provider_key) = provider_key.clone() {
-        payload.insert("providerKey".to_string(), Value::String(provider_key));
+    if !payload.contains_key("tools") {
+        let tools = normalize_responses_tool_definitions(entry_obj.get("tools"));
+        if !tools.is_empty() {
+            payload.insert("tools".to_string(), Value::Array(tools));
+        }
     }
 
     payload.insert(
@@ -1360,9 +1403,6 @@ fn materialize_responses_continuation_payload(
     }
 
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
-    if let Some(provider_key) = provider_key.clone() {
-        payload.insert("providerKey".to_string(), Value::String(provider_key));
-    }
 
     payload.insert("input".to_string(), Value::Array(full_input.clone()));
     payload.remove("previous_response_id");
@@ -1555,6 +1595,31 @@ mod tests {
     }
 
     #[test]
+    fn handler_entry_plan_routes_submit_tool_outputs_to_native_submit_shape() {
+        let planned = plan_responses_handler_entry(
+            &json!({
+                "model": "gpt-5.5",
+                "response_id": "resp_submit_1",
+                "tool_outputs": [
+                    { "call_id": "call_submit_1", "output": "ok" }
+                ]
+            }),
+            Some("/v1/responses"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(planned["mode"], json!("submit_tool_outputs"));
+        assert_eq!(planned["responseId"], json!("resp_submit_1"));
+        assert_eq!(planned["payload"]["response_id"], json!("resp_submit_1"));
+        assert_eq!(
+            planned["payload"]["tool_outputs"][0]["call_id"],
+            json!("call_submit_1")
+        );
+        assert!(planned["payload"].get("input").is_none());
+    }
+
+    #[test]
     fn shared_responses_conversation_prepare_and_resume_json() {
         let payload = json!({
             "model": "gpt-base",
@@ -1660,6 +1725,55 @@ mod tests {
     }
 
     #[test]
+    fn converts_required_action_tool_calls_to_pending_function_call_items() {
+        let response = json!({
+            "id": "resp_required_action_1",
+            "object": "response",
+            "status": "requires_action",
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_required_action_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                }
+            }
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["type"], json!("function_call"));
+        assert_eq!(items[0]["call_id"], json!("call_required_action_1"));
+        assert_eq!(items[0]["name"], json!("exec_command"));
+        assert_eq!(items[0]["arguments"], json!("{\"cmd\":\"pwd\"}"));
+    }
+
+    #[test]
+    fn does_not_create_pending_function_call_when_required_action_has_no_tool_calls() {
+        let response = json!({
+            "id": "resp_empty_required_action_1",
+            "object": "response",
+            "status": "requires_action",
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": { "tool_calls": [] }
+            }
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(items.is_empty());
+    }
+
+    #[test]
     fn restore_never_emits_function_call_output_content_from_persisted_history() {
         let restored = restore_responses_continuation_payload(
             &json!({
@@ -1704,7 +1818,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_replaces_historical_attachments_with_placeholders_but_keeps_current_tool_output() {
+    fn resume_preserves_historical_attachments_until_provider_send_completes() {
         let payload = json!({
             "model": "gpt-base",
             "stream": true,
@@ -1745,8 +1859,8 @@ mod tests {
         .unwrap();
 
         let serialized = serde_json::to_string(resumed.get("payload").unwrap()).unwrap();
-        assert!(!serialized.contains("data:image/png;base64,HISTORY"));
-        assert!(serialized.contains("[Image omitted]"));
+        assert!(serialized.contains("data:image/png;base64,HISTORY"));
+        assert!(!serialized.contains("[Image omitted]"));
         assert!(serialized.contains("data:image/png;base64,CURRENT"));
     }
 

@@ -9,6 +9,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "applyReqProcessToolGovernanceJson",
   "applyClaudeThinkingToolSchemaCompatJson",
   "applyStoplessGoalDirectiveJson",
+  "planStoplessGoalStateReadJson",
+  "planStoplessGoalStatePersistJson",
   "buildOpenaiChatFromAnthropicJson",
   "buildOpenaiChatResponseFromAnthropicMessageJson",
   "buildAnthropicFromOpenaiChatJson",

@@ -62,7 +62,7 @@ function runExpectFailure(toolName, args = {}, options = {}) {
 
 console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
 
-// RED TEST 1: stop_message_auto outputs Rust-owned schema
+// RED TEST 1: stop_message_auto emits status-only stdout for stopless CLI projection
 {
   const raw = run('stop_message_auto', {
     continuationPrompt: 'continue with schema',
@@ -74,22 +74,30 @@ console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
   assert.equal(out.flowId, 'stop_message_flow', 'flowId must be stop_message_flow');
   assert.equal(out.repeatCount, 1, 'repeatCount');
   assert.equal(out.maxRepeats, 3, 'maxRepeats');
-  // schema must be Rust-owned
-  assert.ok(out.schemaGuidance, 'schemaGuidance present');
-  assert.ok(Array.isArray(out.schemaGuidance.requiredFields), 'requiredFields is array');
-  assert.ok(out.schemaGuidance.requiredFields.includes('stopreason'), 'must include stopreason');
-  assert.equal(out.schemaGuidance.stopreasonValues.continueNeeded, 2);
-  console.log('  [PASS] stop_message_auto Rust-owned schema');
+  assert.ok(!('continuationPrompt' in out), 'stdout must not leak continuationPrompt');
+  assert.ok(!('schemaGuidance' in out), 'stdout must not leak schemaGuidance');
+  assert.ok(!('injectedPromptPreview' in out), 'stdout must not leak injectedPromptPreview');
+  assert.deepEqual(out.input, {
+    continuationPrompt: 'continue with schema',
+    repeatCount: 1,
+    maxRepeats: 3,
+  }, 'internal input echo remains inside input only');
+  console.log('  [PASS] stop_message_auto status-only stdout');
 }
 
-// RED TEST 2: missing continuationPrompt fails fast
+// RED TEST 2: missing continuationPrompt still succeeds with status-only output
 {
-  const stderr = runExpectFailure('stop_message_auto', {
+  const raw = run('stop_message_auto', {
     repeatCount: 1,
     maxRepeats: 3,
   });
-  assert.ok(stderr.includes('SERVERTOOL_CLI_MISSING_FIELD: continuationPrompt'), stderr);
-  console.log('  [PASS] missing continuationPrompt fails fast');
+  const out = JSON.parse(raw);
+  assert.equal(out.ok, true, 'stop_message_auto still succeeds');
+  assert.equal(out.flowId, 'stop_message_flow', 'default flowId');
+  assert.equal(out.repeatCount, 1, 'repeatCount');
+  assert.equal(out.maxRepeats, 3, 'maxRepeats');
+  assert.ok(!('continuationPrompt' in out), 'stdout must not leak continuationPrompt');
+  console.log('  [PASS] missing continuationPrompt stays status-only');
 }
 
 // RED TEST 3: web_search is NOT ClientExecCliProjection

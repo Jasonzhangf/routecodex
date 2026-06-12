@@ -12,6 +12,7 @@ use crate::hub_pipeline_blocks::router_metadata_input::*;
 use crate::hub_pipeline_blocks::runtime_metadata::*;
 use crate::hub_pipeline_blocks::standardized_request::*;
 use crate::hub_pipeline_blocks::web_search::*;
+use crate::hub_pipeline_lib::execute_hub_pipeline_json;
 use serde_json::{json, Value};
 
 #[test]
@@ -381,6 +382,164 @@ fn test_json_roundtrip() {
     let output: HubPipelineOutput = serde_json::from_str(&result).unwrap();
     assert!(output.success);
     assert_eq!(output.request_id, "req_456");
+}
+
+#[test]
+fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_chat_provider() {
+    let input_json = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "minimonth.key1.MiniMax-M2.7",
+                    "providerType": "openai",
+                    "outboundProfile": "openai-chat",
+                    "runtimeKey": "minimonth.key1.MiniMax-M2.7"
+                },
+                "routeName": "search/gateway-priority-5555-weighted-search"
+            }
+        },
+        "request": {
+            "requestId": "req_responses_tool_continuation_chat_provider",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "stream": true,
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound",
+            "payload": {
+                "model": "router-gpt-5.5",
+                "previous_response_id": "resp_prev_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "name": "probe_tool",
+                        "arguments": "{\"query\":\"routecodex_probe\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "output": "TOOL_RESULT_ROUTE_CODEX_OK"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "probe_tool",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            },
+            "metadata": {
+                "stream": true,
+                "providerProtocol": "openai-responses"
+            }
+        }
+    })
+    .to_string();
+
+    let result = execute_hub_pipeline_json(input_json).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["success"], json!(true));
+    let messages = output["payload"]["messages"]
+        .as_array()
+        .expect("provider messages");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(messages[0]["tool_calls"][0]["id"], json!("call_probe_1"));
+    assert_eq!(
+        messages[0]["tool_calls"][0]["function"]["name"],
+        json!("probe_tool")
+    );
+    assert_eq!(messages[1]["role"], json!("tool"));
+    assert_eq!(messages[1]["tool_call_id"], json!("call_probe_1"));
+    assert_eq!(messages[1]["content"], json!("TOOL_RESULT_ROUTE_CODEX_OK"));
+}
+
+#[test]
+fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic_provider() {
+    let input_json = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "minimonth.key1.MiniMax-M2.7",
+                    "providerType": "anthropic",
+                    "outboundProfile": "anthropic-messages",
+                    "runtimeKey": "minimonth.key1.MiniMax-M2.7",
+                    "compatibilityProfile": "anthropic:claude-code"
+                },
+                "routeName": "tools/gateway-priority-5555-weighted-tools"
+            }
+        },
+        "request": {
+            "requestId": "req_responses_tool_continuation_anthropic_provider",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "stream": true,
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound",
+            "payload": {
+                "model": "router-gpt-5.5",
+                "previous_response_id": "resp_prev_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "name": "probe_tool",
+                        "arguments": "{\"query\":\"routecodex_probe\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_probe_1",
+                        "call_id": "call_probe_1",
+                        "output": "TOOL_RESULT_ROUTE_CODEX_OK"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "probe_tool",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            },
+            "metadata": {
+                "stream": true,
+                "providerProtocol": "openai-responses"
+            }
+        }
+    })
+    .to_string();
+
+    let result = execute_hub_pipeline_json(input_json).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["success"], json!(true));
+    let messages = output["payload"]["messages"]
+        .as_array()
+        .expect("provider messages");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(messages[0]["content"][0]["type"], json!("tool_use"));
+    assert_eq!(messages[0]["content"][0]["id"], json!("call_probe_1"));
+    assert_eq!(messages[0]["content"][0]["name"], json!("probe_tool"));
+    assert_eq!(messages[1]["role"], json!("user"));
+    assert_eq!(messages[1]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(
+        messages[1]["content"][0]["tool_use_id"],
+        json!("call_probe_1")
+    );
+    assert_eq!(
+        messages[1]["content"][0]["content"],
+        json!("TOOL_RESULT_ROUTE_CODEX_OK")
+    );
 }
 
 #[test]

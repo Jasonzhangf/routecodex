@@ -157,9 +157,10 @@ type SseTerminalWatch = {
   sawTerminalChunk: boolean;
   sawResponsesCompletedChunk?: boolean;
   sawResponsesDoneEvent?: boolean;
+  sawAssistantMessageDoneTerminal?: boolean;
   requiresResponsesTerminalEvent?: boolean;
   terminalSource?: string;
-  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.required_action' | 'response.error' | 'response.cancelled' | 'response.failed';
+  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.error' | 'response.cancelled' | 'response.failed';
 };
 
 type StreamCompletionLogState = {
@@ -233,7 +234,130 @@ function assertClientSseFrameHasNoInternalCarriers(frame: string, requestId: str
   }
 }
 
+const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
+  'error',
+  'ping',
+  'response.queued',
+  'response.created',
+  'response.in_progress',
+  'response.incomplete',
+  'response.completed',
+  'response.failed',
+  'response.cancelled',
+  'response.done',
+  'response.output_item.added',
+  'response.output_item.done',
+  'response.content_part.added',
+  'response.content_part.done',
+  'response.output_text.annotation.added',
+  'response.output_text.delta',
+  'response.output_text.done',
+  'response.audio.delta',
+  'response.audio.done',
+  'response.audio.transcript.delta',
+  'response.audio.transcript.done',
+  'response.refusal.delta',
+  'response.refusal.done',
+  'response.function_call_arguments.delta',
+  'response.function_call_arguments.done',
+  'response.custom_tool_call_input.delta',
+  'response.custom_tool_call_input.done',
+  'response.code_interpreter_call.in_progress',
+  'response.code_interpreter_call.interpreting',
+  'response.code_interpreter_call.completed',
+  'response.code_interpreter_call_code.delta',
+  'response.code_interpreter_call_code.done',
+  'response.file_search_call.in_progress',
+  'response.file_search_call.searching',
+  'response.file_search_call.completed',
+  'response.reasoning_summary_part.added',
+  'response.reasoning_summary_part.done',
+  'response.reasoning_summary_text.delta',
+  'response.reasoning_summary_text.done',
+  'response.reasoning_text.delta',
+  'response.reasoning_text.done',
+  'response.reasoning.delta',
+  'response.reasoning.done',
+  'response.web_search_call.in_progress',
+  'response.web_search_call.searching',
+  'response.web_search_call.completed',
+  'response.image_generation_call.in_progress',
+  'response.image_generation_call.generating',
+  'response.image_generation_call.partial_image',
+  'response.image_generation_call.completed',
+  'response.mcp_call.in_progress',
+  'response.mcp_call_arguments.delta',
+  'response.mcp_call_arguments.done',
+  'response.mcp_call.completed',
+  'response.mcp_call.failed',
+  'response.mcp_list_tools.in_progress',
+  'response.mcp_list_tools.completed',
+  'response.mcp_list_tools.failed',
+]);
+
+function assertDirectPassthroughSseFrameUsesResponsesProtocol(frame: string, requestId: string): void {
+  const eventNames = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('event:'))
+    .map((line) => line.slice('event:'.length).trim())
+    .filter(Boolean);
+  for (const eventName of eventNames) {
+    if (!RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS.has(eventName)) {
+      throw Object.assign(
+        new Error(`[server.response_projection] direct passthrough SSE emitted non-Responses event "${eventName}" (requestId=${requestId})`),
+        { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
+      );
+    }
+  }
+}
+
+function isDirectPassthroughTransportKeepaliveFrame(frame: string): boolean {
+  const trimmed = frame.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const lines = trimmed.split(/\r?\n/);
+  const eventNames = lines
+    .filter((line) => line.startsWith('event:'))
+    .map((line) => line.slice('event:'.length).trim())
+    .filter(Boolean);
+  if (eventNames.length !== 1 || eventNames[0] !== 'keepalive') {
+    return false;
+  }
+  return lines.every((line) => {
+    if (!line) {
+      return true;
+    }
+    return line.startsWith('event:') || line.startsWith('data:') || line.startsWith(':');
+  });
+}
+
+function isResponsesRequiredActionFrame(frame: string): boolean {
+  return frame.split(/\r?\n/).some((line) => {
+    if (!line.startsWith('data:')) {
+      return false;
+    }
+    const data = line.slice('data:'.length).trim();
+    if (!data || data === '[DONE]') {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(data) as Record<string, unknown>;
+      return parsed.type === 'response.required_action';
+    } catch {
+      return false;
+    }
+  });
+}
+
 function assertDirectPassthroughSseFrameHasNoInternalMetadataControls(frame: string, requestId: string): void {
+  assertDirectPassthroughSseFrameUsesResponsesProtocol(frame, requestId);
+  if (isResponsesRequiredActionFrame(frame)) {
+    throw Object.assign(
+      new Error(`[server.response_projection] direct passthrough SSE must not rewrite response.required_action into output_item/function_call frames (requestId=${requestId})`),
+      { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
+    );
+  }
   for (const line of frame.split(/\r?\n/)) {
     if (!line.startsWith('data:')) {
       continue;
@@ -479,7 +603,7 @@ function shouldPersistResponsesToolCallContinuationRecord(
   if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
     return true;
   }
-  return entryEndpoint === '/v1/responses' && !!requestContext;
+  return entryEndpoint === '/v1/responses' && Boolean(requestContext);
 }
 
 async function recordResponsesConversationToolCallResponse(args: {
@@ -487,6 +611,7 @@ async function recordResponsesConversationToolCallResponse(args: {
   requestLabel: string;
   timingRequestIds?: string[];
   providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
   sessionId?: unknown;
   conversationId?: unknown;
   requestContext?: DispatchOptions['responsesRequestContext'];
@@ -496,19 +621,38 @@ async function recordResponsesConversationToolCallResponse(args: {
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) {
+    logResponsesContinuationTrace('record.skip.endpoint', args.requestLabel, {
+      entryEndpoint: args.entryEndpoint ?? 'unknown'
+    });
     return;
   }
   if (!shouldPersistResponsesToolCallContinuationRecord(args.entryEndpoint, args.requestContext)) {
+    logResponsesContinuationTrace('record.skip.persist_policy', args.requestLabel, {
+      entryEndpoint: args.entryEndpoint ?? 'unknown',
+      hasRequestContext: Boolean(args.requestContext)
+    });
     return;
   }
   if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    logResponsesContinuationTrace('record.skip.body', args.requestLabel, {
+      reason: 'non_object_body'
+    });
     return;
   }
   if (!isToolCallContinuationResponse(args.body)) {
+    logResponsesContinuationTrace('record.skip.non_continuation', args.requestLabel, {
+      responseId: readResponsesConversationResponseId(args.body),
+      finishReason: deriveFinishReason(args.body) ?? undefined
+    });
     return;
   }
   const recordBody = args.body as Record<string, unknown>;
   const responseId = readResponsesConversationResponseId(recordBody);
+  logResponsesContinuationTrace('record.start', args.requestLabel, {
+    responseId,
+    continuationOwner: args.continuationOwner,
+    providerKey: args.providerKey
+  });
   await rebindResponsesConversationRequestIdsToResponseId({
     requestLabel: args.requestLabel,
     timingRequestIds: args.timingRequestIds,
@@ -534,9 +678,15 @@ async function recordResponsesConversationToolCallResponse(args: {
       sessionId: effectiveSessionId,
       conversationId: effectiveConversationId,
       providerKey: args.providerKey,
+      continuationOwner: args.continuationOwner,
       matchedPort: args.requestContext?.matchedPort,
       routingPolicyGroup: args.requestContext?.routingPolicyGroup,
     }).catch((error) => {
+      logResponsesContinuationTrace('record.error', args.requestLabel, {
+        recordRequestId,
+        responseId,
+        message: error instanceof Error ? error.message : String(error ?? 'unknown')
+      });
       logResponseNonBlockingError(`responses-conversation-record:${recordRequestId}`, error);
     });
   }
@@ -554,9 +704,18 @@ async function recordResponsesConversationToolCallResponse(args: {
     await finalizeResponsesConversationRequestRetention(retainRequestId, {
       keepForSubmitToolOutputs: true,
     }).catch((error) => {
+      logResponsesContinuationTrace('record.finalize_error', args.requestLabel, {
+        retainRequestId,
+        responseId,
+        message: error instanceof Error ? error.message : String(error ?? 'unknown')
+      });
       logResponseNonBlockingError(`responses-conversation-finalize:${retainRequestId}`, error);
     });
   }
+  logResponsesContinuationTrace('record.done', args.requestLabel, {
+    responseId,
+    retainedRequestIds: retainRequestIds
+  });
 }
 
 async function finalizeResponsesConversationNonToolResponse(args: {
@@ -602,13 +761,29 @@ async function captureResponsesConversationToolCallRequestContext(args: {
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) return;
-  if (!args.requestContext) return;
-  if (!shouldPersistResponsesToolCallContinuationRecord(args.entryEndpoint, args.requestContext)) return;
+  if (!args.requestContext) {
+    logResponsesContinuationTrace('capture.skip.no_request_context', args.requestLabel, {
+      entryEndpoint: args.entryEndpoint ?? 'unknown'
+    });
+    return;
+  }
+  if (!shouldPersistResponsesToolCallContinuationRecord(args.entryEndpoint, args.requestContext)) {
+    logResponsesContinuationTrace('capture.skip.persist_policy', args.requestLabel, {
+      entryEndpoint: args.entryEndpoint ?? 'unknown'
+    });
+    return;
+  }
   const requestPayload =
     args.requestContext.payload && typeof args.requestContext.payload === 'object' && !Array.isArray(args.requestContext.payload)
       ? (args.requestContext.payload as Record<string, unknown>)
       : undefined;
-  if (!isToolCallContinuationResponse(args.body)) return;
+  if (!isToolCallContinuationResponse(args.body)) {
+    logResponsesContinuationTrace('capture.skip.non_continuation', args.requestLabel, {
+      responseId: readResponsesConversationResponseId(args.body),
+      finishReason: deriveFinishReason(args.body) ?? undefined
+    });
+    return;
+  }
   const body = args.body && typeof args.body === 'object' && !Array.isArray(args.body)
     ? args.body as Record<string, unknown>
     : undefined;
@@ -618,6 +793,11 @@ async function captureResponsesConversationToolCallRequestContext(args: {
     args.timingRequestIds,
     responseId
   );
+  logResponsesContinuationTrace('capture.start', args.requestLabel, {
+    responseId,
+    requestIds: ids,
+    providerKey: args.providerKey
+  });
   for (const requestId of ids) {
     await captureResponsesRequestContextForRequest({
       requestId,
@@ -629,9 +809,18 @@ async function captureResponsesConversationToolCallRequestContext(args: {
       matchedPort: args.requestContext?.matchedPort,
       routingPolicyGroup: args.requestContext?.routingPolicyGroup,
     }).catch((error) => {
+      logResponsesContinuationTrace('capture.error', args.requestLabel, {
+        captureRequestId: requestId,
+        responseId,
+        message: error instanceof Error ? error.message : String(error ?? 'unknown')
+      });
       logResponseNonBlockingError(`responses-conversation-capture:${requestId}`, error);
     });
   }
+  logResponsesContinuationTrace('capture.done', args.requestLabel, {
+    responseId,
+    requestIds: ids
+  });
 }
 
 function logSseClientCloseDiagnosis(
@@ -642,6 +831,22 @@ function logSseClientCloseDiagnosis(
     console.warn(`[handler-response] response.sse.client_close request=${requestLabel} ${JSON.stringify(details)}`);
   } catch {
     console.warn(`[handler-response] response.sse.client_close request=${requestLabel}`);
+  }
+}
+
+function logResponsesContinuationTrace(
+  stage: string,
+  requestLabel: string,
+  details?: Record<string, unknown>
+): void {
+  if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
+    return;
+  }
+  try {
+    const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
+    console.warn(`[responses-continuation] ${stage} request=${requestLabel}${suffix}`);
+  } catch {
+    console.warn(`[responses-continuation] ${stage} request=${requestLabel}`);
   }
 }
 
@@ -735,6 +940,29 @@ function logSseFrameProjection(
     return;
   }
   logPipelineStage(stage, requestLabel, summary);
+}
+
+function writeSseDiagnosticSnapshot(
+  requestLabel: string,
+  entryEndpoint: string | undefined,
+  reason: string,
+  data: Record<string, unknown>
+): void {
+  if (!shouldCaptureClientResponseSnapshotStage('client-response.error')) {
+    return;
+  }
+  void writeServerSnapshot({
+    phase: 'client-response.error',
+    requestId: requestLabel,
+    entryEndpoint,
+    data: {
+      mode: 'sse',
+      reason,
+      ...data
+    }
+  }).catch((error) => {
+    logResponseNonBlockingError(`writeServerSnapshot:sse_diagnostic:${requestLabel}:${reason}`, error);
+  });
 }
 
 function createSseClientResponseClosedError(): Error & { code: string; name: string; retryable: boolean } {
@@ -1037,6 +1265,10 @@ function createDirectPassthroughSseGuardStream(
       const frameEnd = boundary.index + boundary[0].length;
       const frame = pending.slice(0, frameEnd);
       pending = pending.slice(frameEnd);
+      if (isDirectPassthroughTransportKeepaliveFrame(frame)) {
+        boundary = /\r?\n\r?\n/.exec(pending);
+        continue;
+      }
       assertDirectPassthroughSseFrameHasNoInternalMetadataControls(frame, requestId);
       target.push(frame);
       boundary = /\r?\n\r?\n/.exec(pending);
@@ -1062,6 +1294,11 @@ function createDirectPassthroughSseGuardStream(
     flush(callback) {
       try {
         if (pending) {
+          if (isDirectPassthroughTransportKeepaliveFrame(pending)) {
+            pending = '';
+            callback();
+            return;
+          }
           assertDirectPassthroughSseFrameHasNoInternalMetadataControls(pending, requestId);
           this.push(pending);
           pending = '';
@@ -1112,7 +1349,6 @@ function updateSseTerminalTrackerFromChunk(
     if (
       eventName === 'response.completed'
       || eventName === 'response.done'
-      || eventName === 'response.required_action'
       || eventName === 'response.failed'
       || eventName === 'response.error'
       || eventName === 'response.cancelled'
@@ -1134,10 +1370,13 @@ function updateSseTerminalTrackerFromChunk(
             ? ((parsed as Record<string, unknown>).type as string).trim()
             : '')
           : '';
+      const parsedItem =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? ((parsed as Record<string, unknown>).item as Record<string, unknown> | undefined)
+          : undefined;
       if (
         parsedType === 'response.completed'
         || parsedType === 'response.done'
-        || parsedType === 'response.required_action'
         || parsedType === 'response.failed'
         || parsedType === 'response.error'
         || parsedType === 'response.cancelled'
@@ -1146,6 +1385,19 @@ function updateSseTerminalTrackerFromChunk(
       }
       const derived = deriveFinishReason(parsed);
       if (!derived) {
+        const itemType = typeof parsedItem?.type === 'string' ? parsedItem.type.trim() : '';
+        const itemRole = typeof parsedItem?.role === 'string' ? parsedItem.role.trim() : '';
+        const itemStatus = typeof parsedItem?.status === 'string' ? parsedItem.status.trim().toLowerCase() : '';
+        if (
+          parsedType === 'response.output_item.done'
+          && itemType === 'message'
+          && itemRole === 'assistant'
+          && itemStatus === 'completed'
+        ) {
+          terminalWatch.sawTerminalChunk = true;
+          terminalWatch.sawAssistantMessageDoneTerminal = true;
+          terminalWatch.terminalSource = terminalWatch.terminalSource ?? parsedType;
+        }
         continue;
       }
       finishTracker.finishReason = derived;
@@ -1159,8 +1411,21 @@ function updateSseTerminalTrackerFromChunk(
       if (trueTerminal) {
         finishTracker.seenTerminalEvent = true;
         terminalWatch.sawTerminalChunk = true;
+        terminalWatch.terminalSource = terminalWatch.terminalSource ?? eventName ?? parsedType;
       }
-      terminalWatch.terminalSource = terminalWatch.terminalSource ?? eventName ?? 'finish_reason';
+      if (
+        parsedType === 'response.output_item.done'
+        && typeof parsedItem?.type === 'string'
+        && parsedItem.type.trim() === 'message'
+        && typeof parsedItem?.role === 'string'
+        && parsedItem.role.trim() === 'assistant'
+        && typeof parsedItem?.status === 'string'
+        && parsedItem.status.trim().toLowerCase() === 'completed'
+      ) {
+        terminalWatch.sawTerminalChunk = true;
+        terminalWatch.sawAssistantMessageDoneTerminal = true;
+        terminalWatch.terminalSource = terminalWatch.terminalSource ?? parsedType;
+      }
     } catch {
       // ignore parse failure; handled by explicit response.* scanning below
     }
@@ -1174,7 +1439,7 @@ function updateSseTerminalTrackerFromChunk(
     const eventName = lines
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
-      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.required_action' || name === 'response.failed' || name === 'response.error' || name === 'response.cancelled');
+      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.failed' || name === 'response.error' || name === 'response.cancelled');
     const effectiveTerminalEvent = (eventName ?? terminalWatch.pendingTerminalEvent ?? undefined) as string | undefined;
     if (!effectiveTerminalEvent) {
       continue;
@@ -1317,6 +1582,9 @@ async function normalizeResponsesToolCallsForClientBody(
   if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
     return body;
   }
+  if (!(body as Record<string, unknown>).required_action) {
+    return body;
+  }
   const mod = await importCoreDist<{ projectResponsesClientPayloadForClientWithNative?: (payload: unknown, toolsRaw: unknown[], metadata?: Record<string, unknown>) => Record<string, unknown> }>(
     'native/router-hotpath/native-hub-pipeline-resp-semantics'
   );
@@ -1331,7 +1599,8 @@ async function normalizeResponsesSseFrameForClient(
   entryEndpoint?: string,
   requestContext?: DispatchOptions['responsesRequestContext'],
   metadata?: Record<string, unknown>,
-  projectionState?: ResponsesSseClientProjectionState
+  projectionState?: ResponsesSseClientProjectionState,
+  requestLabel = 'unknown'
 ): Promise<string> {
   if (metadata?.__routecodexDirectPassthrough === true) {
     return frame;
@@ -1357,6 +1626,9 @@ async function normalizeResponsesSseFrameForClient(
   if (!dataText || dataText === '[DONE]') {
     return frame;
   }
+  if (!eventName.startsWith('response.')) {
+    return frame;
+  }
   let data: Record<string, unknown>;
   try {
     const parsed = JSON.parse(dataText);
@@ -1366,6 +1638,12 @@ async function normalizeResponsesSseFrameForClient(
     data = parsed as Record<string, unknown>;
   } catch {
     return frame;
+  }
+  if (eventName !== 'response.required_action' && !dataText.includes('"required_action"')) {
+    return frame;
+  }
+  if (eventName === 'response.required_action') {
+    return buildResponsesTerminalSseFramesFromProbe(data, requestLabel).join('');
   }
   const mod = await importCoreDist<{
     projectResponsesSseFrameForClientWithNative?: (input: {
@@ -1728,7 +2006,14 @@ export async function sendPipelineResponse(
     return Promise.resolve();
   }
 
-  logPipelineStage('response.dispatch.start', requestLabel, { status, stream: expectsStream, forced: forceSSE });
+  logPipelineStage('response.dispatch.start', requestLabel, {
+    status,
+    stream: expectsStream,
+    forced: forceSSE,
+    entryEndpoint,
+    hasSsePayload: hasSsePayload(body),
+    directPassthrough: result.metadata?.__routecodexDirectPassthrough === true,
+  });
 
   if (expectsStream) {
     const sseBody = body as SsePayloadShape & Record<string, unknown>;
@@ -1783,6 +2068,22 @@ export async function sendPipelineResponse(
     const outboundStream = captureClientResponse
       ? maybeAttachClientSseSnapshotStream(restoredStream, clientSseSnapshotRecorder)
       : restoredStream;
+    logPipelineStage('response.sse.prestart.inspect', requestLabel, {
+      status,
+      entryEndpoint,
+      hasStreamSource: streamSource !== undefined,
+      streamSourceType:
+        streamSource === null
+          ? 'null'
+          : Array.isArray(streamSource)
+            ? 'array'
+            : typeof streamSource,
+      directPassthrough: isDirectPassthrough,
+      resDestroyed: res.destroyed === true,
+      resWritableEnded: (res as unknown as { writableEnded?: boolean }).writableEnded === true,
+      resWritableFinished: (res as unknown as { writableFinished?: boolean }).writableFinished === true,
+      clientConnectionDisconnected: clientConnectionState?.disconnected === true,
+    });
     const preStartClientClosed =
       res.destroyed
       || (res as unknown as { writableEnded?: boolean }).writableEnded === true
@@ -1807,6 +2108,18 @@ export async function sendPipelineResponse(
       });
       logSseClientCloseDiagnosis(requestLabel, details);
       logPipelineStage('response.sse.client_close', requestLabel, details);
+      writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'prestart_client_close', {
+        ...details,
+        hasStreamSource: streamSource !== undefined,
+        streamSourceType:
+          streamSource === null
+            ? 'null'
+            : Array.isArray(streamSource)
+              ? 'array'
+              : typeof streamSource,
+        directPassthrough: isDirectPassthrough,
+        clientConnectionDisconnected: clientConnectionState?.disconnected === true,
+      });
       cleanupAbandonedResponsesConversation(requestLabel, {
         entryEndpoint,
         closeBeforeStreamEnd: true,
@@ -1906,13 +2219,15 @@ export async function sendPipelineResponse(
       (result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
       ?? options?.responsesRequestContext;
     let nativeSseConversationPersisted = false;
+    const responsesContinuationOwner =
+      result.metadata?.__routecodexDirectPassthrough === true ? 'direct' : 'relay';
     const persistNativeSseConversationState = async (): Promise<void> => {
       if (nativeSseConversationPersisted) {
+        logResponsesContinuationTrace('sse.persist.skip.already_persisted', requestLabel);
         return;
       }
       if (
-        isDirectPassthrough
-        || (
+        (
         (entryEndpoint !== '/v1/responses'
           && entryEndpoint !== '/v1/responses.submit_tool_outputs')
         || !contractProbe.probe
@@ -1920,11 +2235,22 @@ export async function sendPipelineResponse(
         || Array.isArray(contractProbe.probe)
         )
       ) {
+        logResponsesContinuationTrace('sse.persist.skip.not_eligible', requestLabel, {
+          entryEndpoint: entryEndpoint ?? 'unknown',
+          hasProbe: Boolean(contractProbe.probe)
+        });
         return;
       }
       nativeSseConversationPersisted = true;
       const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
       const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
+      logResponsesContinuationTrace('sse.persist.start', requestLabel, {
+        responseId: readResponsesConversationResponseId(sanitizedProbeBody),
+        finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined,
+        continuationOwner: responsesContinuationOwner,
+        providerKey: conversationProviderKey,
+        hasRequestContext: Boolean(effectiveResponsesRequestContext)
+      });
       await captureResponsesConversationToolCallRequestContext({
         entryEndpoint,
         requestLabel,
@@ -1938,6 +2264,7 @@ export async function sendPipelineResponse(
         requestLabel,
         timingRequestIds: result.usageLogInfo?.timingRequestIds,
         providerKey: conversationProviderKey,
+        continuationOwner: responsesContinuationOwner,
         sessionId: result.usageLogInfo?.sessionId,
         conversationId: result.usageLogInfo?.conversationId,
         requestContext: effectiveResponsesRequestContext,
@@ -1951,6 +2278,10 @@ export async function sendPipelineResponse(
           body: sanitizedProbeBody,
         });
       }
+      logResponsesContinuationTrace('sse.persist.done', requestLabel, {
+        responseId: readResponsesConversationResponseId(sanitizedProbeBody),
+        finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined
+      });
     };
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
@@ -2037,6 +2368,26 @@ export async function sendPipelineResponse(
     const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
       abortSourceStreamForClientClose();
       void (async () => {
+        const hasContinuationProbe =
+          (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+          && effectiveResponsesRequestContext
+          && contractProbe.probe
+          && typeof contractProbe.probe === 'object'
+          && !Array.isArray(contractProbe.probe)
+          && isToolCallContinuationResponse(contractProbe.probe);
+        if (hasContinuationProbe) {
+          logResponsesContinuationTrace('client_close.persist_continuation', requestLabel, {
+            closeBeforeStreamEnd,
+            detectedBeforeStreamStart: !streamEnded
+          });
+          await persistNativeSseConversationState();
+          await finalizeResponsesConversationRequestRetention(requestLabel, { keepForSubmitToolOutputs: true });
+          return;
+        }
+        logResponsesContinuationTrace('client_close.clear_abandoned', requestLabel, {
+          closeBeforeStreamEnd,
+          detectedBeforeStreamStart: !streamEnded
+        });
         cleanupAbandonedResponsesConversation(requestLabel, {
           entryEndpoint,
           closeBeforeStreamEnd,
@@ -2074,6 +2425,16 @@ export async function sendPipelineResponse(
       clearTimers();
       detachOutboundStream();
       logPipelineStage(logLabel, requestLabel, { code, message });
+      writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, code, {
+        status: statusCode,
+        message,
+        lastRawFrame: lastRawClientFrameSummary ?? undefined,
+        lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+        probe: contractProbe.probe ?? undefined,
+        streamEnded,
+        sawTerminalEvent: finishTracker.seenTerminalEvent,
+        finishReason: finishTracker.finishReason,
+      });
       const payload = { type: 'error', status: statusCode, error: { message, code, request_id: requestLabel } };
       writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.error.write_error_event');
       try {
@@ -2140,6 +2501,10 @@ export async function sendPipelineResponse(
           ...details,
           closeBeforeStreamEnd
         });
+        writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'client_close_before_terminal', {
+          ...details,
+          closeBeforeStreamEnd
+        });
         runClientCloseBeforeTerminalCleanup(closeBeforeStreamEnd);
         return;
       }
@@ -2166,7 +2531,8 @@ export async function sendPipelineResponse(
           entryEndpoint,
           effectiveResponsesRequestContext,
           responseProjectionMetadata,
-          responsesSseProjectionState
+          responsesSseProjectionState,
+          requestLabel
         ),
         projectionTimeoutMs,
         requestLabel,
@@ -2196,11 +2562,27 @@ export async function sendPipelineResponse(
         .catch((error) => {
           const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
           const sourceCode = readErrorCode(error);
+          if (res.destroyed || (res as unknown as { writableEnded?: boolean }).writableEnded === true) {
+            logPipelineStage('response.sse.projection.cancelled_after_client_close', requestLabel, {
+              reason,
+              sourceCode,
+              raw: summarizeSseFrameForLog(frame) ?? undefined,
+            });
+            return;
+          }
+          const isProjectionTimeout =
+            sourceCode === 'SSE_CLIENT_PROJECTION_TIMEOUT'
+            || reason.includes('SSE client projection timed out');
           const projectionError = Object.assign(
             new Error(`[server.response_projection] SSE client projection failed: ${reason}`),
-            { code: sourceCode === 'SSE_CLIENT_PROJECTION_TIMEOUT' ? sourceCode : 'SSE_CLIENT_PROJECTION_FAILED' }
+            { code: isProjectionTimeout ? 'SSE_CLIENT_PROJECTION_TIMEOUT' : 'SSE_CLIENT_PROJECTION_FAILED' }
           );
-          logPipelineStage('response.sse.projection.error', requestLabel, { message: projectionError.message });
+          logPipelineStage('response.sse.projection.error', requestLabel, {
+            message: projectionError.message,
+            reason,
+            sourceCode,
+            raw: summarizeSseFrameForLog(frame) ?? undefined,
+          });
           endWithSseError(
             readErrorCode(projectionError) ?? 'SSE_CLIENT_PROJECTION_FAILED',
             'SSE stream response projection failed',
@@ -2211,8 +2593,7 @@ export async function sendPipelineResponse(
     };
     const hasResponsesToolCallContinuationProbe = (): boolean => {
       if (
-        isDirectPassthrough
-        || (
+        (
         entryEndpoint !== '/v1/responses'
         && entryEndpoint !== '/v1/responses.submit_tool_outputs'
         )
@@ -2224,6 +2605,17 @@ export async function sendPipelineResponse(
         && typeof contractProbe.probe === 'object'
         && !Array.isArray(contractProbe.probe)
         && isToolCallContinuationResponse(contractProbe.probe)
+      );
+    };
+    const hasResponsesRequiredActionContinuationProbe = (): boolean => {
+      if (!hasResponsesToolCallContinuationProbe()) {
+        return false;
+      }
+      const probe = contractProbe.probe as Record<string, unknown>;
+      return Boolean(
+        probe.required_action
+        && typeof probe.required_action === 'object'
+        && !Array.isArray(probe.required_action)
       );
     };
     const writeTerminalProbeFramesAndClose = async (stage: string): Promise<void> => {
@@ -2243,7 +2635,7 @@ export async function sendPipelineResponse(
       });
       const framesToWrite = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
       if (framesToWrite.length === 0) {
-        if (terminalWatch.sawTerminalChunk || finishTracker.seenTerminalEvent) {
+        if (terminalWatch.sawAssistantMessageDoneTerminal || finishTracker.seenTerminalEvent) {
           finishTracker.seenTerminalEvent = true;
           ended = true;
           clearTimers();
@@ -2269,6 +2661,11 @@ export async function sendPipelineResponse(
         for (const frame of framesToWrite) {
           const normalizedFrame = await projectClientSseFrame(frame, `${stage}.write_terminal`);
           if (normalizedFrame) {
+            logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
+              stage,
+              raw: summarizeSseFrameForLog(frame) ?? undefined,
+              projected: summarizeSseFrameForLog(normalizedFrame) ?? undefined
+            });
             writeClientSseFrame(normalizedFrame, `${stage}.write_terminal`);
           }
         }
@@ -2309,7 +2706,7 @@ export async function sendPipelineResponse(
       }, delayMs);
       terminalAutoCloseTimer.unref?.();
     };
-    if (hasResponsesToolCallContinuationProbe()) {
+    if (hasResponsesRequiredActionContinuationProbe()) {
       scheduleTerminalProbeClose('response.sse.terminal.probe_close', terminalCloseTimeoutMs);
     }
     outboundStream.on('data', (chunk: unknown) => {
@@ -2329,9 +2726,14 @@ export async function sendPipelineResponse(
         maybeUpdateUsageLogInfoFromSseFrame(result, frame);
         updateSseTerminalTrackerFromChunk(part, finishTracker, terminalWatch);
         updateContractProbeFromSseChunk(part, contractProbe);
+        if (hasResponsesRequiredActionContinuationProbe()) {
+          void persistNativeSseConversationState().catch((error) => {
+            logResponseNonBlockingError(`responses-conversation-native-sse-required-action:${requestLabel}`, error);
+          });
+        }
         enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
       }
-      if (hasResponsesToolCallContinuationProbe()) {
+      if (hasResponsesRequiredActionContinuationProbe()) {
         scheduleTerminalProbeClose('response.sse.terminal.probe_close', terminalCloseTimeoutMs);
       }
       if (!terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
@@ -2367,6 +2769,17 @@ export async function sendPipelineResponse(
         closeBeforeStreamEnd: !streamEnded
       });
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
+      writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'stream_error', {
+        status: 500,
+        message: error.message,
+        code: readErrorCode(error),
+        lastRawFrame: lastRawClientFrameSummary ?? undefined,
+        lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+        probe: contractProbe.probe ?? undefined,
+        streamEnded,
+        sawTerminalEvent: finishTracker.seenTerminalEvent,
+        finishReason: finishTracker.finishReason,
+      });
       void clearResponsesConversationRequestIds({
         requestLabel,
         timingRequestIds: result.usageLogInfo?.timingRequestIds,
@@ -2438,7 +2851,9 @@ export async function sendPipelineResponse(
       } catch (error) {
         logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
       }
-      const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk || !terminalWatch.sawResponsesDoneEvent
+      const repairedTerminalFrames =
+        !terminalWatch.sawResponsesCompletedChunk
+        || !terminalWatch.sawResponsesDoneEvent
         ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel)
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
@@ -2447,6 +2862,11 @@ export async function sendPipelineResponse(
           for (const frame of framesToWrite) {
             const normalizedFrame = await projectClientSseFrame(frame, 'response.sse.stream.end.write_terminal_probe');
             if (normalizedFrame) {
+              logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
+                stage: 'response.sse.stream.end.write_terminal_probe',
+                raw: summarizeSseFrameForLog(frame) ?? undefined,
+                projected: summarizeSseFrameForLog(normalizedFrame) ?? undefined
+              });
               writeClientSseFrame(normalizedFrame, 'response.sse.stream.end.write_terminal_probe');
             }
           }
@@ -2473,6 +2893,18 @@ export async function sendPipelineResponse(
             logPipelineStage('response.sse.stream.error', requestLabel, {
               message: 'stream closed before response.completed',
               code: 'upstream_stream_incomplete'
+            });
+            writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'upstream_stream_incomplete', {
+              status: 502,
+              message: 'stream closed before response.completed',
+              code: 'upstream_stream_incomplete',
+              lastRawFrame: lastRawClientFrameSummary ?? undefined,
+              lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+              probe: contractProbe.probe ?? undefined,
+              sawTerminalEvent: finishTracker.seenTerminalEvent,
+              sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
+              sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+              finishReason: resolvedStreamFinishReason,
             });
             void clearResponsesConversationRequestIds({
               requestLabel,
@@ -2587,6 +3019,8 @@ export async function sendPipelineResponse(
   }
   const jsonFinishReason = deriveFinishReason(clientBody);
   const conversationProviderKey = deriveResponsesConversationProviderKey(result.usageLogInfo);
+  const responsesContinuationOwner =
+    result.metadata?.__routecodexDirectPassthrough === true ? 'direct' : 'relay';
   await captureResponsesConversationToolCallRequestContext({
     entryEndpoint,
     requestLabel,
@@ -2600,6 +3034,7 @@ export async function sendPipelineResponse(
     requestLabel,
     timingRequestIds: result.usageLogInfo?.timingRequestIds,
     providerKey: conversationProviderKey,
+    continuationOwner: responsesContinuationOwner,
     sessionId: result.usageLogInfo?.sessionId,
     conversationId: result.usageLogInfo?.conversationId,
     requestContext: options?.responsesRequestContext,

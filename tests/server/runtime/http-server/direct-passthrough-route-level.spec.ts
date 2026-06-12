@@ -354,7 +354,7 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'mutated-model',
+      model: 'gpt-5.3-codex',
       instructions: 'mutated-system-prompt',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
@@ -364,7 +364,7 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
-  it('router same-protocol direct skips client tools so caller can relay through Hub', async () => {
+  it('router same-protocol direct keeps client tools on direct path', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -444,9 +444,9 @@ describe('direct passthrough route-level', () => {
         },
       );
 
-      expect(outcome.used).toBe(false);
-      expect(outcome.reason).toBe('client_tools_require_hub_relay');
-      expect(directSend).not.toHaveBeenCalled();
+      expect(outcome.used).toBe(true);
+      expect(outcome.reason).toBeUndefined();
+      expect(directSend).toHaveBeenCalledTimes(1);
       expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
     }
   });
@@ -620,7 +620,7 @@ describe('direct passthrough route-level', () => {
     }));
   });
 
-  it('router same-protocol client tools request relays through Hub', async () => {
+  it('router same-protocol client tools request stays on direct path', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => ({
       resolveRawPayloadForDirect: (body: unknown) => body as Record<string, unknown>,
@@ -645,9 +645,9 @@ describe('direct passthrough route-level', () => {
         });
         return {
           providerWireValid: true,
-          requiresHubRelay: hasClientTool,
-          reason: hasClientTool ? 'client_tools_require_hub_relay' : undefined,
-          hasDeclaredApplyPatchTool: false,
+          requiresHubRelay: false,
+          reason: undefined,
+          hasDeclaredApplyPatchTool: hasClientTool,
         };
       },
     }));
@@ -701,9 +701,9 @@ describe('direct passthrough route-level', () => {
       metadata: {},
     });
 
-    expect(routerDirectSpy).not.toHaveBeenCalled();
-    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_tools_stopmessage' });
+    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy).not.toHaveBeenCalled();
+    expect(result?.body).toMatchObject({ ok: true, mode: 'direct' });
   });
 
   it('router port metadata exposes only its routing policy group providers', async () => {
@@ -1344,6 +1344,121 @@ describe('direct passthrough route-level', () => {
     expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       excludedProviderKeys: [firstProviderKey],
     }));
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
+  it('router same-protocol direct uses target.modelId as outbound model instead of inbound alias', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 10000 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const providerKey = 'DF.key1.deepseek-v4-pro';
+    const route = jest.fn(() => ({
+      target: {
+        providerKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: providerKey,
+        modelId: 'DeepSeek-V4-Pro',
+      },
+      decision: { routeName: 'thinking', pool: [providerKey], reason: 'thinking:user-input' },
+      diagnostics: {},
+    }));
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 10000,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_coding_10000',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct alias->canonical test must stay direct'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_coding_10000', (server as any).hubPipeline],
+    ]);
+    (server as any).currentRouterArtifacts = {
+      targetRuntime: {
+        [providerKey]: {
+          runtimeKey: providerKey,
+          providerId: 'DF',
+          providerType: 'openai',
+          providerKey,
+          defaultModel: 'DeepSeek-V4-Pro',
+          endpoint: 'https://www.dreamfield.top/v1',
+          auth: { type: 'apikey', value: 'test' },
+        },
+      },
+    };
+    (server as any).providerHandles = new Map([
+      [providerKey, {
+        runtimeKey: providerKey,
+        providerId: 'DF',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-chat',
+        runtime: {},
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+            sentPayload = payload;
+            return {
+              status: 200,
+              data: {
+                id: 'chatcmpl_df_alias_canonical',
+                object: 'chat.completion',
+                model: String(payload.model || ''),
+                choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+              },
+            };
+          }),
+        },
+      }],
+    ]);
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 10000,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_coding_10000',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_df_alias_canonical',
+        entryEndpoint: '/v1/chat/completions',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'deepseek-v4-pro',
+          stream: false,
+          messages: [{ role: 'user', content: 'hello' }],
+        },
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(sentPayload?.model).toBe('DeepSeek-V4-Pro');
+    expect((outcome.response as any)?.data?.model).toBe('DeepSeek-V4-Pro');
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 

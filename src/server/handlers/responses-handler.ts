@@ -78,6 +78,16 @@ function readResponsesSessionId(metadata: Record<string, unknown> | undefined): 
   return trimmed || undefined;
 }
 
+function readResponsesConversationId(metadata: Record<string, unknown> | undefined): string | undefined {
+  const value = typeof metadata?.conversation_id === 'string'
+    ? metadata.conversation_id
+    : typeof metadata?.conversationId === 'string'
+      ? metadata.conversationId
+      : undefined;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed || undefined;
+}
+
 function shouldPersistResponsesConversation(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return false;
@@ -214,7 +224,9 @@ export async function handleResponses(
     // Responses API stream contract is driven by payload.stream, not Accept.
     // Accept only indicates the client can consume SSE if stream=true.
     // Do not upgrade stream=false requests into SSE-visible execution just because the client advertises SSE.
-    const outboundStream = typeof options.forceStream === 'boolean' ? options.forceStream : originalStream;
+    const outboundStream = typeof options.forceStream === 'boolean'
+      ? options.forceStream
+      : originalStream;
     // submit_tool_outputs is a synthetic entrypoint: keep transport intent aligned with outbound stream.
     // Some upstreams do not implement streaming on submit paths; we must not infer it from Accept headers.
     const inboundStream = outboundStream;
@@ -233,6 +245,7 @@ export async function handleResponses(
     }
     const requestBodyMetadata = readRequestBodyMetadata(payload);
     const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
+    const conversationIdForResume = readResponsesConversationId(requestBodyMetadata);
     const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
     if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
@@ -285,7 +298,7 @@ export async function handleResponses(
         return;
       }
     }
-    if (!isSubmitToolOutputs && options.forceStream === true && (!originalStream || options.forceStream)) {
+    if (!isSubmitToolOutputs && outboundStream && payload.stream !== true) {
       payload.stream = true;
     }
     if (!isSubmitToolOutputs && plannedEntry.mode === 'scope_materialize') {
@@ -352,13 +365,14 @@ export async function handleResponses(
         clientHeaders,
         clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
-          responsesRequestContext: {
+        responsesRequestContext: {
             payload: pipelineBody as Record<string, unknown>,
             context: {
               input: Array.isArray(payload.input) ? payload.input : [],
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
             },
             sessionId: readResponsesSessionId(requestBodyMetadata),
+            conversationId: readResponsesConversationId(requestBodyMetadata),
             ...responsesConversationPortScope,
           }
 	      })
@@ -377,6 +391,7 @@ export async function handleResponses(
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
         },
         sessionId: readResponsesSessionId(requestBodyMetadata),
+        conversationId: readResponsesConversationId(requestBodyMetadata),
         ...responsesConversationPortScope,
         providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
@@ -460,7 +475,7 @@ export async function handleResponses(
     ) {
       result.metadata = {
         ...(result.metadata || {}),
-        responsesRequestContext:
+          responsesRequestContext:
           (result.metadata?.responsesRequestContext as Record<string, unknown> | undefined)
           ?? {
             payload: pipelineBody as Record<string, unknown>,
@@ -469,6 +484,7 @@ export async function handleResponses(
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
             },
             sessionId: readResponsesSessionId(requestBodyMetadata),
+            conversationId: readResponsesConversationId(requestBodyMetadata),
           },
       };
     }
@@ -582,7 +598,8 @@ export async function handleResponses(
     } catch {}
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
-    const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);
+    const bodyPayload = req.body && typeof req.body === 'object' ? req.body as ResponsesPayload : undefined;
+    const originalStream = bodyPayload?.stream === true;
     const wantsStream = options.forceStream === true || originalStream;
     if (res.headersSent) {
       if (wantsStream && !res.writableEnded) {

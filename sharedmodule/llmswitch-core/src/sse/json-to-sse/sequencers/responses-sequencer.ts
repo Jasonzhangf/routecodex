@@ -24,11 +24,8 @@ import {
   buildOutputTextDoneEvent,
   buildFunctionCallArgsDeltas,
   buildFunctionCallDoneEvent,
-  buildReasoningStartEvent,
   buildReasoningSummaryEvents,
   buildReasoningDeltas,
-  buildReasoningDoneEvent,
-  buildRequiredActionEvent,
   buildResponseCompletedEvent,
   buildErrorEvent,
   DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
@@ -214,25 +211,19 @@ async function* sequenceReasoningItem(
   // 1. 发送output_item.start事件
   yield buildOutputItemStartEvent(item, context, config);
 
-  // 2. 发送reasoning.start事件
-  yield buildReasoningStartEvent(item, context, config);
-
-  // 3. 发送reasoning_summary事件流
+  // 2. 发送reasoning_summary事件流
   yield* withDelay(
     buildReasoningSummaryEvents(item, context, config),
     config
   );
 
-  // 4. 发送reasoning.delta事件流
+  // 3. 发送reasoning.delta事件流
   yield* withDelay(
     buildReasoningDeltas(item, context, config),
     config
   );
 
-  // 5. 发送reasoning.done事件
-  yield buildReasoningDoneEvent(item, context, config);
-
-  // 6. 发送output_item.done事件
+  // 4. 发送output_item.done事件
   yield buildOutputItemDoneEvent(item, context, config);
 }
 
@@ -316,14 +307,7 @@ export async function* sequenceResponse(
       }
     }
 
-    const hasRequiredAction = Boolean((response as any).required_action);
-
-    // 4. 发送required_action事件（如果有）
-    if (hasRequiredAction) {
-      yield buildRequiredActionEvent(response, (response as any).required_action, context, config);
-    }
-
-    // 5. 发送终止事件：Codex 客户端以 response.completed 判定流完成，required_action 后也必须发 completed。
+    // 4. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。
     yield buildResponseCompletedEvent(response, context, config);
     yield buildResponseDoneEvent(response, context, config);
 

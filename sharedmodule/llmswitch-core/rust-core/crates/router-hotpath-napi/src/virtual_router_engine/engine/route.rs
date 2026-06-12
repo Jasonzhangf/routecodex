@@ -78,12 +78,9 @@ fn normalize_instruction_target_against_registry(
     let Some(model) = target.model.clone() else {
         return target.clone();
     };
-    if registry
-        .resolve_runtime_key_by_model(&provider, &model)
-        .is_some()
-    {
+    let Some(canonical_model) = registry.resolve_canonical_model_id(&provider, &model) else {
         return target.clone();
-    }
+    };
     for provider_key in registry.list_provider_keys(&provider) {
         let Some(alias) = extract_key_alias(&provider_key) else {
             continue;
@@ -94,16 +91,18 @@ fn normalize_instruction_target_against_registry(
         let Some(model_id) = profile.model_id.clone() else {
             continue;
         };
-        let composite = format!("{}.{}", alias, model_id);
-        if composite == model {
+        let canonical_composite = format!("{}.{}", alias, model_id);
+        if canonical_composite == model || model_id == canonical_model {
             let mut normalized = target.clone();
             normalized.key_alias = Some(alias);
-            normalized.model = Some(model_id);
+            normalized.model = Some(canonical_model);
             normalized.path_length = Some(3);
             return normalized;
         }
     }
-    target.clone()
+    let mut normalized = target.clone();
+    normalized.model = Some(canonical_model);
+    normalized
 }
 
 fn normalize_parsed_instructions_against_registry(
@@ -467,26 +466,31 @@ impl VirtualRouterEngineCore {
         let direct_model =
             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
         if let Some((provider_id, model_id)) = direct_model {
-            let has_model = self
+            let Some(canonical_model_id) = self
                 .provider_registry
-                .list_provider_keys(&provider_id)
-                .iter()
-                .any(|key| {
-                    self.provider_registry
-                        .get(key)
-                        .and_then(|profile| profile.model_id.clone())
-                        .map(|candidate| candidate == model_id)
-                        .unwrap_or(false)
-                });
-            if !has_model {
+                .resolve_canonical_model_id(&provider_id, &model_id)
+            else {
                 return Err(format_virtual_router_error(
                     "CONFIG_ERROR",
                     format!("Unknown model {} for provider {}", model_id, provider_id),
                 ));
+            };
+            if self
+                .provider_registry
+                .resolve_runtime_key_by_model(&provider_id, &canonical_model_id)
+                .is_none()
+            {
+                return Err(format_virtual_router_error(
+                    "CONFIG_ERROR",
+                    format!(
+                        "Unknown model {} for provider {}",
+                        canonical_model_id, provider_id
+                    ),
+                ));
             }
             if let Some(error_message) = direct_model_media_requirement_error(
                 &provider_id,
-                &model_id,
+                &canonical_model_id,
                 &features,
                 &self.provider_registry,
             ) {
@@ -497,7 +501,7 @@ impl VirtualRouterEngineCore {
                 let mut eligible: Vec<String> = Vec::new();
                 for key in candidate_keys {
                     if let Some(profile) = self.provider_registry.get(&key) {
-                        if profile.model_id.as_deref() == Some(&model_id)
+                        if profile.model_id.as_deref() == Some(&canonical_model_id)
                             && router_direct_inbound_protocol
                                 .as_deref()
                                 .map(|protocol| {
@@ -534,11 +538,11 @@ impl VirtualRouterEngineCore {
                         &cooldown_candidate_keys,
                         format!(
                             "All providers unavailable for model {}.{}",
-                            provider_id, model_id
+                            provider_id, canonical_model_id
                         ),
                     ));
                 }
-                let route_key = format!("direct:{}.{}", provider_id, model_id);
+                let route_key = format!("direct:{}.{}", provider_id, canonical_model_id);
                 let direct_key = self
                     .load_balancer
                     .select(&route_key, &available, None, |_| true, Some("round-robin"))
@@ -547,12 +551,12 @@ impl VirtualRouterEngineCore {
                             "PROVIDER_NOT_AVAILABLE",
                             format!(
                                 "All providers unavailable for model {}.{}",
-                                provider_id, model_id
+                                provider_id, canonical_model_id
                             ),
                         )
                     })?;
                 let reasoning = append_reasoning_tag(
-                    &format!("direct_model:{}.{}", provider_id, model_id),
+                    &format!("direct_model:{}.{}", provider_id, canonical_model_id),
                     marker_reason.clone(),
                 );
                 let selection = SelectionResult::new(
@@ -1007,6 +1011,60 @@ mod tests {
 
         assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
         assert!(error.contains("All providers unavailable for model mini27.MiniMax-M2.7"));
+    }
+
+    #[test]
+    fn router_direct_direct_model_alias_resolves_to_canonical_target_model() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "routing": {
+                "default": [{
+                    "id": "default-pool",
+                    "priority": 100,
+                    "targets": ["DF.key1.deepseek-v4-pro"]
+                }]
+            },
+            "providers": {
+                "DF.key1.deepseek-v4-pro": {
+                    "providerKey": "DF.key1.deepseek-v4-pro",
+                    "providerType": "openai",
+                    "providerProtocol": "openai-chat",
+                    "modelId": "DeepSeek-V4-Pro",
+                    "aliasToModel": {
+                        "deepseek-v4-pro": "DeepSeek-V4-Pro"
+                    },
+                    "enabled": true
+                }
+            }
+        });
+        core.initialize(&config).expect("init should succeed");
+        let request = json!({
+            "model": "DF.deepseek-v4-pro",
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "routerDirectInboundProtocol": "openai-chat",
+            "requestId": "test-router-direct-direct-model-alias"
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("router-direct alias request should route");
+        let decision = result.get("decision").expect("should have decision");
+        let target = result.get("target").expect("should have target");
+        assert_eq!(decision["providerKey"].as_str(), Some("DF.key1.deepseek-v4-pro"));
+        assert_eq!(target["modelId"].as_str(), Some("DeepSeek-V4-Pro"));
+        assert!(decision["reasoning"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("direct_model:DF.DeepSeek-V4-Pro"));
     }
 
     #[test]

@@ -138,10 +138,10 @@ pub(crate) fn build_route_queue(
         }
     }
 
-    let should_insert_tools_continuation =
-        should_insert_tools_for_current_tool_continuation(requested_route_trimmed, features)
+    let should_insert_tools_route =
+        should_insert_tools_route_after_current_route(requested_route_trimmed, features)
             && has_tools_targets;
-    if should_insert_tools_continuation && !queue.iter().any(|v| v == "tools") {
+    if should_insert_tools_route && !queue.iter().any(|v| v == "tools") {
         if let Some(requested_index) = queue
             .iter()
             .position(|route| route == requested_route_trimmed)
@@ -169,17 +169,11 @@ pub(crate) fn build_route_queue(
     deduped
 }
 
-fn should_insert_tools_for_current_tool_continuation(
-    route: &str,
-    features: &RoutingFeatures,
-) -> bool {
-    if features.latest_message_from_user || !features.has_tool_call_responses {
-        return false;
-    }
-    matches!(
-        route,
-        "tools" | "search" | "read" | "write" | "web_search" | "thinking"
-    )
+fn should_insert_tools_route_after_current_route(route: &str, features: &RoutingFeatures) -> bool {
+    matches!(route, "search" | "read" | "write" | "web_search")
+        || (!features.latest_message_from_user
+            && features.has_tool_call_responses
+            && matches!(route, "tools" | "thinking"))
 }
 
 pub(crate) fn filter_pools_by_capability(
@@ -453,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn search_route_without_tool_continuation_keeps_default_available() {
+    fn search_route_inserts_tools_before_default() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "tools".to_string(),
@@ -478,7 +472,14 @@ mod tests {
             &RoutingFeatures::default(),
             &routing,
         );
-        assert_eq!(queue, vec!["search".to_string(), "default".to_string()]);
+        assert_eq!(
+            queue,
+            vec![
+                "search".to_string(),
+                "tools".to_string(),
+                "default".to_string()
+            ]
+        );
     }
 
     #[test]

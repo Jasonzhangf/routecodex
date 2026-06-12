@@ -7,6 +7,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
     inboundProtocol: string;
     applyPatchMode?: string;
   }) => {
+    const stopMessageRequiresRelay = false;
     const hasDeclaredApplyPatchTool = Array.isArray(input.payload.tools) && input.payload.tools.some((tool) => {
       if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
       const row = tool as Record<string, unknown>;
@@ -23,12 +24,12 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       && (
         (input.metadata.__rt as Record<string, unknown>).serverToolFollowup === true
         || typeof (input.metadata.__rt as Record<string, unknown>).followupSource === 'string'
-      ));
+      )) || stopMessageRequiresRelay;
     return {
       providerWireValid: true,
       requiresHubRelay,
       reason: requiresHubRelay
-          ? 'servertool_followup_requires_hub_relay'
+          ? (stopMessageRequiresRelay ? 'stopless_servertool_requires_hub_relay' : 'servertool_followup_requires_hub_relay')
           : undefined,
       hasDeclaredApplyPatchTool,
     };
@@ -56,7 +57,7 @@ const {
   assertDirectRouteDecision,
   resolveRawPayloadForDirect,
   evaluateDirectRouteDecision,
-} = await import('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
+} = require('../../../../src/server/runtime/http-server/direct-passthrough-payload.js');
 
 describe('direct-passthrough-payload', () => {
   it('ignores metadata.__raw_request_body and keeps current body as direct payload source', () => {
@@ -145,7 +146,7 @@ describe('direct-passthrough-payload', () => {
     expect(output).toEqual(ingress);
   });
 
-  it('keeps responses tool declarations on direct path without Hub relay', () => {
+  it('keeps responses client tool declarations on same-protocol direct path', () => {
     const decision = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -157,7 +158,45 @@ describe('direct-passthrough-payload', () => {
 
     expect(decision.providerWireValid).toBe(true);
     expect(decision.requiresHubRelay).toBe(false);
-    expect(decision.reason).toBeUndefined();
+    expect(decision.reason == null).toBe(true);
+  });
+
+  it('keeps client tools direct when stopMessage excludes direct but no followup exists', () => {
+    const decision = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      metadata: {
+        stopMessageEnabled: true,
+        stopMessageExcludeDirect: true,
+      },
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
+      },
+    });
+
+    expect(decision.providerWireValid).toBe(true);
+    expect(decision.requiresHubRelay).toBe(false);
+    expect(decision.reason == null).toBe(true);
+  });
+
+  it('keeps hosted responses tools on direct path when stopMessage excludes direct', () => {
+    const decision = evaluateDirectRouteDecision({
+      inboundProtocol: 'openai-responses',
+      metadata: {
+        stopMessageEnabled: true,
+        stopMessageExcludeDirect: true,
+      },
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        tools: [{ type: 'web_search_preview' }],
+      },
+    });
+
+    expect(decision.providerWireValid).toBe(true);
+    expect(decision.requiresHubRelay).toBe(false);
+    expect(decision.reason == null).toBe(true);
   });
 
   it('keeps responses reasoning content on same-protocol direct path', () => {
@@ -178,10 +217,10 @@ describe('direct-passthrough-payload', () => {
       providerWireValid: true,
       requiresHubRelay: false,
     });
-    expect(decision.reason).toBeUndefined();
+    expect(decision.reason == null).toBe(true);
   });
 
-  it('does not runtime-reject chat-style function tools on responses direct', () => {
+  it('allows chat-style function tools on responses same-protocol direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -192,7 +231,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('does not runtime-reject mixed responses direct tool arrays', () => {
+  it('allows mixed responses direct client tool arrays when provider wire is valid', () => {
     for (const invalidIndex of [0, 3, 11]) {
       const tools = Array.from({ length: 12 }, (_, index) => (
         index === invalidIndex
@@ -220,7 +259,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('does not runtime-reject historical responses tool input content on direct', () => {
+  it('rejects historical responses tool input content on direct', () => {
     expect(() => assertDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       payload: {
@@ -235,7 +274,7 @@ describe('direct-passthrough-payload', () => {
           },
         ],
       },
-    })).not.toThrow();
+    })).toThrow(/function_call_output must not include content/);
   });
 
   it('allows responses-native hosted tools without name', () => {
@@ -249,7 +288,7 @@ describe('direct-passthrough-payload', () => {
     })).not.toThrow();
   });
 
-  it('detects legacy servertool apply_patch metadata without forcing Hub relay', () => {
+  it('keeps custom apply_patch client tool declarations direct and only marks presence', () => {
     const result = evaluateDirectRouteDecision({
       inboundProtocol: 'openai-responses',
       applyPatchMode: 'servertool',
@@ -264,7 +303,7 @@ describe('direct-passthrough-payload', () => {
       requiresHubRelay: false,
       hasDeclaredApplyPatchTool: true,
     });
-    expect(result.reason).toBeUndefined();
+    expect(result.reason == null).toBe(true);
   });
 
   it('requires Hub relay for stopless servertool metadata on responses direct', () => {

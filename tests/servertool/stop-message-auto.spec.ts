@@ -19,6 +19,8 @@ import {
 import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resolveRuntimeStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import { resetStopMessageRuntimeConfigCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
+import { decideStopMessageActionWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js';
+import { readStopMessageCompareContext } from '../../sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
@@ -196,7 +198,8 @@ function readStopMessageCliProjection(result: any, expectedReasoning?: string): 
   const toolArgs = JSON.parse(String(toolCall?.function?.arguments ?? '{}')) as { cmd?: string };
   const cmd = String(toolArgs.cmd ?? '');
   expect(cmd).toContain('routecodex servertool run stop_message_auto');
-  expect(cmd).toContain('"continuationPrompt"');
+  expect(cmd).not.toContain('stopreason');
+  expect(cmd).not.toContain('schemaGuidance');
   return { cmd, message: projectedMessage };
 }
 
@@ -255,7 +258,37 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
   }
 
   // Resolve snapshot.
-  const rawSnap = (ctx.persisted_snapshot ?? ctx.runtime_snapshot) as Record<string, unknown> | undefined;
+  const providerPin = ctx.provider_pin && typeof ctx.provider_pin === 'object' && !Array.isArray(ctx.provider_pin)
+    ? ctx.provider_pin as Record<string, unknown>
+    : undefined;
+  const currentProvider = typeof providerPin?.provider_key === 'string' ? providerPin.provider_key.trim() : '';
+  const isProviderContinuous = (snapshot: Record<string, unknown> | undefined): boolean => {
+    const snapshotProvider = typeof snapshot?.provider_key === 'string' ? snapshot.provider_key.trim() : '';
+    if (snapshotProvider && currentProvider) {
+      return snapshotProvider === currentProvider;
+    }
+    if (snapshotProvider && !currentProvider) {
+      return false;
+    }
+    return true;
+  };
+  const persistedSnap = ctx.persisted_snapshot as Record<string, unknown> | undefined;
+  const runtimeSnap = ctx.runtime_snapshot as Record<string, unknown> | undefined;
+  const resetForCurrentProvider = (snapshot: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+    if (!snapshot) {
+      return undefined;
+    }
+    return {
+      ...snapshot,
+      ...(currentProvider ? { provider_key: currentProvider } : {}),
+      used: 0
+    };
+  };
+  const rawSnap = isProviderContinuous(persistedSnap)
+    ? persistedSnap
+    : isProviderContinuous(runtimeSnap)
+      ? runtimeSnap
+      : resetForCurrentProvider(persistedSnap) ?? resetForCurrentProvider(runtimeSnap);
   let snap = rawSnap;
 
   // Explicit mode without snapshot?
@@ -273,6 +306,7 @@ function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, u
       const defaultUsed = 0;
       snap = {
         text: defaultPrompt(defaultUsed),
+        ...(currentProvider ? { provider_key: currentProvider } : {}),
         max_repeats: typeof ctx.default_max_repeats === 'number' ? ctx.default_max_repeats : 3,
         used: defaultUsed,
         source: 'default',
@@ -396,6 +430,48 @@ describe('stop_message_auto servertool', () => {
     });
 
     expect(result.execution?.flowId).toBe('stop_message_flow');
+
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
+    resetStopMessageRuntimeConfigCacheForTests();
+  });
+
+  test('still triggers default stopMessage without persistent session scope', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '1';
+    resetStopMessageRuntimeConfigCacheForTests();
+
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-missing-scope',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        id: 'chatcmpl-stopmessage-missing-scope',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-missing-scope',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(fs.readdirSync(SESSION_DIR)).toHaveLength(0);
 
     process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED = '0';
     resetStopMessageRuntimeConfigCacheForTests();
@@ -670,7 +746,7 @@ describe('stop_message_auto servertool', () => {
     const { cmd } = readStopMessageCliProjection(result, 'ok');
     expect(cmd).toContain('"repeatCount":1');
     expect(cmd).toContain('"maxRepeats":3');
-    expect(cmd).toContain('第一轮核对');
+    expect(cmd).not.toContain('第一轮核对');
   });
 
   test('missing stop schema followup increments schema rejection budget', async () => {
@@ -1075,6 +1151,64 @@ describe('stop_message_auto servertool', () => {
     expect(persisted.state?.stopMessageText).toContain('运行 targeted tests');
   });
 
+  test('resets stopless consecutive budget when scoped provider changes', () => {
+    const result = decideStopMessageActionWithNative({
+      port_stop_message_disabled: false,
+      stop_eligible: true,
+      has_responses_submit_tool_outputs_resume: false,
+      persisted_snapshot: {
+        text: '继续执行',
+        provider_key: 'provider.previous',
+        max_repeats: 3,
+        used: 1,
+        source: 'persisted',
+        stage_mode: 'on'
+      },
+      persisted_default_exhausted: false,
+      explicit_mode: 'on',
+      goal_status: 'idle',
+      plan_mode_active: false,
+      default_enabled: false,
+      default_max_repeats: 3,
+      default_text: '继续执行',
+      provider_pin: { provider_key: 'provider.current' }
+    });
+
+    expect(result.action).toBe('trigger');
+    expect(result.used).toBe(0);
+    expect(result.max_repeats).toBe(3);
+    expect(result.followup_text).toContain('第一轮核对');
+  });
+
+  test('preserves stopless consecutive budget for the same scoped provider', () => {
+    const result = decideStopMessageActionWithNative({
+      port_stop_message_disabled: false,
+      stop_eligible: true,
+      has_responses_submit_tool_outputs_resume: false,
+      persisted_snapshot: {
+        text: '继续执行',
+        provider_key: 'provider.same',
+        max_repeats: 3,
+        used: 1,
+        source: 'persisted',
+        stage_mode: 'on'
+      },
+      persisted_default_exhausted: false,
+      explicit_mode: 'on',
+      goal_status: 'idle',
+      plan_mode_active: false,
+      default_enabled: false,
+      default_max_repeats: 3,
+      default_text: '继续执行',
+      provider_pin: { provider_key: 'provider.same' }
+    });
+
+    expect(result.action).toBe('trigger');
+    expect(result.used).toBe(1);
+    expect(result.max_repeats).toBe(3);
+    expect(result.followup_text).toContain('第二轮核对');
+  });
+
   test('stop schema budget exhausted returns clean user summary without leaking internal validation report', async () => {
     const sessionId = 'stopmessage-budget-exhausted-clean-summary';
     writeRoutingStateForSession(sessionId, {
@@ -1430,7 +1564,7 @@ describe('stop_message_auto servertool', () => {
           requestId: 'req-stopmessage-raw-responses-captured',
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-chat',
-          sessionId: undefined,
+          sessionId: 'stopmessage-spec-session-raw-responses-captured',
           routecodexPortStopMessageEnabled: true,
           stopMessageEnabled: true,
           __raw_request_body: {
@@ -1511,9 +1645,9 @@ describe('stop_message_auto servertool', () => {
       const { cmd } = readStopMessageCliProjection(result, 'ok');
       expect(cmd).toContain('"repeatCount":1');
       expect(cmd).toContain('"maxRepeats":3');
-      expect(cmd).toContain('第一轮核对');
-      expect(cmd).toContain('Stop schema 校验未通过');
-      expect(cmd).toContain('JSON 对象');
+      expect(cmd).not.toContain('第一轮核对');
+      expect(cmd).not.toContain('Stop schema 校验未通过');
+      expect(cmd).not.toContain('JSON 对象');
     } finally {
       __setDecideOverrideForTests(testStopMessageDecision as any);
     }
@@ -1561,7 +1695,7 @@ describe('stop_message_auto servertool', () => {
       });
     const { cmd } = readStopMessageCliProjection(result, assistantText);
     expect(cmd).toContain('"repeatCount":1');
-    expect(cmd).toContain('第一轮核对');
+    expect(cmd).not.toContain('第一轮核对');
   });
 
   test('stop_message_flow uses CLI projection and never clientInjectDispatch or reenterPipeline', async () => {
@@ -1875,7 +2009,7 @@ describe('stop_message_auto servertool', () => {
     expect(injectMeta.clientInjectText.length).toBeGreaterThan(0);
   });
 
-  test('does not resolve stopMessage session scope from capturedContext fallback (prevents cross-session leakage)', async () => {
+  test('does not resolve stopMessage session scope from capturedContext fallback but still allows request-scoped trigger', async () => {
     const sessionId = 'stopmessage-spec-session-captured-context-only';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -1939,6 +2073,7 @@ describe('stop_message_auto servertool', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(readStopMessageCompareContext(adapterContext)?.reason).not.toBe('skip_missing_session_scope');
   });
 
   test('stopMessage routing state key uses client inject scope', () => {

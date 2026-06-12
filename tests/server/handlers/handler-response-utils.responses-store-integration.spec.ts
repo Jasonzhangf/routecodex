@@ -12,7 +12,181 @@ jest.unstable_mockModule(
           Readable.from(["event: response.completed\n", "data: {}\n\n"]),
         ),
       })),
-      importCoreDist: jest.fn(),
+      deriveFinishReasonNative: jest.fn(() => undefined),
+      isToolCallContinuationResponseNative: jest.fn((body: unknown) => {
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return false;
+        }
+        const record = body as Record<string, unknown>;
+        const requiredAction = record.required_action as Record<string, unknown> | undefined;
+        const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
+        if (Array.isArray(submit?.tool_calls) && submit.tool_calls.length > 0) {
+          return true;
+        }
+        const output = Array.isArray(record.output) ? record.output : [];
+        return output.some((item) =>
+          item
+          && typeof item === "object"
+          && !Array.isArray(item)
+          && (item as Record<string, unknown>).type === "function_call"
+        );
+      }),
+      updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe: unknown) => {
+        const next = {
+          ...((probe && typeof probe === "object" && !Array.isArray(probe)) ? probe as Record<string, unknown> : {}),
+        };
+        const text = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
+        const upsertOutputItem = (item: unknown) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return;
+          }
+          const outputItem = item as Record<string, unknown>;
+          if (outputItem.type !== "function_call") {
+            return;
+          }
+          const output = Array.isArray(next.output)
+            ? [...next.output] as Record<string, unknown>[]
+            : [];
+          const id = typeof outputItem.id === "string" ? outputItem.id : undefined;
+          const callId = typeof outputItem.call_id === "string" ? outputItem.call_id : undefined;
+          const existingIndex = output.findIndex((row) => {
+            if (!row || typeof row !== "object" || Array.isArray(row)) {
+              return false;
+            }
+            return (id && row.id === id) || (callId && row.call_id === callId);
+          });
+          if (existingIndex >= 0) {
+            output[existingIndex] = { ...output[existingIndex], ...outputItem };
+          } else {
+            output.push({ ...outputItem });
+          }
+          next.output = output;
+        };
+        const mergeArguments = (parsed: Record<string, unknown>, done: boolean) => {
+          const callId = typeof parsed.call_id === "string" ? parsed.call_id : undefined;
+          const itemId = typeof parsed.item_id === "string" ? parsed.item_id : undefined;
+          const name = typeof parsed.name === "string" ? parsed.name : undefined;
+          const delta = typeof parsed.delta === "string" ? parsed.delta : "";
+          const finalArguments = typeof parsed.arguments === "string" ? parsed.arguments : undefined;
+          const output = Array.isArray(next.output)
+            ? [...next.output] as Record<string, unknown>[]
+            : [];
+          let index = output.findIndex((row) => {
+            if (!row || typeof row !== "object" || Array.isArray(row)) {
+              return false;
+            }
+            return (itemId && row.id === itemId) || (callId && row.call_id === callId);
+          });
+          if (index < 0) {
+            output.push({
+              id: itemId ?? (callId ? `fc_${callId}` : undefined),
+              type: "function_call",
+              call_id: callId,
+              name: name ?? "function",
+              arguments: "",
+              status: "in_progress",
+            });
+            index = output.length - 1;
+          }
+          const current = output[index];
+          const currentArgs = typeof current.arguments === "string" ? current.arguments : "";
+          output[index] = {
+            ...current,
+            ...(callId ? { call_id: callId } : {}),
+            ...(itemId ? { id: itemId } : {}),
+            ...(name ? { name } : {}),
+            arguments: finalArguments ?? `${currentArgs}${delta}`,
+            ...(done ? { status: "completed" } : {}),
+          };
+          next.output = output;
+        };
+        for (const block of text.split(/\n\n/)) {
+          const data = block
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice("data:".length).trimStart())
+            .join("\n")
+            .trim();
+          if (!data || data === "[DONE]") {
+            continue;
+          }
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(data) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+          if (parsed.type === "response.required_action" && parsed.required_action) {
+            next.required_action = parsed.required_action;
+            if (parsed.response && typeof parsed.response === "object" && !Array.isArray(parsed.response)) {
+              Object.assign(next, parsed.response);
+            }
+          }
+          if (parsed.type === "response.output_item.added" || parsed.type === "response.output_item.done") {
+            upsertOutputItem(parsed.item);
+          }
+          if (parsed.type === "response.function_call_arguments.delta") {
+            mergeArguments(parsed, false);
+          }
+          if (parsed.type === "response.function_call_arguments.done") {
+            mergeArguments(parsed, true);
+          }
+          if (parsed.type === "response.completed" || parsed.type === "response.done") {
+            next.__seen_response_done = parsed.type === "response.done" || next.__seen_response_done;
+            const response = parsed.response;
+            if (response && typeof response === "object" && !Array.isArray(response)) {
+              const existingOutput = next.output;
+              Object.assign(next, response);
+              if (
+                (!Array.isArray(next.output) || next.output.length === 0)
+                && Array.isArray(existingOutput)
+                && existingOutput.length > 0
+              ) {
+                next.output = existingOutput;
+              }
+            }
+          }
+        }
+        return next;
+      }),
+      buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+      importCoreDist: jest.fn(async (subpath?: string) => {
+        if (subpath !== "native/router-hotpath/native-hub-pipeline-resp-semantics") {
+          return {};
+        }
+        return {
+          projectResponsesSseFrameForClientWithNative: (input: {
+            frame: string;
+            eventName?: string;
+            data?: Record<string, unknown>;
+            state: unknown;
+          }) => {
+            const requiredAction = input.data?.required_action as Record<string, unknown> | undefined;
+            const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
+            const calls = Array.isArray(submit?.tool_calls)
+              ? submit.tool_calls as Record<string, unknown>[]
+              : [];
+            if (input.eventName === "response.required_action" && calls.length > 0) {
+              const frames = calls.map((call, index) => {
+                const fn = call.function as Record<string, unknown> | undefined;
+                const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
+                const name = String(fn?.name ?? call.name ?? "function");
+                const args = String(fn?.arguments ?? call.arguments ?? "{}");
+                const itemId = `fc_${callId}`;
+                return [
+                  `event: response.output_item.added\ndata: ${JSON.stringify({ type: "response.output_item.added", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: "", status: "in_progress" } })}\n\n`,
+                  `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: "response.function_call_arguments.delta", output_index: index, item_id: itemId, call_id: callId, delta: args })}\n\n`,
+                  `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: "response.function_call_arguments.done", output_index: index, item_id: itemId, call_id: callId, name, arguments: args })}\n\n`,
+                  `event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: args, status: "completed" } })}\n\n`,
+                ].join("");
+              }).join("");
+              return { emit: true, frame: frames, state: input.state };
+            }
+            return { emit: true, frame: input.frame, state: input.state };
+          },
+          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+        };
+      }),
       requireCoreDist: jest.fn(),
       captureResponsesRequestContextForRequest: jest.fn(
         async (args: {
@@ -264,7 +438,7 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(restored).not.toBeNull();
     expect(restored?.payload.previous_response_id).toBe("resp_1779503404150");
     expect(restored?.payload.tools).toEqual([
-      { type: "function", function: { name: "exec_command" } },
+      { type: "function", name: "exec_command" },
     ]);
     expect(restored?.payload.input).toEqual([
       {
@@ -399,6 +573,122 @@ describe("sendPipelineResponse responses store integration", () => {
       ],
     });
     expect(resumed.payload.previous_response_id).toBe(responseId);
+  });
+
+  it("RED: responses tool-call continuation must persist even when request store=false", async () => {
+    const { sendPipelineResponse } =
+      await import("../../../src/server/handlers/handler-response-utils.js");
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId = "openai-responses-router-gpt-5.3-codex-store-false-continuation";
+    const responseId = "resp_store_false_continuation_1";
+    const callId = "call_store_false_continuation_1";
+
+    const res = new MockResponse();
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: Readable.from([
+            "event: response.output_item.done\n",
+            `data: ${JSON.stringify({
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                id: `fc_${callId}`,
+                type: "function_call",
+                status: "completed",
+                arguments: '{"text":"PING_OK"}',
+                call_id: callId,
+                name: "echo",
+              },
+            })}\n\n`,
+            "event: response.completed\n",
+            `data: ${JSON.stringify({
+              type: "response.completed",
+              response: {
+                id: responseId,
+                object: "response",
+                status: "completed",
+                output: [
+                  {
+                    id: `fc_${callId}`,
+                    type: "function_call",
+                    status: "completed",
+                    arguments: '{"text":"PING_OK"}',
+                    call_id: callId,
+                    name: "echo",
+                  },
+                ],
+              },
+            })}\n\n`,
+            "data: [DONE]\n\n",
+          ]),
+        },
+        usageLogInfo: {
+          finishReason: "tool_calls",
+          routeName: "tools/gateway-priority-5520-tools",
+          sessionId: "store-false-session",
+        },
+        metadata: {
+          outboundStream: true,
+        },
+      } as any,
+      requestId,
+      {
+        entryEndpoint: "/v1/responses",
+        responsesRequestContext: {
+          payload: {
+            model: "gpt-5.3-codex",
+            store: false,
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "必须调用 echo 工具",
+                  },
+                ],
+              },
+            ],
+            tools: [{ type: "function", name: "echo" }],
+          },
+          context: {
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "必须调用 echo 工具",
+                  },
+                ],
+              },
+            ],
+            toolsRaw: [{ type: "function", name: "echo" }],
+          },
+          sessionId: "store-false-session",
+        },
+      },
+    );
+    await waitForEnd(res);
+
+    const resumed = store.resumeResponsesConversation(responseId, {
+      tool_outputs: [
+        {
+          call_id: callId,
+          output: "PING_OK",
+        },
+      ],
+    });
+    expect(resumed.payload.previous_response_id).toBe(responseId);
+    expect(resumed.payload.providerKey).toBeUndefined();
+    expect(resumed.meta.providerKey).toBeDefined();
+    const stats = store.responsesConversationStore.getDebugStats();
+    expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
   });
 
 
@@ -943,6 +1233,8 @@ describe("sendPipelineResponse responses store integration", () => {
     });
 
     expect(resumed.payload.previous_response_id).toBe(responseId);
+    expect(resumed.payload.providerKey).toBeUndefined();
+    expect(resumed.meta.providerKey).toBeDefined();
     expect(resumed.payload.input).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

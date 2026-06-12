@@ -6,6 +6,28 @@ import { StatsManager } from '../../../../src/server/runtime/http-server/stats-m
 import type { ProviderTrafficGovernorLike } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
 import { createBridgeHttpServerMock } from '../../../helpers/bridge-http-server-mock';
 
+jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
+  resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
+    classification?: string;
+    isStreamingRequest?: boolean;
+    hostContractFailure?: boolean;
+    forceExcludeCurrentProviderOnRetry?: boolean;
+    promptTooLong?: boolean;
+    existingExclusion?: boolean;
+  }) => {
+    if (input.hostContractFailure) {
+      return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
+    }
+    if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
+      return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
+    }
+    if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
+      return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
+    }
+    return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
+  })
+}));
+
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
   if (!result || typeof result !== 'object') {
     return result;
@@ -1748,6 +1770,99 @@ describe('HubRequestExecutor failover', () => {
     ).toBe(true);
   });
 
+  test('RED: recoverable 429 must continue to later pools before failing when default still has candidates', async () => {
+    const firstProviderKey = 'minimax.key1.MiniMax-M3';
+    const secondProviderKey = 'asxs.crsa.gpt-5.4';
+
+    const firstProcess = jest.fn(async () => {
+      throw Object.assign(new Error('HTTP 429: upstream rate limited'), {
+        statusCode: 429,
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429'
+      });
+    });
+    const secondProcess = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'ok-after-next-pool',
+        object: 'response',
+        status: 'completed',
+        output: [{
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'ok_from_default_pool' }]
+        }]
+      }
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey?: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => {
+        if (runtimeKey === firstProviderKey) {
+          return buildHandle(firstProviderKey, firstProcess);
+        }
+        if (runtimeKey === secondProviderKey) {
+          return buildHandle(secondProviderKey, secondProcess);
+        }
+        return undefined;
+      }
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const providerKey = excluded.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+        const pool = excluded.has(firstProviderKey)
+          ? [secondProviderKey]
+          : [firstProviderKey];
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-responses',
+            runtimeKey: providerKey
+          },
+          routingDecision: {
+            routeName: excluded.has(firstProviderKey) ? 'default' : 'search',
+            pool,
+            poolId: excluded.has(firstProviderKey) ? 'default-backstop' : 'search-primary'
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const executor = createRequestExecutor({
+      runtimeManager: runtimeManager as any,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }) as any,
+      logStage: () => undefined,
+      stats: new StatsManager()
+    });
+
+    const result = await executor.execute({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-429-next-pool-default',
+      headers: {},
+      query: {},
+      body: { model: 'gpt-test', input: 'hi' },
+      metadata: {}
+    });
+
+    expect(firstProcess).toHaveBeenCalledTimes(1);
+    expect(secondProcess).toHaveBeenCalledTimes(1);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(result.body).toEqual(expect.objectContaining({
+      id: 'ok-after-next-pool'
+    }));
+  });
+
   test('records attempt and fails fast when hub pipeline is unavailable', async () => {
     const deps = {
       runtimeManager: {
@@ -1776,7 +1891,8 @@ describe('HubRequestExecutor failover', () => {
     ).rejects.toThrow('Hub pipeline runtime is not initialized');
   });
 
-  test('fails fast on recoverable pool exhaustion instead of waiting in-request', async () => {
+  test('backs off recoverable pool exhaustion before retrying route selection', async () => {
+    jest.useFakeTimers();
     const providerKey = 'deepseek-web.1.deepseek-chat';
     const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
 
@@ -1826,23 +1942,37 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(executor.execute({
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: { id: 'ok-after-pool-exhausted-backoff', object: 'response', status: 'completed' }
+    });
+    const pending = executor.execute({
       requestId: 'req-cooldown-wait',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
-    })).rejects.toThrow('All providers unavailable for route default');
+    });
+    const expectation = expect(pending).resolves.toMatchObject({
+      status: 200,
+      body: { id: 'ok-after-wait' }
+    });
 
+    await jest.advanceTimersByTimeAsync(999);
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(
       logStage.mock.calls.some(
-        (call) => call[0] === 'provider.route_pool_cooldown_wait'
+        (call) => call[0] === 'hub.pool_exhausted.backoff_wait'
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  test('fails fast on singleton concurrency busy instead of waiting in-request', async () => {
+  test('does not surface singleton concurrency busy before bounded pool backoff retry completes', async () => {
+    jest.useFakeTimers();
     const providerKey = 'mimo.key1.mimo-v2.5-pro';
     const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-concurrency-wait' } }));
 
@@ -1908,21 +2038,27 @@ describe('HubRequestExecutor failover', () => {
         ]
       }
     });
-    await expect(executor.execute({
+    const pending = executor.execute({
       requestId: 'req-singleton-concurrency-wait',
       entryEndpoint: '/v1/responses',
       body: {},
       headers: {},
       metadata: {}
-    })).rejects.toThrow('No available providers after applying routing instructions');
+    });
+    const expectation = expect(pending).resolves.toMatchObject({ status: 200 });
 
+    await jest.advanceTimersByTimeAsync(999);
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(
       logStage.mock.calls.some(
         (call) =>
-          call[0] === 'provider.route_pool_cooldown_wait'
+          call[0] === 'hub.pool_exhausted.backoff_wait'
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test('does not block beyond the generic pool cooldown budget for a singleton recoverable pool', async () => {

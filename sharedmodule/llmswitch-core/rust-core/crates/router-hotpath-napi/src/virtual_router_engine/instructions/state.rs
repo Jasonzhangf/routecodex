@@ -130,6 +130,7 @@ pub(crate) fn has_client_inject_fields(state: &RoutingInstructionState) -> bool 
     let has_stop = stop.stop_message_text.is_some()
         || stop.stop_message_max_repeats.is_some()
         || stop.stop_message_used.is_some()
+        || stop.stop_message_provider_key.is_some()
         || stop.stop_message_stage_mode.is_some()
         || stop.stop_message_ai_mode.is_some()
         || stop.stop_message_ai_seed_prompt.is_some()
@@ -148,6 +149,12 @@ fn stop_message_state_to_map(state: &StopMessageState) -> Map<String, Value> {
     if let Some(value) = &state.stop_message_source {
         map.insert(
             "stopMessageSource".to_string(),
+            Value::String(value.clone()),
+        );
+    }
+    if let Some(value) = &state.stop_message_provider_key {
+        map.insert(
+            "stopMessageProviderKey".to_string(),
             Value::String(value.clone()),
         );
     }
@@ -206,6 +213,7 @@ fn apply_stop_message_patch(state: &mut StopMessageState, patch: StopMessagePatc
     for field in patch.unset {
         match field.as_str() {
             "stopMessageSource" => state.stop_message_source = None,
+            "stopMessageProviderKey" => state.stop_message_provider_key = None,
             "stopMessageText" => state.stop_message_text = None,
             "stopMessageMaxRepeats" => state.stop_message_max_repeats = None,
             "stopMessageUsed" => state.stop_message_used = None,
@@ -223,6 +231,11 @@ fn apply_stop_message_patch(state: &mut StopMessageState, patch: StopMessagePatc
             "stopMessageSource" => {
                 if let Some(text) = value.as_str() {
                     state.stop_message_source = Some(text.to_string());
+                }
+            }
+            "stopMessageProviderKey" => {
+                if let Some(text) = value.as_str() {
+                    state.stop_message_provider_key = Some(text.to_string());
                 }
             }
             "stopMessageText" => {

@@ -32,10 +32,11 @@ pub(crate) fn select_direct_provider_model(
     registry: &ProviderRegistry,
     is_available: impl Fn(&str) -> bool,
 ) -> Option<String> {
+    let canonical_model_id = registry.resolve_canonical_model_id(provider_id, model_id)?;
     let keys = registry.list_provider_keys(provider_id);
     for key in keys {
         if let Some(profile) = registry.get(&key) {
-            if profile.model_id.as_deref() == Some(model_id) && is_available(&key) {
+            if profile.model_id.as_deref() == Some(&canonical_model_id) && is_available(&key) {
                 return Some(key);
             }
         }
@@ -52,6 +53,7 @@ pub(crate) fn direct_model_media_requirement_error(
     if !features.has_image_attachment && !features.has_video_attachment {
         return None;
     }
+    let canonical_model_id = provider_registry.resolve_canonical_model_id(provider_id, model_id)?;
     let needs_multimodal = features.has_image_attachment
         || (features.has_video_attachment && features.has_remote_video_attachment);
     if !needs_multimodal {
@@ -64,7 +66,7 @@ pub(crate) fn direct_model_media_requirement_error(
         provider_registry
             .get(key)
             .and_then(|p| p.model_id.as_deref())
-            == Some(model_id)
+            == Some(canonical_model_id.as_str())
             && if requires_video_capability {
                 provider_registry.has_capability(key, "multimodal")
             } else {
@@ -82,7 +84,7 @@ pub(crate) fn direct_model_media_requirement_error(
     };
     Some(format!(
         "Direct model {}.{} cannot satisfy media requirement {}; explicit provider.model routing must not change route",
-        provider_id, model_id, requirement
+        provider_id, canonical_model_id, requirement
     ))
 }
 
@@ -168,5 +170,29 @@ mod tests {
             direct_model_media_requirement_error("media", "mm-model", &features, &registry)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn direct_model_alias_resolves_to_canonical_model_id() {
+        let mut registry = ProviderRegistry::default();
+        let providers = json!({
+            "DF.key1.DeepSeek-V4-Pro": {
+                "providerKey": "DF.key1.DeepSeek-V4-Pro",
+                "providerType": "openai",
+                "modelId": "DeepSeek-V4-Pro",
+                "aliasToModel": {
+                    "deepseek-v4-pro": "DeepSeek-V4-Pro"
+                }
+            }
+        });
+        registry.load(providers.as_object().unwrap());
+
+        let selected = select_direct_provider_model(
+            "DF",
+            "deepseek-v4-pro",
+            &registry,
+            |_| true,
+        );
+        assert_eq!(selected, Some("DF.key1.DeepSeek-V4-Pro".to_string()));
     }
 }

@@ -179,6 +179,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(normalizePath)).toBe(false);
   });
 
+  it('lmstudio responses input stringify residue must be physically removed', () => {
+    const actionPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/compat/actions/lmstudio-responses-input-stringify.ts',
+    );
+    const profilePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/compat/profiles/chat-lmstudio.json',
+    );
+
+    expect(fs.existsSync(actionPath)).toBe(false);
+    const profileSource = fs.readFileSync(profilePath, 'utf8');
+    expect(profileSource).not.toContain('lmstudio_responses_input_stringify');
+  });
+
   it('legacy TS stage native entrypoints must be retired from tracked source', () => {
     const sourceRoots = [
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
@@ -1556,18 +1571,8 @@ describe('hub pipeline stage residue audit', () => {
   it('server response handler must not inspect required_action to repair finish reason in TS', () => {
     const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const autoCloseStart = source.indexOf('terminalAutoCloseTimer = setTimeout');
-    expect(autoCloseStart).toBeGreaterThanOrEqual(0);
-    const autoCloseEnd = source.indexOf("}, 120);", autoCloseStart);
-    expect(autoCloseEnd).toBeGreaterThan(autoCloseStart);
-    const autoCloseBody = source.slice(autoCloseStart, autoCloseEnd);
-    const repairStart = source.indexOf('const repairedTerminalFrames = !terminalWatch.sawResponsesCompletedChunk');
-    expect(repairStart).toBeGreaterThanOrEqual(0);
-    const repairEnd = source.indexOf('void persistNativeSseConversationState', repairStart);
-    expect(repairEnd).toBeGreaterThan(repairStart);
-    const repairBody = source.slice(repairStart, repairEnd);
-    const findings = collectMatches(`${autoCloseBody}\n${repairBody}`, [
-      { label: 'checks required_action in TS finish repair', pattern: /required_action|response\.required_action|submit_tool_outputs|tool_calls/ },
+    const findings = collectMatches(source, [
+      { label: 'TS derives finish repair from required_action', pattern: /deriveFinishReason\(|buildResponsesTerminalSseFramesFromProbeNative|isResponsesRequiredActionFrame|response\.required_action/ },
     ]);
 
     expect(findings).toEqual([]);

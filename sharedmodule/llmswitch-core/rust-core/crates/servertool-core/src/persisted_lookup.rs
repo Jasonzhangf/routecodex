@@ -70,6 +70,8 @@ pub struct StopMessagePersistedStateSelectionOutput {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStopMessageStateSnapshot {
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_key: Option<String>,
     pub max_repeats: i64,
     pub used: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -319,6 +321,9 @@ pub fn resolve_runtime_stop_message_state(
 
     Some(RuntimeStopMessageStateSnapshot {
         text,
+        provider_key: state
+            .and_then(Value::as_object)
+            .and_then(|state| read_trimmed_string(state.get("stopMessageProviderKey"))),
         max_repeats,
         used,
         source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
@@ -561,6 +566,7 @@ pub fn plan_persist_stop_message_state(
         || read_finite_number(state.get("preCommandUpdatedAt")).is_some();
     let has_lifecycle_stamp = read_finite_number(state.get("stopMessageLastUsedAt")).is_some();
     let is_empty = read_trimmed_string(state.get("stopMessageText")).is_none()
+        && read_trimmed_string(state.get("stopMessageProviderKey")).is_none()
         && read_finite_number(state.get("stopMessageMaxRepeats")).is_none()
         && read_finite_number(state.get("stopMessageUsed")).is_none()
         && read_trimmed_string(state.get("stopMessageStageMode")).is_none()
@@ -590,6 +596,7 @@ pub fn resolve_default_stop_message_snapshot(
 
     Some(RuntimeStopMessageStateSnapshot {
         text,
+        provider_key: None,
         max_repeats,
         used: 0,
         source: Some("default".to_string()),
@@ -633,6 +640,8 @@ pub fn resolve_implicit_gemini_stop_message_snapshot(
 
     Some(RuntimeStopMessageStateSnapshot {
         text: STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string(),
+        provider_key: read_trimmed_string(input.record.get("providerKey"))
+            .or_else(|| read_trimmed_string(input.record.get("providerId"))),
         max_repeats: 1,
         used: 0,
         source: Some("auto".to_string()),
@@ -663,12 +672,14 @@ fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessa
         .map(|value| value.floor() as i64)
         .map(|value| value.max(0))
         .unwrap_or(0);
+    let provider_key = read_trimmed_string(record.get("stopMessageProviderKey"));
     let updated_at = read_nonzero_finite_number(record.get("stopMessageUpdatedAt"));
     let last_used_at = read_nonzero_finite_number(record.get("stopMessageLastUsedAt"));
     let source = read_trimmed_string(record.get("stopMessageSource"));
 
     Some(RuntimeStopMessageStateSnapshot {
         text,
+        provider_key,
         max_repeats,
         used,
         source,
@@ -1135,6 +1146,7 @@ fn resolve_runtime_stop_message_state_from_request_record(
 
         return Some(RuntimeStopMessageStateSnapshot {
             text,
+            provider_key: None,
             max_repeats,
             used,
             source: Some("client_exec_result".to_string()),
@@ -1911,6 +1923,7 @@ mod tests {
             snapshot,
             RuntimeStopMessageStateSnapshot {
                 text: "keep going".to_string(),
+                provider_key: None,
                 max_repeats: DEFAULT_STOP_MESSAGE_MAX_REPEATS,
                 used: 2,
                 source: Some("explicit".to_string()),
@@ -1941,6 +1954,7 @@ mod tests {
             snapshot,
             RuntimeStopMessageStateSnapshot {
                 text: STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string(),
+                provider_key: None,
                 max_repeats: 3,
                 used: 2,
                 source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
@@ -2230,6 +2244,7 @@ mod tests {
             snapshot,
             RuntimeStopMessageStateSnapshot {
                 text: "continue from result".to_string(),
+                provider_key: None,
                 max_repeats: 5,
                 used: 3,
                 source: Some("client_exec_result".to_string()),

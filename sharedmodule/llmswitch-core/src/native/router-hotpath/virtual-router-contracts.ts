@@ -585,6 +585,7 @@ export interface RoutingDiagnostics {
 
 export interface StopMessageStateSnapshot {
   stopMessageText?: string;
+  stopMessageProviderKey?: string;
   stopMessageMaxRepeats: number;
   /**
    * stopMessage 来源：

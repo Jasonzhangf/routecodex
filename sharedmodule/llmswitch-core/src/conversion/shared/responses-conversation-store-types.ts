@@ -18,6 +18,7 @@ export interface RecordResponseArgs {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
   allowScopeContinuation?: boolean;
@@ -55,6 +56,7 @@ export interface ConversationEntry {
   inputItemCount?: number;
   tools?: AnyRecord[];
   providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
   createdAt: number;
   updatedAt: number;
   lastResponseId?: string;

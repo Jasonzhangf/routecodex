@@ -36,6 +36,19 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
     });
   });
 
+  it('keeps session scope fields stable when request metadata is absent', () => {
+    const merged = mergePipelineMetadata(undefined, {
+      providerProtocol: 'openai-responses',
+      sessionId: 'sess-keep',
+      conversationId: 'conv-keep'
+    });
+    expect(merged).toMatchObject({
+      providerProtocol: 'openai-responses',
+      sessionId: 'sess-keep',
+      conversationId: 'conv-keep'
+    });
+  });
+
   it('throws on client __rt metadata (no merge with internal __rt, no silent drop)', () => {
     expect(() => mergePipelineMetadata(
       { __rt: { routeHint: 'coding', keep: true } },

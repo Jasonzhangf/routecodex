@@ -23,6 +23,7 @@ pub(crate) struct RoutingInstructionState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StopMessageState {
     pub stop_message_source: Option<String>,
+    pub stop_message_provider_key: Option<String>,
     pub stop_message_text: Option<String>,
     pub stop_message_max_repeats: Option<i64>,
     pub stop_message_used: Option<i64>,

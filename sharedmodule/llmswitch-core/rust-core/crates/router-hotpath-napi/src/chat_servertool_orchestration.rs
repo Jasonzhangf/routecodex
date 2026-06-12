@@ -481,6 +481,50 @@ fn read_provider_response_root_tools(value: Option<&Value>) -> Option<Vec<Value>
         .cloned()
 }
 
+fn read_provider_response_messages(value: Option<&Value>) -> Option<Vec<Value>> {
+    as_json_object(value)
+        .and_then(|row| row.get("messages"))
+        .and_then(Value::as_array)
+        .filter(|messages| !messages.is_empty())
+        .cloned()
+}
+
+fn read_provider_response_input(value: Option<&Value>) -> Option<Vec<Value>> {
+    let row = as_json_object(value)?;
+    row.get("input")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+        .cloned()
+        .or_else(|| {
+            row.get("semantics")
+                .and_then(Value::as_object)
+                .and_then(|semantics| semantics.get("input"))
+                .and_then(Value::as_array)
+                .filter(|items| !items.is_empty())
+                .cloned()
+        })
+}
+
+fn read_provider_response_metadata_input(
+    metadata: Option<&Map<String, Value>>,
+) -> Option<Vec<Value>> {
+    let row = metadata?;
+    row.get("responsesContext")
+        .and_then(Value::as_object)
+        .and_then(|context| context.get("input"))
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+        .cloned()
+        .or_else(|| {
+            row.get("contextSnapshot")
+                .and_then(Value::as_object)
+                .and_then(|context| context.get("input"))
+                .and_then(Value::as_array)
+                .filter(|items| !items.is_empty())
+                .cloned()
+        })
+}
+
 fn read_provider_response_request_semantics<'a>(
     processed_metadata: Option<&'a Map<String, Value>>,
     standardized_metadata: Option<&'a Map<String, Value>>,
@@ -635,9 +679,15 @@ fn resolve_provider_response_request_semantics_value(
     );
     let fallback_tools = read_provider_response_root_tools(processed_ref)
         .or_else(|| read_provider_response_root_tools(standardized_ref));
+    let fallback_input = read_provider_response_input(processed_ref)
+        .or_else(|| read_provider_response_input(standardized_ref))
+        .or_else(|| read_provider_response_metadata_input(request_metadata_record));
     let base_value =
         read_provider_response_base_semantics(processed_ref, standardized_ref, metadata_semantics);
-    if base_value.is_none() && fallback_tools.as_ref().is_none_or(Vec::is_empty) {
+    if base_value.is_none()
+        && fallback_tools.as_ref().is_none_or(Vec::is_empty)
+        && fallback_input.as_ref().is_none_or(Vec::is_empty)
+    {
         return Value::Null;
     }
 
@@ -667,6 +717,18 @@ fn resolve_provider_response_request_semantics_value(
             Value::Array(fallback_tools.clone().unwrap_or_default()),
         );
         normalized_base.insert("tools".to_string(), Value::Object(tools));
+    }
+    if !normalized_base.contains_key("messages") {
+        if let Some(messages) = read_provider_response_messages(processed_ref)
+            .or_else(|| read_provider_response_messages(standardized_ref))
+        {
+            normalized_base.insert("messages".to_string(), Value::Array(messages));
+        }
+    }
+    if !normalized_base.contains_key("input") {
+        if let Some(input) = fallback_input {
+            normalized_base.insert("input".to_string(), Value::Array(input));
+        }
     }
 
     let processed_rt = read_provider_response_rt(processed_metadata);
@@ -2770,6 +2832,86 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_provider_response_request_semantics_preserves_messages_for_tool_result_followup(
+    ) {
+        let processed = json!({
+            "messages": [
+                { "role": "assistant", "content": "call tool" },
+                { "role": "tool", "tool_call_id": "call_1", "content": "ok" }
+            ]
+        });
+        let standardized = json!({
+            "semantics": { "tools": { "clientToolsRaw": [] } }
+        });
+        let output =
+            resolve_provider_response_request_semantics_value(processed, standardized, Value::Null);
+        assert_eq!(output["messages"].as_array().unwrap().len(), 2);
+        assert_eq!(output["messages"][1]["role"], "tool");
+        assert_eq!(output["messages"][1]["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_preserves_responses_input_for_tool_result_followup(
+    ) {
+        let processed = json!({
+            "input": [
+                { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let standardized = json!({
+            "semantics": { "tools": { "clientToolsRaw": [] } }
+        });
+        let output =
+            resolve_provider_response_request_semantics_value(processed, standardized, Value::Null);
+        assert_eq!(output["input"].as_array().unwrap().len(), 2);
+        assert_eq!(output["input"][1]["type"], "function_call_output");
+        assert_eq!(output["input"][1]["call_id"], "call_1");
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_preserves_standardized_semantics_input() {
+        let standardized = json!({
+            "semantics": {
+                "tools": { "clientToolsRaw": [] },
+                "input": [
+                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+                ]
+            }
+        });
+        let output = resolve_provider_response_request_semantics_value(
+            Value::Null,
+            standardized,
+            Value::Null,
+        );
+        assert_eq!(output["input"].as_array().unwrap().len(), 2);
+        assert_eq!(output["input"][1]["type"], "function_call_output");
+        assert_eq!(output["input"][1]["call_id"], "call_1");
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_preserves_metadata_responses_context_input()
+    {
+        let request_metadata = json!({
+            "responsesContext": {
+                "input": [
+                    { "type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{}" },
+                    { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+                ]
+            }
+        });
+        let output = resolve_provider_response_request_semantics_value(
+            Value::Null,
+            Value::Null,
+            request_metadata,
+        );
+        assert_eq!(output["input"].as_array().unwrap().len(), 2);
+        assert_eq!(output["input"][1]["type"], "function_call_output");
+        assert_eq!(output["input"][1]["call_id"], "call_1");
+    }
+
+    #[test]
     fn test_stop_message_auto_followup_does_not_pin_provider() {
         let input = json!({
             "base": {
@@ -3716,7 +3858,6 @@ mod tests {
             Some(1)
         );
     }
-
 }
 
 /// Read followup client inject source from adapter context.

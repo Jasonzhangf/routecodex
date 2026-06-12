@@ -174,16 +174,6 @@ export function applyGeminiWebSearchRequestCompatWithNative(
   ]);
 }
 
-export function applyLmstudioResponsesInputStringifyWithNative(
-  payload: Record<string, unknown>,
-  adapterContext?: Record<string, unknown>,
-): Record<string, unknown> {
-  return invokeRecordCapability('applyLmstudioResponsesInputStringifyJson', [
-    payload,
-    adapterContext ?? {},
-  ]);
-}
-
 export function applyToolTextRequestGuidanceWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,

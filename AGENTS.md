@@ -161,6 +161,8 @@ client-visible error
 3. 启动排障必须区分：`checkHealth=false`、`VR success hook 不可用`、`success 后再次失败重写冷却` 三个分支；不得混为“路由器错误”。
 4. 本项目该类问题调试先看 `.agents/skills/rcc-dev-skills/SKILL.md` 的“2026-05-27 调试精华（5555 主备/health/stopless）”章节，再执行改动。
 5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。
+6. Provider 模型名双轨契约（2026-06-12）：`provider.models.<modelId>` 的 key 即唯一 upstream/provider wire model 名；`aliases` 仅供客户端可见模型名和客户端入口匹配使用。`/v1/models` 可以展示 alias（无 alias 时展示 `modelId`），但 provider 出站请求里的 `body.model` 必须始终回写为 `modelId`，禁止把 alias 直接发给上游。
+7. Responses continuation 契约（2026-06-12）：remote/upstream-owned `responseId/previous_response_id` 必须记 `continuationOwner=direct` 并沿 same-protocol direct 续接；本地 relay/materialize 生成的 continuation id 必须记 `continuationOwner=relay` 并只走 relay。`store:false` 不得阻止同一 response 的 tool continuation 持久化；response 侧若仍有 pending tool call，必须以 response 真相将 `allowContinuation=true`。`providerKey` 只能存在于 runtime/meta carrier 做 direct pin，禁止写回 resumed/materialized provider payload。
 
 ## 2026-06-05 硬编码 + Fallback 架构收口引用
 

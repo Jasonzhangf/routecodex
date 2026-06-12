@@ -16,20 +16,6 @@ fn read_rt_bool(adapter_context: &AdapterContext, key: &str) -> Option<bool> {
         .and_then(|value| value.as_bool())
 }
 
-fn lmstudio_stringify_input_enabled(adapter_context: &AdapterContext) -> bool {
-    if let Some(override_value) = read_rt_bool(adapter_context, "lmstudioStringifyInputEnabled")
-    {
-        return override_value;
-    }
-    matches!(
-        std::env::var("LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT").ok().as_deref(),
-        Some("1")
-    ) || matches!(
-        std::env::var("ROUTECODEX_LMSTUDIO_STRINGIFY_INPUT").ok().as_deref(),
-        Some("1")
-    )
-}
-
 fn normalize_with_fallback(call_id: Option<&str>, fallback: Option<&str>, prefix: &str) -> String {
     normalize_prefixed_tool_call_id(call_id, fallback, prefix)
 }

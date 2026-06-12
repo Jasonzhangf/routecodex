@@ -320,6 +320,102 @@ fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_
 }
 
 #[test]
+fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_relay() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "minimax.key1.MiniMax-M3": {
+                        "providerKey": "minimax.key1.MiniMax-M3",
+                        "providerType": "anthropic",
+                        "runtimeKey": "minimax.key1",
+                        "modelId": "MiniMax-M3",
+                        "endpoint": "mock://minimax",
+                        "auth": { "type": "apikey", "apiKey": "minimax-key" },
+                        "outboundProfile": "anthropic-messages",
+                        "compatibilityProfile": "anthropic:claude-code"
+                    }
+                },
+                "routing": {
+                    "thinking": [{
+                        "id": "thinking-priority",
+                        "mode": "priority",
+                        "targets": ["minimax.key1.MiniMax-M3"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-responses-to-minimax-compat",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "read files" }]
+                }],
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "execute command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "cmd": { "type": "string" } },
+                        "required": ["cmd"]
+                    }
+                }],
+                "tool_choice": "auto"
+            },
+            "metadata": {
+                "__routecodexPreselectedRoute": {
+                    "target": {
+                        "providerKey": "minimax.key1.MiniMax-M3",
+                        "providerType": "anthropic",
+                        "runtimeKey": "minimax.key1",
+                        "modelId": "MiniMax-M3",
+                        "outboundProfile": "anthropic-messages",
+                        "compatibilityProfile": "anthropic:claude-code"
+                    },
+                    "decision": { "routeName": "thinking" },
+                    "diagnostics": {}
+                }
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/system/0/text")
+            .and_then(|value| value.as_str()),
+        Some("You are Claude Code, Anthropic's official CLI for Claude.")
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/thinking/type")
+            .and_then(|value| value.as_str()),
+        Some("adaptive")
+    );
+    assert_eq!(
+        output
+            .pointer("/payload/output_config/effort")
+            .and_then(|value| value.as_str()),
+        Some("medium")
+    );
+}
+
+#[test]
 fn execute_request_path_preserves_client_tool_surface() {
     let input = json!({
         "config": {

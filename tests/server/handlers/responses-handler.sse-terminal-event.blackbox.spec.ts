@@ -237,7 +237,7 @@ describe('responses-handler SSE terminal contract', () => {
     });
   });
 
-  it('HTTP blackbox: upstream required_action without response.completed is repaired before close', async () => {
+  it('HTTP blackbox: upstream required_action without response.completed is repaired into standard Responses tool SSE before close', async () => {
     const executePipeline = jest.fn(async () => ({
       status: 200,
       headers: {},
@@ -280,20 +280,31 @@ describe('responses-handler SSE terminal contract', () => {
         stopOnEvent: 'response.done'
       });
       const eventNames = events.map((entry) => entry.event);
-      const requiredActionIndex = eventNames.indexOf('response.required_action');
+      const outputAddedIndex = eventNames.indexOf('response.output_item.added');
+      const argsDoneIndex = eventNames.indexOf('response.function_call_arguments.done');
+      const outputDoneIndex = eventNames.indexOf('response.output_item.done');
       const completedIndex = eventNames.indexOf('response.completed');
       const doneIndex = eventNames.indexOf('response.done');
 
       expect(response.status).toBe(200);
-      expect(requiredActionIndex).toBeGreaterThanOrEqual(0);
+      expect(outputAddedIndex).toBeGreaterThanOrEqual(0);
+      expect(argsDoneIndex).toBeGreaterThanOrEqual(0);
+      expect(outputDoneIndex).toBeGreaterThanOrEqual(0);
       expect(completedIndex).toBeGreaterThanOrEqual(0);
       expect(doneIndex).toBeGreaterThanOrEqual(0);
-      expect(requiredActionIndex).toBeLessThan(completedIndex);
+      expect(outputAddedIndex).toBeLessThan(argsDoneIndex);
+      expect(argsDoneIndex).toBeLessThan(outputDoneIndex);
+      expect(outputDoneIndex).toBeLessThan(completedIndex);
       expect(completedIndex).toBeLessThan(doneIndex);
-      expect(text).toContain('event: response.required_action');
+      expect(text).toContain('event: response.output_item.added');
+      expect(text).toContain('event: response.function_call_arguments.done');
+      expect(text).toContain('event: response.output_item.done');
       expect(text).toContain('event: response.completed');
       expect(text).toContain('event: response.done');
-      expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
+      expect(text).not.toContain('event: response.required_action');
+      expect(text.indexOf('event: response.output_item.added')).toBeLessThan(text.indexOf('event: response.function_call_arguments.done'));
+      expect(text.indexOf('event: response.function_call_arguments.done')).toBeLessThan(text.indexOf('event: response.output_item.done'));
+      expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
       expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');

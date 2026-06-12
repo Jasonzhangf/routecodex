@@ -9,12 +9,15 @@ pub struct StopMessagePersistPlanInput {
     pub state_update: Option<Value>,
     pub default_text: Option<String>,
     pub schema_used_before_count: Option<Value>,
+    pub current_provider_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StopMessagePersistSnapshotPlan {
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_key: Option<String>,
     pub max_repeats: i64,
     pub used: i64,
     pub source: String,
@@ -77,6 +80,20 @@ pub fn plan_stop_message_persist_snapshot(
         .and_then(|row| row.get("text"))
         .map(value_to_string)
         .unwrap_or(default_text);
+    let provider_key = state_update
+        .and_then(|row| row.get("providerKey").or_else(|| row.get("provider_key")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            input
+                .current_provider_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
     let source = state_update
         .and_then(|row| row.get("source"))
         .and_then(Value::as_str)
@@ -95,6 +112,7 @@ pub fn plan_stop_message_persist_snapshot(
         next_used,
         snapshot: StopMessagePersistSnapshotPlan {
             text,
+            provider_key,
             max_repeats: next_max_repeats,
             used: next_used,
             source,
@@ -149,6 +167,7 @@ mod tests {
             })),
             default_text: Some("default".to_string()),
             schema_used_before_count: Some(json!(1)),
+            current_provider_key: None,
         });
 
         assert_eq!(plan.compare_max_repeats, 3);
@@ -168,6 +187,7 @@ mod tests {
             state_update: Some(json!({})),
             default_text: Some("default".to_string()),
             schema_used_before_count: Some(json!(4.8)),
+            current_provider_key: None,
         });
 
         assert_eq!(plan.compare_max_repeats, 9);
@@ -186,6 +206,7 @@ mod tests {
             state_update: Some(json!({ "used": 8 })),
             default_text: Some("default".to_string()),
             schema_used_before_count: None,
+            current_provider_key: None,
         });
 
         assert_eq!(plan.compare_max_repeats, 3);

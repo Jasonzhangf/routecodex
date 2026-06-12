@@ -37,7 +37,8 @@ import {
   planStoplessDecisionContextSignals,
   planStopMessagePersistedLookup,
   planStopMessagePersistedStateSelection,
-  readRuntimeStopMessageStageMode
+  readRuntimeStopMessageStageMode,
+  resolveAdapterContextProviderKey
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
 import { loadRoutingInstructionStateSync } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
@@ -163,6 +164,7 @@ function writeStoplessLearnedNoteFromRustPlan(args: {
 
 function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknown>, state: {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   stageMode: string;
@@ -172,6 +174,7 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
     : {};
   rt.stopMessageState = {
     stopMessageText: state.text,
+    ...(state.providerKey ? { stopMessageProviderKey: state.providerKey } : {}),
     stopMessageMaxRepeats: state.maxRepeats,
     stopMessageUsed: state.used,
     stopMessageStageMode: state.stageMode
@@ -190,6 +193,7 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
 
 function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
   text: string;
+  providerKey?: string;
   maxRepeats: number;
   used: number;
   stageMode: string;
@@ -339,6 +343,7 @@ const handler: ServerToolHandler = async (
         threshold: 3
       })
     : undefined;
+  const currentProviderKey = resolveAdapterContextProviderKey(ctx.adapterContext);
 
   const decisionCtx: StopMessageDecisionContext = {
     port_stop_message_disabled: decisionSignals.portStopMessageDisabled,
@@ -347,6 +352,7 @@ const handler: ServerToolHandler = async (
     has_responses_submit_tool_outputs_resume: decisionSignals.hasResponsesSubmitToolOutputsResume,
     persisted_snapshot: persistedSnap ? {
       text: persistedSnap.text,
+      ...(persistedSnap.providerKey ? { provider_key: persistedSnap.providerKey } : {}),
       max_repeats: persistedSnap.maxRepeats,
       used: persistedSnap.used,
       source: (persistedSnap.source === 'default' ? 'default' : 'persisted') as any,
@@ -354,6 +360,7 @@ const handler: ServerToolHandler = async (
     } : undefined,
     runtime_snapshot: runtimeSnap ? {
       text: runtimeSnap.text,
+      ...(runtimeSnap.providerKey ? { provider_key: runtimeSnap.providerKey } : {}),
       max_repeats: runtimeSnap.maxRepeats,
       used: runtimeSnap.used,
       source: 'default' as any,
@@ -372,7 +379,9 @@ const handler: ServerToolHandler = async (
     default_enabled: defaultConfig.enabled,
     default_max_repeats: defaultConfig.maxRepeats,
     default_text: defaultConfig.text,
-    provider_pin: undefined,
+    provider_pin: currentProviderKey
+      ? { provider_key: currentProviderKey }
+      : undefined,
   };
 
   // ── Call decision (native by default, overridable for tests) ──
@@ -487,12 +496,14 @@ const handler: ServerToolHandler = async (
       decision,
       stateUpdate,
       defaultText: defaultConfig.text,
-      schemaUsedBeforeCount
+      schemaUsedBeforeCount,
+      currentProviderKey
     });
     compare.maxRepeats = persistPlan.compareMaxRepeats;
     compare.remaining = persistPlan.compareRemaining;
     const snapInput = {
       text: persistPlan.snapshot.text,
+      ...(persistPlan.snapshot.providerKey ? { providerKey: persistPlan.snapshot.providerKey } : {}),
       maxRepeats: persistPlan.snapshot.maxRepeats,
       used: persistPlan.snapshot.used,
       source: persistPlan.snapshot.source,

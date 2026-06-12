@@ -65,7 +65,7 @@ describe('servertool CLI command', () => {
       'run',
       'stop_message_auto',
       '--input-json',
-      '{"flowId":"stop_message_flow","stdoutPreview":"continue","continuationPrompt":"继续执行原任务","repeatCount":2,"maxRepeats":3}'
+      '{"flowId":"stop_message_flow","continuationPrompt":"继续执行原任务","repeatCount":2,"maxRepeats":3}'
     ]);
 
     expect(errors).toEqual([]);
@@ -75,12 +75,7 @@ describe('servertool CLI command', () => {
       flowId: 'stop_message_flow',
       continuationPrompt: '继续执行原任务',
       repeatCount: 2,
-      maxRepeats: 3,
-      schemaGuidance: {
-        stopreasonValues: {
-          continueNeeded: 2
-        }
-      }
+      maxRepeats: 3
     });
   });
 

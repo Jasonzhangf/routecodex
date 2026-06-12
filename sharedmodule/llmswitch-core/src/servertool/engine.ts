@@ -101,7 +101,6 @@ function buildStopMessageCliProjectionResult(args: {
     options: args.options,
     flowId: seed.flowId,
     reasoningText: seed.reasoningText,
-    stdoutPreview: seed.continuationPrompt,
     input: seed.input as JsonObject
   });
   args.logProgress(5, args.totalSteps, 'completed (stop_message_auto cli projection; no reenter)', {

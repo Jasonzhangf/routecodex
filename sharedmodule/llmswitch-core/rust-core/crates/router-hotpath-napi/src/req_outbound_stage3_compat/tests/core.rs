@@ -52,6 +52,53 @@ fn test_no_profile_passthrough() {
 }
 
 #[test]
+fn lmstudio_profile_preserves_openai_responses_structured_tool_input() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "MiniMax-M3",
+            "input": [
+                { "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "exec_command", "arguments": { "cmd": "pwd" } },
+                { "type": "function_call_output", "id": "fc_1", "call_id": "call_1", "output": "ok" }
+            ],
+            "tools": []
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("lmstudio".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_lmstudio_responses_tool_input".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+
+    assert!(result.payload["input"].as_array().is_some());
+    assert_eq!(result.payload["input"][0]["type"], json!("function_call"));
+    assert_eq!(
+        result.payload["input"][1]["type"],
+        json!("function_call_output")
+    );
+}
+
+#[test]
 fn test_openai_responses_normalizes_chat_style_function_tools_without_profile() {
     let input = ReqOutboundCompatInput {
         payload: json!({

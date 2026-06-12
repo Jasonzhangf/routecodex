@@ -334,6 +334,7 @@ fn is_stop_message_empty(state: &RoutingInstructionState) -> bool {
         && state.stop_message_state.stop_message_text.is_none()
         && state.stop_message_state.stop_message_max_repeats.is_none()
         && state.stop_message_state.stop_message_used.is_none()
+        && state.stop_message_state.stop_message_provider_key.is_none()
         && state.stop_message_state.stop_message_last_used_at.is_none()
         && state.stop_message_state.stop_message_stage_mode.is_none()
         && state.stop_message_state.stop_message_ai_mode.is_none()
@@ -482,6 +483,17 @@ fn same_stop_message_config(
 ) -> bool {
     normalize_text(existing.stop_message_state.stop_message_text.as_deref())
         == normalize_text(persisted.stop_message_state.stop_message_text.as_deref())
+        && normalize_text(
+            existing
+                .stop_message_state
+                .stop_message_provider_key
+                .as_deref(),
+        ) == normalize_text(
+            persisted
+                .stop_message_state
+                .stop_message_provider_key
+                .as_deref(),
+        )
         && existing.stop_message_state.stop_message_max_repeats
             == persisted.stop_message_state.stop_message_max_repeats
         && normalize_text(
@@ -669,6 +681,12 @@ fn serialize_stop_message_state(state: &RoutingInstructionState, out: &mut Map<S
     if let Some(value) = &state.stop_message_source {
         out.insert(
             "stopMessageSource".to_string(),
+            Value::String(value.clone()),
+        );
+    }
+    if let Some(value) = &state.stop_message_provider_key {
+        out.insert(
+            "stopMessageProviderKey".to_string(),
             Value::String(value.clone()),
         );
     }
@@ -970,6 +988,10 @@ fn deserialize_stop_message_state(obj: &Map<String, Value>, state: &mut RoutingI
         .map(|v| v.to_string());
     state.stop_message_state.stop_message_source = obj
         .get("stopMessageSource")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
+    state.stop_message_state.stop_message_provider_key = obj
+        .get("stopMessageProviderKey")
         .and_then(|v| v.as_str())
         .map(|v| v.to_string());
     state.stop_message_state.stop_message_max_repeats =

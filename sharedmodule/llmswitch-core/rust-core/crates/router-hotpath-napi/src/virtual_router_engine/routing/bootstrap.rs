@@ -41,6 +41,8 @@ pub(crate) struct ModelIndexEntry {
     declared: bool,
     #[serde(default)]
     models: Vec<String>,
+    #[serde(default)]
+    alias_to_model: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -219,9 +221,16 @@ pub(crate) fn expand_routing_table_impl(
                     ));
                 }
 
-                if let Some(model_info) = model_index.get(&parsed.provider_id) {
+                let canonical_model_id = if let Some(model_info) = model_index.get(&parsed.provider_id) {
+                    let canonical_model_id = resolve_canonical_model_id(&parsed.model_id, model_info)
+                        .ok_or_else(|| {
+                            format!(
+                                "Route \"{}\" references unknown model \"{}\" for provider \"{}\"",
+                                route_name, parsed.model_id, parsed.provider_id
+                            )
+                        })?;
                     if model_info.declared {
-                        if parsed.model_id.trim().is_empty() {
+                        if canonical_model_id.trim().is_empty() {
                             return Err(format!(
                                 "Route \"{}\" references empty model id for provider \"{}\"",
                                 route_name, parsed.provider_id
@@ -233,18 +242,17 @@ pub(crate) fn expand_routing_table_impl(
                                 route_name, parsed.provider_id
                             ));
                         }
-                        if !model_info
-                            .models
-                            .iter()
-                            .any(|candidate| candidate == &parsed.model_id)
-                        {
+                        if !model_info.models.iter().any(|candidate| candidate == &canonical_model_id) {
                             return Err(format!(
                                 "Route \"{}\" references unknown model \"{}\" for provider \"{}\"",
                                 route_name, parsed.model_id, parsed.provider_id
                             ));
                         }
                     }
-                }
+                    canonical_model_id
+                } else {
+                    parsed.model_id.clone()
+                };
 
                 let aliases = if let Some(alias) = parsed.key_alias.clone() {
                     vec![alias]
@@ -272,7 +280,7 @@ pub(crate) fn expand_routing_table_impl(
 
                 for alias in aliases {
                     let runtime_key = build_runtime_key(&parsed.provider_id, &alias);
-                    let target_key = format!("{}.{}", runtime_key, parsed.model_id);
+                    let target_key = format!("{}.{}", runtime_key, canonical_model_id);
                     if let Some(existing) = expanded_targets
                         .iter_mut()
                         .find(|candidate| candidate.key == target_key)
@@ -903,6 +911,17 @@ fn parse_route_entry(
     })
 }
 
+fn resolve_canonical_model_id(model_id: &str, model_index: &ModelIndexEntry) -> Option<String> {
+    let trimmed = model_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if model_index.models.iter().any(|candidate| candidate == trimmed) {
+        return Some(trimmed.to_string());
+    }
+    model_index.alias_to_model.get(trimmed).cloned()
+}
+
 fn split_model_priority(raw: &str) -> (String, i64) {
     let value = raw.trim();
     if value.is_empty() {
@@ -988,6 +1007,7 @@ mod tests {
             ModelIndexEntry {
                 declared: true,
                 models: vec!["mimo-v2.5".to_string()],
+                alias_to_model: BTreeMap::new(),
             },
         )]);
 
@@ -1044,6 +1064,7 @@ mod tests {
             ModelIndexEntry {
                 declared: true,
                 models: vec!["MiniMax-M2.7".to_string()],
+                alias_to_model: BTreeMap::new(),
             },
         )]);
 
@@ -1108,6 +1129,7 @@ mod tests {
             ModelIndexEntry {
                 declared: true,
                 models: vec!["gpt-4o".to_string()],
+                alias_to_model: BTreeMap::new(),
             },
         )]);
         let routing_map = routing.as_object().unwrap();
@@ -1219,7 +1241,11 @@ mod tests {
             "mimo": ["key1", "key2"]
         });
         let model_index = json!({
-            "mimo": { "declared": true, "models": ["mimo-v2.5"] }
+            "mimo": {
+                "declared": true,
+                "models": ["mimo-v2.5"],
+                "aliasToModel": {"mimo-v2.5-alias": "mimo-v2.5"}
+            }
         });
 
         let result = bootstrap_virtual_router_routing_json(
@@ -1249,6 +1275,49 @@ mod tests {
         assert!(targets.contains(&"mimo.key1.mimo-v2.5".to_string()));
         assert!(targets.contains(&"mimo.key2.mimo-v2.5".to_string()));
         assert!(!targets.contains(&"mimo.mimo-v2.5".to_string()));
+    }
+
+    #[test]
+    fn bootstrap_json_alias_to_model_canonicalization_keeps_canonical_model_id() {
+        let routing = json!({
+            "default": ["DF.deepseek-v4-pro-alias"]
+        });
+        let alias_index = json!({ "DF": ["key1"] });
+        let model_index = json!({
+            "DF": {
+                "declared": true,
+                "models": ["DeepSeek-V4-Pro"],
+                "aliasToModel": {
+                    "deepseek-v4-pro-alias": "DeepSeek-V4-Pro"
+                }
+            }
+        });
+
+        let result = bootstrap_virtual_router_routing_json(
+            routing.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+            None,
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        let pools = output
+            .get("routing")
+            .unwrap()
+            .get("default")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let targets: Vec<String> = pools[0]
+            .get("targets")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(targets, vec!["DF.key1.DeepSeek-V4-Pro".to_string()]);
     }
 
     #[test]

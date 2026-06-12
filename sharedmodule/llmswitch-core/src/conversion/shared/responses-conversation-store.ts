@@ -72,6 +72,10 @@ function serializeEntry(entry: ConversationEntry): ConversationEntry | undefined
     inputItemCount: typeof entry.inputItemCount === 'number' ? entry.inputItemCount : undefined,
     tools: cloneJsonRecordArray(entry.tools),
     providerKey: typeof entry.providerKey === 'string' ? entry.providerKey : undefined,
+    continuationOwner:
+      entry.continuationOwner === 'direct' || entry.continuationOwner === 'relay'
+        ? entry.continuationOwner
+        : undefined,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     lastResponseId: typeof entry.lastResponseId === 'string' ? entry.lastResponseId : undefined,
@@ -103,6 +107,10 @@ function deserializeEntry(value: unknown): ConversationEntry | undefined {
     inputItemCount: typeof value.inputItemCount === 'number' && Number.isFinite(value.inputItemCount) ? value.inputItemCount : undefined,
     tools: cloneJsonRecordArray(value.tools),
     providerKey: readScopeToken(value.providerKey),
+    continuationOwner:
+      value.continuationOwner === 'direct' || value.continuationOwner === 'relay'
+        ? value.continuationOwner
+        : undefined,
     createdAt,
     updatedAt,
     lastResponseId,
@@ -222,9 +230,12 @@ function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): s
 function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationEntry): AnyRecord {
   const baseMeta: AnyRecord = isRecord(meta) ? { ...meta } : {};
   const metaProviderKey = readScopeToken(baseMeta.providerKey);
-  const entryProviderKey = readScopeToken(entry.providerKey) ?? readScopeToken((entry.basePayload as AnyRecord | undefined)?.providerKey);
+  const entryProviderKey = readScopeToken(entry.providerKey);
   if (!metaProviderKey && entryProviderKey) {
     baseMeta.providerKey = entryProviderKey;
+  }
+  if (!readScopeToken(baseMeta.continuationOwner) && entry.continuationOwner) {
+    baseMeta.continuationOwner = entry.continuationOwner;
   }
   return baseMeta;
 }
@@ -348,7 +359,8 @@ class ResponsesConversationStore {
       input: Array.isArray(prepared.input) ? prepared.input : [],
       allowContinuation: shouldAllowContinuation(payload),
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
-      providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey) ?? readScopeToken((prepared.basePayload as AnyRecord | undefined)?.providerKey),
+      providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey),
+      continuationOwner: undefined,
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
       scopeKeys,
@@ -397,6 +409,15 @@ class ResponsesConversationStore {
       }
     }
     if (!entry) {
+      logResponsesStoreNonBlockingError('record.missing_request_context', new Error('missing_request_context'), {
+        requestId,
+        responseId,
+        providerKey: args.providerKey,
+        sessionId: args.sessionId,
+        conversationId: args.conversationId,
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup
+      });
       throw new ProviderProtocolError('Responses conversation request context missing for response capture', {
         code: 'MALFORMED_RESPONSE',
         protocol: 'openai-responses',
@@ -428,7 +449,9 @@ class ResponsesConversationStore {
     const responseProviderKey = readScopeToken(args.providerKey);
     if (responseProviderKey) {
       entry.providerKey = responseProviderKey;
-      entry.basePayload.providerKey = responseProviderKey;
+    }
+    if (args.continuationOwner === 'direct' || args.continuationOwner === 'relay') {
+      entry.continuationOwner = args.continuationOwner;
     }
     const nextScopeKeys = buildScopeKeys({
       sessionId: args.sessionId,
@@ -448,7 +471,8 @@ class ResponsesConversationStore {
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
-    if (entry.allowContinuation === true && collectPendingToolCallIds(entry.input).length > 0) {
+    const hasPendingToolCalls = collectPendingToolCallIds(entry.input).length > 0;
+    if (hasPendingToolCalls) {
       entry.allowContinuation = true;
     }
     if (entry.allowContinuation === true && args.allowScopeContinuation === true && entry.scopeKeys.length > 0) {
@@ -549,6 +573,9 @@ class ResponsesConversationStore {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
+    if (RESPONSES_DEBUG) {
+      console.log('[responses-store] clear.request', requestId, entry.lastResponseId);
+    }
     this.detachEntry(entry);
     this.flushPersistence();
   }
@@ -578,7 +605,6 @@ class ResponsesConversationStore {
       : [];
     entry.basePayload = {
       ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
-      ...(entry.providerKey ? { providerKey: entry.providerKey } : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
     entry.releasedPendingToolCallIds = collectPendingToolCallIds(entry.input);
@@ -603,16 +629,28 @@ class ResponsesConversationStore {
       typeof entry.lastResponseId !== 'string' ||
       !String(entry.lastResponseId).trim()
     ) {
+      if (RESPONSES_DEBUG) {
+        console.log('[responses-store] finalize.clear_missing_response', requestId);
+      }
       this.clearRequest(requestId);
       return;
     }
     if (options?.keepForSubmitToolOutputs === true) {
+      if (RESPONSES_DEBUG) {
+        console.log('[responses-store] finalize.keep_for_submit', requestId, entry.lastResponseId);
+      }
       this.releaseRequestPayload(requestId);
       return;
     }
     if (!Array.isArray(entry.scopeKeys) || entry.scopeKeys.length <= 0) {
+      if (RESPONSES_DEBUG) {
+        console.log('[responses-store] finalize.clear_missing_scope', requestId, entry.lastResponseId);
+      }
       this.clearRequest(requestId);
       return;
+    }
+    if (RESPONSES_DEBUG) {
+      console.log('[responses-store] finalize.release', requestId, entry.lastResponseId);
     }
     this.releaseRequestPayload(requestId);
   }

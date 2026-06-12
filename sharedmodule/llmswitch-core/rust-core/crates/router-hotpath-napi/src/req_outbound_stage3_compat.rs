@@ -157,13 +157,5 @@ pub fn apply_tool_text_request_guidance_json(
     tool_text_request_guidance::apply_tool_text_request_guidance_json(payload_json, config_json)
 }
 
-#[napi_derive::napi]
-pub fn apply_lmstudio_responses_input_stringify_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-) -> napi::Result<String> {
-    lmstudio::apply_lmstudio_responses_input_stringify_json(payload_json, adapter_context_json)
-}
-
 #[cfg(test)]
 mod tests;

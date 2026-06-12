@@ -1769,6 +1769,18 @@ pub fn plan_stopless_goal_state_sync_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_stopless_goal_state_read_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_goal_state_read_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stopless_goal_state_persist_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_goal_state_persist_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn inject_mcp_tools_for_chat_json(
     tools_json: String,
     discovered_servers_json: String,
@@ -1955,17 +1967,6 @@ pub fn apply_gemini_web_search_request_compat_json(
     adapter_context_json: Option<String>,
 ) -> NapiResult<String> {
     req_outbound_stage3_compat::gemini::apply_gemini_web_search_request_compat_json(
-        payload_json,
-        adapter_context_json,
-    )
-}
-
-#[napi(js_name = "applyLmstudioResponsesInputStringifyJson")]
-pub fn apply_lmstudio_responses_input_stringify_json_bridge(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-) -> NapiResult<String> {
-    req_outbound_stage3_compat::apply_lmstudio_responses_input_stringify_json(
         payload_json,
         adapter_context_json,
     )

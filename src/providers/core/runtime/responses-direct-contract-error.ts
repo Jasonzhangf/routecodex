@@ -1,5 +1,6 @@
 export type ResponsesDirectContractDecision = {
   providerWireValid: boolean;
+  requiresHubRelay?: boolean;
   reason?: string;
 };
 
@@ -52,6 +53,12 @@ export function annotateAsHostPayloadContractError(error: unknown): Error {
 export function projectResponsesDirectContractDecision(
   decision: ResponsesDirectContractDecision,
 ): void {
+  if (decision.requiresHubRelay) {
+    throw buildDirectPayloadContractError(
+      decision.reason ?? 'requires_hub_relay',
+      { reason: decision.reason ?? 'direct_payload_requires_hub_relay' },
+    );
+  }
   if (decision.providerWireValid) {
     return;
   }
