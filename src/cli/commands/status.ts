@@ -5,6 +5,7 @@ import type { LoadedRouteCodexConfig } from '../../config/routecodex-config-load
 import type { ManagedZombieProcess } from '../../utils/managed-server-pids.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
+import { resolvePortGroupFromParsedConfig } from './port-group-resolver.js';
 
 type LoggerLike = {
   info: (msg: string) => void;
@@ -75,6 +76,28 @@ function pickPortHost(userConfig: Record<string, any>): { port: number | null; h
       : (typeof userConfig?.server?.host === 'string' ? userConfig.server.host : userConfig?.host);
   const host = typeof hostCandidate === 'string' && hostCandidate.trim() ? hostCandidate.trim() : LOCAL_HOSTS.LOCALHOST;
   return { port, host };
+}
+
+function resolveStatusHostForPort(args: {
+  loaded: LoadedRouteCodexConfig;
+  explicitPort: number | null;
+  fallbackHost: string;
+}): string {
+  if (!args.explicitPort || !args.loaded?.configPath) {
+    return args.fallbackHost;
+  }
+  try {
+    const userConfig = isRecord(args.loaded.userConfig)
+      ? (args.loaded.userConfig as Record<string, unknown>)
+      : {};
+    const grouped = resolvePortGroupFromParsedConfig(userConfig, {
+      configPath: args.loaded.configPath,
+      targetPort: args.explicitPort
+    });
+    return grouped?.host?.trim() || args.fallbackHost;
+  } catch {
+    return args.fallbackHost;
+  }
 }
 
 async function checkServer(ctx: StatusCommandContext, port: number, host: string): Promise<HealthCheckResult> {
@@ -183,7 +206,9 @@ export function createStatusCommand(program: Command, ctx: StatusCommandContext)
         const fallback = pickPortHost(loaded.userConfig as any);
         const explicitPort = typeof options.port === 'string' && options.port.trim() ? Number(options.port.trim()) : null;
         const port = explicitPort && Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : fallback.port;
-        const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : fallback.host;
+        const host = typeof options.host === 'string' && options.host.trim()
+          ? options.host.trim()
+          : resolveStatusHostForPort({ loaded, explicitPort, fallbackHost: fallback.host });
         if (!port || port <= 0) {
           const errorMsg = 'Missing port. Set via --port or config file.';
           ctx.logger.error(errorMsg);

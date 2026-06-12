@@ -132,4 +132,52 @@ describe('cli status command', () => {
     expect(warn.join('\n')).toContain('operation=load_config');
     expect(error.join('\n')).toContain('Configuration file not found');
   });
+
+  it('uses target port host from multi-port config instead of top-level httpserver host', async () => {
+    const success: string[] = [];
+    const fetchCalls: string[] = [];
+
+    const program = new Command();
+    createStatusCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: (msg) => success.push(msg),
+        error: () => {}
+      },
+      log: () => {},
+      loadConfig: async () =>
+        ({
+          configPath: '/tmp/config.json',
+          userConfig: {
+            httpserver: {
+              host: '127.0.0.1',
+              port: 5520,
+              ports: [
+                { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'gateway_priority_5520' },
+                { port: 10000, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'gateway_coding_10000' }
+              ]
+            }
+          },
+          providerProfiles: {} as any
+        }) as any,
+      fetch: (async (url: string) => {
+        fetchCalls.push(String(url));
+        if (String(url).includes('127.0.0.1:10000/health')) {
+          throw new Error('status must not probe top-level loopback host for 10000 multi-port target');
+        }
+        if (String(url).includes(':10000/health')) {
+          return { ok: true, json: async () => ({ server: 'routecodex', status: 'healthy', ready: true, version: 'test' }) } as any;
+        }
+        throw new Error('unexpected probe host');
+      }) as any,
+      listManagedZombieChildren: () => []
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'status', '--port', '10000'], { from: 'node' });
+
+    expect(fetchCalls.some((url) => url.includes('127.0.0.1:10000/health'))).toBe(false);
+    expect(success.join('\n')).toContain('Server is running on');
+    expect(success.join('\n')).not.toContain('127.0.0.1:10000');
+  });
 });

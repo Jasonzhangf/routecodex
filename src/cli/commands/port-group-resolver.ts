@@ -16,6 +16,74 @@ export type ResolvedPortGroup = {
   configPath: string;
 };
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readHost(record: Record<string, unknown> | null): string {
+  if (!record) {
+    return '';
+  }
+  const value = record.host;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function resolvePortGroupFromParsedConfig(
+  parsed: Record<string, unknown>,
+  options?: { configPath?: string; targetPort?: number | null }
+): ResolvedPortGroup | null {
+  const httpserver = (parsed.httpserver && typeof parsed.httpserver === 'object' ? parsed.httpserver : {}) as Record<string, unknown>;
+  const server = (parsed.server && typeof parsed.server === 'object' ? parsed.server : {}) as Record<string, unknown>;
+
+  const defaultHost = String(httpserver.host ?? server.host ?? parsed.host ?? LOCAL_HOSTS.LOCALHOST);
+
+  const fromPorts: number[] = [];
+  const portsRaw = httpserver.ports;
+  let matchedPortHost = '';
+  let matchedPortSeen = false;
+  if (Array.isArray(portsRaw)) {
+    for (const entry of portsRaw) {
+      const record = asRecord(entry);
+      const p = record ? asValidPort(record.port) : null;
+      if (p) {
+        fromPorts.push(p);
+        if (options?.targetPort && p === options.targetPort) {
+          matchedPortSeen = true;
+          matchedPortHost = readHost(record);
+        }
+      }
+    }
+  }
+
+  if (fromPorts.length > 0) {
+    const unique = Array.from(new Set(fromPorts)).sort((a, b) => a - b);
+    if (options?.targetPort && !matchedPortSeen) {
+      return null;
+    }
+    const resolvedPorts = options?.targetPort ? [options.targetPort] : unique;
+    return {
+      ports: resolvedPorts,
+      host: matchedPortHost || defaultHost,
+      configPath: options?.configPath || ''
+    };
+  }
+
+  const single = asValidPort(httpserver.port) ?? asValidPort(server.port) ?? asValidPort((parsed as Record<string, unknown>).port);
+  if (!single) {
+    return null;
+  }
+  if (options?.targetPort && single !== options.targetPort) {
+    return null;
+  }
+  return {
+    ports: [single],
+    host: defaultHost,
+    configPath: options?.configPath || ''
+  };
+}
+
 function asValidPort(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
     return null;
@@ -35,36 +103,5 @@ export function resolvePortGroupFromConfig(
   }
 
   const parsed = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>).parsed as Record<string, unknown>;
-  const httpserver = (parsed.httpserver && typeof parsed.httpserver === 'object' ? parsed.httpserver : {}) as Record<string, unknown>;
-  const server = (parsed.server && typeof parsed.server === 'object' ? parsed.server : {}) as Record<string, unknown>;
-
-  const host = String(httpserver.host ?? server.host ?? parsed.host ?? LOCAL_HOSTS.LOCALHOST);
-
-  const fromPorts: number[] = [];
-  const portsRaw = httpserver.ports;
-  if (Array.isArray(portsRaw)) {
-    for (const entry of portsRaw) {
-      const p = entry && typeof entry === 'object' ? asValidPort((entry as Record<string, unknown>).port) : null;
-      if (p) {
-        fromPorts.push(p);
-      }
-    }
-  }
-
-  if (fromPorts.length > 0) {
-    const unique = Array.from(new Set(fromPorts)).sort((a, b) => a - b);
-    if (options?.targetPort && !unique.includes(options.targetPort)) {
-      return null;
-    }
-    return { ports: unique, host, configPath };
-  }
-
-  const single = asValidPort(httpserver.port) ?? asValidPort(server.port) ?? asValidPort((parsed as Record<string, unknown>).port);
-  if (!single) {
-    return null;
-  }
-  if (options?.targetPort && single !== options.targetPort) {
-    return null;
-  }
-  return { ports: [single], host, configPath };
+  return resolvePortGroupFromParsedConfig(parsed, { configPath, targetPort: options?.targetPort });
 }
