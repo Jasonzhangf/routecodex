@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 
 const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
+  assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({

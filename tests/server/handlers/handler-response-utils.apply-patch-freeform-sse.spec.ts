@@ -164,6 +164,8 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const patch = '*** Begin Patch\n*** Add File: tmp/routecodex-online-apply-patch-smoke.txt\n+hello\n*** End Patch';
     const res = new MockResponse();
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
 
     await sendPipelineResponse(
       res as any,
@@ -203,19 +205,14 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
       },
     );
     await waitForEnd(res);
+    const text = Buffer.concat(chunks).toString('utf8');
 
-    expect(projectResponsesClientBodyForClientWithNativeMock).toHaveBeenCalledWith(
-      expect.any(Object),
-      [{ type: 'custom', name: 'apply_patch', format: { type: 'grammar' } }],
-    );
-    expect(convertResponseToJsonToSseMock.mock.calls[0][0].output[0]).toMatchObject({
-      type: 'custom_tool_call',
-      name: 'apply_patch',
-      call_id: 'call_patch',
-      input: patch,
-    });
-    expect(JSON.stringify(convertResponseToJsonToSseMock.mock.calls[0][0])).not.toContain('{\\"patch\\"');
-    expect(JSON.stringify(convertResponseToJsonToSseMock.mock.calls[0][0])).not.toContain('"type":"function_call","name":"apply_patch"');
+    expect(text).toContain('event: response.output_item.done');
+    expect(text).toContain('"type":"custom_tool_call"');
+    expect(text).toContain('"input":');
+    expect(text).toContain(JSON.stringify(patch));
+    expect(text).not.toContain('{\\"patch\\"');
+    expect(text).not.toContain('"type":"function_call","name":"apply_patch"');
   });
 
   it('normalizes live __sse_responses function_call frames before writing to client', async () => {

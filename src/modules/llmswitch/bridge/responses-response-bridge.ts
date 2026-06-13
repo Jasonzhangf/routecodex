@@ -1090,6 +1090,12 @@ export async function persistResponsesConversationLifecycleForHttp(
     && typeof args.body === 'object'
     && !Array.isArray(args.body)
   ) {
+    if (!responseId) {
+      args.onTrace?.('record.skip_missing_response_id', {
+        providerKey: args.providerKey,
+      });
+      return;
+    }
     args.onTrace?.('capture.start', {
       responseId,
       providerKey: args.providerKey,
@@ -1456,6 +1462,56 @@ function readResponsesClientToolsRawForHttp(requestContext?: {
   return contextClientTools?.length ? contextClientTools : [];
 }
 
+function readResponsesRequestModelForHttp(requestContext?: {
+  payload: AnyRecord;
+  context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}): string | undefined {
+  const payloadModel = requestContext?.payload?.model;
+  if (typeof payloadModel === 'string' && payloadModel.trim()) {
+    return payloadModel.trim();
+  }
+  const contextModel = requestContext?.context?.model;
+  if (typeof contextModel === 'string' && contextModel.trim()) {
+    return contextModel.trim();
+  }
+  return undefined;
+}
+
+function ensureResponsesJsonToSseRequiredFieldsForHttp(args: {
+  payload: unknown;
+  requestContext?: {
+    payload: AnyRecord;
+    context: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  };
+}): unknown {
+  if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
+    return args.payload;
+  }
+  const payload = args.payload as Record<string, unknown>;
+  if (payload.object !== 'response') {
+    return args.payload;
+  }
+  if (typeof payload.model === 'string' && payload.model.trim()) {
+    return args.payload;
+  }
+  const model = readResponsesRequestModelForHttp(args.requestContext);
+  if (!model) {
+    return args.payload;
+  }
+  return {
+    ...payload,
+    model,
+  };
+}
+
 export async function normalizeResponsesClientPayloadForHttp(args: {
   payload: unknown;
   entryEndpoint?: string;
@@ -1482,13 +1538,14 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload) || args.hasSsePayload(args.payload)) {
     return args.payload;
   }
-  if (!(args.payload as Record<string, unknown>).required_action) {
-    return args.payload;
-  }
-  return await projectResponsesClientPayloadForClientForHttp({
+  const projectedPayload = await projectResponsesClientPayloadForClientForHttp({
     payload: args.payload,
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
+  });
+  return ensureResponsesJsonToSseRequiredFieldsForHttp({
+    payload: projectedPayload,
+    requestContext: args.requestContext,
   });
 }
 
@@ -1515,12 +1572,9 @@ export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
   sanitizedPayload: Record<string, unknown>;
   finishReason?: string;
 }> {
-  const normalizedPayload = await normalizeResponsesClientPayloadForHttp({
+  const normalizedPayload = ensureResponsesJsonToSseRequiredFieldsForHttp({
     payload: args.responsesPayload,
-    entryEndpoint: args.entryEndpoint,
     requestContext: args.requestContext,
-    metadata: args.metadata,
-    hasSsePayload: args.hasSsePayload,
   }) as Record<string, unknown>;
   const sanitizedPayload = stripInternalKeysDeep(normalizedPayload);
   return {
@@ -1618,6 +1672,148 @@ export async function projectResponsesSseFrameForClientForHttp(args: {
   return mod.projectResponsesSseFrameForClientWithNative(args);
 }
 
+function readResponsesSseCallIdForHttp(data: Record<string, unknown>): string | undefined {
+  const direct = data.call_id;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+  const item =
+    data.item && typeof data.item === 'object' && !Array.isArray(data.item)
+      ? data.item as Record<string, unknown>
+      : undefined;
+  const nested = item?.call_id;
+  return typeof nested === 'string' && nested.trim() ? nested.trim() : undefined;
+}
+
+function isApplyPatchFunctionCallRecordForHttp(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const row = value as Record<string, unknown>;
+  return row.type === 'function_call' && row.name === 'apply_patch';
+}
+
+function shouldSuppressDuplicateApplyPatchSseFrameForHttp(args: {
+  eventName: string;
+  data: Record<string, unknown>;
+  state?: {
+    pendingApplyPatchArgumentDeltas: Record<string, string>;
+    applyPatchCallIds: string[];
+    emittedApplyPatchDoneCallIds: string[];
+  };
+}): boolean {
+  const emitted = args.state?.emittedApplyPatchDoneCallIds ?? [];
+  if (emitted.length === 0) {
+    return false;
+  }
+  const callId = readResponsesSseCallIdForHttp(args.data);
+  if (!callId || !emitted.includes(callId)) {
+    return false;
+  }
+  if (
+    args.eventName === 'response.function_call_arguments.delta'
+    || args.eventName === 'response.function_call_arguments.done'
+  ) {
+    return true;
+  }
+  if (args.eventName === 'response.output_item.added' || args.eventName === 'response.output_item.done') {
+    return isApplyPatchFunctionCallRecordForHttp(args.data.item);
+  }
+  return false;
+}
+
+function collectEmittedApplyPatchDoneCallIdsFromFrameForHttp(frame: string): string[] {
+  const lines = frame.split('\n');
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataIndex = lines.findIndex((line) => line.startsWith('data:'));
+  if (!eventLine || dataIndex < 0) {
+    return [];
+  }
+  const eventName = eventLine.slice('event:'.length).trim();
+  if (eventName !== 'response.output_item.done') {
+    return [];
+  }
+  const dataText = lines
+    .slice(dataIndex)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(dataText) as Record<string, unknown>;
+    const item =
+      parsed.item && typeof parsed.item === 'object' && !Array.isArray(parsed.item)
+        ? parsed.item as Record<string, unknown>
+        : undefined;
+    if (!item || item.type !== 'custom_tool_call' || item.name !== 'apply_patch') {
+      return [];
+    }
+    const callId = item.call_id;
+    return typeof callId === 'string' && callId.trim() ? [callId.trim()] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function normalizeNestedResponsesPayloadInSseFrameForHttp(args: {
+  frame: string;
+  eventName: string;
+  requestContext?: {
+    payload: AnyRecord;
+    context: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  };
+  metadata?: Record<string, unknown>;
+}): Promise<string> {
+  const lines = args.frame.split('\n');
+  const eventIndex = lines.findIndex((line) => line.startsWith('event:'));
+  const dataIndex = lines.findIndex((line) => line.startsWith('data:'));
+  if (eventIndex < 0 || dataIndex < 0) {
+    return args.frame;
+  }
+  const dataText = lines
+    .slice(dataIndex)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return args.frame;
+  }
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(dataText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return args.frame;
+    }
+    data = parsed as Record<string, unknown>;
+  } catch {
+    return args.frame;
+  }
+  const response =
+    data.response && typeof data.response === 'object' && !Array.isArray(data.response)
+      ? data.response
+      : undefined;
+  if (!response) {
+    return args.frame;
+  }
+  const normalizedResponse = await projectResponsesClientPayloadForClientForHttp({
+    payload: response,
+    toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
+    metadata: args.metadata,
+  });
+  const nextData = {
+    ...data,
+    response: normalizedResponse,
+  };
+  lines[eventIndex] = `event: ${args.eventName}`;
+  return `${lines.slice(0, dataIndex).join('\n')}${lines.slice(0, dataIndex).length ? '\n' : ''}data: ${JSON.stringify(nextData)}\n\n`;
+}
+
 export async function normalizeResponsesSseFrameForClientForHttp(args: {
   frame: string;
   entryEndpoint?: string;
@@ -1674,11 +1870,12 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
   } catch {
     return args.frame;
   }
-  if (eventName !== 'response.required_action' && !dataText.includes('"required_action"')) {
-    return args.frame;
-  }
-  if (eventName === 'response.required_action') {
-    return buildResponsesTerminalSseFramesFromProbeForHttp(data, args.requestLabel ?? 'unknown').join('');
+  if (shouldSuppressDuplicateApplyPatchSseFrameForHttp({
+    eventName,
+    data,
+    state: args.projectionState,
+  })) {
+    return '';
   }
   const projected = await projectResponsesSseFrameForClientForHttp({
     frame: args.frame,
@@ -1695,7 +1892,25 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
   if (args.projectionState) {
     args.projectionState.pendingApplyPatchArgumentDeltas = projected.state.pendingApplyPatchArgumentDeltas ?? {};
     args.projectionState.applyPatchCallIds = projected.state.applyPatchCallIds ?? [];
-    args.projectionState.emittedApplyPatchDoneCallIds = projected.state.emittedApplyPatchDoneCallIds ?? [];
+    args.projectionState.emittedApplyPatchDoneCallIds = Array.from(new Set([
+      ...(args.projectionState.emittedApplyPatchDoneCallIds ?? []),
+      ...(projected.state.emittedApplyPatchDoneCallIds ?? []),
+    ]));
   }
-  return projected.emit ? projected.frame : '';
+  if (!projected.emit) {
+    return '';
+  }
+  const normalizedFrame = await normalizeNestedResponsesPayloadInSseFrameForHttp({
+    frame: projected.frame,
+    eventName,
+    requestContext: args.requestContext,
+    metadata: args.metadata,
+  });
+  if (args.projectionState) {
+    args.projectionState.emittedApplyPatchDoneCallIds = Array.from(new Set([
+      ...(args.projectionState.emittedApplyPatchDoneCallIds ?? []),
+      ...collectEmittedApplyPatchDoneCallIdsFromFrameForHttp(normalizedFrame),
+    ]));
+  }
+  return normalizedFrame;
 }

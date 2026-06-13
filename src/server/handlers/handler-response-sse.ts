@@ -499,6 +499,85 @@ async function normalizeResponsesSseFrameForClient(
   });
 }
 
+function createResponsesClientProjectionStream(args: {
+  stream: Readable;
+  entryEndpoint?: string;
+  requestContext?: DispatchOptions['responsesRequestContext'];
+  metadata?: Record<string, unknown>;
+  requestLabel: string;
+}): Readable {
+  let pending = '';
+  const projectionState: ResponsesSseClientProjectionState = {
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
+  };
+  const pushReadyFrames = async (target: Transform) => {
+    let boundary = /\r?\n\r?\n/.exec(pending);
+    while (boundary) {
+      const frameEnd = boundary.index + boundary[0].length;
+      const frame = pending.slice(0, frameEnd);
+      pending = pending.slice(frameEnd);
+      if (shouldDropClientSseFrameForHttp(frame, args.entryEndpoint)) {
+        boundary = /\r?\n\r?\n/.exec(pending);
+        continue;
+      }
+      const normalizedFrame = await normalizeResponsesSseFrameForClient(
+        frame,
+        args.entryEndpoint,
+        args.requestContext,
+        args.metadata,
+        projectionState,
+        args.requestLabel
+      );
+      if (!normalizedFrame) {
+        boundary = /\r?\n\r?\n/.exec(pending);
+        continue;
+      }
+      assertClientSseFrameHasNoInternalCarriers(normalizedFrame, args.requestLabel);
+      target.push(normalizedFrame);
+      boundary = /\r?\n\r?\n/.exec(pending);
+    }
+  };
+  const transform = new Transform({
+    transform(chunk, _encoding, callback) {
+      pending +=
+        typeof chunk === 'string'
+          ? chunk
+          : Buffer.isBuffer(chunk)
+            ? chunk.toString('utf8')
+            : chunk instanceof Uint8Array
+              ? Buffer.from(chunk).toString('utf8')
+              : String(chunk ?? '');
+      void pushReadyFrames(this)
+        .then(() => callback())
+        .catch((error) => callback(error as Error));
+    },
+    flush(callback) {
+      if (!pending) {
+        callback();
+        return;
+      }
+      void (async () => {
+        const normalizedFrame = await normalizeResponsesSseFrameForClient(
+          pending,
+          args.entryEndpoint,
+          args.requestContext,
+          args.metadata,
+          projectionState,
+          args.requestLabel
+        );
+        pending = '';
+        if (normalizedFrame) {
+          assertClientSseFrameHasNoInternalCarriers(normalizedFrame, args.requestLabel);
+          this.push(normalizedFrame);
+        }
+      })().then(() => callback()).catch((error) => callback(error as Error));
+    }
+  });
+  return args.stream.pipe(transform);
+}
+
 async function streamResponsesJsonAsSse(
   args: ResponsesJsonSseDispatchArgs & { responsesPayload: Record<string, unknown> }
 ): Promise<boolean> {
@@ -545,7 +624,19 @@ async function streamResponsesJsonAsSse(
     const sse = await converter.convertResponseToJsonToSse(bridgePlan.normalizedPayload, {
       requestId: args.requestLabel
     });
-    const stream = toNodeReadable(sse);
+    const rawStream = toNodeReadable(sse);
+    const stream = rawStream
+      ? createResponsesClientProjectionStream({
+        stream: rawStream,
+        entryEndpoint: args.entryEndpoint,
+        requestContext: responsesRequestContext,
+        metadata:
+          args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
+            ? args.result.metadata as Record<string, unknown>
+            : undefined,
+        requestLabel: args.requestLabel,
+      })
+      : null;
     if (!stream) {
       sendSseBridgeError(args.res, args.requestLabel, 502);
       return true;
@@ -1202,6 +1293,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           raw: lastRawClientFrameSummary ?? undefined,
           projected: lastProjectedClientFrameSummary ?? undefined
         });
+        updateContractProbeFromSseChunk(normalizedFrame, contractProbe);
         writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
       })
       .catch((error) => {
