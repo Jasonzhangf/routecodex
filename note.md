@@ -1,3 +1,16 @@
+## 2026-06-14 note.md consolidation index
+- Rule: same-topic entries use latest-wins. Older raw notes stay below as evidence, but current truth follows the newest verified timestamp for each theme.
+- Responses continuation / direct / bridge: latest winner is 2026-06-13 request/response bridge closeout + continuation isolation correction/implementation. Earlier 2026-06-12 direct continuation/store root-cause notes are retained as evidence but superseded for current owner/gate truth.
+- Function map / owner / gate: latest winner is 2026-06-13 function-map owner schema baseline landed + function-map audit check. Current baseline is 62 mapped features with explicit `owner_kind`/`owner_scope`; remaining gap is hidden-owner scan and warning cleanup, not schema absence.
+- `~/.rcc` / provider config: latest winner is 2026-06-12 DF direct probe closed + XL runtime config truth corrected. Runtime/provider truth must be read from `~/.rcc/config.toml`, `~/.rcc/config.<provider>.toml`, and `~/.rcc/provider/<id>/config.v2.toml`, not repo `config/`.
+- Servertool / stopless: latest winner is 2026-06-13 stopless schema closed-loop + live proof notes. Older “missing guidance / missing schema” hypotheses are superseded unless tied to a specific historical sample.
+- Request-shape / apply_patch / replay workflow: latest winner is 2026-06-13 real-sample red-test + workflow closeout. Rule is now red test first, then green, then replay old real sample online.
+- Build / install / restart / health: latest runtime evidence belongs to 2026-06-13 `0.90.3064` install/health/live checks. Earlier 0.90.305x install notes remain historical only.
+- Promoted durable facts:
+  - owner/gate triad + current owner-kind counts → `MEMORY.md` 2026-06-14 owner registry section
+  - `~/.rcc` path/config truth → `MEMORY.md` 2026-06-14 rcc config section
+  - note→MEMORY→skill routing rule → `MEMORY.md` 2026-06-14 note/memory/skill section
+
 2026-06-12 CLI multi-port host resolution
 - 结论：`status --port <n>` / `restart --port <n>` 不能只沿用顶层 `httpserver.host`；多端口配置时必须按目标端口读对应 `[[httpserver.ports]]` 的 host，否则会把 10000 这类端口的健康探测和 restart 误导到 loopback。
 - 证据：`tests/cli/status-command.spec.ts` 与 `tests/cli/restart-command.spec.ts` 新增定向回归已绿，覆盖 explicit `--port 10000` 不再 probe `127.0.0.1:10000`。
