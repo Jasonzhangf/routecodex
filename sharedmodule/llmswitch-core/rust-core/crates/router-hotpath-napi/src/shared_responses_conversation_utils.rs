@@ -902,6 +902,7 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
+    let full_input = normalize_responses_history_items(merged_input.clone());
     payload.insert("input".to_string(), Value::Array(merged_input));
 
     let stream = submit_payload
@@ -951,6 +952,8 @@ fn resume_responses_conversation_payload(
             "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
             "toolOutputs": tool_outputs.len(),
             "toolOutputsDetailed": submitted_details,
+            "fullInputItems": full_input.len(),
+            "fullInput": full_input,
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
         }
     }))
@@ -1745,6 +1748,11 @@ mod tests {
         );
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         assert_eq!(meta.get("toolOutputs").and_then(Value::as_u64), Some(1));
+        assert_eq!(meta.get("fullInputItems").and_then(Value::as_u64), Some(3));
+        let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
+        assert_eq!(full_input.len(), 3);
+        assert_eq!(full_input[1]["type"], json!("function_call"));
+        assert_eq!(full_input[2]["type"], json!("function_call_output"));
     }
 
     #[test]

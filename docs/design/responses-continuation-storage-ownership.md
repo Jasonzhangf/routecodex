@@ -23,6 +23,7 @@ Responses continuation 的唯一判定，不是“同 session / 同 scope 是否
 2. 保存发生在哪个介质
 3. 当前请求是否是明确 continuation 入口
 4. 若为 direct，当前 provider 是否与保存时 provider 完全一致
+5. 当前入口协议 / 入口 endpoint 是否与保存时允许恢复的入口完全一致
 
 ## 单一语义（SSOT）
 
@@ -82,6 +83,7 @@ Responses continuation 的唯一判定，不是“同 session / 同 scope 是否
 3. 普通 thinking 首发
 4. 普通 coding 首发
 5. 仅仅因为同 session / conversation / scope 命中历史
+6. `/v1/chat/completions` 或 `/v1/messages` 仅因为 session/scope 命中旧 Responses continuation
 
 补充说明：
 
@@ -96,6 +98,7 @@ Responses continuation 的唯一判定，不是“同 session / 同 scope 是否
 ContinuationOwnership = {
   storeEnabled: boolean;
   storageKind: 'none' | 'remote-direct' | 'local-relay';
+  entryKind: 'responses' | 'chat' | 'messages';
   providerKey?: string;
   responseId?: string;
   sessionId?: string;
@@ -106,13 +109,14 @@ ContinuationOwnership = {
 恢复规则：
 
 - `none` → 禁止 continuation
-- `remote-direct` → 仅允许同 `providerKey` 继续
-- `local-relay` → 仅允许本地 store materialize / resume
+- `remote-direct` → 仅允许同 `providerKey` + 同 `entryKind=responses` 继续
+- `local-relay` → 仅允许本地 store materialize / resume，且仅对 `entryKind=responses` 生效
 
 补充要求：
 
 - 若 `storageKind === 'remote-direct'`，则 `providerKey` 必须是恢复时的强校验条件，而不是仅用于观测日志。
 - 若 `storageKind === 'local-relay'`，则本地 store 是唯一恢复真源；不得再派生一个假的 remote continuation 影子。
+- `entryKind` 必须进入 store scope key，而不是只作为 metadata 注释字段；chat/messages 入口不得共享 responses continuation scope。
 
 ## 真源修改边界
 
@@ -142,6 +146,7 @@ ContinuationOwnership = {
 - 只保存 relay 本地 continuation 所需状态
 - 显式记录其为 local-relay ownership
 - 不为普通 store=false 请求生成 continuation 恢复权
+- 必须把 `entryKind` 与 `continuationOwner` 编进 scope key
 
 ### C. direct 保存真源
 
@@ -181,6 +186,7 @@ ContinuationOwnership = {
 2. direct 远程 state 被错误投影成 relay 本地 continuation
 3. relay 本地历史被错误伪装成 remote `previous_response_id`
 4. provider / client 看到不属于自己协议面的控制字段
+5. chat/messages 入口命中 responses continuation scope，导致桥层在错误入口上恢复 Responses 历史
 
 ## followup 规则
 
@@ -206,6 +212,33 @@ followup 不是特权协议，只是正常请求重入。
 - submit 是显式 continuation 入口
 - followup 是“标准 create 重入 + 内部 continuation 打标”
 - 两者都不能绕开 ownership
+- chat/messages 入口不是 Responses continuation 合法恢复入口；若确需跨协议重放，必须先由唯一 owner 把 origin request materialize 成新的标准请求，再显式进入目标入口，不能靠 scope 自动命中
+
+## 三重隔离键（新增）
+
+Responses continuation 的恢复键必须同时包含：
+
+1. `entryKind`
+   - `responses`
+   - `chat`
+   - `messages`
+2. `continuationOwner`
+   - `direct`
+   - `relay`
+3. `session/conversation + port/group`
+
+最小要求：
+
+- `responses` continuation store 只能给 `entryKind=responses` 请求命中。
+- `continuationOwner=direct` 与 `continuationOwner=relay` 必须使用不同 scope key，不能只作为 entry 属性记录。
+- `sessionId/conversationId` 只用于同入口同 owner 下缩小命中范围，不能单独成为恢复权。
+
+禁止：
+
+- chat 请求因为 session 相同而命中 responses scope
+- relay scope materialize 恢复出 direct 记录
+- direct submit_tool_outputs 恢复到 relay 记录
+- bridge 层通过读 `deltaInput` / `fullInput` 猜测“既然像 continuation 就先续接”
 
 ## Continuation Provider Routing Pin
 

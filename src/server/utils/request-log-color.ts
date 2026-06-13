@@ -71,6 +71,21 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
   return normalizeToken(sid);
 }
 
+function resolveVirtualRouterHitColorKey(text: string): string | undefined {
+  const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
+  const requestKey = normalizeRequestKey(requestId);
+  if (requestKey) {
+    const record = REQUEST_LOG_CONTEXT.get(requestKey);
+    if (record && record.expiresAtMs > Date.now()) {
+      return record.sessionKey;
+    }
+    if (record) {
+      REQUEST_LOG_CONTEXT.delete(requestKey);
+    }
+  }
+  return resolveVirtualRouterHitSessionKey(text);
+}
+
 function pruneExpiredContext(nowMs: number): void {
   for (const [key, record] of REQUEST_LOG_CONTEXT.entries()) {
     if (record.expiresAtMs <= nowMs) {
@@ -162,7 +177,7 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   if (!text || !text.includes('[virtual-router-hit]') || !isConsoleColorEnabled()) {
     return text;
   }
-  const sessionKey = resolveVirtualRouterHitSessionKey(text);
+  const sessionKey = resolveVirtualRouterHitColorKey(text);
   const color = sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
   if (!color) {
     return text;

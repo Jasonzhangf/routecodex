@@ -578,17 +578,20 @@ owners:
     canonical_builders:
       - build_unavailable_providers_details
       - collect_recoverable_cooldown_for_key
+      - evaluate_singleton_route_pool_exhaustion
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
       - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/server/runtime/http-server/executor/request-executor-core-utils.ts
       - docs
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/router
       - src/server/runtime/http-server/daemon-admin
-      - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - src/manager/modules/quota
     required_tests:
+      - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
@@ -599,8 +602,9 @@ owners:
     migration_target: rust
     notes:
       - "non-empty routing invariant belongs to Rust Virtual Router selection only."
-      - "do not patch empty-pool behavior in handlers, executors, adapters, or provider TS runtime."
-      - "route order is high-priority pools -> low-priority pools -> default pool; if default pool has providers, routing must not return empty."
+      - "singleton/default hold decision and cooldown-hint parsing belong to Rust Virtual Router; TS executor may only consume native output and perform wait/log IO."
+      - "do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code."
+      - "route order is requested route -> inserted tools route when required -> default; search/tool path must stay `search -> tools -> default`, and if default pool has providers routing must not return empty."
 
   - feature_id: vr.provider_forwarder_runtime
     status: active
@@ -1874,6 +1878,8 @@ owners:
       - clearResponsesConversationByRequestIdForHttpProjection
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
     required_gates:
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
@@ -1889,6 +1895,7 @@ owners:
       - "Responses handler must not keep local `/v1/responses*` conversation-management branch checks, local `responseIdFromPath -> payload.response_id` prewrite, or local `responsesRequestContext` fallback assembly; those request-side continuation/context helpers must stay behind the single request bridge surface."
       - "Responses handler must not keep local continuation-expired or resume-client invalid_request_error payload shapes; those request-side resume error projections must stay behind the single request bridge surface."
       - "Responses handler must not locally classify `Tool history contract violated` malformed-request errors or write `responses.inbound_tool_history_contract` errorsamples; that request-side contract capture must stay behind the single request bridge surface."
+      - "Relay-owned request context must come from native req_inbound normalized snapshot, not raw HTTP `payload.input` / `payload.tools`; duplicate or orphan tool history must fail at the bridge owner instead of being silently reserialized by the handler."
       - "Responses handler must not locally orchestrate request-context capture gating, result metadata attach, or tool-call response seeding; those request-side lifecycle hooks must stay behind the single request bridge surface."
       - "Responses handler must not keep local stream-intent derivation, request-start stream metadata assembly, or port-scope parsing; those request-side stream/scope decisions must stay behind the single request bridge surface."
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."

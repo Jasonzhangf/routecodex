@@ -98,6 +98,7 @@ fn apply_target_metadata(
     route_name: Option<String>,
     original_model: Option<String>,
     thinking: Option<&str>,
+    original_reasoning_effort: Option<&str>,
 ) {
     if let Some(route) = route_name.filter(|v| !v.trim().is_empty()) {
         let route_trimmed = route.trim().to_string();
@@ -114,6 +115,13 @@ fn apply_target_metadata(
                 Value::String("config".to_string()),
             );
             configured.to_string()
+        } else if let Some(original) = original_reasoning_effort.filter(|v| !v.trim().is_empty())
+        {
+            normalized_metadata.insert(
+                "__thinking_source".to_string(),
+                Value::String("request".to_string()),
+            );
+            original.to_string()
         } else {
             normalized_metadata.insert(
                 "__thinking_source".to_string(),
@@ -314,6 +322,26 @@ fn apply_target_to_subject(
     metadata_map.insert("assignedModelId".to_string(), Value::String(assigned_model));
 }
 
+fn read_request_reasoning_effort(request_map: &Map<String, Value>) -> Option<String> {
+    request_map
+        .get("reasoning_effort")
+        .or_else(|| request_map.get("reasoningEffort"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            request_map
+                .get("reasoning")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("effort"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
 pub fn apply_route_selection(
     input: RouteSelectionApplyInput,
 ) -> Result<RouteSelectionApplyOutput, String> {
@@ -330,6 +358,7 @@ pub fn apply_route_selection(
         .target
         .as_object()
         .ok_or("target must be a JSON object")?;
+    let original_reasoning_effort = read_request_reasoning_effort(request_map);
 
     apply_target_metadata(
         metadata_map,
@@ -337,6 +366,7 @@ pub fn apply_route_selection(
         input.route_name,
         input.original_model.clone(),
         input.thinking.as_deref(),
+        original_reasoning_effort.as_deref(),
     );
     apply_target_to_subject(request_map, target_map, input.original_model);
     crate::virtual_router_engine::instructions::clean_routing_instruction_markers(&mut request);
@@ -418,5 +448,33 @@ mod tests {
         let result = apply_route_selection(input).unwrap();
         assert_eq!(result.request["model"], "kimi-k2.5");
         assert_eq!(result.request["metadata"]["assignedModelId"], "kimi-k2.5");
+    }
+
+    #[test]
+    fn test_apply_route_selection_prefers_original_request_reasoning_effort_when_route_has_no_override(
+    ) {
+        let input = RouteSelectionApplyInput {
+            request: serde_json::json!({
+              "model": "gpt-4.1",
+              "reasoning_effort": "low",
+              "messages": [],
+              "parameters": {},
+              "metadata": {}
+            }),
+            normalized_metadata: serde_json::json!({}),
+            target: serde_json::json!({
+              "providerKey": "tab.key1.gpt-5.2",
+              "providerType": "tab",
+              "modelId": "gpt-5.2",
+              "processMode": "chat"
+            }),
+            route_name: Some("thinking".to_string()),
+            original_model: Some("gpt-4.1".to_string()),
+            thinking: None,
+        };
+
+        let result = apply_route_selection(input).unwrap();
+        assert_eq!(result.normalized_metadata["reasoning_effort"], "low");
+        assert_eq!(result.normalized_metadata["__thinking_source"], "request");
     }
 }

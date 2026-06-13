@@ -19,6 +19,7 @@
 16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 阶段 + 节点序号 + 节点语义”唯一命名并唯一拥有；Hub 主链阶段固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`。只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
 17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。
 18. **红测→绿化→旧样本在线复测锁**：每次开发新功能或修复缺陷，必须先固化最小 failing sample / red test 并确认当前为红，再修改唯一真源让其转绿；绿化后必须在线重放旧错误样本或同入口真实样本，证明不是只对单测修好的虚假修复。没有“先红”证据或没有旧样本在线复测证据，不得宣称闭环完成。
+19. **Responses continuation 三重隔离锁**：Responses continuation / submit_tool_outputs / scope materialize 必须同时按 `entry protocol(or endpoint)`、`continuationOwner(direct|relay)`、`session/conversation(+port/group)` 建立恢复隔离键。禁止普通 chat/messages 入口命中 responses continuation scope；禁止 direct continuation 续到 relay；禁止 relay continuation 伪装成 direct remote continuation；禁止仅凭 session/scope 命中历史自动续接。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -27,6 +28,7 @@
 4. **响应隔离**：resp_inbound/process/outbound 只能读取同一 requestId/pipelineId 的 metadata；不得把 metadata 注入 client response body。
 5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
 6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
+7. **Responses continuation 隔离模式**：禁止把 `/v1/responses` continuation state 当作普通 chat/messages 会话历史复用；禁止只靠 `sessionId` / `conversationId` 命中旧 continuation；恢复必须同时校验入口协议、continuation owner、port/group scope 与会话 scope。
 
 ## 标准接口契约流水线图（醒目）
 
@@ -122,6 +124,7 @@ client-visible error
 8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得修复请求侧历史污染、不得 provider 特例、不得吞上游错误。
 9. **servertool_followup**：只能基于 origin snapshot 重建 followup；只能走 relay Hub Pipeline 单次复入；不得进入 router-direct/provider-direct 预跑或直通；不得从当前污染 payload 猜测补偿。servertool 只代客户端执行本地工具，不拥有专用响应出口；followup 响应必须按 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client 的正常响应链返回。
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
+11. **Responses continuation owner**：`buildChatRequestFromResponses` 等 bridge 只负责已确认的 Responses continuation 协议转换，不负责 scope/owner 判定。entry/owner 隔离必须在 continuation store / restore / materialize owner 层完成；桥层收到 owner 不匹配或缺失 `fullInput` 时必须 fail-fast。
 
 ## 全局流水线类型拓扑（醒目）
 1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从模型/provider 端的 `ProviderRespInbound01Raw` 单向进入 Hub，再经 `HubRespOutbound04ClientSemantic` 出到 `ServerRespOutbound05ClientFrame`；`RespInbound/RespOutbound` 均以 Hub 为参照。错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
@@ -164,6 +167,7 @@ client-visible error
 5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。
 6. Provider 模型名双轨契约（2026-06-12）：`provider.models.<modelId>` 的 key 即唯一 upstream/provider wire model 名；`aliases` 仅供客户端可见模型名和客户端入口匹配使用。`/v1/models` 可以展示 alias（无 alias 时展示 `modelId`），但 provider 出站请求里的 `body.model` 必须始终回写为 `modelId`，禁止把 alias 直接发给上游。
 7. Responses continuation 契约（2026-06-12）：remote/upstream-owned `responseId/previous_response_id` 必须记 `continuationOwner=direct` 并沿 same-protocol direct 续接；本地 relay/materialize 生成的 continuation id 必须记 `continuationOwner=relay` 并只走 relay。`store:false` 不得阻止同一 response 的 tool continuation 持久化；response 侧若仍有 pending tool call，必须以 response 真相将 `allowContinuation=true`。`providerKey` 只能存在于 runtime/meta carrier 做 direct pin，禁止写回 resumed/materialized provider payload。
+8. Responses continuation 隔离补充（2026-06-13）：continuation 恢复键必须同时锁 `entry protocol/endpoint + continuationOwner + session/conversation(+port/group)`；不能只靠 session scope materialize。普通 `/v1/chat/completions` / `/v1/messages` 入口命中到 Responses continuation 时必须显式拒绝，而不是桥接补偿；`buildChatRequestFromResponses` 只消费已确认属于 Responses owner 的 `fullInput`。
 
 ## 2026-06-05 硬编码 + Fallback 架构收口引用
 

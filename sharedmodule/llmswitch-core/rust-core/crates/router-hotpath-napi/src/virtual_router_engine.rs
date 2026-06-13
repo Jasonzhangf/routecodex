@@ -24,3 +24,7 @@ mod time_utils;
 
 #[allow(unused_imports)]
 pub use napi_proxy::VirtualRouterEngineProxy;
+pub(crate) use engine::{
+    evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
+    SingletonRoutePoolExhaustionInput,
+};

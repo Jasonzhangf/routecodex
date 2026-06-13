@@ -102,6 +102,9 @@ export {
   repairArgumentsToStringWithNative
 } from './native-shared-conversion-semantics-misc.js';
 export {
+  captureReqInboundResponsesContextSnapshotWithNative
+} from './native-hub-pipeline-req-inbound-semantics-tools.js';
+export {
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative

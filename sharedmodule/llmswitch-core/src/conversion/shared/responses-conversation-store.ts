@@ -18,6 +18,7 @@ import type {
   CaptureContextArgs,
   ConversationEntry,
   RecordResponseArgs,
+  ResponsesContinuationEntryKind,
   RestoreByScopeArgs,
   ResumeOptions,
   ResumeResult
@@ -73,6 +74,7 @@ function serializeEntry(entry: ConversationEntry): ConversationEntry | undefined
     inputItemCount: typeof entry.inputItemCount === 'number' ? entry.inputItemCount : undefined,
     tools: cloneJsonRecordArray(entry.tools),
     providerKey: typeof entry.providerKey === 'string' ? entry.providerKey : undefined,
+    entryKind: normalizeEntryKind(entry.entryKind),
     continuationOwner:
       entry.continuationOwner === 'direct' || entry.continuationOwner === 'relay'
         ? entry.continuationOwner
@@ -108,6 +110,7 @@ function deserializeEntry(value: unknown): ConversationEntry | undefined {
     inputItemCount: typeof value.inputItemCount === 'number' && Number.isFinite(value.inputItemCount) ? value.inputItemCount : undefined,
     tools: cloneJsonRecordArray(value.tools),
     providerKey: readScopeToken(value.providerKey),
+    entryKind: normalizeEntryKind(value.entryKind),
     continuationOwner:
       value.continuationOwner === 'direct' || value.continuationOwner === 'relay'
         ? value.continuationOwner
@@ -136,6 +139,37 @@ function readToolCallId(item: AnyRecord): string | undefined {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return undefined;
+}
+
+function normalizeEntryKind(value: unknown): ResponsesContinuationEntryKind {
+  if (value === 'chat' || value === 'messages') {
+    return value;
+  }
+  return 'responses';
+}
+
+function normalizeContinuationOwner(value: unknown): 'direct' | 'relay' | undefined {
+  return value === 'direct' || value === 'relay' ? value : undefined;
+}
+
+function entryMatchesIsolation(
+  entry: ConversationEntry,
+  options: { entryKind?: unknown; continuationOwner?: unknown } | undefined
+): boolean {
+  if (!options) {
+    return true;
+  }
+  const requestedEntryKind = options.entryKind === undefined
+    ? undefined
+    : normalizeEntryKind(options.entryKind);
+  if (requestedEntryKind && normalizeEntryKind(entry.entryKind) !== requestedEntryKind) {
+    return false;
+  }
+  const requestedOwner = normalizeContinuationOwner(options.continuationOwner);
+  if (requestedOwner && normalizeContinuationOwner(entry.continuationOwner) !== requestedOwner) {
+    return false;
+  }
+  return true;
 }
 
 function shouldAllowContinuation(payload: AnyRecord | undefined): boolean {
@@ -186,16 +220,60 @@ function qualifyScopeKey(portScopeKey: string | undefined, key: string): string 
   return portScopeKey ? `${portScopeKey}|${key}` : key;
 }
 
-function buildScopeKeys(scope: { sessionId?: unknown; conversationId?: unknown; matchedPort?: unknown; routingPolicyGroup?: unknown }): string[] {
+function buildStoredScopeKeysFromResolved(scope: {
+  sessionId?: unknown;
+  conversationId?: unknown;
+  entryKind?: unknown;
+  continuationOwner?: unknown;
+}, portScopeKey: string | undefined): string[] {
   const keys: string[] = [];
-  const portScopeKey = readPortScopeKey(scope);
+  const entryKind = normalizeEntryKind(scope.entryKind);
+  const continuationOwner = normalizeContinuationOwner(scope.continuationOwner) ?? 'relay';
   const sessionId = readScopeToken(scope.sessionId);
   const conversationId = readScopeToken(scope.conversationId);
   if (sessionId) {
-    keys.push(qualifyScopeKey(portScopeKey, `session:${sessionId}`));
+    keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${continuationOwner}|session:${sessionId}`));
   }
   if (conversationId) {
-    keys.push(qualifyScopeKey(portScopeKey, `conversation:${conversationId}`));
+    keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${continuationOwner}|conversation:${conversationId}`));
+  }
+  return [...new Set(keys)];
+}
+
+function buildStoredScopeKeys(scope: {
+  sessionId?: unknown;
+  conversationId?: unknown;
+  matchedPort?: unknown;
+  routingPolicyGroup?: unknown;
+  entryKind?: unknown;
+  continuationOwner?: unknown;
+}): string[] {
+  const portScopeKey = readPortScopeKey(scope);
+  return buildStoredScopeKeysFromResolved(scope, portScopeKey);
+}
+
+function buildRequestedScopeKeys(scope: {
+  sessionId?: unknown;
+  conversationId?: unknown;
+  matchedPort?: unknown;
+  routingPolicyGroup?: unknown;
+  entryKind?: unknown;
+  continuationOwner?: unknown;
+}): string[] {
+  const keys: string[] = [];
+  const portScopeKey = readPortScopeKey(scope);
+  const entryKind = normalizeEntryKind(scope.entryKind);
+  const requestedOwner = normalizeContinuationOwner(scope.continuationOwner);
+  const owners: Array<'direct' | 'relay'> = requestedOwner ? [requestedOwner] : ['direct', 'relay'];
+  const sessionId = readScopeToken(scope.sessionId);
+  const conversationId = readScopeToken(scope.conversationId);
+  for (const owner of owners) {
+    if (sessionId) {
+      keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${owner}|session:${sessionId}`));
+    }
+    if (conversationId) {
+      keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${owner}|conversation:${conversationId}`));
+    }
   }
   return [...new Set(keys)];
 }
@@ -222,9 +300,19 @@ function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): s
     ?? readScopeToken(payload.conversationId)
     ?? readScopeToken(metadata?.conversation_id)
     ?? readScopeToken(metadata?.conversationId);
-  return buildScopeKeys({
+  const continuationOwner =
+    readScopeToken(payload.continuationOwner)
+    ?? readScopeToken(metadata?.continuationOwner)
+    ?? (
+      isRecord(metadata?.responsesResume)
+        ? readScopeToken((metadata?.responsesResume as AnyRecord).continuationOwner)
+        : undefined
+    );
+  return buildRequestedScopeKeys({
     sessionId,
     conversationId,
+    entryKind: 'responses',
+    continuationOwner,
     matchedPort: metadata?.matchedPort ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).matchedPort : undefined),
     routingPolicyGroup: metadata?.routingPolicyGroup ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).routingPolicyGroup : undefined)
   });
@@ -240,6 +328,9 @@ function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationE
   }
   if (!readScopeToken(baseMeta.continuationOwner) && entry.continuationOwner) {
     baseMeta.continuationOwner = entry.continuationOwner;
+  }
+  if (!readScopeToken(baseMeta.entryKind) && entry.entryKind) {
+    baseMeta.entryKind = entry.entryKind;
   }
   return baseMeta;
 }
@@ -345,7 +436,11 @@ class ResponsesConversationStore {
     if (existing) {
       this.detachEntry(existing);
     }
-    const scopeKeys = buildScopeKeys(args);
+    const scopeKeys = buildStoredScopeKeys({
+      ...args,
+      entryKind: normalizeEntryKind(args.entryKind),
+      continuationOwner: 'relay'
+    });
     const portScopeKey = readPortScopeKey(args);
     const prepared = prepareConversationEntry(payload, context);
     for (const candidate of scopeKeys.length ? this.requestMap.values() : []) {
@@ -364,6 +459,7 @@ class ResponsesConversationStore {
       allowContinuation: shouldAllowContinuation(payload),
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
       providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey),
+      entryKind: normalizeEntryKind(args.entryKind),
       continuationOwner: undefined,
       sessionId: readScopeToken(args.sessionId),
       conversationId: readScopeToken(args.conversationId),
@@ -398,9 +494,11 @@ class ResponsesConversationStore {
       entry = this.requestMap.get(responseId);
     }
     if (!entry) {
-      const fallbackScopeKeys = buildScopeKeys({
+      const fallbackScopeKeys = buildRequestedScopeKeys({
         sessionId: args.sessionId,
         conversationId: args.conversationId,
+        entryKind: normalizeEntryKind(args.entryKind),
+        continuationOwner: normalizeContinuationOwner(args.continuationOwner),
         matchedPort: args.matchedPort,
         routingPolicyGroup: args.routingPolicyGroup
       });
@@ -454,20 +552,17 @@ class ResponsesConversationStore {
     if (responseProviderKey) {
       entry.providerKey = responseProviderKey;
     }
-    if (args.continuationOwner === 'direct' || args.continuationOwner === 'relay') {
-      entry.continuationOwner = args.continuationOwner;
-    }
-    const nextScopeKeys = buildScopeKeys({
-      sessionId: args.sessionId,
-      conversationId: args.conversationId,
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup
-    });
-    for (const scopeKey of nextScopeKeys) {
-      if (!entry.scopeKeys.includes(scopeKey)) {
-        entry.scopeKeys.push(scopeKey);
-      }
-    }
+    entry.sessionId = readScopeToken(args.sessionId) ?? entry.sessionId;
+    entry.conversationId = readScopeToken(args.conversationId) ?? entry.conversationId;
+    entry.entryKind = normalizeEntryKind(args.entryKind ?? entry.entryKind);
+    entry.continuationOwner = normalizeContinuationOwner(args.continuationOwner) ?? entry.continuationOwner ?? 'relay';
+    const nextScopeKeys = buildStoredScopeKeysFromResolved({
+      sessionId: entry.sessionId,
+      conversationId: entry.conversationId,
+      entryKind: entry.entryKind,
+      continuationOwner: entry.continuationOwner
+    }, responsePortScopeKey ?? entry.portScopeKey);
+    entry.scopeKeys = nextScopeKeys;
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }
@@ -520,7 +615,13 @@ class ResponsesConversationStore {
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
     let entry = this.responseIndex.get(responseId);
-    if (entry && !entryMatchesPortScope(entry, requestedPortScopeKey)) {
+    if (
+      entry
+      && (
+        !entryMatchesPortScope(entry, requestedPortScopeKey)
+        || !entryMatchesIsolation(entry, options)
+      )
+    ) {
       entry = undefined;
     }
     if (!entry) {
@@ -531,6 +632,7 @@ class ResponsesConversationStore {
           && typeof candidate.lastResponseId === 'string'
           && candidate.lastResponseId === responseId
           && entryMatchesPortScope(candidate, requestedPortScopeKey)
+          && entryMatchesIsolation(candidate, options)
         ) {
           entry = candidate;
           break;
@@ -664,57 +766,77 @@ class ResponsesConversationStore {
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.ensurePersistenceLoaded();
     this.prune();
-    const scopeKeys = buildScopeKeys(args);
-    const portScopeKey = readPortScopeKey(args);
+    const scopeKeys = buildRequestedScopeKeys({
+      ...args,
+      entryKind: normalizeEntryKind(args.entryKind)
+    });
+    const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
       if (!entry || entry.allowContinuation !== true || !entry.lastResponseId) {
         continue;
       }
-      assertResponsesConversationStoreNativeAvailable();
-      const restored = restoreContinuationPayload(entry, args.payload, args.requestId, scopeKey);
-      if (!restored) {
-        continue;
+      const dedupeKey = `${entry.requestId}:${entry.lastResponseId}`;
+      if (!matches.has(dedupeKey)) {
+        matches.set(dedupeKey, { entry, scopeKey });
       }
-      return {
-        payload: restored.payload,
-        meta: ensureMetaProviderKey(restored.meta, entry)
-      };
     }
-    return null;
+    if (matches.size !== 1) {
+      return null;
+    }
+    const match = [...matches.values()][0];
+    assertResponsesConversationStoreNativeAvailable();
+    const restored = restoreContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
+    if (!restored) {
+      return null;
+    }
+    return {
+      payload: restored.payload,
+      meta: ensureMetaProviderKey(restored.meta, match.entry)
+    };
   }
 
   materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.ensurePersistenceLoaded();
     this.prune();
-    const scopeKeys = buildScopeKeys(args);
-    const portScopeKey = readPortScopeKey(args);
+    const scopeKeys = buildRequestedScopeKeys({
+      ...args,
+      entryKind: normalizeEntryKind(args.entryKind)
+    });
+    const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
       if (!entry || entry.allowContinuation !== true) {
         continue;
       }
-      assertResponsesConversationStoreNativeAvailable();
-      if (entry.continuationOwner === 'direct') {
-        const restored = restoreContinuationPayload(entry, args.payload, args.requestId, scopeKey);
-        if (!restored) {
-          continue;
-        }
-        return {
-          payload: restored.payload,
-          meta: ensureMetaProviderKey(restored.meta, entry)
-        };
+      const dedupeKey = `${entry.requestId}:${entry.lastResponseId ?? ''}`;
+      if (!matches.has(dedupeKey)) {
+        matches.set(dedupeKey, { entry, scopeKey });
       }
-      const materialized = materializeContinuationPayload(entry, args.payload, args.requestId, scopeKey);
-      if (!materialized) {
-        continue;
+    }
+    if (matches.size !== 1) {
+      return null;
+    }
+    const match = [...matches.values()][0];
+    assertResponsesConversationStoreNativeAvailable();
+    if (match.entry.continuationOwner === 'direct') {
+      const restored = restoreContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
+      if (!restored) {
+        return null;
       }
       return {
-        payload: materialized.payload,
-        meta: ensureMetaProviderKey(materialized.meta, entry)
+        payload: restored.payload,
+        meta: ensureMetaProviderKey(restored.meta, match.entry)
       };
     }
-    return null;
+    const materialized = materializeContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
+    if (!materialized) {
+      return null;
+    }
+    return {
+      payload: materialized.payload,
+      meta: ensureMetaProviderKey(materialized.meta, match.entry)
+    };
   }
 
   private cleanupEntry(entry: ConversationEntry, responseId: string): void {

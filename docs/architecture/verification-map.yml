@@ -290,7 +290,10 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
+      - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
     integration:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
@@ -302,7 +305,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - "Empty-pool closeout belongs to Rust VR selection only; no TS-side recovery or fallback is allowed."
+      - "Empty-pool closeout belongs to Rust VR selection only; no TS-side policy recovery or fallback is allowed."
+      - "Singleton/default hold decision must be exported from Rust and consumed by TS executor shell only."
 
   - feature_id: vr.provider_forwarder_runtime
     change_risk: high
@@ -965,6 +969,7 @@ verification:
       - src/server/handlers/responses-handler.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
     integration: []
     smoke:
@@ -981,6 +986,7 @@ verification:
       - "Request-side `/v1/responses*` conversation-management branch checks, `responseIdFromPath` prewrite, and `responsesRequestContext` fallback assembly are covered by the same request-bridge gate."
       - "continuation-expired and resume-client invalid_request_error payload projection is covered by the same request-bridge gate."
       - "request-side malformed tool-history contract errorsample capture is covered by the same request-bridge gate and bridge unit test."
+      - "relay-owned request-context normalization is covered by `responses-request-bridge.request-context-normalization.spec.ts`: native req_inbound snapshot must replace raw duplicate tool history, and orphan tool_result must fail without falling back to raw input."
       - "request-context capture gating, result metadata attach, and tool-call response seeding are covered by the same request-bridge gate and submit_tool_outputs handler regressions."
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
       - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."

@@ -1,6 +1,7 @@
 // feature_id: vr.route_availability_floor
 
 use napi::Env;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -25,6 +26,102 @@ use crate::virtual_router_engine::time_utils::now_ms;
 
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
 const SINGLETON_RUST_QUOTA_RECOVERABLE_COOLDOWN_MS: i64 = 10_000;
+const ROUTE_POOL_COOLDOWN_WAIT_MAX_MS: i64 = 3 * 60 * 1000;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SingletonRoutePoolExhaustionInput {
+    pub pipeline_error: Value,
+    #[serde(default)]
+    pub initial_route_pool_len: Option<usize>,
+    #[serde(default)]
+    pub explicit_singleton_pool: bool,
+    #[serde(default)]
+    pub excluded_provider_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SingletonRoutePoolExhaustionDecision {
+    pub should_block: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_provider_count: Option<usize>,
+}
+
+fn read_positive_wait_ms(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64().filter(|value| *value > 0),
+        Value::String(raw) => raw
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .filter(|value| *value > 0),
+        _ => None,
+    }
+}
+
+fn read_candidate_provider_count_from_error(pipeline_error: &Value) -> Option<usize> {
+    pipeline_error
+        .as_object()
+        .and_then(|record| record.get("details"))
+        .and_then(|details| details.as_object())
+        .and_then(|details| details.get("candidateProviderCount"))
+        .and_then(|value| match value {
+            Value::Number(number) => number.as_u64().map(|raw| raw as usize),
+            Value::String(raw) => raw.trim().parse::<usize>().ok(),
+            _ => None,
+        })
+}
+
+fn resolve_pool_cooldown_wait_ms_from_error(pipeline_error: &Value) -> Option<i64> {
+    let details = pipeline_error
+        .as_object()
+        .and_then(|record| record.get("details"))
+        .and_then(|details| details.as_object())?;
+    let direct = details
+        .get("minRecoverableCooldownMs")
+        .and_then(read_positive_wait_ms);
+    let hinted = details
+        .get("recoverableCooldownHints")
+        .and_then(|value| value.as_array())
+        .and_then(|items| {
+            items.iter().filter_map(|item| {
+                item.as_object()
+                    .and_then(|record| record.get("waitMs"))
+                    .and_then(read_positive_wait_ms)
+            })
+            .min()
+        });
+    let candidate = match (direct, hinted) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }?;
+    if candidate > ROUTE_POOL_COOLDOWN_WAIT_MAX_MS {
+        return None;
+    }
+    Some(candidate.max(50))
+}
+
+pub(crate) fn evaluate_singleton_route_pool_exhaustion(
+    input: &SingletonRoutePoolExhaustionInput,
+) -> SingletonRoutePoolExhaustionDecision {
+    let candidate_provider_count = read_candidate_provider_count_from_error(&input.pipeline_error);
+    let singleton_route_pool = candidate_provider_count == Some(1)
+        || input.initial_route_pool_len == Some(1)
+        || input.explicit_singleton_pool;
+    let wait_ms = resolve_pool_cooldown_wait_ms_from_error(&input.pipeline_error);
+    let should_block =
+        singleton_route_pool && (wait_ms.is_some() || input.excluded_provider_count > 0);
+    SingletonRoutePoolExhaustionDecision {
+        should_block,
+        wait_ms,
+        candidate_provider_count,
+    }
+}
 
 fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
     metadata
@@ -1407,6 +1504,86 @@ mod tests {
         core.health_manager.register_providers(&keys);
         core.quota_manager.register_providers(&keys);
         core
+    }
+
+    #[test]
+    fn singleton_route_pool_exhaustion_blocks_default_only_last_provider() {
+        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
+            pipeline_error: json!({
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "details": {
+                    "routeName": "default",
+                    "candidateProviderCount": 1,
+                    "minRecoverableCooldownMs": 1000,
+                    "recoverableCooldownHints": [
+                        { "providerKey": "deepseek.key1.deepseek-v4-pro", "waitMs": 1000, "source": "provider.error" }
+                    ]
+                }
+            }),
+            initial_route_pool_len: Some(1),
+            explicit_singleton_pool: false,
+            excluded_provider_count: 0,
+        });
+        assert_eq!(
+            decision,
+            SingletonRoutePoolExhaustionDecision {
+                should_block: true,
+                wait_ms: Some(1000),
+                candidate_provider_count: Some(1),
+            }
+        );
+    }
+
+    #[test]
+    fn singleton_route_pool_exhaustion_blocks_after_last_provider_excluded() {
+        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
+            pipeline_error: json!({
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "details": {
+                    "routeName": "tools",
+                    "candidateProviderCount": 1
+                }
+            }),
+            initial_route_pool_len: Some(1),
+            explicit_singleton_pool: true,
+            excluded_provider_count: 1,
+        });
+        assert_eq!(
+            decision,
+            SingletonRoutePoolExhaustionDecision {
+                should_block: true,
+                wait_ms: None,
+                candidate_provider_count: Some(1),
+            }
+        );
+    }
+
+    #[test]
+    fn singleton_route_pool_exhaustion_does_not_block_multi_candidate_pool() {
+        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
+            pipeline_error: json!({
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "details": {
+                    "routeName": "default",
+                    "candidateProviderCount": 2,
+                    "minRecoverableCooldownMs": 1000,
+                    "recoverableCooldownHints": [
+                        { "providerKey": "provider.a", "waitMs": 1000, "source": "provider.error" }
+                    ]
+                }
+            }),
+            initial_route_pool_len: Some(2),
+            explicit_singleton_pool: false,
+            excluded_provider_count: 0,
+        });
+        assert_eq!(
+            decision,
+            SingletonRoutePoolExhaustionDecision {
+                should_block: false,
+                wait_ms: Some(1000),
+                candidate_provider_count: Some(2),
+            }
+        );
     }
 
     #[test]

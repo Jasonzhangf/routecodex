@@ -13,6 +13,20 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   createResponsesJsonToSseConverter: jest.fn(async () => ({
     convertResponseToJsonToSse: convertResponseToJsonToSseMock
   })),
+  deriveFinishReasonNative: jest.fn((body: unknown) => {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return undefined;
+    }
+    const record = body as Record<string, unknown>;
+    const status = typeof record.status === 'string' ? record.status : '';
+    if (status === 'requires_action') {
+      return 'tool_calls';
+    }
+    if (status === 'completed') {
+      return 'stop';
+    }
+    return undefined;
+  }),
   finalizeResponsesConversationRequestRetention: finalizeResponsesConversationRequestRetentionMock,
   importCoreDist: jest.fn(),
   requireCoreDist: jest.fn(),

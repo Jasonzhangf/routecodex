@@ -18,7 +18,10 @@ import {
   recordResponsesResponseForRequest,
   resumeResponsesConversation,
 } from './runtime-integrations.js';
-import { planResponsesHandlerEntry } from './native-exports.js';
+import {
+  captureReqInboundResponsesContextSnapshotJson,
+  planResponsesHandlerEntry,
+} from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 
@@ -360,15 +363,27 @@ export function shouldProjectResponsesResumeClientErrorForHttp(args: {
 
 export function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
+  requestId?: string;
   metadata?: Record<string, unknown>;
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): ResponsesRequestContextForHttp {
+  const payloadMetadata =
+    args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
+      ? (args.payload.metadata as Record<string, unknown>)
+      : undefined;
+  const captured = captureReqInboundResponsesContextSnapshotJson({
+    rawRequest: args.payload,
+    requestId: args.requestId,
+    toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
+  });
+  const capturedInput = Array.isArray(captured.input) ? captured.input : [];
+  const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
   return {
     payload: args.payload,
     context: {
-      input: Array.isArray(args.payload.input) ? args.payload.input : [],
-      toolsRaw: Array.isArray(args.payload.tools) ? args.payload.tools : undefined,
+      input: capturedInput,
+      toolsRaw: capturedToolsRaw,
     },
     sessionId: readResponsesSessionIdFromHttp(args.metadata),
     conversationId: readResponsesConversationIdFromHttp(args.metadata),
@@ -499,6 +514,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       payload,
       requestContext: buildResponsesRequestContextForHttp({
         payload,
+        requestId: args.requestId,
         metadata: requestBodyMetadata,
         matchedPort: args.portScope?.matchedPort,
         routingPolicyGroup: args.portScope?.routingPolicyGroup,

@@ -58,6 +58,10 @@ type ResponsesConversationModule = {
     context: Record<string, unknown>;
     sessionId?: string;
     conversationId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    providerKey?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
     routeHint?: string;
   }) => void;
   rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
@@ -100,6 +104,7 @@ async function captureNestedResponsesRequestContext(input: PipelineExecutionInpu
     context,
     sessionId: typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined,
     conversationId: typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined,
+    entryKind: 'responses',
     routeHint: typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined
   });
 }

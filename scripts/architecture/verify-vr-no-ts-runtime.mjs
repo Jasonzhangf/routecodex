@@ -44,6 +44,7 @@ const scanRoots = [
 ];
 
 const scanExtensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.md']);
+const singletonExecutorShellPath = 'src/server/runtime/http-server/executor/request-executor-core-utils.ts';
 
 function exists(relPath) {
   return fs.existsSync(path.join(root, relPath));
@@ -157,6 +158,25 @@ for (const file of scanRoots.flatMap(listFiles)) {
     if (!isProductionReferenceFile(relFile) && !relFile.startsWith('docs/')) return;
     failures.push(`${relFile}:${index + 1}: old VR runtime path reference: ${line.trim()}`);
   });
+}
+
+if (exists(singletonExecutorShellPath)) {
+  const src = fs.readFileSync(path.join(root, singletonExecutorShellPath), 'utf8');
+  if (!src.includes('evaluateSingletonRoutePoolExhaustionNative')) {
+    failures.push(`${singletonExecutorShellPath}: must delegate singleton route-pool exhaustion to native helper`);
+  }
+  const forbiddenLocalSingletonPatterns = [
+    /POOL_COOLDOWN_WAIT_MAX_MS/,
+    /function\s+coercePositiveMs/,
+    /function\s+resolvePoolCooldownCandidateProviderCount/,
+    /candidateProviderCount === 1/,
+    /recoverableCooldownHints/,
+  ];
+  for (const pattern of forbiddenLocalSingletonPatterns) {
+    if (pattern.test(src)) {
+      failures.push(`${singletonExecutorShellPath}: local singleton availability-floor semantics revived (${pattern})`);
+    }
+  }
 }
 
 const functionMapPath = path.join(root, 'docs/architecture/function-map.yml');

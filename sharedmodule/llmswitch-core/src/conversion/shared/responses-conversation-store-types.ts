@@ -1,4 +1,5 @@
 export type AnyRecord = Record<string, unknown>;
+export type ResponsesContinuationEntryKind = 'responses' | 'chat' | 'messages';
 
 export interface CaptureContextArgs {
   requestId?: string;
@@ -7,6 +8,7 @@ export interface CaptureContextArgs {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
   matchedPort?: number;
   routingPolicyGroup?: string;
 }
@@ -18,6 +20,7 @@ export interface RecordResponseArgs {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
   continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
@@ -27,6 +30,8 @@ export interface RecordResponseArgs {
 
 export interface ResumeOptions {
   requestId?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }
@@ -41,6 +46,8 @@ export interface RestoreByScopeArgs {
   sessionId?: string;
   conversationId?: string;
   requestId?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }
@@ -56,6 +63,7 @@ export interface ConversationEntry {
   inputItemCount?: number;
   tools?: AnyRecord[];
   providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
   continuationOwner?: 'direct' | 'relay';
   createdAt: number;
   updatedAt: number;

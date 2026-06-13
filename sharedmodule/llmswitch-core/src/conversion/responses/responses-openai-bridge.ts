@@ -308,7 +308,7 @@ export function buildChatRequestFromResponses(
     tools: toolsNormalized,
     normalizeFunctionName: 'responses',
     toolResultFallbackText: '',
-    allowDanglingToolCalls: true,
+    allowDanglingToolCalls: false,
     allowOrphanToolResult:
       typeof (payload as Record<string, unknown>).previous_response_id === 'string'
       && ((payload as Record<string, unknown>).previous_response_id as string).trim().length > 0
@@ -446,6 +446,10 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const forceWebSearch = bridgeDecisions.forceWebSearch === true;
   const toolCallIdStyle = bridgeDecisions.toolCallIdStyle;
   const historySeed = bridgeDecisions.historySeed as unknown as BridgeInputBuildResult | undefined;
+  const stripHostFields = shouldStripHostManagedFields(ctx);
+  const continuationPreviousResponseId = stripHostFields
+    ? ''
+    : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
 
   // tools: 反向映射为 ResponsesToolDefinition 形状
   const chatTools: ChatToolDefinition[] = Array.isArray(chat.tools) ? (chat.tools as ChatToolDefinition[]) : [];

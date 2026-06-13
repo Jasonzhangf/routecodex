@@ -11,3 +11,7 @@ mod types;
 // Owner implementation lives in selection.rs; this module-level anchor keeps the
 // architecture map queryable without restoring the deleted TS runtime shell.
 pub(crate) use core::VirtualRouterEngineCore;
+pub(crate) use selection::{
+    evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
+    SingletonRoutePoolExhaustionInput,
+};

@@ -104,6 +104,10 @@ mod vr_route_04_selection_boundary;
 mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
 use crate::virtual_router_engine::routing::resolve_stop_message_scope as resolve_virtual_router_stop_message_scope;
+use crate::virtual_router_engine::{
+    evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
+    SingletonRoutePoolExhaustionInput,
+};
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuotaBucketInputEntry {
@@ -259,6 +263,17 @@ pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> N
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_virtual_router_routing_state_key(&metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn evaluate_singleton_route_pool_exhaustion_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: SingletonRoutePoolExhaustionInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output: SingletonRoutePoolExhaustionDecision =
+        evaluate_singleton_route_pool_exhaustion(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

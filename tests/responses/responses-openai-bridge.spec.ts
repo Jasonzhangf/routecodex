@@ -14,7 +14,7 @@ jest.unstable_mockModule(
   })
 );
 
-const { buildResponsesRequestFromChat } = await import(
+const { buildResponsesRequestFromChat, buildChatRequestFromResponses, captureResponsesContext } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js'
 );
 
@@ -194,7 +194,7 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
     };
 
     expect(() => buildResponsesRequestFromChat(payload, {})).toThrow(
-      /synthetic RouteCodex fallback id/i
+      /synthetic.*fallback tool_call id/i
     );
   });
 
@@ -210,5 +210,37 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
     expect(() => buildResponsesRequestFromChat(payload, {})).toThrow(
       /synthetic RouteCodex local control text/i
     );
+  });
+});
+
+describe('buildChatRequestFromResponses (responses bridge)', () => {
+  it('fails fast when previous_response_id history contains a dangling tool call before ordinary user content', () => {
+    const payload = {
+      model: 'gpt-test',
+      previous_response_id: 'resp_prev_2013',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'hello' }]
+        },
+        {
+          type: 'function_call',
+          id: 'fc_missing_result_1',
+          call_id: 'call_missing_result_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"cat SKILL.md"}'
+        },
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '[Image omitted]' }]
+        }
+      ]
+    };
+
+    expect(() =>
+      captureResponsesContext(payload as any, { route: { requestId: 'req_2013_guard' } } as any)
+    ).toThrow(/dangling_tool_call/i);
   });
 });

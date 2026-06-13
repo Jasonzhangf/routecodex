@@ -70,6 +70,18 @@ function createNodeRequire() {
 
 const nodeRequire = createNodeRequire();
 
+function getJestRequire(): NodeJS.Require | null {
+  if (!isJestRuntime()) {
+    return null;
+  }
+  try {
+    const jestRequire = Function('return typeof require === "function" ? require : null')() as NodeJS.Require | null;
+    return typeof jestRequire === 'function' ? jestRequire : null;
+  } catch {
+    return null;
+  }
+}
+
 function isJestRuntime(): boolean {
   return typeof process.env.JEST_WORKER_ID === 'string' && process.env.JEST_WORKER_ID.length > 0;
 }
@@ -87,18 +99,11 @@ function resolveBuiltinSourceModulePath(subpath: string, impl: LlmsImpl): string
   }
 }
 
-const JEST_SOURCE_FIRST_SUBPATHS = new Set<string>([
-  'native/router-hotpath/native-virtual-router-routing-state',
-  'native/router-hotpath/native-servertool-core-semantics',
-  'runtime/virtual-router-hit-log'
-]);
-
 function shouldPreferSourceInJest(subpath: string, impl: LlmsImpl): boolean {
   if (impl !== 'ts' || !isJestRuntime()) {
     return false;
   }
-  const normalized = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
-  return JEST_SOURCE_FIRST_SUBPATHS.has(normalized);
+  return true;
 }
 
 function parsePrefixList(raw: string | undefined): string[] {
@@ -162,21 +167,24 @@ function requireCoreDist<TModule extends object = AnyRecord>(
   if (shouldPreferSourceInJest(subpath, impl)) {
     const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
     if (sourcePath) {
+      const jestRequire = getJestRequire();
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      return nodeRequire(sourcePath) as TModule;
+      return (jestRequire ?? nodeRequire)(sourcePath) as TModule;
     }
   }
   const modulePath = resolveCoreModulePath(subpath, impl);
   try {
+    const jestRequire = getJestRequire();
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return nodeRequire(modulePath) as TModule;
+    return (jestRequire ?? nodeRequire)(modulePath) as TModule;
   } catch (error) {
     if (isJestRuntime()) {
       const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
       if (sourcePath) {
         try {
+          const jestRequire = getJestRequire();
           // eslint-disable-next-line @typescript-eslint/no-var-requires
-          return nodeRequire(sourcePath) as TModule;
+          return (jestRequire ?? nodeRequire)(sourcePath) as TModule;
         } catch {
           // fall through to original error below
         }

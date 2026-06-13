@@ -305,6 +305,81 @@ describe('responses-openai-bridge history seed normalization', () => {
     expect(tool?.tool_call_id).toBe('fc_find_fixme');
   });
 
+  test('preserves late batched function_call_output after assistant text and repeated tool turns', () => {
+    const hugeToolOutput = [
+      'Chunk ID: 43a0cd',
+      'Wall time: 0.0000 seconds',
+      'Process exited with code 0',
+      'Original token count: 8993',
+      'Output:',
+      '---',
+      'name: rcc-dev-skills',
+      'description: RouteCodex/llmswitch-core',
+      'Total output lines: 624',
+      '[Image omitted]'
+    ].join('\n');
+
+    const payload = {
+      model: 'gpt-4.1-mini',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '整理 rcc-dev-skills' }]
+        },
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '继续读取上下文' }]
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_list_sizes',
+          name: 'exec_command',
+          arguments: '{"cmd":"wc -l note.md CACHE.md MEMORY.md"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_list_sizes',
+          output: '624 note.md\n109 CACHE.md\n3188 MEMORY.md'
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_paths',
+          name: 'exec_command',
+          arguments: '{"cmd":"find .agents -maxdepth 2 -type f"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_paths',
+          output: '.agents/skills/rcc-dev-skills/SKILL.md'
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_skill_dump',
+          name: 'exec_command',
+          arguments: '{"cmd":"sed -n 1,260p .agents/skills/rcc-dev-skills/SKILL.md"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_skill_dump',
+          output: hugeToolOutput
+        }
+      ]
+    } as any;
+
+    const ctx = captureResponsesContext(payload, { route: { requestId: 'bridge-late-batched-tool-output' } });
+    const result = buildChatRequestFromResponses(payload, ctx);
+    const messages = (result.request.messages as Array<Record<string, any>>) || [];
+    const lastTool = [...messages]
+      .reverse()
+      .find((entry) => entry.role === 'tool' && entry.tool_call_id === 'call_skill_dump');
+
+    expect(lastTool).toBeDefined();
+    expect(lastTool?.content).toContain('name: rcc-dev-skills');
+    expect(messages.some((entry) => entry.role === 'assistant' && Array.isArray(entry.tool_calls) && entry.tool_calls.some((call: any) => call?.id === 'call_skill_dump'))).toBe(true);
+  });
+
   test('fails fast when responses input assistant message tool_calls dangle without tool result', () => {
     expect(() => buildChatRequestFromResponses({
       model: 'gpt-4.1-mini',

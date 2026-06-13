@@ -16,6 +16,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  captureReqInboundResponsesContextSnapshotJson: jest.fn(),
   planResponsesHandlerEntry: jest.fn(),
 }));
 

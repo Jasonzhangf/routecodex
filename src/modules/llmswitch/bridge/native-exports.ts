@@ -56,6 +56,11 @@ type NativeSharedConversionSemantics = {
     message: Record<string, unknown>,
     options?: Record<string, unknown>
   ) => Record<string, unknown>;
+  captureReqInboundResponsesContextSnapshotWithNative?: (input: {
+    rawRequest: Record<string, unknown>;
+    requestId?: string;
+    toolCallIdStyle?: unknown;
+  }) => Record<string, unknown>;
   planResponsesHandlerEntryWithNative?: (
     payload: unknown,
     entryEndpoint?: string,
@@ -113,6 +118,9 @@ type NativeHubBridgePolicySemantics = {
 
 type NativeRouterHotpathJsonBinding = {
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
+  evaluateSingletonRoutePoolExhaustionJson?: (
+    inputJson: string
+  ) => string;
   evaluateResponsesDirectRouteDecisionJson?: (
     payloadJson: string,
     metadataJson: string,
@@ -138,6 +146,7 @@ type NativeHubVrNodeContracts = {
 };
 
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
+let cachedSharedSemanticsSync: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
@@ -207,6 +216,9 @@ async function assertSharedBindings(): Promise<void> {
   if (typeof shared.normalizeAssistantTextToToolCallsWithNative !== 'function') {
     missing.push('normalizeAssistantTextToToolCallsJson');
   }
+  if (typeof shared.captureReqInboundResponsesContextSnapshotWithNative !== 'function') {
+    missing.push('captureReqInboundResponsesContextSnapshotJson');
+  }
   if (typeof shared.planResponsesHandlerEntryWithNative !== 'function') {
     missing.push('planResponsesHandlerEntryJson');
   }
@@ -249,6 +261,26 @@ async function getSharedConversionSemantics(): Promise<NativeSharedConversionSem
     throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
   }
   return cachedSharedSemantics;
+}
+
+function getSharedConversionSemanticsSync(): NativeSharedConversionSemantics {
+  if (cachedSharedSemanticsSync !== undefined) {
+    if (!cachedSharedSemanticsSync) {
+      throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
+    }
+    return cachedSharedSemanticsSync;
+  }
+  try {
+    cachedSharedSemanticsSync = requireCoreDist<NativeSharedConversionSemantics>(
+      'native/router-hotpath/native-shared-conversion-semantics'
+    );
+  } catch {
+    cachedSharedSemanticsSync = null;
+  }
+  if (!cachedSharedSemanticsSync) {
+    throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
+  }
+  return cachedSharedSemanticsSync;
 }
 
 async function getRespSemantics(): Promise<NativeHubPipelineRespSemantics> {
@@ -468,6 +500,19 @@ export async function normalizeAssistantTextToToolCallsJson(
   return fn(message, options) as AnyRecord;
 }
 
+export function captureReqInboundResponsesContextSnapshotJson(input: {
+  rawRequest: Record<string, unknown>;
+  requestId?: string;
+  toolCallIdStyle?: unknown;
+}): AnyRecord {
+  const mod = getSharedConversionSemanticsSync();
+  const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
+  }
+  return fn(input) as AnyRecord;
+}
+
 export async function planResponsesHandlerEntry(
   payload: unknown,
   entryEndpoint?: string,
@@ -521,6 +566,34 @@ export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
   const parsed = invokeRouterHotpathJsonCapability('hasDeclaredApplyPatchToolJson', [payload ?? null]);
   const row = assertNativeObject('hasDeclaredApplyPatchToolJson', parsed);
   return row.hasDeclaredApplyPatchTool === true;
+}
+
+export function evaluateSingletonRoutePoolExhaustionNative(input: {
+  pipelineError: unknown;
+  initialRoutePoolLen?: number | null;
+  explicitSingletonPool?: boolean;
+  excludedProviderCount: number;
+}): {
+  shouldBlock: boolean;
+  waitMs?: number;
+  candidateProviderCount?: number;
+} {
+  const parsed = invokeRouterHotpathJsonCapability('evaluateSingletonRoutePoolExhaustionJson', [
+    {
+      pipelineError: input.pipelineError ?? null,
+      initialRoutePoolLen:
+        typeof input.initialRoutePoolLen === 'number' && Number.isFinite(input.initialRoutePoolLen)
+          ? Math.max(0, Math.floor(input.initialRoutePoolLen))
+          : undefined,
+      explicitSingletonPool: input.explicitSingletonPool === true,
+      excludedProviderCount: Math.max(0, Math.floor(input.excludedProviderCount || 0)),
+    }
+  ]);
+  return assertNativeObject('evaluateSingletonRoutePoolExhaustionJson', parsed) as {
+    shouldBlock: boolean;
+    waitMs?: number;
+    candidateProviderCount?: number;
+  };
 }
 
 export function convertResponsesRequestToChatNative(

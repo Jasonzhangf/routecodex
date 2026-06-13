@@ -90,17 +90,27 @@ describe('request log color registry', () => {
     expect(String(logSpy.mock.calls[0]?.[0] ?? '').startsWith(String(expectedColor))).toBe(true);
   });
 
-  it('does not color virtual-router-hit lines from request context when sid is absent', () => {
-    const sessionId = 'session-vr-hit-context';
+  it('colors virtual-router-hit lines from registered request context when sid is absent', () => {
+    const tmuxSessionId = 'tmux-vr-hit-context';
+    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    let requestSessionId = 'session-vr-hit-context';
+    for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === expectedColor; index += 1) {
+      requestSessionId = `session-vr-hit-context-${index}`;
+    }
     const requestId = 'req-vr-hit-context';
 
-    registerRequestLogContext(requestId, { sessionId });
+    registerRequestLogContext(requestId, {
+      clientTmuxSessionId: tmuxSessionId,
+      sessionId: requestSessionId
+    });
     const line = colorizeVirtualRouterHitLogLine(
       `\x1b[38;5;208m[virtual-router-hit]\x1b[0m \x1b[90m19:42:25\x1b[0m req=${requestId} \x1b[36mtools/pool -> provider.model reason=tools\x1b[0m`
     );
 
-    expect(line).toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
-    expect(line).toContain(`req=${requestId} \x1b[36mtools/pool -> provider.model`);
+    expect(expectedColor).toBeDefined();
+    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
+    expect(line).toContain(`req=${requestId} ${expectedColor}tools/pool -> provider.model`);
+    expect(line).not.toContain(`req=${requestId} \x1b[36mtools/pool -> provider.model`);
   });
 
   it('does not recolor virtual-router-hit lines without an explicit session key', () => {

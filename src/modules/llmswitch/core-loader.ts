@@ -68,6 +68,32 @@ function resolveCoreLoaderModulePath(): string {
   return path.join(process.cwd(), 'src/modules/llmswitch/core-loader.ts');
 }
 
+function createNodeRequire() {
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      return createRequire(metaUrl);
+    } catch {
+      // continue to path fallback
+    }
+  }
+  return createRequire(resolveCoreLoaderModulePath());
+}
+
+const nodeRequire = createNodeRequire();
+
+function getJestRequire(): NodeJS.Require | null {
+  if (!isJestRuntime()) {
+    return null;
+  }
+  try {
+    const jestRequire = Function('return typeof require === "function" ? require : null')() as NodeJS.Require | null;
+    return typeof jestRequire === 'function' ? jestRequire : null;
+  } catch {
+    return null;
+  }
+}
+
 function findPackageRootFromEntry(entryPath: string): string | null {
   let current = path.dirname(entryPath);
   while (true) {
@@ -198,6 +224,22 @@ function resolveBuiltinSourceModulePath(subpath: string, impl: LlmsImpl): string
 }
 
 export async function importCoreModule<T = unknown>(subpath: string, impl: LlmsImpl = 'ts'): Promise<T> {
+  if (isJestRuntime()) {
+    const jestRequire = getJestRequire();
+    const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
+    if (sourcePath && jestRequire) {
+      try {
+        return jestRequire(sourcePath) as T;
+      } catch {
+        // fall through to dist-path fallback below
+      }
+    }
+    const modulePath = resolveCoreDistPath(subpath, impl);
+    if (jestRequire) {
+      return jestRequire(modulePath) as T;
+    }
+    return nodeRequire(modulePath) as T;
+  }
   const moduleUrl = resolveCoreModuleUrl(subpath, impl);
   try {
     return (await import(moduleUrl)) as T;
