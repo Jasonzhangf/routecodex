@@ -18,6 +18,7 @@
 15. **metadata 请求/响应闭环隔离**：metadata 只能作为单个 request/response 闭环内的无状态内部控制语义 carrier；provider 出站 body、provider SDK options、client response body、provider/runtime 持久状态均不得携带内部 metadata。闭环结束必须释放，不得跨 requestId / pipelineId / port(serverId) / sessionId / conversationId 复用或污染。禁止 `body.metadata -> provider options`、`rawBody.metadata -> SDK request`、`payload.metadata.context -> provider wire payload`、snapshot metadata 进入正常 live path。
 16. **全局流水线类型拓扑锁**：请求链、响应链、错误链、metadata carrier、Virtual Router、Provider Runtime、Server Runtime 的关键数据结构必须按“模块 + 阶段 + 节点序号 + 节点语义”唯一命名并唯一拥有；Hub 主链阶段固定为 `ReqInbound` / `ReqChatProcess` / `ReqOutbound` / `RespInbound` / `RespChatProcess` / `RespOutbound`。只允许相邻节点 builder/parser 转换，禁止跨节点 shortcut、同义 DTO、重复 shape、散落 `From` 转换、裸 `unknown`/`Record`/`Value` 承载关键语义。拓扑、命名、插节点规则真源见 `docs/design/pipeline-type-topology-and-module-boundaries.md`。
 17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。
+18. **红测→绿化→旧样本在线复测锁**：每次开发新功能或修复缺陷，必须先固化最小 failing sample / red test 并确认当前为红，再修改唯一真源让其转绿；绿化后必须在线重放旧错误样本或同入口真实样本，证明不是只对单测修好的虚假修复。没有“先红”证据或没有旧样本在线复测证据，不得宣称闭环完成。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。

@@ -559,6 +559,7 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
    - 黑盒触发：`scripts/tests/stopless-followup-blackbox.mjs`
    - 故障回放：`scripts/tests/replay-orphan-followup-sample.mjs` 或新建等价 replay
 3. 没有“先红”的测试证据，不允许进入改代码阶段。
+4. 该规则不仅适用于 bugfix，也适用于新功能开发：新增能力先用最小失败样本/契约红测锁住目标，再进入实现。
 
 ### S2. 固化回归样本（不改业务逻辑）
 1. 把失败请求最小样本固化到可重放位置（request/response/payload）。
@@ -575,6 +576,7 @@ Provider 配置仍在 `~/.rcc/provider/<providerId>/config.v2.toml`，但 `[prov
 2. 构建链路：`build -> install:global -> restart --port 5555`
 3. 黑盒复验：`stopless-followup-blackbox` 必跑，确认 followup 真实触发。
 4. 日志验收：必须有 `payload_normalized`、`bodyHasInput=true`、`stage=final result=completed` 或明确失败分类。
+5. 在线样本复测：必须重放旧错误样本或同入口真实样本，确认 live/runtime 也转绿；只有单测转绿不算完成。
 
 ### S5. 交付报告格式（固定）
 1. 复现证据（哪条测试先红）

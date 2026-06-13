@@ -15,8 +15,9 @@
 3. 需要发布时执行 `npm run install:release`。
 
 ## 最小验证栈
-- 目标改动对应的最小测试（同路径回归）。
+- 先补并跑目标改动对应的最小 red test / 同路径回归，必须先看到“当前为红”。
 - 至少一条 failing-shape replay + 一条 control replay。
+- red test 转绿后，必须在线重放旧错误样本或同入口真实样本；没有样本在线复测，不算闭环。
 - 安装后版本/可执行性复核（`routecodex --version` / `rcc --version`）。
 - 安装后真实 restart + `/health` 复核；仅 CLI 存在不算闭环。
 

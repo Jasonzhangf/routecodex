@@ -1,0 +1,7 @@
+{
+  "source": "real-diag",
+  "requestId": "openai-responses-router-gpt-5.4-20260613T091618631-339813-1726",
+  "endpoint": "/v1/responses",
+  "samplePath": "error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json",
+  "purpose": "locks duplicate replay + wrapper noise regression from real sample"
+}

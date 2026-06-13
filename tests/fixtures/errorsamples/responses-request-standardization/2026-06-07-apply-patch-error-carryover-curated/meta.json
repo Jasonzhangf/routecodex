@@ -1,0 +1,14 @@
+{
+  "source": "real-diag-curated",
+  "requestId": "openai-responses-router-gpt-5.5-20260607T022906302-288146-11057",
+  "endpoint": "/v1/responses",
+  "samplePath": "error-openai-responses-router-gpt-5.5-20260607T022906302-288146-11057.json",
+  "purpose": "locks apply_patch verification-failed carryover and zterm wrapper coexistence from real sample",
+  "selectedInputIndexes": [
+    0,
+    142,
+    143,
+    186,
+    190
+  ]
+}

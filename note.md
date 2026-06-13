@@ -197,6 +197,18 @@
   - Native replay on real error sample `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json` with wrapped `{ payload, normalized }` input now passes `coerceStandardizedRequestFromPayloadWithNative`, returning `messages=33`, `tools=16` instead of failing request standardization.
 - Next required evidence: global install/restart current runtime, then rerun a live/runtime probe to confirm the built server process picks up the request-shape fix.
 
+2026-06-13 real-sample red-test + workflow closeout
+- Jason required the workflow to be fixed as a general rule: every new feature or bugfix must go `red test first -> fix -> green -> live replay old sample`, otherwise the change is not closed.
+- Added curated real-sample fixture gate under `tests/fixtures/errorsamples/responses-request-standardization/`:
+  1. `2026-06-13-duplicate-replay-wrapper-noise/` keeps the real diag request body from `error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json`;
+  2. `2026-06-07-apply-patch-error-carryover-curated/` keeps a curated real-sample payload extracted from `error-openai-responses-router-gpt-5.5-20260607T022906302-288146-11057.json`, locking `apply_patch verification failed` carryover plus zterm wrapper coexistence.
+- Added formal red regression `tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts` that replays both fixtures through `coerceStandardizedRequestFromPayloadWithNative`.
+- Fixture gate PASS: `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts`
+- Online replay PASS on current `0.90.3064` runtime:
+  - `2026-06-13-duplicate-replay-wrapper-noise` -> HTTP 200, no `MALFORMED_REQUEST`, no `orphan_tool_result`, no `RESPONSE_CONVERSION_ERROR`
+  - `2026-06-07-apply-patch-error-carryover-curated` -> HTTP 200, no `MALFORMED_REQUEST`, no `orphan_tool_result`, no `RESPONSE_CONVERSION_ERROR`
+- Process rule was written into project `AGENTS.md`, `docs/agent-routing/20-build-test-release-routing.md`, and `.agents/skills/rcc-dev-skills/SKILL.md`.
+
 2026-06-12 request/response/usage concise log cleanup
 - User target: standard `virtual-router-hit -> completed -> session-request -> usage` logs should be shorter, keep request id / request-response pairing / core usage / single finish_reason signal, and avoid repeated finish_reason clutter.
 - Unique owner direction: only log presentation files are in scope: `src/server/handlers/handler-utils.ts`, `src/server/handlers/handler-response-utils.ts`, `src/server/runtime/http-server/executor/usage-logger.ts`, `src/server/utils/request-log-color.ts`, plus existing log-color/usage tests. No Hub/VR/provider payload or routing semantics change.
@@ -372,3 +384,7 @@
 2026-06-13 stopless prompts md-source migration
 - Move stopless default prompt text from Rust hardcode to source asset under code tree, build copy to dist, runtime read from dist.
 - Must keep single owner and add tests for round1/2/3 + schema mention + next-check mention.
+2026-06-13 stopless schema closed-loop
+- Added Rust red tests for guidance-before-gate, missing-schema-no-count, and missing-schema-reissues-guidance.
+- stop_message_cli_projection_seed now injects stopless_schema_guidance into continuationPrompt and appends next-round schema-check hint.
+- Rust evidence: targeted cargo tests passed for cli seed + stop-message persist/gate contract.
