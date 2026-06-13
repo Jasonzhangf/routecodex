@@ -80,6 +80,7 @@ afterEach(() => {
 describe('http-server direct result metadata propagation', () => {
   it('router-direct result preserves input metadata for downstream SSE restore', async () => {
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
     const result = await server.buildRouterDirectResult({
       response: {
         status: 200,
@@ -112,12 +113,14 @@ describe('http-server direct result metadata propagation', () => {
       projectPath: '/tmp/router-direct-project',
       providerRequestId: 'req-router-direct-session-color',
       inputRequestId: 'req-router-direct-session-color',
-      externalLatencyMs: 2345
+      externalLatencyMs: 2345,
+      model: 'gpt-5.4'
     });
   });
 
   it('router-direct usage log uses client tmux session when sessionId is absent', async () => {
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
     const result = await server.buildRouterDirectResult({
       response: {
         status: 200,
@@ -139,7 +142,8 @@ describe('http-server direct result metadata propagation', () => {
     expect(result.usageLogInfo).toMatchObject({
       sessionId: 'tmux-router-direct-session',
       projectPath: '/tmp/router-direct-tmux-project',
-      externalLatencyMs: 678
+      externalLatencyMs: 678,
+      model: 'gpt-5.4'
     });
   });
 

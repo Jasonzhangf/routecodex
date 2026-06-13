@@ -142,4 +142,5 @@ describe('responses-handler request timeout blackbox', () => {
       expect(observedAbort).toBe(false);
     });
   });
+
 });

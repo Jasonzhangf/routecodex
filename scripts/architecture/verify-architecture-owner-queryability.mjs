@@ -21,7 +21,9 @@ function parseOwners(text) {
       current = {
         featureId: trimmed.split(':').slice(1).join(':').trim(),
         summary: '',
+        ownerKind: '',
         ownerModule: '',
+        ownerScope: '',
         canonicalTypes: [],
         canonicalBuilders: [],
         allowedPaths: [],
@@ -38,8 +40,18 @@ function parseOwners(text) {
       section = null;
       continue;
     }
+    if (trimmed.startsWith('owner_kind:')) {
+      current.ownerKind = trimmed.split(':').slice(1).join(':').trim();
+      section = null;
+      continue;
+    }
     if (trimmed.startsWith('owner_module:')) {
       current.ownerModule = trimmed.split(':').slice(1).join(':').trim();
+      section = null;
+      continue;
+    }
+    if (trimmed.startsWith('owner_scope:')) {
+      current.ownerScope = trimmed.split(':').slice(1).join(':').trim();
       section = null;
       continue;
     }
@@ -105,7 +117,9 @@ const owners = parseOwners(mapText);
 for (const owner of owners) {
   if (!owner.featureId) failures.push('feature_id missing');
   if (!owner.summary) failures.push(`${owner.featureId}: summary missing`);
+  if (!owner.ownerKind) failures.push(`${owner.featureId}: owner_kind missing`);
   if (!owner.ownerModule) failures.push(`${owner.featureId}: owner_module missing`);
+  if (!owner.ownerScope) failures.push(`${owner.featureId}: owner_scope missing`);
   if (owner.ownerModule && !fs.existsSync(path.join(root, owner.ownerModule))) {
     failures.push(`${owner.featureId}: owner_module path missing on disk: ${owner.ownerModule}`);
   }

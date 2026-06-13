@@ -2061,7 +2061,7 @@ describe('HubRequestExecutor failover', () => {
     ).toBe(true);
   });
 
-  test('does not block beyond the generic pool cooldown budget for a singleton recoverable pool', async () => {
+  test('blocks and retries singleton recoverable pool exhaustion instead of surfacing no-provider', async () => {
     jest.useFakeTimers();
     const providerKey = 'dbittai.key1.MiniMax-M2.7';
     const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-long-singleton-wait' } }));
@@ -2075,7 +2075,7 @@ describe('HubRequestExecutor failover', () => {
     const pipeline = {
       execute: jest.fn(async () => {
         calls += 1;
-        if (calls <= 61) {
+        if (calls <= 2) {
           throw Object.assign(new Error('No available providers after applying routing instructions'), {
             code: 'PROVIDER_NOT_AVAILABLE',
             details: {
@@ -2134,21 +2134,32 @@ describe('HubRequestExecutor failover', () => {
     });
 
     try {
-      await expect(executor.execute({
+      const pending = executor.execute({
         requestId: 'req-singleton-cooldown-budget',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
         metadata: {}
-      })).rejects.toThrow('No available providers after applying routing instructions');
+      });
+      const expectation = expect(pending).resolves.toMatchObject({ status: 200 });
 
+      await jest.advanceTimersByTimeAsync(999);
       expect(pipeline.execute).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expectation;
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
       expect(
-        logStage.mock.calls.some(
-          (call) =>
-            call[0] === 'provider.route_pool_cooldown_wait'
+        logStage.mock.calls.filter(
+          (call) => call[0] === 'provider.route_pool_cooldown_wait'
         )
-      ).toBe(false);
+      ).toHaveLength(2);
+      expect(
+        logStage.mock.calls.filter(
+          (call) => call[0] === 'provider.route_pool_cooldown_wait.completed'
+        )
+      ).toHaveLength(2);
     } finally {
       jest.useRealTimers();
     }
@@ -2913,6 +2924,7 @@ describe('HubRequestExecutor failover', () => {
       getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
     };
 
+    let pipelineCalls = 0;
     const pipeline = {
       execute: jest.fn()
         .mockResolvedValueOnce({
@@ -2927,22 +2939,45 @@ describe('HubRequestExecutor failover', () => {
           routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
           metadata: {}
         })
-        .mockRejectedValueOnce(
-          Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
-            code: 'PROVIDER_NOT_AVAILABLE'
-          })
-        )
-        .mockResolvedValueOnce({
-          requestId: 'req-single-pool-unavailable',
-          providerPayload: {},
-          target: {
-            providerKey: firstProviderKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: firstProviderKey
-          },
-          routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
-          metadata: {}
+        .mockImplementation(async () => {
+          pipelineCalls += 1;
+          if (pipelineCalls === 1) {
+            return {
+              requestId: 'req-single-pool-unavailable',
+              providerPayload: {},
+              target: {
+                providerKey: firstProviderKey,
+                providerType: 'openai',
+                outboundProfile: 'openai-chat',
+                runtimeKey: firstProviderKey
+              },
+              routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+              metadata: {}
+            };
+          }
+          if (pipelineCalls === 2) {
+            throw Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
+              code: 'PROVIDER_NOT_AVAILABLE',
+              details: {
+                routeName: 'direct',
+                candidateProviderCount: 1,
+                minRecoverableCooldownMs: 1000,
+                recoverableCooldownHints: [{ providerKey: firstProviderKey, waitMs: 1000, source: 'provider.error' }]
+              }
+            });
+          }
+          return {
+            requestId: 'req-single-pool-unavailable',
+            providerPayload: {},
+            target: {
+              providerKey: firstProviderKey,
+              providerType: 'openai',
+              outboundProfile: 'openai-chat',
+              runtimeKey: firstProviderKey
+            },
+            routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+            metadata: {}
+          };
         }),
       updateVirtualRouterConfig: jest.fn()
     };
@@ -2960,24 +2995,37 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(executor.execute({
-      requestId: 'req-single-pool-unavailable',
-      entryEndpoint: '/v1/chat/completions',
-      body: {},
-      headers: {},
-      metadata: {}
-    })).rejects.toThrow('HTTP 429: quota exhausted');
+    jest.useFakeTimers();
+    try {
+      const pending = executor.execute({
+        requestId: 'req-single-pool-unavailable',
+        entryEndpoint: '/v1/chat/completions',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(failingProcess).toHaveBeenCalledTimes(1);
-    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
-    expect(
-      deps.logStage.mock.calls.some(
-        (call: unknown[]) =>
-          call[0] === 'provider.route_pool_cooldown_wait'
-      )
-    ).toBe(false);
+      await jest.advanceTimersByTimeAsync(999);
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(1);
+      await expectation;
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(failingProcess).toHaveBeenCalledTimes(2);
+      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+      expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+      const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([]);
+      expect(
+        deps.logStage.mock.calls.some(
+          (call: unknown[]) =>
+            call[0] === 'provider.route_pool_cooldown_wait'
+        )
+      ).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate', async () => {
@@ -4288,5 +4336,386 @@ describe('HubRequestExecutor provider transport backoff', () => {
       },
       stage: 'provider.send'
     })).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 红测：VR 路由池耗尽 backoff 机制
+// 覆盖三种关键路径：
+//   A) singleton pool — 无限阻塞等待（路径 A）
+//   B) 非 singleton 3 次 backoff → 抛错（路径 B）
+//   C) router-direct pool exhausted（路径 C）
+// ═══════════════════════════════════════════════════════════════
+
+describe('HubRequestExecutor pool exhaustion backoff (VR error routing)', () => {
+  beforeEach(() => {
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  // ── 路径 A: 10000 端口典型场景 —— 全路由池只有 default，一个 provider ──
+  // 注：这些测试 mock pipeline.execute 直接抛 PROVIDER_NOT_AVAILABLE，
+  // 模拟 provider send 失败 → exclude → reroute → VR pool empty 的完整链路。
+  // 绕过 processProviderSendFailure（需要 native module），聚焦 singleton block 路径。
+
+  test('A1: singleton pool blocks when pipeline throws PROVIDER_NOT_AVAILABLE with candidateProviderCount=1', async () => {
+    const providerKey = 'deepseek.key1.deepseek-v4-pro';
+    const handle = buildHandle(providerKey, async () => ({
+      status: 200,
+      data: { id: 'ok-after-singleton-block' }
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey === providerKey ? handle : undefined
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        // call 1: pipeline ok → provider 200 → resolves
+        .mockResolvedValueOnce({
+          requestId: 'req-singleton-10000',
+          providerPayload: {},
+          target: { providerKey, providerType: 'deepseek', outboundProfile: 'openai-chat', runtimeKey: providerKey },
+          routingDecision: { routeName: 'default', pool: [providerKey] },
+          metadata: {}
+        })
+        // call 2: provider excluded → retry → VR pool empty → PROVIDER_NOT_AVAILABLE → singleton block
+        .mockRejectedValueOnce(
+          Object.assign(new Error('No available providers after applying routing instructions'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'default',
+              candidateProviderCount: 1,
+              minRecoverableCooldownMs: 2000,
+              recoverableCooldownHints: [
+                { providerKey, waitMs: 2000, source: 'provider.error' }
+              ]
+            }
+          })
+        )
+        // call 3: after singleton block (excluded cleared) → works
+        .mockResolvedValueOnce({
+          requestId: 'req-singleton-10000',
+          providerPayload: {},
+          target: { providerKey, providerType: 'deepseek', outboundProfile: 'openai-chat', runtimeKey: providerKey },
+          routingDecision: { routeName: 'default', pool: [providerKey] },
+          metadata: {}
+        }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: { handleError: jest.fn(async () => undefined) }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    // Mock convert to avoid provider-side send logic (native module unavailable in test)
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: { id: 'ok-after-block', object: 'response', status: 'completed' }
+    });
+
+    const pending = executor.execute({
+      requestId: 'req-singleton-10000',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+    const expectation = expect(pending).resolves.toMatchObject({ status: 200 });
+
+    // call 1: pipeline ok → provider 200 → done
+    // call 2: pipeline throws PROVIDER_NOT_AVAILABLE → singleton block 2s
+    await jest.advanceTimersByTimeAsync(1999);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(3);
+    expect(
+      (deps.logStage as jest.Mock).mock.calls.some(
+        (call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait'
+      )
+    ).toBe(true);
+    expect(
+      (deps.logStage as jest.Mock).mock.calls.some(
+        (call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait.completed'
+      )
+    ).toBe(true);
+  });
+
+  // A2: singleton pool blocks from first call (no warmup), with cooldown hints triggering block
+  test('A2: singleton pool blocks when PROVIDER_NOT_AVAILABLE on first pipeline call with cooldown hints', async () => {
+    const providerKey = 'gemini.key1.gemini-2.5-pro';
+    const handle = buildHandle(providerKey, async () => ({
+      status: 200,
+      data: { id: 'ok-after-singleton-block' }
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey === providerKey ? handle : undefined
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        // call 1: throws PROVIDER_NOT_AVAILABLE with cooldown hints → singleton block
+        .mockRejectedValueOnce(
+          Object.assign(new Error('No available providers after applying routing instructions'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'tools',
+              candidateProviderCount: 1,
+              minRecoverableCooldownMs: 500,
+              recoverableCooldownHints: [
+                { providerKey, waitMs: 500, source: 'concurrency.busy' }
+              ]
+            }
+          })
+        )
+        // call 2: after singleton block → excluded cleared → works
+        .mockResolvedValueOnce({
+          requestId: 'req-singleton-unrec',
+          providerPayload: {},
+          target: { providerKey, providerType: 'gemini', outboundProfile: 'gemini-chat', runtimeKey: providerKey },
+          routingDecision: { routeName: 'tools', pool: [providerKey] },
+          metadata: {}
+        }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: { handleError: jest.fn(async () => undefined) }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValueOnce({ status: 200, body: { id: 'ok-after-block', object: 'response', status: 'completed' } });
+
+    const pending = executor.execute({
+      requestId: 'req-singleton-unrec',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+    const expectation = expect(pending).resolves.toMatchObject({ status: 200 });
+
+    // call 1: pipeline throws PROVIDER_NOT_AVAILABLE → singleton block 500ms → call 2 succeeds
+    await jest.advanceTimersByTimeAsync(499);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(
+      (deps.logStage as jest.Mock).mock.calls.some(
+        (call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait'
+      )
+    ).toBe(true);
+  });
+
+  // A3: singleton pool with maxAttempts=1 — must still block, not throw
+  test('A3: singleton pool with maxAttempts=1 still blocks instead of throwing', async () => {
+    const prev = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+
+    try {
+      const providerKey = 'qwen.key1.qwen3.5-27b';
+      const handle = buildHandle(providerKey, async () => ({
+        status: 200,
+        data: { id: 'ok-after-singleton-block' }
+      }));
+
+      const runtimeManager = {
+        resolveRuntimeKey: (key: string) => key,
+        getHandleByRuntimeKey: (runtimeKey?: string) =>
+          runtimeKey === providerKey ? handle : undefined
+      };
+
+      const pipeline = {
+        execute: jest.fn()
+          // call 1: throws PROVIDER_NOT_AVAILABLE → singleton block → clear excluded → retry
+          .mockRejectedValueOnce(
+            Object.assign(new Error('All providers unavailable for model qwen.qwen3.5-27b'), {
+              code: 'PROVIDER_NOT_AVAILABLE',
+              details: {
+                routeName: 'default',
+                candidateProviderCount: 1,
+                minRecoverableCooldownMs: 1000,
+                recoverableCooldownHints: [
+                  { providerKey, waitMs: 1000, source: 'provider.error' }
+                ]
+              }
+            })
+          )
+          // call 2: after singleton block → excluded cleared → succeeds
+          .mockResolvedValueOnce({
+            requestId: 'req-singleton-max1',
+            providerPayload: {},
+            target: { providerKey, providerType: 'qwen', outboundProfile: 'openai-chat', runtimeKey: providerKey },
+            routingDecision: { routeName: 'default', pool: [providerKey] },
+            metadata: {}
+          }),
+        updateVirtualRouterConfig: jest.fn()
+      };
+
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: { handleError: jest.fn(async () => undefined) }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .mockResolvedValueOnce({ status: 200, body: { id: 'ok-after-block', object: 'response', status: 'completed' } });
+
+      const pending = executor.execute({
+        requestId: 'req-singleton-max1',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+      const expectation = expect(pending).resolves.toMatchObject({ status: 200 });
+
+      // call 1 throws PROVIDER_NOT_AVAILABLE → singleton block 1s → call 2 succeeds
+      await jest.advanceTimersByTimeAsync(999);
+      expect(pipeline.execute).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await expectation;
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      // Even with maxAttempts=1, singleton block bypasses attempt budget
+      expect(
+        (deps.logStage as jest.Mock).mock.calls.filter(
+          (call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait'
+        ).length
+      ).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (prev === undefined) delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      else process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = prev;
+    }
+  });
+
+  // ── 路径 B: 非 singleton 池 3 次 backoff → 抛错 ──
+
+  test('B1: non-singleton pool throws after 3 exhausted backoffs', async () => {
+    const providerKeyA = 'gemini.key1.gemini-2.5-pro';
+    const providerKeyB = 'gemini.key2.gemini-2.5-pro';
+
+    const handleA = buildHandle(providerKeyA, async () => {
+      throw Object.assign(new Error('HTTP 503'), { statusCode: 503, code: 'HTTP_503' });
+    });
+    const handleB = buildHandle(providerKeyB, async () => {
+      throw Object.assign(new Error('HTTP 503'), { statusCode: 503, code: 'HTTP_503' });
+    });
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerKeyA, handleA],
+      [providerKeyB, handleB]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined
+    };
+
+    let pipelineCall = 0;
+    const pipeline = {
+      execute: jest.fn(async () => {
+        pipelineCall += 1;
+        // Always throw PROVIDER_NOT_AVAILABLE — simulate all pools exhausted
+        throw Object.assign(
+          new Error('All providers unavailable for model gemini.gemini-2.5-pro'),
+          {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'thinking',
+              candidateProviderCount: 2,
+              attempted: [
+                'thinking:gemini.key1.gemini-2.5-pro:health',
+                'thinking:gemini.key2.gemini-2.5-pro:health'
+              ]
+            }
+          }
+        );
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const pending = executor.execute({
+      requestId: 'req-non-singleton-exhausted',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+    const expectation = expect(pending).rejects.toMatchObject({
+      code: 'PROVIDER_NOT_AVAILABLE'
+    });
+
+    // Backoff #1: 1s → pipeline call #2
+    await jest.advanceTimersByTimeAsync(999);
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    // Backoff #2: 2s → pipeline call #3
+    await jest.advanceTimersByTimeAsync(1_999);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1);
+    // Backoff #3: 3s → pipeline call #4 → exhausted, throws
+    await jest.advanceTimersByTimeAsync(2_999);
+    expect(pipeline.execute).toHaveBeenCalledTimes(3);
+    await jest.advanceTimersByTimeAsync(1);
+    // After 3 backoffs (4 total calls, 3 waits), should throw
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(4);
+
+    const backoffLogs = (deps.logStage as jest.Mock).mock.calls.filter(
+      (call: unknown[]) => call[0] === 'hub.pool_exhausted.backoff_wait'
+    );
+    expect(backoffLogs).toHaveLength(3);
+    // Backoff steps: 1s, 2s, 3s
+    expect((backoffLogs[0] as unknown[])[2]).toMatchObject({ waitMs: 1000, poolExhaustedBackoffAttempt: 1 });
+    expect((backoffLogs[1] as unknown[])[2]).toMatchObject({ waitMs: 2000, poolExhaustedBackoffAttempt: 2 });
+    expect((backoffLogs[2] as unknown[])[2]).toMatchObject({ waitMs: 3000, poolExhaustedBackoffAttempt: 3 });
   });
 });

@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   captureResponsesRequestContext,
   clearAllResponsesConversationState,
@@ -14,16 +17,26 @@ import {
 
 describe('responses conversation store plain continuation restore', () => {
   const requestIds = new Set<string>();
+  const persistFile = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'responses-store-spec-')),
+    'responses-conversation-store.json'
+  );
+  process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE = persistFile;
+
   const track = (requestId: string): string => {
     requestIds.add(requestId);
     return requestId;
   };
 
   afterEach(() => {
+    clearAllResponsesConversationState();
     for (const requestId of requestIds) {
       clearResponsesConversationByRequestId(requestId);
     }
     requestIds.clear();
+    try {
+      fs.rmSync(persistFile, { force: true });
+    } catch {}
   });
 
   it('restores previous_response_id by session scope when incoming input replays the exact prefix', () => {
@@ -164,6 +177,95 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
+  it('RED: direct-owned scope continuation must restore remote previous_response_id, not local materialize or re-inject tools', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-direct-scope-1'),
+      sessionId: 'sess-direct-scope',
+      conversationId: 'conv-direct-scope',
+      providerKey: 'asxs.crsa.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'apply_patch',
+              parameters: {
+                type: 'object',
+                properties: {
+                  patch: { type: 'string' }
+                },
+                required: ['patch']
+              }
+            }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'first turn' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-direct-scope-1'),
+      providerKey: 'asxs.crsa.gpt-5.4',
+      continuationOwner: 'direct',
+      response: {
+        id: 'resp-direct-scope-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'done' }]
+          }
+        ]
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-direct-scope-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-direct-scope-2'),
+      sessionId: 'sess-direct-scope',
+      conversationId: 'conv-direct-scope',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'second turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-direct-scope-1',
+      providerKey: 'asxs.crsa.gpt-5.4',
+      continuationOwner: 'direct',
+      restored: true
+    });
+    expect(materialized?.payload.previous_response_id).toBe('resp-direct-scope-1');
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'second turn' }]
+      }
+    ]);
+    expect(materialized?.payload.tools).toBeUndefined();
+  });
+
   it('returns null when no exact prefix match exists', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-3'),
@@ -296,6 +398,144 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(restored).not.toBeNull();
     expect(restored?.payload.previous_response_id).toBe('resp-store-release-1');
+  });
+
+  it('releasing request payload strips historical images from stored continuation history after success', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-image-release-1'),
+      sessionId: 'sess-image-release',
+      payload: {
+        model: 'gpt-5.3-codex',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              { type: 'input_image', image_url: 'data:image/png;base64,HISTORY' },
+              { type: 'input_text', text: 'look' }
+            ]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-image-release-1'),
+      response: {
+        id: 'resp-store-image-release-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'done' }]
+          }
+        ]
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-image-release-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-image-release-2'),
+      sessionId: 'sess-image-release',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    const serialized = JSON.stringify(materialized?.payload ?? {});
+    expect(serialized).not.toContain('data:image/png;base64,HISTORY');
+    expect(serialized).toContain('[Image omitted]');
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Image omitted]' },
+          { type: 'input_text', text: 'look' }
+        ]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'done' }]
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next turn' }]
+      }
+    ]);
+  });
+
+  it('stored continuation history preserves historical images before success release', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-image-capture-1'),
+      sessionId: 'sess-image-capture',
+      payload: {
+        model: 'gpt-5.3-codex',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              { type: 'input_image', image_url: 'data:image/png;base64,HISTORY_RAW' },
+              { type: 'input_text', text: 'look raw' }
+            ]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-image-capture-1'),
+      response: {
+        id: 'resp-store-image-capture-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'done raw' }]
+          }
+        ]
+      }
+    });
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-image-capture-2'),
+      sessionId: 'sess-image-capture',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    const serialized = JSON.stringify(materialized?.payload ?? {});
+    expect(serialized).toContain('data:image/png;base64,HISTORY_RAW');
+    expect(serialized).not.toContain('[Image omitted]');
   });
 
   it('materializes full input by session scope for local continuation when incoming payload only carries delta', () => {
@@ -445,6 +685,219 @@ describe('responses conversation store plain continuation restore', () => {
       materialized: true,
       materializedMode: 'local_full_input'
     });
+  });
+
+  it('RED: materialize must not duplicate pending tool-call history when incoming payload already replays the current pending turn', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-no-dup-pending-1'),
+      sessionId: 'sess-no-dup-pending',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'first user' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_prev_1',
+            call_id: 'call_prev_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_prev_1',
+            call_id: 'call_prev_1',
+            output: '/tmp'
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-no-dup-pending-1'),
+      response: {
+        id: 'resp-no-dup-pending-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_pending_1',
+            call_id: 'call_pending_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,5p note.md"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_pending_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"sed -n 1,5p note.md"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-no-dup-pending-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-no-dup-pending-2'),
+      sessionId: 'sess-no-dup-pending',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call',
+            id: 'fc_pending_1',
+            call_id: 'call_pending_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,5p note.md"}'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_pending_1',
+            output: 'ok'
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'first user' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_prev_1',
+        call_id: 'call_prev_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      },
+      {
+        type: 'function_call_output',
+        id: 'fc_prev_1',
+        call_id: 'call_prev_1',
+        output: '/tmp'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_pending_1',
+        call_id: 'call_pending_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,5p note.md"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_pending_1',
+        output: 'ok'
+      }
+    ]);
+  });
+
+  it('materialize still builds full input when incoming payload is true delta after a pending tool call', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-pending-delta-1'),
+      sessionId: 'sess-pending-delta',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'start' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-pending-delta-1'),
+      response: {
+        id: 'resp-pending-delta-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_delta_1',
+            call_id: 'call_delta_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_delta_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-pending-delta-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-pending-delta-2'),
+      sessionId: 'sess-pending-delta',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_delta_1',
+            output: 'delta-ok'
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'start' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_delta_1',
+        call_id: 'call_delta_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_delta_1',
+        output: 'delta-ok'
+      }
+    ]);
   });
 
   it('detaches superseded scoped entries so requestMap/responseIndex do not grow unbounded per session', () => {
@@ -860,7 +1313,7 @@ describe('responses conversation store plain continuation restore', () => {
 
 
 
-  it('RED: store=false captured entry must not allow submit_tool_outputs resume or scope continuation', () => {
+  it('RED: store=false captured entry still allows same-response submit_tool_outputs resume when pending tool calls exist, but must not allow scope continuation', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-store-false-blocked'),
       sessionId: 'sess-store-false-blocked',
@@ -946,16 +1399,18 @@ describe('responses conversation store plain continuation restore', () => {
       })
     ).not.toThrow();
 
-    expect(() =>
-      resumeResponsesConversation(
-        'resp-store-false-blocked',
-        {
-          tool_outputs: [{ tool_call_id: 'call_store_false_blocked_1', output: '/tmp/project\n' }],
-          stream: false
-        },
-        { requestId: track('req-resp-store-store-false-blocked-submit') }
-      )
-    ).toThrow(/Responses conversation expired or not found/);
+    const resumed = resumeResponsesConversation(
+      'resp-store-false-blocked',
+      {
+        tool_outputs: [{ tool_call_id: 'call_store_false_blocked_1', output: '/tmp/project\n' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-store-false-blocked-submit') }
+    );
+    expect(resumed.payload).toBeTruthy();
+    expect(resumed.meta).toMatchObject({
+      restoredFromResponseId: 'resp-store-false-blocked'
+    });
 
     const restored = resumeLatestResponsesContinuationByScope({
       sessionId: 'sess-store-false-blocked',

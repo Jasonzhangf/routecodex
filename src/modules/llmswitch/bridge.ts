@@ -42,6 +42,28 @@ export {
   type SnapshotRecorder
 } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';
+export {
+  prepareResponsesHandlerEntryForHttp,
+  captureResponsesRequestContextForHttp,
+  recordResponsesResponseForHttp,
+  clearResponsesConversationByRequestIdForHttp
+} from './bridge/responses-request-bridge.js';
+export {
+  updateResponsesContractProbeFromSseChunkForHttp,
+  buildResponsesTerminalSseFramesFromProbeForHttp,
+  isToolCallContinuationResponseForHttp,
+  captureResponsesRequestContextForHttpProjection,
+  rebindResponsesConversationRequestIdForHttp,
+  clearResponsesConversationByRequestIdForHttpProjection,
+  recordResponsesResponseForHttpProjection,
+  finalizeResponsesConversationRequestRetentionForHttp,
+  createResponsesJsonToSseConverterForHttp,
+  requireResponsesHandlerCoreDist,
+  importResponsesHandlerCoreDist,
+  buildResponsesPayloadFromChatForHttp,
+  projectResponsesClientPayloadForClientForHttp,
+  projectResponsesSseFrameForClientForHttp
+} from './bridge/responses-response-bridge.js';
 
 // Newly factored bridge modules.
 export {

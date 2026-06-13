@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { resolveRccPath } from '../../../runtime/user-data-paths.js';
 
@@ -22,6 +23,61 @@ const CONFIG_ENV_KEYS = [
   'ROUTECODEX_STOPMESSAGE_CONFIG_PATH'
 ] as const;
 const CONFIG_CACHE_TTL_MS = 1000;
+
+const PROMPT_SOURCE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../assets/stop-message-prompts.md'
+);
+const PROMPT_DIST_PATH = path.resolve(process.cwd(), 'dist/servertool/assets/stop-message-prompts.md');
+const PROMPT_CACHE_TTL_MS = 1000;
+let cachedPrompts:
+  | {
+      cacheKey: string;
+      loadedAtMs: number;
+      snapshot: { round1: string; round2: string; round3: string };
+    }
+  | undefined;
+
+function parseStopMessagePromptAsset(raw: string): { round1: string; round2: string; round3: string } {
+  const matches = {
+    round1: raw.match(/<!-- stop_message_prompt:round1:start -->([\s\S]*?)<!-- stop_message_prompt:round1:end -->/),
+    round2: raw.match(/<!-- stop_message_prompt:round2:start -->([\s\S]*?)<!-- stop_message_prompt:round2:end -->/),
+    round3: raw.match(/<!-- stop_message_prompt:round3:start -->([\s\S]*?)<!-- stop_message_prompt:round3:end -->/),
+  };
+  const round1 = matches.round1?.[1]?.trim();
+  const round2 = matches.round2?.[1]?.trim();
+  const round3 = matches.round3?.[1]?.trim();
+  if (!round1 || !round2 || !round3) {
+    throw new Error('invalid stop-message prompt asset: missing round1/round2/round3 block');
+  }
+  return { round1, round2, round3 };
+}
+
+function resolveStopMessagePromptAssetPath(): string {
+  return fs.existsSync(PROMPT_DIST_PATH) ? PROMPT_DIST_PATH : PROMPT_SOURCE_PATH;
+}
+
+function loadStopMessagePromptAsset(): { round1: string; round2: string; round3: string } {
+  const sourcePath = resolveStopMessagePromptAssetPath();
+  const now = Date.now();
+  try {
+    const stat = fs.statSync(sourcePath);
+    const cacheKey = `${sourcePath}:${Math.floor(stat.mtimeMs)}`;
+    if (cachedPrompts && cachedPrompts.cacheKey === cacheKey && now - cachedPrompts.loadedAtMs <= PROMPT_CACHE_TTL_MS) {
+      return cachedPrompts.snapshot;
+    }
+    const raw = fs.readFileSync(sourcePath, 'utf8');
+    const snapshot = parseStopMessagePromptAsset(raw);
+    cachedPrompts = { cacheKey, loadedAtMs: now, snapshot };
+    return snapshot;
+  } catch (error) {
+    const cacheKey = `${sourcePath}:missing`;
+    if (cachedPrompts && cachedPrompts.cacheKey === cacheKey && now - cachedPrompts.loadedAtMs <= PROMPT_CACHE_TTL_MS) {
+      return cachedPrompts.snapshot;
+    }
+    throw new Error(`STOP_MESSAGE_PROMPT_ASSET_FAILED: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 let cachedConfig:
   | {
@@ -161,7 +217,7 @@ export function resolveStopMessageDefaultEnabled(): boolean | undefined {
 }
 
 export function resolveStopMessageDefaultText(): string | undefined {
-  return resolveStopMessageRuntimeConfig().default?.text;
+  return loadStopMessagePromptAsset().round1;
 }
 
 export function resolveStopMessageDefaultMaxRepeats(): unknown {
@@ -170,4 +226,15 @@ export function resolveStopMessageDefaultMaxRepeats(): unknown {
 
 export function resetStopMessageRuntimeConfigCacheForTests(): void {
   cachedConfig = undefined;
+}
+
+export function resolveStopMessageExecutionPromptForRound(round: number): string | undefined {
+  const prompts = loadStopMessagePromptAsset();
+  if (round <= 0) return prompts.round1;
+  if (round === 1) return prompts.round2;
+  return prompts.round3;
+}
+
+export function resetStopMessagePromptAssetCacheForTests(): void {
+  cachedPrompts = undefined;
 }

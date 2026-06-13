@@ -5,6 +5,8 @@ const ANSI_RESET = '\x1b[0m';
 const ANSI_WHITE = '\x1b[97m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
 const ANSI_FALLBACK_LOG_COLOR = '\x1b[90m';
+const ANSI_DEFAULT_NORMAL_LOG_COLOR = '\x1b[36m';
+const ANSI_ERROR_LOG_COLOR = '\x1b[31m';
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
 
@@ -124,25 +126,36 @@ export function resolveRequestLogColorToken(
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
   }
-  return ANSI_FALLBACK_LOG_COLOR;
+  return ANSI_DEFAULT_NORMAL_LOG_COLOR;
+}
+
+function highlightLogNumbers(text: string, baseColor: string): string {
+  if (!text) {
+    return text;
+  }
+  const whiteNumber = (_match: string, value: string) => `${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}`;
+  return text
+    .replace(/=(\d+(?:\.\d+)?(?:ms|MB|%|t\/s)?)/g, (_match, value: string) => `=${whiteNumber('', value)}`)
+    .replace(/status=(\d{3})/g, (_match, value: string) => `status=${whiteNumber('', value)}`);
 }
 
 export function colorizeRequestLog(
   text: string,
   requestId?: string,
-  context?: RequestLogColorContext | null
+  context?: RequestLogColorContext | null,
+  options?: { isError?: boolean }
 ): string {
   if (!text || !isConsoleColorEnabled()) {
     return text;
   }
-  const color = resolveRequestLogColorToken(requestId, context);
+  const color = options?.isError ? ANSI_ERROR_LOG_COLOR : resolveRequestLogColorToken(requestId, context);
   if (!color) {
     return text;
   }
   if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
     return text;
   }
-  return `${color}${text}${ANSI_RESET}`;
+  return `${color}${highlightLogNumbers(text, color)}${ANSI_RESET}`;
 }
 
 export function colorizeVirtualRouterHitLogLine(text: string): string {

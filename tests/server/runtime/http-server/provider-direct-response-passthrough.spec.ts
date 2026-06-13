@@ -1,27 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => {
-  const resolveRawPayloadForDirect = (body: unknown, metadata?: Record<string, unknown>) => {
-    const source = body && typeof body === 'object' && !Array.isArray(body)
-      ? body as Record<string, unknown>
-      : {};
-    if ((((body as Record<string, unknown> | undefined)?.stream) === true || metadata?.stream === true || metadata?.outboundStream === true) && source.stream !== true) {
-      source.stream = true;
-    }
-    return source;
-  };
-  const applyMinimalDirectOverrides = (payload: Record<string, unknown>) => payload;
-  const evaluateDirectRouteDecision = () => ({
-    providerWireValid: true as const,
-    requiresHubRelay: false as const,
-    reason: undefined,
-  });
-  const assertDirectRouteDecision = () => {};
   return {
-    resolveRawPayloadForDirect,
-    applyMinimalDirectOverrides,
-    evaluateDirectRouteDecision,
-    assertDirectRouteDecision,
+    requireDirectPassthroughPayloadObject: (body: unknown) => body as Record<string, unknown>,
   };
 });
 

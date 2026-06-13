@@ -150,6 +150,23 @@ export function resolvePoolCooldownCandidateProviderCount(pipelineError: unknown
   return undefined;
 }
 
+export function shouldBlockSingletonRoutePoolExhaustion(args: {
+  pipelineError: unknown;
+  initialRoutePool?: string[] | null;
+  explicitSingletonPool?: boolean;
+  excludedProviderCount: number;
+}): boolean {
+  const candidateProviderCount = resolvePoolCooldownCandidateProviderCount(args.pipelineError);
+  const singletonRoutePool =
+    candidateProviderCount === 1
+    || args.initialRoutePool?.length === 1
+    || args.explicitSingletonPool === true;
+  if (!singletonRoutePool) {
+    return false;
+  }
+  return resolvePoolCooldownWaitMs(args.pipelineError) !== undefined || args.excludedProviderCount > 0;
+}
+
 export function mergeMetadataPreservingDefined(
   base: Record<string, unknown>,
   overlay?: Record<string, unknown> | null

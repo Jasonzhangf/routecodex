@@ -323,8 +323,8 @@ export function logUsageSummary(
     hiMsPairIfSlow('decode.codec', codecDecodeMs, requestColor)
   ].filter(Boolean).join(' ');
   const lines = [
-    `${requestColor}[usage] ${pad(`req=${requestId}`, 56)} route=${route}/${pool} -> provider=${providerLabel}${ANSI_RESET}`,
-    `${requestColor}        time ${hiPair('total', `${latency}ms`, requestColor)} ${hiPair('external', formatMs(externalLatencyMs), requestColor)} ${hiPair('internal', formatMs(internalLatencyMs), requestColor)} ${hiPair('attempts', providerAttemptCount, requestColor)} ${hiPair('retries', retryCount, requestColor)} ${hiPair('finish_reason', finishReason, requestColor)}${ANSI_RESET}`,
+    `${requestColor}[usage] ${pad(`req=${requestId}`, 56)} route=${route}/${pool} -> provider=${providerLabel} finish_reason=${finishReason}${ANSI_RESET}`,
+    `${requestColor}        time ${hiPair('total', `${latency}ms`, requestColor)} ${hiPair('external', formatMs(externalLatencyMs), requestColor)} ${hiPair('internal', formatMs(internalLatencyMs), requestColor)} ${hiPair('attempts', providerAttemptCount, requestColor)} ${hiPair('retries', retryCount, requestColor)}${ANSI_RESET}`,
     `${requestColor}        tok  ${hiPair('in', inputTokens, requestColor)} ${hiPair('out', outputTokens, requestColor)} ${hiPair('total', totalTokens, requestColor)} ${hiPair('cache', cacheValue, requestColor)} ${hiPair('day.calls', dailyProviderStat.calls, requestColor)} ${hiPair('day.fail', dailyProviderStat.failures, requestColor)} ${hiPair('day.avg', formatMs(dailyProviderStat.avgMs), requestColor)}${tokenSuffix}${ANSI_RESET}`,
     `${requestColor}        diag mem=${formatMemoryHealth()} sample=${sampleId}${diagTimings ? ` ${diagTimings}` : ''}${typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? ` ${info.providerDecodeTag.trim()}` : ''}${formattedTimingSuffix}${hubStageTopSuffix}${ANSI_RESET}`
   ];

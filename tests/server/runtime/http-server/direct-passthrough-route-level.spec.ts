@@ -109,7 +109,7 @@ describe('direct passthrough route-level', () => {
     }
   }, 15000);
 
-  it('HTTP BLACKBOX: provider-mode chat direct preserves stream flag when stream_options is present', async () => {
+  it('HTTP BLACKBOX: provider-mode chat direct does not synthesize stream=true when stream_options is present', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -184,10 +184,10 @@ describe('direct passthrough route-level', () => {
       });
       const bodyText = await response.text();
 
-      expect(response.status).toBe(200);
-      expect(bodyText).not.toContain('stream_options should be set along with stream = true');
+      expect(response.status).toBe(400);
+      expect(bodyText).toContain('stream_options should be set along with stream = true');
       expect(sentPayload?.model).toBe('deepseek-v4-flash');
-      expect(sentPayload?.stream).toBe(true);
+      expect(sentPayload?.stream).toBeUndefined();
       expect(sentPayload?.stream_options).toEqual({ include_usage: true });
     } finally {
       await server.stop();
@@ -622,35 +622,6 @@ describe('direct passthrough route-level', () => {
 
   it('router same-protocol client tools request stays on direct path', async () => {
     jest.resetModules();
-    jest.unstable_mockModule('../../../../src/server/runtime/http-server/direct-passthrough-payload.js', () => ({
-      resolveRawPayloadForDirect: (body: unknown) => body as Record<string, unknown>,
-      applyMinimalDirectOverrides: (payload: Record<string, unknown>) => payload,
-      assertDirectRouteDecision: () => undefined,
-      evaluateDirectRouteDecision: (args: {
-        payload?: Record<string, unknown>;
-        metadata?: Record<string, unknown>;
-        inboundProtocol?: string;
-      }) => {
-        const payload = args?.payload ?? {};
-        const metadata = args?.metadata ?? {};
-        const tools = Array.isArray(payload.tools) ? payload.tools : [];
-        const hasClientTool = tools.some((tool) => {
-          if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-            return false;
-          }
-          const toolType = typeof (tool as Record<string, unknown>).type === 'string'
-            ? String((tool as Record<string, unknown>).type).trim()
-            : '';
-          return toolType === 'function';
-        });
-        return {
-          providerWireValid: true,
-          requiresHubRelay: false,
-          reason: undefined,
-          hasDeclaredApplyPatchTool: hasClientTool,
-        };
-      },
-    }));
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
     const server = new RouteCodexHttpServer({
@@ -1457,8 +1428,8 @@ describe('direct passthrough route-level', () => {
     );
 
     expect(outcome.used).toBe(true);
-    expect(sentPayload?.model).toBe('DeepSeek-V4-Pro');
-    expect((outcome.response as any)?.data?.model).toBe('DeepSeek-V4-Pro');
+    expect(sentPayload?.model).toBe('deepseek-v4-pro');
+    expect((outcome.response as any)?.data?.model).toBe('deepseek-v4-pro');
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 

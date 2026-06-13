@@ -1,5 +1,6 @@
 import fs from 'fs';
 // feature_id: server.responses_handler_family
+// feature_id: server.responses_request_handler_bridge_surface
 import path from 'path';
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
@@ -17,8 +18,16 @@ import {
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
-import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, materializeLatestResponsesContinuationByScope, planResponsesHandlerEntry, recordResponsesResponseForRequest, resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
-import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
+import {
+  captureResponsesRequestContextForHttp,
+  clearResponsesConversationByRequestIdForHttp,
+  finalizeResponsesHandlerPayloadForHttp,
+  prepareResponsesHandlerEntryForHttp,
+  readResponsesConversationIdFromHttp,
+  readResponsesResponseIdFromHttp,
+  readResponsesSessionIdFromHttp,
+  recordResponsesResponseForHttp
+} from '../../modules/llmswitch/bridge/responses-request-bridge.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { markClientConnectionDisconnected, trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -68,52 +77,6 @@ function logResponsesHandlerNonBlockingError(stage: string, error: unknown, deta
   }
 }
 
-function readResponsesSessionId(metadata: Record<string, unknown> | undefined): string | undefined {
-  const value = typeof metadata?.session_id === 'string'
-    ? metadata.session_id
-    : typeof metadata?.sessionId === 'string'
-      ? metadata.sessionId
-      : undefined;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed || undefined;
-}
-
-function readResponsesConversationId(metadata: Record<string, unknown> | undefined): string | undefined {
-  const value = typeof metadata?.conversation_id === 'string'
-    ? metadata.conversation_id
-    : typeof metadata?.conversationId === 'string'
-      ? metadata.conversationId
-      : undefined;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed || undefined;
-}
-
-function shouldPersistResponsesConversation(payload: unknown): boolean {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return false;
-  }
-  const record = payload as Record<string, unknown>;
-  if (record.store === true) {
-    return true;
-  }
-  const previousResponseId =
-    typeof record.previous_response_id === 'string' && record.previous_response_id.trim()
-      ? record.previous_response_id.trim()
-      : '';
-  const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : [];
-  return Boolean(previousResponseId && toolOutputs.length > 0);
-}
-
-function shouldPersistResponsesConversationForEndpoint(
-  entryEndpoint: string | undefined,
-  payload: unknown
-): boolean {
-  if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
-    return true;
-  }
-  return shouldPersistResponsesConversation(payload);
-}
-
 function queueInboundToolHistoryErrorsample(args: {
   requestId: string;
   entryEndpoint: string;
@@ -145,18 +108,6 @@ function queueInboundToolHistoryErrorsample(args: {
       entryEndpoint: args.entryEndpoint
     });
   });
-}
-
-function readResponsesResponseId(body: unknown): string | undefined {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-  const record = body as Record<string, unknown>;
-  const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-    ? (record.response as Record<string, unknown>)
-    : undefined;
-  for (const candidate of [record.id, record.response_id, nested?.id]) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-  }
-  return undefined;
 }
 
 export async function handleResponses(
@@ -244,84 +195,75 @@ export async function handleResponses(
       return;
     }
     const requestBodyMetadata = readRequestBodyMetadata(payload);
-    const sessionIdForResume = readResponsesSessionId(requestBodyMetadata);
-    const conversationIdForResume = readResponsesConversationId(requestBodyMetadata);
+    const sessionIdForResume = readResponsesSessionIdFromHttp(requestBodyMetadata);
+    const conversationIdForResume = readResponsesConversationIdFromHttp(requestBodyMetadata);
     const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
     if (options.responseIdFromPath && !payload.response_id) {
       payload.response_id = options.responseIdFromPath;
     }
-    const plannedEntry = await planResponsesHandlerEntry(payload, entryEndpoint, options.responseIdFromPath);
-    payload = (plannedEntry.payload ?? {}) as ResponsesPayload;
-    isSubmitToolOutputs = plannedEntry.mode === 'submit_tool_outputs';
     let resumeMeta: Record<string, unknown> | undefined;
-    if (isSubmitToolOutputs) {
-      const responseId = plannedEntry.responseId || options.responseIdFromPath;
-      if (!responseId) {
-        res.status(400).json({ error: { message: 'response_id is required for submit_tool_outputs', type: 'invalid_request_error', code: 'bad_request' } });
-        return;
-      }
-      try {
-        const resumeResult = await resumeResponsesConversation(responseId, payload as Record<string, unknown>, { requestId, ...responsesConversationPortScope });
-        payload = (resumeResult.payload ?? {}) as ResponsesPayload;
-        resumeMeta = resumeResult.meta;
-        // Keep the synthetic submit endpoint through the pipeline.
-        // Outbound mapping must decide based on the routed provider protocol:
-        // - openai-responses target => rebuild native /submit_tool_outputs payload
-        // - cross-protocol target   => use resumed payload semantics for relay
-        // Rewriting to `/v1/responses` here breaks same-protocol responses providers
-        // that reject `previous_response_id` on plain HTTP create requests.
-        pipelineEntryEndpoint = entryEndpoint;
-      } catch (error: unknown) {
-        const structured = error as { status?: number; code?: string; origin?: string };
-        const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
-        const status = typeof structured?.status === 'number'
-          ? structured.status
-          : origin === 'client'
-            ? 422
-            : 500;
-        const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
-        const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
-        logRequestError(entryEndpoint, requestId, error);
-        if (origin === 'client') {
-          res.status(status).json({
-            error: {
-              message,
-              type: 'invalid_request_error',
-              code,
-              origin
-            }
-          });
-          return;
-        }
-        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
-        await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStreamForError });
-        return;
-      }
-    }
-    if (!isSubmitToolOutputs && outboundStream && payload.stream !== true) {
-      payload.stream = true;
-    }
-    if (!isSubmitToolOutputs && plannedEntry.mode === 'scope_materialize') {
-      const materialized = await materializeLatestResponsesContinuationByScope({
+    try {
+      const preparedEntry = await prepareResponsesHandlerEntryForHttp({
         payload: payload as Record<string, unknown>,
+        entryEndpoint,
+        responseIdFromPath: options.responseIdFromPath,
         requestId,
         sessionId: sessionIdForResume,
+        conversationId: conversationIdForResume,
         ...responsesConversationPortScope
       });
-      if (materialized) {
-        payload = (materialized.payload ?? {}) as ResponsesPayload;
-        resumeMeta = materialized.meta;
+      if (preparedEntry.kind === 'scope_continuation_expired') {
+        res.status(400).json({
+          error: {
+            message: 'Responses continuation expired or not found for local scope materialization',
+            type: 'invalid_request_error',
+            code: 'responses_continuation_expired'
+          }
+        });
+        return;
       }
+      payload = preparedEntry.payload as ResponsesPayload;
+      isSubmitToolOutputs = preparedEntry.isSubmitToolOutputs;
+      pipelineEntryEndpoint = preparedEntry.pipelineEntryEndpoint;
+      resumeMeta = preparedEntry.resumeMeta;
+    } catch (error: unknown) {
+      const structured = error as { status?: number; code?: string; origin?: string };
+      const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
+      const status = typeof structured?.status === 'number'
+        ? structured.status
+        : origin === 'client'
+          ? 422
+          : 500;
+      const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
+      const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
+      logRequestError(entryEndpoint, requestId, error);
+      if (origin === 'client') {
+        res.status(status).json({
+          error: {
+            message,
+            type: 'invalid_request_error',
+            code,
+            origin
+          }
+        });
+        return;
+      }
+      const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+      await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStreamForError });
+      return;
     }
+    payload = finalizeResponsesHandlerPayloadForHttp({
+      payload: payload as Record<string, unknown>,
+      entryEndpoint,
+      isSubmitToolOutputs,
+      outboundStream,
+    }) as ResponsesPayload;
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
       requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
     }
     const wantsStream = outboundStream;
 
-    if (!isSubmitToolOutputs && entryEndpoint === '/v1/responses') {
-      applySystemPromptOverride(entryEndpoint, payload);
-    }
     const warmupCheck = detectWarmupRequest(req.headers, payload as Record<string, unknown>);
     if (warmupCheck.isWarmup) {
       recordWarmupSkipEvent({
@@ -371,8 +313,8 @@ export async function handleResponses(
               input: Array.isArray(payload.input) ? payload.input : [],
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
             },
-            sessionId: readResponsesSessionId(requestBodyMetadata),
-            conversationId: readResponsesConversationId(requestBodyMetadata),
+            sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
+            conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
             ...responsesConversationPortScope,
           }
 	      })
@@ -383,15 +325,15 @@ export async function handleResponses(
         || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
       )
     ) {
-      await captureResponsesRequestContextForRequest({
+      await captureResponsesRequestContextForHttp({
         requestId,
         payload: pipelineBody as Record<string, unknown>,
         context: {
           input: Array.isArray(payload.input) ? payload.input : [],
           toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
         },
-        sessionId: readResponsesSessionId(requestBodyMetadata),
-        conversationId: readResponsesConversationId(requestBodyMetadata),
+        sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
+        conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
         ...responsesConversationPortScope,
         providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
@@ -447,12 +389,12 @@ export async function handleResponses(
           } catch (endError) {
             logResponsesHandlerNonBlockingError('timeout.response_end', endError, { requestId });
           }
-          void clearResponsesConversationByRequestId(requestId).catch((error) => {
+          void clearResponsesConversationByRequestIdForHttp(requestId).catch((error) => {
             logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout_started', error, { requestId });
           });
           return;
         }
-        void clearResponsesConversationByRequestId(requestId).catch((error) => {
+        void clearResponsesConversationByRequestIdForHttp(requestId).catch((error) => {
           logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout', error, { requestId });
         });
         void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
@@ -483,8 +425,8 @@ export async function handleResponses(
               input: Array.isArray(payload.input) ? payload.input : [],
               toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
             },
-            sessionId: readResponsesSessionId(requestBodyMetadata),
-            conversationId: readResponsesConversationId(requestBodyMetadata),
+            sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
+            conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
           },
       };
     }
@@ -500,7 +442,7 @@ export async function handleResponses(
       )
     ) {
       try {
-        const responseId = readResponsesResponseId(result.body);
+        const responseId = readResponsesResponseIdFromHttp(result.body);
         const finishReason = deriveFinishReason(result.body);
         if (responseId && finishReason === 'tool_calls') {
           const requestContext = result.metadata?.responsesRequestContext as {
@@ -512,7 +454,7 @@ export async function handleResponses(
             routingPolicyGroup?: string;
           } | undefined;
           if (requestContext?.payload && requestContext?.context) {
-            await captureResponsesRequestContextForRequest({
+            await captureResponsesRequestContextForHttp({
               requestId: responseId,
               payload: requestContext.payload,
               context: requestContext.context,
@@ -523,7 +465,7 @@ export async function handleResponses(
               providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
             });
             if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
-              await recordResponsesResponseForRequest({
+              await recordResponsesResponseForHttp({
                 requestId: responseId,
                 response: result.body as Record<string, unknown>,
                 providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined,
@@ -552,7 +494,7 @@ export async function handleResponses(
     });
   } catch (error: unknown) {
     clearTimeoutHandle();
-    void clearResponsesConversationByRequestId(requestId).catch((clearError) => {
+    void clearResponsesConversationByRequestIdForHttp(requestId).catch((clearError) => {
       logResponsesHandlerNonBlockingError('responses_context.clear_on_error', clearError, { requestId });
     });
     if (timedOut) {

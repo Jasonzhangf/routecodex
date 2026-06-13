@@ -63,10 +63,45 @@ function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
   return Object.values(value as Record<string, unknown>).some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
 }
 
+function bodyHasVisibleAssistantPayload(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+  const record = body as Record<string, unknown>;
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object' || Array.isArray(choice)) {
+      continue;
+    }
+    const message = (choice as Record<string, unknown>).message;
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      const content = (message as Record<string, unknown>).content;
+      if (typeof content === 'string' && content.trim()) {
+        return true;
+      }
+      if (Array.isArray(content) && content.some((part) => valueHasNonEmptyPayloadContent(part))) {
+        return true;
+      }
+    }
+  }
+  const outputText = record.output_text;
+  if (typeof outputText === 'string' && outputText.trim()) {
+    return true;
+  }
+  const content = record.content;
+  if (typeof content === 'string' && content.trim()) {
+    return true;
+  }
+  return false;
+}
+
 export async function detectRetryableEmptyAssistantResponse(
   body: unknown,
   requestSemantics?: Record<string, unknown>
 ): Promise<PayloadContractSignal | null> {
+  if (bodyHasVisibleAssistantPayload(body)) {
+    return null;
+  }
   const fn = (await getNativeSemantics()).detectRetryableEmptyAssistantResponseWithNative;
   if (typeof fn !== 'function') throw new Error('[response-contract] detectRetryableEmptyAssistantResponseWithNative unavailable');
   return fn(body, requestSemantics);

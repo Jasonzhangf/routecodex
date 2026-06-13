@@ -20,6 +20,35 @@ export {
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
 export {
+  finalizeResponsesHandlerPayloadForHttp,
+  prepareResponsesHandlerEntryForHttp,
+  captureResponsesRequestContextForHttp,
+  recordResponsesResponseForHttp,
+  clearResponsesConversationByRequestIdForHttp
+} from './responses-request-bridge.js';
+export {
+  assertDirectPassthroughResponsesSseFrameForHttp,
+  buildClientSseKeepaliveFrameForHttp,
+  isDirectPassthroughTransportKeepaliveFrameForHttp,
+  normalizeResponsesClientPayloadForHttp,
+  updateResponsesContractProbeFromSseChunkForHttp,
+  buildResponsesTerminalSseFramesFromProbeForHttp,
+  isToolCallContinuationResponseForHttp,
+  captureResponsesRequestContextForHttpProjection,
+  rebindResponsesConversationRequestIdForHttp,
+  clearResponsesConversationByRequestIdForHttpProjection,
+  recordResponsesResponseForHttpProjection,
+  finalizeResponsesConversationRequestRetentionForHttp,
+  createResponsesJsonToSseConverterForHttp,
+  requireResponsesHandlerCoreDist,
+  importResponsesHandlerCoreDist,
+  buildResponsesPayloadFromChatForHttp,
+  normalizeResponsesSseFrameForClientForHttp,
+  projectResponsesClientPayloadForClientForHttp,
+  projectResponsesSseFrameForClientForHttp,
+  shouldDropClientSseFrameForHttp
+} from './responses-response-bridge.js';
+export {
   writeSnapshotViaHooks,
   preloadCriticalBridgeRuntimeModules,
   resumeResponsesConversation,

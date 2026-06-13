@@ -344,6 +344,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "serializeRoutingInstructionStateJson",
   "stripOrphanFunctionCallsTagJson",
   "stripChatProcessHistoricalImagesJson",
+  "stripResponsesStoredContextInputMediaJson",
   "classifyProviderFailureJson",
   "networkErrorSetJson",
   "isProviderFailureBlockingRecoverableJson",

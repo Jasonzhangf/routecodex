@@ -4,6 +4,25 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 const mockBridgeModule = async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
+  assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
+  buildResponsesPayloadFromChatForHttp: jest.fn((payload: unknown) => payload),
+  buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn((probe: Record<string, unknown> | undefined) => {
+    if (!probe?.required_action) return [];
+    const response = { ...probe, status: 'requires_action' };
+    return [
+      `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
+      `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
+    ];
+  }),
+  clearResponsesConversationByRequestIdForHttpProjection: jest.fn(async () => undefined),
+  clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
+  createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async () => Readable.from([])
+  })),
+  deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
+  finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   importCoreDist: jest.fn(async (subpath?: string) => {
     if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
       return {
@@ -18,7 +37,91 @@ const mockBridgeModule = async () => ({
     }
     return {};
   }),
+  importResponsesHandlerCoreDist: jest.fn(async () => ({})),
+  isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
+  isToolCallContinuationResponseForHttp: jest.fn((body: unknown) => Boolean(
+    body
+    && typeof body === 'object'
+    && !Array.isArray(body)
+    && (body as Record<string, unknown>).required_action
+  )),
   requireCoreDist: jest.fn(() => ({})),
+  normalizeResponsesClientPayloadForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
+  normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => {
+    if (!frame.includes('response.required_action')) {
+      return frame;
+    }
+    const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine) {
+      return frame;
+    }
+    try {
+      const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
+      const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+        ? parsed.response as Record<string, unknown>
+        : {};
+      const requiredAction = parsed.required_action && typeof parsed.required_action === 'object' && !Array.isArray(parsed.required_action)
+        ? parsed.required_action as Record<string, unknown>
+        : {};
+      const submitToolOutputs =
+        requiredAction.submit_tool_outputs
+        && typeof requiredAction.submit_tool_outputs === 'object'
+        && !Array.isArray(requiredAction.submit_tool_outputs)
+          ? requiredAction.submit_tool_outputs as Record<string, unknown>
+          : {};
+      const toolCalls = Array.isArray(submitToolOutputs.tool_calls) ? submitToolOutputs.tool_calls : [];
+      const firstToolCall =
+        toolCalls[0] && typeof toolCalls[0] === 'object' && !Array.isArray(toolCalls[0])
+          ? toolCalls[0] as Record<string, unknown>
+          : {};
+      const callId = typeof firstToolCall.id === 'string' ? firstToolCall.id : 'call_mock';
+      const name = typeof firstToolCall.name === 'string' ? firstToolCall.name : 'update_plan';
+      const args = typeof firstToolCall.arguments === 'string' ? firstToolCall.arguments : '{}';
+      const item = {
+        id: `fc_${callId}`,
+        type: 'function_call',
+        call_id: callId,
+        name,
+        arguments: args,
+        status: 'completed'
+      };
+      const completedResponse = { ...response, status: 'completed' };
+      return [
+        `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', item })}\n\n`,
+        `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', item_id: item.id, output_index: 0, arguments: args })}\n\n`,
+        `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', item })}\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: completedResponse })}\n\n`,
+        `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: completedResponse })}\n\n`
+      ].join('');
+    } catch {
+      return frame;
+    }
+  }),
+  persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
+  requireResponsesHandlerCoreDist: jest.fn(() => ({})),
+  shouldDropClientSseFrameForHttp: jest.fn(() => false),
+  inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((input: {
+    chunk: unknown;
+    finishReason?: string;
+    seenTerminalEvent?: boolean;
+    sawTerminalChunk?: boolean;
+    sawResponsesCompletedChunk?: boolean;
+    sawResponsesDoneEvent?: boolean;
+    sawAssistantMessageDoneTerminal?: boolean;
+    requiresResponsesTerminalEvent?: boolean;
+    terminalSource?: string;
+    pendingTerminalEvent?: string;
+  }) => ({
+    finishReason: input.finishReason,
+    seenTerminalEvent: input.seenTerminalEvent === true,
+    sawTerminalChunk: input.sawTerminalChunk === true,
+    sawResponsesCompletedChunk: input.sawResponsesCompletedChunk === true,
+    sawResponsesDoneEvent: input.sawResponsesDoneEvent === true,
+    sawAssistantMessageDoneTerminal: input.sawAssistantMessageDoneTerminal === true,
+    requiresResponsesTerminalEvent: input.requiresResponsesTerminalEvent === true,
+    terminalSource: input.terminalSource,
+    pendingTerminalEvent: input.pendingTerminalEvent,
+  })),
   deriveFinishReasonNative: jest.fn(() => undefined),
   isToolCallContinuationResponseNative: jest.fn((body: unknown) => Boolean(
     body
@@ -54,11 +157,28 @@ const mockBridgeModule = async () => ({
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
-  rebindResponsesConversationRequestId: jest.fn(async () => undefined)
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  updateResponsesContractProbeFromSseChunkForHttp: jest.fn((chunk: unknown, probe: Record<string, unknown> | undefined) => {
+    const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+    const next = { ...(probe ?? {}) } as Record<string, unknown>;
+    const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
+    if (!dataLine) return next;
+    try {
+      const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
+      const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+        ? parsed.response as Record<string, unknown>
+        : undefined;
+      if (response) Object.assign(next, response);
+      if (parsed.required_action) next.required_action = parsed.required_action;
+    } catch {}
+    return next;
+  }),
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.ts', mockBridgeModule);
 
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
   isSnapshotsEnabled: () => false,
@@ -182,11 +302,12 @@ describe('handler-response-utils required_action split frame regression', () => 
     const ended = await waitForEndWithTimeout(res, 1500);
     expect(ended).toBe(true);
     const text = chunks.join('');
-    expect(text).toContain('event: response.required_action');
-    expect(text).toContain('data: {"type":"response.required_action"');
+    expect(text).toContain('event: response.output_item.added');
+    expect(text).toContain('event: response.function_call_arguments.done');
+    expect(text).toContain('event: response.output_item.done');
     expect(text).toContain('event: response.completed');
     expect(text).toContain('event: response.done');
-    expect(text.indexOf('event: response.required_action')).toBeLessThan(text.indexOf('event: response.completed'));
+    expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
     expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
     if (previousProjectionTimeout === undefined) {
       delete process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;

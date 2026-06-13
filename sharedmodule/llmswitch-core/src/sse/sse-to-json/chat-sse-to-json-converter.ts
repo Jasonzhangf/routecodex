@@ -243,11 +243,31 @@ function normalizeChatUsage(usage: unknown): ChatUsage | null {
   if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
     return null;
   }
-  return {
+
+  // 提取缓存命中 token（支持三个上游格式）：
+  //   - Responses: input_tokens_details.cached_tokens
+  //   - Chat/OpenAI: prompt_tokens_details.cached_tokens
+  //   - DeepSeek: prompt_cache_hit_tokens（顶层）
+  let cachedTokens: number | undefined;
+  const detailsInput = (record as any).input_tokens_details as Record<string, unknown> | undefined;
+  const detailsPrompt = (record as any).prompt_tokens_details as Record<string, unknown> | undefined;
+  cachedTokens = readNonNegativeInteger(record.prompt_cache_hit_tokens);
+  if (cachedTokens === undefined && detailsInput) {
+    cachedTokens = readNonNegativeInteger((detailsInput as any).cached_tokens);
+  }
+  if (cachedTokens === undefined && detailsPrompt) {
+    cachedTokens = readNonNegativeInteger((detailsPrompt as any).cached_tokens);
+  }
+
+  const out: ChatUsage = {
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
     total_tokens: totalTokens
   };
+  if (cachedTokens !== undefined && cachedTokens > 0) {
+    out.prompt_tokens_details = { cached_tokens: cachedTokens };
+  }
+  return out;
 }
 
 function resolveDeepSeekFragmentTarget(fragmentType: unknown): DeepSeekPatchAppendTarget {

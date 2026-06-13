@@ -63,6 +63,8 @@ describe('responses request standardization real-sample regressions', () => {
       expect(messages.length).toBe(5);
       expect(messages.filter((message: any) => message?.role === 'tool')).toHaveLength(2);
       expect(serializedMessages).toContain('apply_patch verification failed');
+      expect(serializedMessages).toContain('Failed to find expected lines');
+      expect(serializedMessages).not.toContain('APPLY_PATCH_ERROR: apply_patch did not apply');
       expect(serializedMessages).not.toContain('Chunk ID:');
       expect(serializedMessages).not.toContain('Original token count:');
     }

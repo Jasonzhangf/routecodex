@@ -31,7 +31,8 @@ export {
   prepareResponsesConversationEntryWithNative,
   resolveBudgetForModelWithNative,
   restoreResponsesContinuationPayloadWithNative,
-  resumeResponsesConversationPayloadWithNative
+  resumeResponsesConversationPayloadWithNative,
+  stripResponsesStoredContextInputMediaWithNative
 } from './native-shared-conversion-semantics-responses.js';
 export {
   buildGeminiToolsFromBridgeWithNative,

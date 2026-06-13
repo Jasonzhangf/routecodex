@@ -1046,6 +1046,38 @@ fn find_prefix_delta_allowing_pending_tool_call_replay(
     Some(incoming[incoming_index..].to_vec())
 }
 
+fn strip_leading_pending_function_call_replay(
+    delta_items: &[Value],
+    pending_call_ids: &[String],
+) -> Vec<Value> {
+    if pending_call_ids.is_empty() || delta_items.is_empty() {
+        return delta_items.to_vec();
+    }
+    let mut start_index = 0usize;
+    while let Some(entry) = delta_items.get(start_index) {
+        let Some(row) = entry.as_object() else {
+            break;
+        };
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if item_type != "function_call" {
+            break;
+        }
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            break;
+        };
+        if !pending_call_ids.iter().any(|existing| existing == &call_id) {
+            break;
+        }
+        start_index += 1;
+    }
+    delta_items[start_index..].to_vec()
+}
+
 fn count_common_leading_items(left: &[Value], right: &[Value]) -> usize {
     let mut count = 0usize;
     let max = left.len().min(right.len());
@@ -1199,6 +1231,14 @@ fn read_released_pending_tool_call_ids(entry_obj: &Map<String, Value>) -> Vec<St
         .unwrap_or_default()
 }
 
+fn read_continuation_owner(entry_obj: &Map<String, Value>) -> Option<&str> {
+    match entry_obj.get("continuationOwner").and_then(Value::as_str) {
+        Some("direct") => Some("direct"),
+        Some("relay") => Some("relay"),
+        _ => None,
+    }
+}
+
 fn leading_input_consumes_pending_tool_calls(
     incoming_items: &[Value],
     pending_call_ids: &[String],
@@ -1217,6 +1257,15 @@ fn leading_input_consumes_pending_tool_calls(
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
+        if item_type == "function_call" {
+            let Some(call_id) = read_bridge_function_call_id(row) else {
+                return false;
+            };
+            if !remaining.iter().any(|existing| existing == &call_id) {
+                return false;
+            }
+            continue;
+        }
         if !is_bridge_tool_output_item_type(item_type.as_str()) {
             break;
         }
@@ -1262,6 +1311,8 @@ fn restore_responses_continuation_payload(
     let incoming_obj = incoming_payload.as_object().cloned().unwrap_or_default();
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
     let incoming_input = clone_optional_array(incoming_obj.get("input"));
+    let continuation_owner = read_continuation_owner(&entry_obj);
+    let released_prefix = normalize_responses_history_items(clone_array(entry_obj.get("releasedInputPrefix")));
 
     let Some(response_id) = last_response_id else {
         return Value::Null;
@@ -1284,6 +1335,8 @@ fn restore_responses_continuation_payload(
         } else {
             input_items.clone()
         }
+    } else if continuation_owner == Some("direct") && !released_prefix.is_empty() {
+        input_items.clone()
     } else {
         let Some(delta_input) = find_exact_prefix_delta(&prefix, &input_items)
             .or_else(|| find_prefix_delta_allowing_pending_tool_call_replay(&prefix, &input_items))
@@ -1310,7 +1363,7 @@ fn restore_responses_continuation_payload(
     }
 
     let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
-    if !payload.contains_key("tools") {
+    if continuation_owner != Some("direct") && !payload.contains_key("tools") {
         let tools = normalize_responses_tool_definitions(entry_obj.get("tools"));
         if !tools.is_empty() {
             payload.insert("tools".to_string(), Value::Array(tools));
@@ -1357,7 +1410,12 @@ fn materialize_responses_continuation_payload(
         return Value::Null;
     }
 
-    let prefix = normalize_responses_history_items(clone_array(entry_obj.get("input")));
+    let prefix_source = if clone_array(entry_obj.get("input")).is_empty() {
+        clone_array(entry_obj.get("releasedInputPrefix"))
+    } else {
+        clone_array(entry_obj.get("input"))
+    };
+    let prefix = normalize_responses_history_items(prefix_source);
     if prefix.is_empty() {
         return Value::Null;
     }
@@ -1381,10 +1439,19 @@ fn materialize_responses_continuation_payload(
         return Value::Null;
     }
 
+    let continuation_delta = if !pending_call_ids.is_empty() {
+        find_prefix_delta_allowing_pending_tool_call_replay(&prefix, &input_items)
+            .unwrap_or_else(|| input_items.clone())
+    } else {
+        input_items.clone()
+    };
+    let continuation_delta =
+        strip_leading_pending_function_call_replay(&continuation_delta, &pending_call_ids);
+
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
-    let submitted_details = collect_submitted_tool_output_details(&input_items);
+    let submitted_details = collect_submitted_tool_output_details(&continuation_delta);
     let mut full_input = prefix.clone();
-    full_input.extend(input_items.clone());
+    full_input.extend(continuation_delta.clone());
     let full_input = normalize_responses_history_items(full_input);
 
     let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
@@ -1418,6 +1485,7 @@ fn materialize_responses_continuation_payload(
             "materialized": true,
             "materializedMode": "local_full_input",
             "incomingInputItems": input_items.len(),
+            "continuationDeltaItems": continuation_delta.len(),
             "fullInputItems": full_input.len(),
             "toolOutputsDetailed": submitted_details,
         }
@@ -1618,6 +1686,7 @@ mod tests {
         );
         assert!(planned["payload"].get("input").is_none());
     }
+
 
     #[test]
     fn shared_responses_conversation_prepare_and_resume_json() {
@@ -1939,6 +2008,49 @@ mod tests {
             meta.get("scopeKey").and_then(Value::as_str),
             Some("session:sess-1")
         );
+    }
+
+    #[test]
+    fn direct_owned_scope_restore_does_not_reinject_tools() {
+        let restored = restore_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev_direct",
+                "lastResponseId": "resp_prev_direct",
+                "continuationOwner": "direct",
+                "providerKey": "asxs.crsa.gpt-5.4",
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "parameters": { "type": "object" }
+                    }
+                }],
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "first turn" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "done" }] }
+                ]
+            }),
+            &json!({
+                "model": "gpt-5.4",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "first turn" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "done" }] },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "second turn" }] }
+                ]
+            }),
+            Some("req_now_direct"),
+            Some("session:sess-direct"),
+        );
+
+        let payload = restored.get("payload").and_then(Value::as_object).unwrap();
+        assert_eq!(
+            payload.get("previous_response_id").and_then(Value::as_str),
+            Some("resp_prev_direct")
+        );
+        assert!(payload.get("tools").is_none());
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["content"][0]["text"].as_str(), Some("second turn"));
     }
 
     #[test]

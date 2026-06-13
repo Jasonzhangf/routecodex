@@ -905,6 +905,9 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         let response = parsed_obj.get("response").and_then(Value::as_object);
         let required_action = parsed_obj.get("required_action").and_then(Value::as_object);
         let output_item = parsed_obj.get("item");
+        let is_function_call_arguments_done =
+            event_name == "response.function_call_arguments.done"
+                || parsed_type == "response.function_call_arguments.done";
         if event_name == "response.completed" || parsed_type == "response.completed" {
             probe.insert("__seen_response_completed".to_string(), Value::Bool(true));
         }
@@ -928,6 +931,7 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
             && required_action.is_none()
             && event_name != "response.required_action"
             && parsed_type != "response.required_action"
+            && !is_function_call_arguments_done
             && (!is_output_item_event || output_item.is_none())
         {
             continue;
@@ -948,9 +952,7 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
                 upsert_probe_output_item(&mut probe, output_item);
             }
         }
-        if event_name == "response.function_call_arguments.done"
-            || parsed_type == "response.function_call_arguments.done"
-        {
+        if is_function_call_arguments_done {
             upsert_probe_function_call_from_arguments_done(&mut probe, parsed_obj);
         }
     }
@@ -1238,6 +1240,51 @@ fn build_standard_tool_call_sse_frames_from_output_items(
     }
 }
 
+fn build_required_action_from_output_items(output: Option<&Vec<Value>>) -> Option<Value> {
+    let output = output?;
+    let mut tool_calls = Vec::<Value>::new();
+    for item in output {
+        let Some(item_obj) = item.as_object() else {
+            continue;
+        };
+        if item_obj.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let call_id = item_obj
+            .get("call_id")
+            .or_else(|| item_obj.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("call_1");
+        let name = item_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("function");
+        let arguments = item_obj
+            .get("arguments")
+            .map(stringify_sse_tool_call_argument_value)
+            .unwrap_or_default();
+        tool_calls.push(serde_json::json!({
+            "id": call_id,
+            "type": "function_call",
+            "name": name,
+            "arguments": arguments
+        }));
+    }
+    if tool_calls.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "type": "submit_tool_outputs",
+        "submit_tool_outputs": {
+            "tool_calls": tool_calls
+        }
+    }))
+}
+
 pub fn build_responses_terminal_sse_frames_from_probe_json(
     probe_json: String,
     request_label: String,
@@ -1263,12 +1310,27 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         .get("__seen_response_done")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let synthesized_required_action =
+        if required_action.is_none() {
+            build_required_action_from_output_items(probe.get("output").and_then(Value::as_array))
+        } else {
+            None
+        };
+    let effective_required_action = required_action
+        .cloned()
+        .map(Value::Object)
+        .or(synthesized_required_action);
+    let effective_status = if effective_required_action.is_some() {
+        "requires_action".to_string()
+    } else {
+        status.clone()
+    };
     let has_completed_output = probe
         .get("output")
         .and_then(Value::as_array)
         .map(|output| !output.is_empty())
         .unwrap_or(false);
-    if required_action.is_none() && status != "completed" && !has_completed_output {
+    if effective_required_action.is_none() && effective_status != "completed" && !has_completed_output {
         return Ok("[]".to_string());
     }
     let response_id = read_trimmed_string(probe.get("id"))
@@ -1278,14 +1340,7 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     response_payload.insert("object".to_string(), Value::String("response".to_string()));
     response_payload.insert(
         "status".to_string(),
-        Value::String(
-            if required_action.is_some() {
-                "requires_action"
-            } else {
-                status.as_str()
-            }
-            .to_string(),
-        ),
+        Value::String(effective_status.clone()),
     );
     if let Some(output) = probe.get("output").and_then(Value::as_array) {
         response_payload.insert("output".to_string(), Value::Array(output.clone()));
@@ -1306,7 +1361,7 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     });
     let done_payload = serde_json::json!({"type":"response.done","response":response_value});
     let mut frames: Vec<String> = Vec::new();
-    if let Some(required_action) = required_action {
+    if let Some(required_action) = effective_required_action.as_ref().and_then(Value::as_object) {
         if !seen_required_action {
             let required_payload = serde_json::json!({
                 "type":"response.required_action",
@@ -1330,7 +1385,7 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         }
         return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
-    if status == "completed" || !probe.is_empty() {
+    if effective_status == "completed" || !probe.is_empty() {
         if let Some(tool_frames) =
             build_standard_tool_call_sse_frames_from_output_items(probe.get("output").and_then(Value::as_array))
         {
@@ -1392,6 +1447,35 @@ mod tests {
             wire.find("event: response.completed").unwrap()
                 < wire.find("event: response.done").unwrap()
         );
+    }
+
+    #[test]
+    fn terminal_frames_synthesize_required_action_from_output_function_calls() {
+        let probe = serde_json::json!({
+            "id": "resp_output_tool_terminal",
+            "status": "completed",
+            "output": [{
+                "id": "fc_call_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}",
+                "status": "completed"
+            }]
+        });
+        let frames_json = build_responses_terminal_sse_frames_from_probe_json(
+            serde_json::to_string(&probe).unwrap(),
+            "req_output_tool_terminal".to_string(),
+        )
+        .unwrap();
+        let frames: Vec<String> = serde_json::from_str(&frames_json).unwrap();
+        let wire = frames.join("");
+        assert!(wire.contains("event: response.output_item.added"));
+        assert!(wire.contains("event: response.function_call_arguments.done"));
+        assert!(wire.contains("event: response.output_item.done"));
+        assert!(wire.contains("\"status\":\"requires_action\""));
+        assert!(wire.contains("event: response.completed"));
+        assert!(wire.contains("event: response.done"));
     }
 
     #[test]

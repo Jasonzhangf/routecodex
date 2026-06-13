@@ -105,16 +105,35 @@ function updateProbeFromChunk(chunk: unknown, probe: unknown): Record<string, un
 function buildTerminalFrames(probe: unknown): string[] {
   if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return [];
   const row = probe as Record<string, unknown>;
+  const outputItems = Array.isArray(row.output) ? row.output as Record<string, unknown>[] : [];
+  const synthesizedToolCalls = outputItems
+    .filter((item) => item && typeof item === 'object' && item.type === 'function_call')
+    .map((item) => ({
+      id: typeof item.call_id === 'string' && item.call_id.trim() ? item.call_id : item.id,
+      type: 'function_call',
+      name: item.name,
+      arguments: item.arguments ?? ''
+    }));
+  const effectiveRequiredAction = row.required_action ?? (
+    synthesizedToolCalls.length > 0
+      ? {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: synthesizedToolCalls
+          }
+        }
+      : undefined
+  );
   const response = {
     id: typeof row.id === 'string' ? row.id : 'resp_test_probe',
     object: 'response',
-    status: row.required_action ? 'requires_action' : (typeof row.status === 'string' ? row.status : 'completed'),
+    status: effectiveRequiredAction ? 'requires_action' : (typeof row.status === 'string' ? row.status : 'completed'),
     ...(Array.isArray(row.output) ? { output: row.output } : {}),
     ...(typeof row.output_text === 'string' ? { output_text: row.output_text } : {}),
   };
   const frames: string[] = [];
-  if (row.required_action && !row.__seen_response_required_action) {
-    frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: row.required_action })}\n\n`);
+  if (effectiveRequiredAction && !row.__seen_response_required_action) {
+    frames.push(`event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: effectiveRequiredAction })}\n\n`);
   }
   if (!row.__seen_response_completed) {
     frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`);
@@ -464,20 +483,23 @@ describe('responses-handler stream closed before completed regression', () => {
     });
   });
 
-  it('repairs tool-call terminal when upstream closes after response.function_call_arguments.done without output_item events', async () => {
+  it('repairs tool continuation terminal frames when upstream closes after function call output items', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/v1/responses', async (_req, res) => {
       const upstream = new PassThrough();
       setTimeout(() => {
-        upstream.write('event: response.created\n');
+        upstream.write('event: response.output_item.added\n');
         upstream.write(
           `data: ${JSON.stringify({
-            type: 'response.created',
-            response: {
-              id: 'resp_args_done_only',
-              object: 'response',
-              status: 'in_progress'
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+              id: 'fc_stream_closed_tool_1',
+              type: 'function_call',
+              call_id: 'call_stream_closed_tool_1',
+              name: 'ping_tool',
+              arguments: ''
             }
           })}\n\n`
         );
@@ -485,10 +507,24 @@ describe('responses-handler stream closed before completed regression', () => {
         upstream.write(
           `data: ${JSON.stringify({
             type: 'response.function_call_arguments.done',
-            item_id: 'fc_args_done_only',
-            call_id: 'call_args_done_only',
-            name: 'exec_command',
-            arguments: '{"cmd":"pwd"}'
+            item_id: 'fc_stream_closed_tool_1',
+            output_index: 0,
+            arguments: '{\"value\":\"ok\"}'
+          })}\n\n`
+        );
+        upstream.write('event: response.output_item.done\n');
+        upstream.write(
+          `data: ${JSON.stringify({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'fc_stream_closed_tool_1',
+              type: 'function_call',
+              status: 'completed',
+              call_id: 'call_stream_closed_tool_1',
+              name: 'ping_tool',
+              arguments: '{\"value\":\"ok\"}'
+            }
           })}\n\n`
         );
         upstream.end();
@@ -504,10 +540,11 @@ describe('responses-handler stream closed before completed regression', () => {
           },
           metadata: {
             outboundStream: true,
-            stream: true
+            stream: true,
+            __routecodexDirectPassthrough: true
           }
         } as any,
-        'req_args_done_only_terminal',
+        'req_stream_closed_tool_continuation',
         { entryEndpoint: '/v1/responses' }
       );
     });
@@ -518,22 +555,27 @@ describe('responses-handler stream closed before completed regression', () => {
           accept: 'text/event-stream'
         }
       });
-      const { rawText: text, events } = await collectSseEvents(response, {
-        timeoutMs: 2_000,
-        stopOnEvent: 'response.done'
-      });
+      const text = await response.text();
+      const completedEvent = findSseDataByType(text, 'response.completed');
+      const doneEvent = findSseDataByType(text, 'response.done');
 
       expect(response.status).toBe(200);
-      expect(events).toEqual(expect.arrayContaining([
-        'response.output_item.added',
-        'response.function_call_arguments.done',
-        'response.output_item.done',
-        'response.completed',
-        'response.done'
-      ]));
-      expect(text).toContain('call_args_done_only');
+      expect(text).toContain('event: response.output_item.added');
+      expect(text).toContain('event: response.function_call_arguments.done');
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');
+      expect(completedEvent?.response).toEqual(expect.objectContaining({
+        id: expect.any(String),
+        output: expect.any(Array)
+      }));
+      expect(doneEvent?.response).toEqual(expect.objectContaining({
+        id: expect.any(String),
+        output: expect.any(Array)
+      }));
     });
   });
+
 });

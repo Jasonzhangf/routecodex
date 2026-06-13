@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 mod chat_web_search_intent;
 use chat_process_media_semantics::{
     analyze_chat_process_media, strip_chat_process_historical_images,
+    strip_responses_stored_context_input_media,
 };
 use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
@@ -434,6 +435,17 @@ pub fn strip_chat_process_historical_images_json(
     let messages: Vec<Value> = serde_json::from_str(&messages_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = strip_chat_process_historical_images(messages, placeholder_text);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn strip_responses_stored_context_input_media_json(
+    input_entries_json: String,
+    placeholder_text: String,
+) -> NapiResult<String> {
+    let input_entries: Vec<Value> = serde_json::from_str(&input_entries_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = strip_responses_stored_context_input_media(input_entries, placeholder_text);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

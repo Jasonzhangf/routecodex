@@ -4,7 +4,8 @@ import {
   pickResponsesPersistedFieldsWithNative,
   prepareResponsesConversationEntryWithNative,
   restoreResponsesContinuationPayloadWithNative,
-  resumeResponsesConversationPayloadWithNative
+  resumeResponsesConversationPayloadWithNative,
+  stripResponsesStoredContextInputMediaWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import type { AnyRecord, ConversationEntry } from './responses-conversation-store-types.js';
 
@@ -15,7 +16,8 @@ export function assertResponsesConversationStoreNativeAvailable(): void {
     typeof prepareResponsesConversationEntryWithNative !== 'function' ||
     typeof materializeResponsesContinuationPayloadWithNative !== 'function' ||
     typeof restoreResponsesContinuationPayloadWithNative !== 'function' ||
-    typeof resumeResponsesConversationPayloadWithNative !== 'function'
+    typeof resumeResponsesConversationPayloadWithNative !== 'function' ||
+    typeof stripResponsesStoredContextInputMediaWithNative !== 'function'
   ) {
     throw new Error('[responses-conversation-store] native bindings unavailable');
   }
@@ -63,7 +65,8 @@ export function resumeConversationPayload(
       releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
-      providerKey: entry.providerKey
+      providerKey: entry.providerKey,
+      continuationOwner: entry.continuationOwner
     },
     responseId,
     submitPayload,
@@ -81,9 +84,18 @@ export function restoreContinuationPayload(
   requestId: string | undefined,
   scopeKey: string
 ): { payload: AnyRecord; meta: AnyRecord } | null {
+  const useReleasedPrefixSideChannelOnly =
+    entry.continuationOwner === 'direct'
+    && (!Array.isArray(entry.input) || entry.input.length === 0)
+    && Array.isArray(entry.releasedInputPrefix)
+    && entry.releasedInputPrefix.length > 0;
   const continuationInput = Array.isArray(entry.input) && entry.input.length > 0
     ? entry.input
-    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
+    : (
+      useReleasedPrefixSideChannelOnly
+        ? []
+        : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : [])
+    );
   const restored = restoreResponsesContinuationPayloadWithNative(
     {
       requestId: entry.requestId,
@@ -93,6 +105,7 @@ export function restoreContinuationPayload(
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       providerKey: entry.providerKey,
+      continuationOwner: entry.continuationOwner,
       lastResponseId: entry.lastResponseId
     },
     payload,
@@ -126,6 +139,7 @@ export function materializeContinuationPayload(
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
       providerKey: entry.providerKey,
+      continuationOwner: entry.continuationOwner,
       lastResponseId: entry.lastResponseId
     },
     payload,
@@ -138,5 +152,20 @@ export function materializeContinuationPayload(
   return {
     payload: materialized.payload as AnyRecord,
     meta: materialized.meta as AnyRecord
+  };
+}
+
+export function stripStoredContextInputMedia(
+  input: Array<Record<string, unknown>>,
+  placeholderText = '[Image omitted]'
+): { changed: boolean; messages: AnyRecord[] } {
+  const stripped = stripResponsesStoredContextInputMediaWithNative(input, placeholderText);
+  return {
+    changed: stripped.changed === true,
+    messages: Array.isArray(stripped.messages)
+      ? stripped.messages.filter(
+          (entry): entry is AnyRecord => !!entry && typeof entry === 'object' && !Array.isArray(entry)
+        )
+      : []
   };
 }

@@ -10,7 +10,8 @@ import {
   pickPersistedFields,
   prepareConversationEntry,
   restoreContinuationPayload,
-  resumeConversationPayload
+  resumeConversationPayload,
+  stripStoredContextInputMedia
 } from './responses-conversation-store-native.js';
 import type {
   AnyRecord,
@@ -139,6 +140,9 @@ function readToolCallId(item: AnyRecord): string | undefined {
 
 function shouldAllowContinuation(payload: AnyRecord | undefined): boolean {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+  if (payload.store === false) {
     return false;
   }
   if (payload.store === true) {
@@ -600,14 +604,16 @@ class ResponsesConversationStore {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
-    entry.releasedInputPrefix = Array.isArray(entry.input)
+    const releasedInputPrefixRaw = Array.isArray(entry.input)
       ? entry.input.map((item) => ({ ...item }))
       : [];
+    const releasedInputPrefix = stripStoredContextInputMedia(releasedInputPrefixRaw).messages;
+    entry.releasedInputPrefix = releasedInputPrefix;
     entry.basePayload = {
       ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
       ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
     };
-    entry.releasedPendingToolCallIds = collectPendingToolCallIds(entry.input);
+    entry.releasedPendingToolCallIds = collectPendingToolCallIds(releasedInputPrefix);
     entry.input = [];
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
@@ -689,6 +695,16 @@ class ResponsesConversationStore {
         continue;
       }
       assertResponsesConversationStoreNativeAvailable();
+      if (entry.continuationOwner === 'direct') {
+        const restored = restoreContinuationPayload(entry, args.payload, args.requestId, scopeKey);
+        if (!restored) {
+          continue;
+        }
+        return {
+          payload: restored.payload,
+          meta: ensureMetaProviderKey(restored.meta, entry)
+        };
+      }
       const materialized = materializeContinuationPayload(entry, args.payload, args.requestId, scopeKey);
       if (!materialized) {
         continue;

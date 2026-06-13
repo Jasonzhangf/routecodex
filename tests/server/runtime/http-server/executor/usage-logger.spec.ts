@@ -154,6 +154,26 @@ describe('usage logger timing summary', () => {
     }
   });
 
+  it('does not repeat finish_reason inside usage detail block', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_usage_no_repeat_finish', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      routeName: 'coding',
+      poolId: 'coding-primary',
+      finishReason: 'tool_calls',
+      latencyMs: 120,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    const matches = plain.match(/finish_reason=tool_calls/g) ?? [];
+    expect(matches).toHaveLength(1);
+  });
+
   it('prints cache read and cache write metrics in realtime session token line', async () => {
     process.env.ROUTECODEX_LOG_ROLLUP = '1';
     process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';

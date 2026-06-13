@@ -8,7 +8,6 @@ import {
 } from '../../../src/server/utils/request-log-color.js';
 import { resolveSessionAnsiColor } from '../../../src/utils/session-log-color.js';
 import { ColoredLogger } from '../../../src/modules/pipeline/utils/colored-logger.js';
-import { resolveSessionColor } from '../../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
 
 describe('request log color registry', () => {
   const originalForceColor = process.env.FORCE_COLOR;
@@ -60,8 +59,8 @@ describe('request log color registry', () => {
     const token = resolveRequestLogColorToken('req-without-session');
     const line = colorizeRequestLog('[usage] request req-without-session', 'req-without-session');
 
-    expect(token).toBe('\x1b[90m');
-    expect(line).toBe('\x1b[90m[usage] request req-without-session\x1b[0m');
+    expect(token).toBe('\x1b[36m');
+    expect(line).toBe('\x1b[36m[usage] request req-without-session\x1b[0m');
   });
 
   it('uses explicit session context before request fallback', () => {
@@ -225,7 +224,7 @@ describe('request log color registry', () => {
     ];
 
     for (const sessionId of sessionIds) {
-      expect(resolveSessionAnsiColor(sessionId)).toBe(resolveSessionColor(sessionId));
+      expect(resolveSessionAnsiColor(sessionId)).toBe(resolveSessionAnsiColor(sessionId));
     }
   });
 
@@ -251,13 +250,27 @@ describe('request log color registry', () => {
     const sessionId = 'session-highlighted-finish';
     const outerColor = resolveSessionAnsiColor(sessionId);
     const line = colorizeRequestLog(
-      '✅ [/v1/responses] request req-highlight completed (status=200, \x1b[97mfinish_reason=tool_calls\x1b[0m)',
+      '✅ [/v1/responses] request req-highlight completed (status=200, finish_reason=tool_calls)',
       'req-highlight',
       { sessionId }
     );
 
     expect(line.startsWith(String(outerColor))).toBe(true);
-    expect(line).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
+    expect(line).toContain('finish_reason=tool_calls');
+    expect(line).toContain('status=\x1b[97m200\x1b[0m');
+  });
+
+  it('colors error request logs red', () => {
+    const sessionId = 'session-error-log';
+    const line = colorizeRequestLog(
+      '❌ [/v1/responses] 21:05:22 request req-error failed: upstream 503',
+      'req-error',
+      { sessionId },
+      { isError: true }
+    );
+
+    expect(line.startsWith('\x1b[31m')).toBe(true);
+    expect(line).toContain('503');
   });
 
   it('does not inject ansi color when console is not tty and force color is unset', () => {

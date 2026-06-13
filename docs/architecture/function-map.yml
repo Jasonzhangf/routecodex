@@ -7,7 +7,9 @@ version: 1
 owners:
   - feature_id: hub.servertool_followup
     status: active
-    summary: servertool followup orchestration and governed response truth
+    summary: "servertool followup orchestration and governed response truth"
+    owner_kind: rust_ssot
+    owner_scope: "servertool followup orchestration and governed response truth"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubRespChatProcess03Governed
@@ -32,12 +34,14 @@ owners:
       - npm run verify:servertool-rust-only
     migration_target: rust
     notes:
-      - Rust owns orchestration semantics; TS only bridge/reentry/IO.
-      - Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner.
+      - "Rust owns orchestration semantics; TS only bridge/reentry/IO."
+      - "Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner."
 
   - feature_id: hub.servertool_pending_session
     status: active
-    summary: servertool pending-session store and pending injection persist planning
+    summary: "servertool pending-session store and pending injection persist planning"
+    owner_kind: rust_ssot
+    owner_scope: "servertool pending-session store and pending injection persist planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
     canonical_types:
       - PendingServerToolInjectionPlan
@@ -77,14 +81,16 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns pending file-name sanitization, max-age parsing/defaulting, save/load payload coercion, stale/malformed/drop decisions, pending injection session dedupe, persist record planning, and persistence error envelope construction.
-      - TS pending-session may only read env/session dir and execute file IO using native plans.
-      - TS pending-injection-block may only call native persist/error planners and execute save IO.
-      - Do not restore local max-age parsing, segment sanitization, payload coercion, stale/malformed drop policy, aliasSessionIds dedupe, pending injection payload construction, or `SERVERTOOL_PENDING_INJECTION_FAILED` envelope assembly in TS.
+      - "servertool-core owns pending file-name sanitization, max-age parsing/defaulting, save/load payload coercion, stale/malformed/drop decisions, pending injection session dedupe, persist record planning, and persistence error envelope construction."
+      - "TS pending-session may only read env/session dir and execute file IO using native plans."
+      - "TS pending-injection-block may only call native persist/error planners and execute save IO."
+      - "Do not restore local max-age parsing, segment sanitization, payload coercion, stale/malformed drop policy, aliasSessionIds dedupe, pending injection payload construction, or `SERVERTOOL_PENDING_INJECTION_FAILED` envelope assembly in TS."
 
   - feature_id: hub.servertool_pre_command_hooks
     status: active
-    summary: servertool pre-command hook config and runtime-rule normalization
+    summary: "servertool pre-command hook config and runtime-rule normalization"
+    owner_kind: rust_ssot
+    owner_scope: "servertool pre-command hook config and runtime-rule normalization"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
     canonical_types:
       - PreCommandHooksConfigPlanInput
@@ -116,13 +122,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning, timeout clamp/default, priority parsing, and runtime pre-command rule planning.
-      - TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO.
-      - Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS.
+      - "servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning, timeout clamp/default, priority parsing, and runtime pre-command rule planning."
+      - "TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO."
+      - "Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS."
 
   - feature_id: hub.servertool_engine_selection
     status: active
-    summary: servertool primary auto-hook first pass and rerun selection planning
+    summary: "servertool primary auto-hook first pass and rerun selection planning"
+    owner_kind: rust_ssot
+    owner_scope: "servertool primary auto-hook first pass and rerun selection planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
     canonical_types:
       - EngineSelectionStartInput
@@ -154,13 +162,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns whether to run default engine, run primary auto hooks first, return current result, or rerun excluding primary hooks.
-      - TS engine-selection-block may only read skeleton queue config, call native plans, and execute the planned runEngine calls.
-      - Do not restore local `primaryAutoHookIds.length`, `engineResult.mode`, or `!engineResult.execution` selection policy in TS.
+      - "servertool-core owns whether to run default engine, run primary auto hooks first, return current result, or rerun excluding primary hooks."
+      - "TS engine-selection-block may only read skeleton queue config, call native plans, and execute the planned runEngine calls."
+      - "Do not restore local `primaryAutoHookIds.length`, `engineResult.mode`, or `!engineResult.execution` selection policy in TS."
 
   - feature_id: hub.servertool_cli_projection
     status: active
-    summary: servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input
+    summary: "servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input"
+    owner_kind: rust_ssot
+    owner_scope: "servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - ServertoolCliProjection01Planned
@@ -188,16 +198,18 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - Phase 1 keeps existing injection/interception but projects execution to real client exec_command.
-      - CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used.
-      - stop_message_auto CLI input must include only flowId, repeatCount, and maxRepeats when stopless state is available; continuationPrompt/schema guidance/prompt preview are request-side internal material and must not be client-visible.
-      - CLI execution path must not call server-side followup/reenter for migrated flows.
-      - `apply_patch` is excluded; it remains native/freeform client tooling.
-      - `servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted.
+      - "Phase 1 keeps existing injection/interception but projects execution to real client exec_command."
+      - "CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used."
+      - "stop_message_auto CLI input must include only flowId, repeatCount, and maxRepeats when stopless state is available; continuationPrompt/schema guidance/prompt preview are request-side internal material and must not be client-visible."
+      - "CLI execution path must not call server-side followup/reenter for migrated flows."
+      - "`apply_patch` is excluded; it remains native/freeform client tooling."
+      - "`servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted."
 
   - feature_id: hub.servertool_stopless_cli_projection_seed
     status: active
-    summary: stop_message_auto stopless CLI projection seed planning
+    summary: "stop_message_auto stopless CLI projection seed planning"
+    owner_kind: rust_ssot
+    owner_scope: "stop_message_auto stopless CLI projection seed planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
     canonical_types:
       - StopMessageCliProjectionSeedInput
@@ -226,13 +238,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns stopless CLI projection seed planning for internal continuationPrompt seed, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction; client-visible CLI projection remains status-only.
-      - TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell.
-      - Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS.
+      - "servertool-core owns stopless CLI projection seed planning for internal continuationPrompt seed, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction; client-visible CLI projection remains status-only."
+      - "TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell."
+      - "Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS."
 
   - feature_id: hub.servertool_flow_presentation
     status: active
-    summary: servertool progress log tool-name and highlight presentation policy
+    summary: "servertool progress log tool-name and highlight presentation policy"
+    owner_kind: rust_ssot
+    owner_scope: "servertool progress log tool-name and highlight presentation policy"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
     canonical_types:
       - ServertoolProgressPresentationInput
@@ -261,14 +275,16 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions.
-      - TS flow-presentation-block may only call native wrappers.
-      - TS skeleton-config must not expose progress presentation projection helpers.
-      - Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS.
+      - "Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions."
+      - "TS flow-presentation-block may only call native wrappers."
+      - "TS skeleton-config must not expose progress presentation projection helpers."
+      - "Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS."
 
   - feature_id: hub.servertool_loop_warning
     status: active
-    summary: stop-message loop warning text/count injection and seed payload bridge
+    summary: "stop-message loop warning text/count injection and seed payload bridge"
+    owner_kind: rust_ssot
+    owner_scope: "stop-message loop warning text/count injection and seed payload bridge"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/followup-core/src
     canonical_types:
       - LoopWarningInput
@@ -296,13 +312,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Loop warning text and repeat-count policy stay Rust-owned in followup-core.
-      - TS may only build the native seed payload and pass the native warning injector as callback glue.
-      - `appendStopMessageLoopWarning` must not return as a TS semantic owner/export.
+      - "Loop warning text and repeat-count policy stay Rust-owned in followup-core."
+      - "TS may only build the native seed payload and pass the native warning injector as callback glue."
+      - "`appendStopMessageLoopWarning` must not return as a TS semantic owner/export."
 
   - feature_id: hub.servertool_orchestration_policy
     status: active
-    summary: servertool timeout, client-inject, followup error, and adapter provider-key policy
+    summary: "servertool timeout, client-inject, followup error, and adapter provider-key policy"
+    owner_kind: rust_ssot
+    owner_scope: "servertool timeout, client-inject, followup error, and adapter provider-key policy"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
     canonical_types:
       - ServertoolTimeoutPolicyInput
@@ -350,15 +368,17 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution.
-      - TS orchestration-policy-block may only read env/arguments and call native wrappers.
-      - TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning.
-      - TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.
-      - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.
+      - "servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution."
+      - "TS orchestration-policy-block may only read env/arguments and call native wrappers."
+      - "TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning."
+      - "TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans."
+      - "Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders."
 
   - feature_id: hub.servertool_backend_route_runtime
     status: active
-    summary: servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning
+    summary: "servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning"
+    owner_kind: rust_ssot
+    owner_scope: "servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
     canonical_types:
       - ServertoolFollowupMaterializationInput
@@ -398,14 +418,16 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Rust owns followupPlan `entryEndpoint` precedence and payload/injection source recognition.
-      - Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning.
-      - TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors.
-      - Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS.
+      - "Rust owns followupPlan `entryEndpoint` precedence and payload/injection source recognition."
+      - "Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning."
+      - "TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors."
+      - "Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS."
 
   - feature_id: error.provider_failure_policy
     status: active
-    summary: provider error cataloging, runtime classification, router policy application
+    summary: "provider error cataloging, runtime classification, router policy application"
+    owner_kind: provider_runtime
+    owner_scope: "provider error cataloging, runtime classification, router policy application"
     owner_module: src/providers/core/runtime
     canonical_types:
       - ErrorErr03RuntimeClassified
@@ -430,11 +452,13 @@ owners:
       - npm run verify:provider-failure-ban-blackbox
     migration_target: rust
     notes:
-      - Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only.
+      - "Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only."
 
   - feature_id: error.backoff_action_queue
     status: active
-    summary: unified blocking backoff queue for host-side error action categories
+    summary: "unified blocking backoff queue for host-side error action categories"
+    owner_kind: ts_runtime_owner
+    owner_scope: "unified blocking backoff queue for host-side error action categories"
     owner_module: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
     canonical_types:
       - ErrorActionCategory
@@ -474,14 +498,16 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat.
-      - Categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup.
-      - Provider traffic saturation records provider_traffic_saturated, waits once through this queue, then raises saturation if still full so Virtual Router can switch provider even in priority mode.
-      - Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner.
+      - "Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat."
+      - "Categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup."
+      - "Provider traffic saturation records provider_traffic_saturated, waits once through this queue, then raises saturation if still full so Virtual Router can switch provider even in priority mode."
+      - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner."
 
   - feature_id: vr.route_selection
     status: active
-    summary: virtual router route classification and selected target truth
+    summary: "virtual router route classification and selected target truth"
+    owner_kind: rust_ssot
+    owner_scope: "virtual router route classification and selected target truth"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - VrRoute04SelectedTarget
@@ -509,11 +535,13 @@ owners:
       - npm run verify:repo-sanity
     migration_target: rust
     notes:
-      - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
+      - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
 
   - feature_id: quota.unified_control_surface
     status: active
-    summary: quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only
+    summary: "quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only"
+    owner_kind: ts_runtime_owner
+    owner_scope: "quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only"
     owner_module: src/manager/modules/quota
     canonical_types:
       - QuotaManagerModule
@@ -535,13 +563,15 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - daemon-admin and control-handler must not create their own adapter or call rust mutator directly.
-      - TS quota module is lifecycle/persistence/control bridge only; runtime quota truth remains in Rust quota host.
-      - startup hydration and persist must ignore providers absent from current config.toml materialized provider set.
+      - "daemon-admin and control-handler must not create their own adapter or call rust mutator directly."
+      - "TS quota module is lifecycle/persistence/control bridge only; runtime quota truth remains in Rust quota host."
+      - "startup hydration and persist must ignore providers absent from current config.toml materialized provider set."
 
   - feature_id: vr.route_availability_floor
     status: active
-    summary: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice
+    summary: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
+    owner_kind: rust_ssot
+    owner_scope: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
     canonical_types:
       - VrRoute04SelectedTarget
@@ -568,13 +598,15 @@ owners:
       - npm run verify:llmswitch-rustification-audit
     migration_target: rust
     notes:
-      - non-empty routing invariant belongs to Rust Virtual Router selection only.
-      - do not patch empty-pool behavior in handlers, executors, adapters, or provider TS runtime.
-      - route order is high-priority pools -> low-priority pools -> default pool; if default pool has providers, routing must not return empty.
+      - "non-empty routing invariant belongs to Rust Virtual Router selection only."
+      - "do not patch empty-pool behavior in handlers, executors, adapters, or provider TS runtime."
+      - "route order is high-priority pools -> low-priority pools -> default pool; if default pool has providers, routing must not return empty."
 
   - feature_id: vr.provider_forwarder_runtime
     status: active
-    summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router
+    summary: "ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
+    owner_kind: rust_ssot
+    owner_scope: "ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
     canonical_types:
       - ForwarderRegistry
@@ -605,13 +637,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys.
-      - Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.
-      - HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.
+      - "Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys."
+      - "Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets."
+      - "HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy."
 
   - feature_id: hub.metadata_boundary
     status: active
-    summary: internal metadata carrier isolation from normal request, provider wire, and client response payloads
+    summary: "internal metadata carrier isolation from normal request, provider wire, and client response payloads"
+    owner_kind: rust_ssot
+    owner_scope: "internal metadata carrier isolation from normal request, provider wire, and client response payloads"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubReqInbound02Standardized
@@ -643,46 +677,48 @@ owners:
       - npm run verify:repo-sanity
     migration_target: rust
     notes:
-      - Metadata is side-channel only; leak to provider/client payload must fail-fast.
-      - Rust contract help owns the standard control/data split for Hub and VR nodes.
-      - TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired.
-      - Retired image attachment metadata control surface (`chat_post_governed_normalization_semantics.rs`, `buildImageAttachmentMetadataJson`) is physically deleted; current media semantics belong to live chat process media/Hub mainline owners, not a zero-consumer NAPI export.
-      - Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) are physically deleted; keep live mainline owners (`analyzeChatWebSearchIntentJson`, lowercase-ai reasoning wrapper, request governance/default registry internals) instead of restoring standalone control surfaces.
-      - Retired standalone tool-governance control surface (`hub_tool_governance_semantics.rs`, `governRequestJson`) is physically deleted; live tool governance belongs to `req_process_stage1_tool_governance.rs` / chat governance / Hub mainline typed boundaries.
-      - Retired zero-consumer response-tool NAPI export (`collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json`) is physically deleted; the follow-on zero-consumer requested-tool public bridge later removed the private collector chain too.
-      - Retired zero-consumer response-governance utility bridges (`buildWebSearchToolAppendOperations*`, `prepareRespProcessToolGovernancePayload*`, `filterOutExecutedServerToolCalls*`, `resolveRequestedToolNames*`) are physically deleted as public TS/NAPI surfaces; the old Rust `servertool_skeleton/finalize_strip.rs` bridge module is also deleted. Live response governance remains `governResponseJson` / `finalizeChatResponseJson` / apply_patch bridges, while web_search append operations stay Rust-internal to req-process servertool injection.
-      - Retired zero-consumer servertool utility public bridges (`tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, `webSearchFindArrayWithNative`, continuation helpers, and the standalone `planChatServertoolOrchestrationBundleJson` / `resolveServertoolFollowupFlowProfileJson` / `webSearchFindArrayJson` / `runApplyPatchJson` / continuation NAPI surfaces) are physically deleted; live req-process servertool bundle planning and followup profile lookup now call Rust-internal helpers directly.
-      - Retired zero-consumer req_inbound standalone public bridges (`mapReqInboundResumeToolOutputsDetailedWithNative`, `resolveClientInjectReadyWithNative`, `normalizeContextCaptureLabelWithNative`, `shouldRunHubChatProcessWithNative`, `isShellLikeToolNameTokenWithNative`, `resolveReqInboundServerToolFollowupSnapshotWithNative`, `augmentReqInboundContextSnapshotWithNative`, `normalizeReqInboundToolCallIdStyleWithNative`, and matching standalone NAPI JSON exports) are physically deleted; live req_inbound semantics remain `applyReqInboundSemanticLiftJson`, `collectToolOutputsJson`, `sanitizeFormatEnvelopeJson`, `normalizeProviderProtocolTokenJson`, and Rust-internal helpers only.
-      - Retired zero-consumer req_inbound reasoning / semantic-lift public bridges (`normalizeReqInboundReasoningPayloadWithNative`, `normalizeReasoningPayloadV2WithNative`, `shouldNormalizeReasoningPayloadWithNative`, `applyReqInboundSemanticLiftWithNative` and matching standalone NAPI JSON exports `normalize_req_inbound_reasoning_payload_json`, `should_normalize_reasoning_payload_json`, `normalize_reasoning_payload_v2_json`, `apply_req_inbound_semantic_lift_json`) are physically deleted; Rust keeps only the internal `apply_req_inbound_semantic_lift` mainline helper invoked by `hub_pipeline_lib::engine`, and the lower-level `normalize_reasoning_in_{chat,responses,gemini,anthropic}_payload` / `normalize_resp_inbound_reasoning_payload_json` helpers remain Rust-internal to active Hub req_inbound/resp_inbound owners.
-      - Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) are physically deleted; corresponding Rust helpers stay internal to VR route cleanup and response apply_patch/hashline governance.
-      - Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) are physically deleted; internal Rust helpers may remain only for current Hub mainline/tests until passthrough-mode semantics are separately retired.
-      - Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) are physically deleted after `runHubPipelineStageJson` retirement; live mainline must use total Hub Pipeline Rust entries.
-      - Retired zero-consumer Hub orchestration public wrapper surface (`native-hub-pipeline-orchestration-semantics-search-resume.ts`, standalone metadata/protocol/node-result/web-search/resume NAPI JSON wrappers and TS `*WithNative` exports) is physically deleted; internal Rust helpers remain private to active Hub mainline/tests and must not be restored through aggregate re-export or required-export gate without a live runtime consumer plus map update.
-      - Retired zero-consumer session header helper public wrappers (`coerceClientHeadersJson`, `findHeaderValueJson`, `pickHeaderJson`, `normalizeHeaderKeyJson` and TS `*WithNative` wrappers) are physically deleted; header parsing remains Rust-internal to `extractSessionIdentifiersJson`, not standalone NAPI surface.
-      - Retired zero-consumer mappable-semantics public wrapper (`findMappableSemanticsKeysJson` / TS `findMappableSemanticsKeysWithNative`) is physically deleted; `find_mappable_semantics_keys` remains Rust-private to process-mode tests/internals.
-      - Retired zero-consumer chat-process sanitize public wrapper (`sanitizeChatProcessMessagesJson` / TS `sanitizeChatProcessMessagesWithNative`) is physically deleted; `sanitize_chat_process_messages_value` remains Rust-internal to request governance and responses context owners.
-      - Retired zero-consumer semantic mapper public wrappers (`mapOpenaiChat*Json`, `buildSubmitToolOutputsPayloadJson`, provider-response signature/submit checks, and TS `*WithNative` wrappers) are physically deleted; live submit handling belongs to Responses provider runtime and live servertool followup shape normalization remains `normalizeServertoolFollowupPayloadShapeJson`.
-      - Retired zero-consumer req-process standalone public wrappers (`applyHubOperationsJson`, `applyReqProcessRouteSelectionJson`, and TS `*WithNative` wrappers) are physically deleted; `apply_hub_operations` and `apply_route_selection` remain Rust-internal to the active req-process/VR mainline.
-      - Retired zero-consumer VR bootstrap/stop-message public wrappers (`bootstrapProviderProfilesWithNative`, `bootstrapVirtualRouterProviderProfilesJson`, `bootstrapVirtualRouterRoutingJson`, `bootstrapVirtualRouterConfigMetaJson`, `parseStopMessageInstructionJson`, `applyStopMessageInstructionJson`, TS parse wrapper) are physically deleted; provider-profile bootstrap, routing/meta bootstrap, and stop-message parse/apply helpers remain Rust-internal to `bootstrapVirtualRouterConfigJson` / routing-instruction state application.
-      - Retired zero-consumer edge-stage public wrappers (`sanitizeChatCompletionLikeWithNative`, `normalizeOpenaiChatReasoningOutboundWithNative`, `stripPrivateFieldsWithNative`, `resolveCompatProfileWithNative`, `planSseStreamEffectWithNative`, `parseReqInboundFormatEnvelopeWithNative`, `parseRespInboundFormatEnvelopeWithNative`, `validateChatEnvelopeWithNative` and their public NAPI JSON surfaces) are physically deleted; Rust keeps only the live mainline helpers and live public bridges needed by active req/resp/sse paths.
-      - Retired zero-consumer routing-instruction public helpers (`cleanRoutingInstructionMarkersJson`, `cleanRoutingInstructionMarkersWithNative`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, `applyRoutingInstructionsToStateWithNative`) are physically deleted; marker cleanup remains Rust-internal to the active Virtual Router route mainline.
-      - Retired zero-consumer Hub protocol spec public wrappers (`resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, `resolveHubProtocolAllowlistsJson`) are physically deleted; protocol spec/allowlist logic remains Rust-internal to `sanitizeProviderOutboundPayloadJson` and its tests.
-      - Retired zero-consumer responses tool-call remap public wrapper (`remapResponsesToolCallsWithNative` / `remapResponsesToolCallsJson`) is physically deleted; live client remap uses `remapChatToolCallsWithNative` and Rust `remapChatToolCallsJson`.
-      - Retired zero-consumer req_outbound context/format/tool-session public wrappers (`resolveReqOutboundContextMergePlan*`, `buildReqOutboundFormatPayload*`, `applyReqOutboundContextSnapshot*`, `mergeContextToolOutputs*`, `normalizeContextTools*`, `selectToolCallIdStyle*`, `normalizeToolSessionMessages*`, `updateToolSessionHistory*`, `shouldAttachReqOutboundContextSnapshot*`) are physically deleted; Rust keeps only the active internal mainline helpers.
-      - Retired zero-consumer request-governance public bridge (`resolveGovernanceContext*`, `applyGovernedControlOperations*`, `applyGovernedMergeRequest*`, `mergeGovernanceSummaryIntoMetadata*`, `finalizeGovernedRequest*`, plus `chat_governance_context.rs` / `chat_governance_finalize.rs`) is physically deleted; request governance must stay in active Rust Hub mainline / `req_process_stage1_tool_governance*` owners, not standalone NAPI surfaces.
-      - Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath.
-      - Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage.
-      - Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports.
-      - Retired zero-consumer SSE stats/timeout public wrappers (`extractDecodeStatsWithNative`, `resolveSseTimeoutOptionsWithNative`, `extractDecodeStatsJson`, `resolveSseTimeoutOptionsJson`) are physically deleted; live SSE public bridges remain parser/stream/error descriptor/context diagnostics surfaces, not standalone stats/timeout helpers.
-      - Retired zero-consumer chat node-result public builders (`buildChatProcessContextMetadata*`, `applyChatProcessedRequest*`, `buildChatProcessedDescriptor*`, `buildChatNodeResultMetadata*`, `buildChatNodeResultObservation*`, `buildProcessedRequestFromChatResponse*`, `restoreResponseContinuationSemantics*`) and the stale `coverage-hub-chat-process-node-result.mjs` script are physically deleted; live request/response contract bridges remain only for request-executor and finish/empty response classification.
-      - Retired zero-consumer Anthropic alias public bridge (`buildAnthropicToolAliasMapWithNative`, `buildAnthropicToolAliasMapJson`, `chat_anthropic_tool_alias.rs`) and stale `coverage-hub-chat-process-anthropic-alias.mjs` are physically deleted; live Anthropic alias semantics remain Rust-internal under shared tool mapping and Hub req/resp mainline owners.
-      - Retired provider-key analysis control surface (`virtual_router_provider_key.rs`, `parseProviderKeyJson`, TS `analyzeProviderKey` wrapper/parser/type) is physically deleted; do not restore an unused native provider-key parser.
-      - Retired stop-message state codec control surface (`virtual_router_stop_message_state_codec.rs`, `serializeStopMessageStateJson`, `deserializeStopMessageStateJson`) is physically deleted; stopless state persistence now belongs to servertool-core contracts, not a standalone VR codec export.
-      - Retired zero-consumer shared-conversion public wrappers (`hasValidThoughtSignature*`, `sanitizeThinkingBlock*`, `filterInvalidThinkingBlocks*`, `removeTrailingUnsignedThinkingBlocks*`, `normalizeTools*`) and Rust `thought_signature_validator.rs` are physically deleted; live tool normalization remains private to `hub_standardized_bridge`, and args schema normalization remains `normalizeArgsBySchemaJson`.
+      - "Metadata is side-channel only; leak to provider/client payload must fail-fast."
+      - "Rust contract help owns the standard control/data split for Hub and VR nodes."
+      - "TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired."
+      - "Retired image attachment metadata control surface (`chat_post_governed_normalization_semantics.rs`, `buildImageAttachmentMetadataJson`) is physically deleted; current media semantics belong to live chat process media/Hub mainline owners, not a zero-consumer NAPI export."
+      - "Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) are physically deleted; keep live mainline owners (`analyzeChatWebSearchIntentJson`, lowercase-ai reasoning wrapper, request governance/default registry internals) instead of restoring standalone control surfaces."
+      - "Retired standalone tool-governance control surface (`hub_tool_governance_semantics.rs`, `governRequestJson`) is physically deleted; live tool governance belongs to `req_process_stage1_tool_governance.rs` / chat governance / Hub mainline typed boundaries."
+      - "Retired zero-consumer response-tool NAPI export (`collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json`) is physically deleted; the follow-on zero-consumer requested-tool public bridge later removed the private collector chain too."
+      - "Retired zero-consumer response-governance utility bridges (`buildWebSearchToolAppendOperations*`, `prepareRespProcessToolGovernancePayload*`, `filterOutExecutedServerToolCalls*`, `resolveRequestedToolNames*`) are physically deleted as public TS/NAPI surfaces; the old Rust `servertool_skeleton/finalize_strip.rs` bridge module is also deleted. Live response governance remains `governResponseJson` / `finalizeChatResponseJson` / apply_patch bridges, while web_search append operations stay Rust-internal to req-process servertool injection."
+      - "Retired zero-consumer servertool utility public bridges (`tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, `webSearchFindArrayWithNative`, continuation helpers, and the standalone `planChatServertoolOrchestrationBundleJson` / `resolveServertoolFollowupFlowProfileJson` / `webSearchFindArrayJson` / `runApplyPatchJson` / continuation NAPI surfaces) are physically deleted; live req-process servertool bundle planning and followup profile lookup now call Rust-internal helpers directly."
+      - "Retired zero-consumer req_inbound standalone public bridges (`mapReqInboundResumeToolOutputsDetailedWithNative`, `resolveClientInjectReadyWithNative`, `normalizeContextCaptureLabelWithNative`, `shouldRunHubChatProcessWithNative`, `isShellLikeToolNameTokenWithNative`, `resolveReqInboundServerToolFollowupSnapshotWithNative`, `augmentReqInboundContextSnapshotWithNative`, `normalizeReqInboundToolCallIdStyleWithNative`, and matching standalone NAPI JSON exports) are physically deleted; live req_inbound semantics remain `applyReqInboundSemanticLiftJson`, `collectToolOutputsJson`, `sanitizeFormatEnvelopeJson`, `normalizeProviderProtocolTokenJson`, and Rust-internal helpers only."
+      - "Retired zero-consumer req_inbound reasoning / semantic-lift public bridges (`normalizeReqInboundReasoningPayloadWithNative`, `normalizeReasoningPayloadV2WithNative`, `shouldNormalizeReasoningPayloadWithNative`, `applyReqInboundSemanticLiftWithNative` and matching standalone NAPI JSON exports `normalize_req_inbound_reasoning_payload_json`, `should_normalize_reasoning_payload_json`, `normalize_reasoning_payload_v2_json`, `apply_req_inbound_semantic_lift_json`) are physically deleted; Rust keeps only the internal `apply_req_inbound_semantic_lift` mainline helper invoked by `hub_pipeline_lib::engine`, and the lower-level `normalize_reasoning_in_{chat,responses,gemini,anthropic}_payload` / `normalize_resp_inbound_reasoning_payload_json` helpers remain Rust-internal to active Hub req_inbound/resp_inbound owners."
+      - "Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) are physically deleted; corresponding Rust helpers stay internal to VR route cleanup and response apply_patch/hashline governance."
+      - "Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) are physically deleted; internal Rust helpers may remain only for current Hub mainline/tests until passthrough-mode semantics are separately retired."
+      - "Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) are physically deleted after `runHubPipelineStageJson` retirement; live mainline must use total Hub Pipeline Rust entries."
+      - "Retired zero-consumer Hub orchestration public wrapper surface (`native-hub-pipeline-orchestration-semantics-search-resume.ts`, standalone metadata/protocol/node-result/web-search/resume NAPI JSON wrappers and TS `*WithNative` exports) is physically deleted; internal Rust helpers remain private to active Hub mainline/tests and must not be restored through aggregate re-export or required-export gate without a live runtime consumer plus map update."
+      - "Retired zero-consumer session header helper public wrappers (`coerceClientHeadersJson`, `findHeaderValueJson`, `pickHeaderJson`, `normalizeHeaderKeyJson` and TS `*WithNative` wrappers) are physically deleted; header parsing remains Rust-internal to `extractSessionIdentifiersJson`, not standalone NAPI surface."
+      - "Retired zero-consumer mappable-semantics public wrapper (`findMappableSemanticsKeysJson` / TS `findMappableSemanticsKeysWithNative`) is physically deleted; `find_mappable_semantics_keys` remains Rust-private to process-mode tests/internals."
+      - "Retired zero-consumer chat-process sanitize public wrapper (`sanitizeChatProcessMessagesJson` / TS `sanitizeChatProcessMessagesWithNative`) is physically deleted; `sanitize_chat_process_messages_value` remains Rust-internal to request governance and responses context owners."
+      - "Retired zero-consumer semantic mapper public wrappers (`mapOpenaiChat*Json`, `buildSubmitToolOutputsPayloadJson`, provider-response signature/submit checks, and TS `*WithNative` wrappers) are physically deleted; live submit handling belongs to Responses provider runtime and live servertool followup shape normalization remains `normalizeServertoolFollowupPayloadShapeJson`."
+      - "Retired zero-consumer req-process standalone public wrappers (`applyHubOperationsJson`, `applyReqProcessRouteSelectionJson`, and TS `*WithNative` wrappers) are physically deleted; `apply_hub_operations` and `apply_route_selection` remain Rust-internal to the active req-process/VR mainline."
+      - "Retired zero-consumer VR bootstrap/stop-message public wrappers (`bootstrapProviderProfilesWithNative`, `bootstrapVirtualRouterProviderProfilesJson`, `bootstrapVirtualRouterRoutingJson`, `bootstrapVirtualRouterConfigMetaJson`, `parseStopMessageInstructionJson`, `applyStopMessageInstructionJson`, TS parse wrapper) are physically deleted; provider-profile bootstrap, routing/meta bootstrap, and stop-message parse/apply helpers remain Rust-internal to `bootstrapVirtualRouterConfigJson` / routing-instruction state application."
+      - "Retired zero-consumer edge-stage public wrappers (`sanitizeChatCompletionLikeWithNative`, `normalizeOpenaiChatReasoningOutboundWithNative`, `stripPrivateFieldsWithNative`, `resolveCompatProfileWithNative`, `planSseStreamEffectWithNative`, `parseReqInboundFormatEnvelopeWithNative`, `parseRespInboundFormatEnvelopeWithNative`, `validateChatEnvelopeWithNative` and their public NAPI JSON surfaces) are physically deleted; Rust keeps only the live mainline helpers and live public bridges needed by active req/resp/sse paths."
+      - "Retired zero-consumer routing-instruction public helpers (`cleanRoutingInstructionMarkersJson`, `cleanRoutingInstructionMarkersWithNative`, `parseAndPreprocessRoutingInstructions`, `extractClearInstruction`, `extractStopMessageClearInstruction`, `applyRoutingInstructionsToStateWithNative`) are physically deleted; marker cleanup remains Rust-internal to the active Virtual Router route mainline."
+      - "Retired zero-consumer Hub protocol spec public wrappers (`resolveHubProtocolSpecWithNative`, `resolveHubProtocolAllowlistsWithNative`, `resolveHubProtocolSpecJson`, `resolveHubProtocolAllowlistsJson`) are physically deleted; protocol spec/allowlist logic remains Rust-internal to `sanitizeProviderOutboundPayloadJson` and its tests."
+      - "Retired zero-consumer responses tool-call remap public wrapper (`remapResponsesToolCallsWithNative` / `remapResponsesToolCallsJson`) is physically deleted; live client remap uses `remapChatToolCallsWithNative` and Rust `remapChatToolCallsJson`."
+      - "Retired zero-consumer req_outbound context/format/tool-session public wrappers (`resolveReqOutboundContextMergePlan*`, `buildReqOutboundFormatPayload*`, `applyReqOutboundContextSnapshot*`, `mergeContextToolOutputs*`, `normalizeContextTools*`, `selectToolCallIdStyle*`, `normalizeToolSessionMessages*`, `updateToolSessionHistory*`, `shouldAttachReqOutboundContextSnapshot*`) are physically deleted; Rust keeps only the active internal mainline helpers."
+      - "Retired zero-consumer request-governance public bridge (`resolveGovernanceContext*`, `applyGovernedControlOperations*`, `applyGovernedMergeRequest*`, `mergeGovernanceSummaryIntoMetadata*`, `finalizeGovernedRequest*`, plus `chat_governance_context.rs` / `chat_governance_finalize.rs`) is physically deleted; request governance must stay in active Rust Hub mainline / `req_process_stage1_tool_governance*` owners, not standalone NAPI surfaces."
+      - "Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath."
+      - "Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage."
+      - "Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports."
+      - "Retired zero-consumer SSE stats/timeout public wrappers (`extractDecodeStatsWithNative`, `resolveSseTimeoutOptionsWithNative`, `extractDecodeStatsJson`, `resolveSseTimeoutOptionsJson`) are physically deleted; live SSE public bridges remain parser/stream/error descriptor/context diagnostics surfaces, not standalone stats/timeout helpers."
+      - "Retired zero-consumer chat node-result public builders (`buildChatProcessContextMetadata*`, `applyChatProcessedRequest*`, `buildChatProcessedDescriptor*`, `buildChatNodeResultMetadata*`, `buildChatNodeResultObservation*`, `buildProcessedRequestFromChatResponse*`, `restoreResponseContinuationSemantics*`) and the stale `coverage-hub-chat-process-node-result.mjs` script are physically deleted; live request/response contract bridges remain only for request-executor and finish/empty response classification."
+      - "Retired zero-consumer Anthropic alias public bridge (`buildAnthropicToolAliasMapWithNative`, `buildAnthropicToolAliasMapJson`, `chat_anthropic_tool_alias.rs`) and stale `coverage-hub-chat-process-anthropic-alias.mjs` are physically deleted; live Anthropic alias semantics remain Rust-internal under shared tool mapping and Hub req/resp mainline owners."
+      - "Retired provider-key analysis control surface (`virtual_router_provider_key.rs`, `parseProviderKeyJson`, TS `analyzeProviderKey` wrapper/parser/type) is physically deleted; do not restore an unused native provider-key parser."
+      - "Retired stop-message state codec control surface (`virtual_router_stop_message_state_codec.rs`, `serializeStopMessageStateJson`, `deserializeStopMessageStateJson`) is physically deleted; stopless state persistence now belongs to servertool-core contracts, not a standalone VR codec export."
+      - "Retired zero-consumer shared-conversion public wrappers (`hasValidThoughtSignature*`, `sanitizeThinkingBlock*`, `filterInvalidThinkingBlocks*`, `removeTrailingUnsignedThinkingBlocks*`, `normalizeTools*`) and Rust `thought_signature_validator.rs` are physically deleted; live tool normalization remains private to `hub_standardized_bridge`, and args schema normalization remains `normalizeArgsBySchemaJson`."
 
   - feature_id: hub.runtime_ingress_bridge
     status: active
-    summary: HubPipeline TS lifecycle bridge for native Virtual Router runtime ingress and deps wiring
+    summary: "HubPipeline TS lifecycle bridge for native Virtual Router runtime ingress and deps wiring"
+    owner_kind: ts_bridge
+    owner_scope: "HubPipeline TS lifecycle bridge for native Virtual Router runtime ingress and deps wiring"
     owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
     canonical_types:
       - HubPipeline
@@ -705,14 +741,16 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - TS owns only lifecycle glue that calls native Virtual Router runtime ingress/deps APIs.
-      - Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback.
-      - Route selection, health, cooldown, and dependency semantics remain in Rust/native owners.
-      - HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types.
+      - "TS owns only lifecycle glue that calls native Virtual Router runtime ingress/deps APIs."
+      - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
+      - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
+      - "HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types."
 
   - feature_id: hub.chat_envelope_type_surface
     status: active
-    summary: Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases
+    summary: "Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases"
+    owner_kind: ts_bridge
+    owner_scope: "Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases"
     owner_module: sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
     canonical_types:
       - AdapterContext
@@ -743,12 +781,14 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned.
-      - Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface.
+      - "ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned."
+      - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface."
 
   - feature_id: hub.stage_timing_observation
     status: active
-    summary: Hub stage timing observation glue for logs and runtime metadata top-summary attachment
+    summary: "Hub stage timing observation glue for logs and runtime metadata top-summary attachment"
+    owner_kind: ts_runtime_owner
+    owner_scope: "Hub stage timing observation glue for logs and runtime metadata top-summary attachment"
     owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
     canonical_types:
       - HubStageTopSummaryEntry
@@ -777,12 +817,14 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - Stage timing is observation/control metadata glue only; it must not mutate Hub data payloads.
-      - Test-only `measureHubStage` wrappers are retired; tests should exercise the production `logHubStageTiming` API directly.
+      - "Stage timing is observation/control metadata glue only; it must not mutate Hub data payloads."
+      - "Test-only `measureHubStage` wrappers are retired; tests should exercise the production `logHubStageTiming` API directly."
 
   - feature_id: hub.response_anthropic_client_projection
     status: active
-    summary: Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers
+    summary: "Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers"
+    owner_kind: rust_ssot
+    owner_scope: "Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
     canonical_types:
       - ProviderRespInbound01Raw
@@ -813,13 +855,15 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust.
-      - Hub response wrapper must not expose ignored `includeToolCallIds`; tool_call id projection shape is Rust-owned.
-      - Hub response wrapper option interfaces are internal only; `AnthropicResponseFromChatOptions` must not be exported from the response runtime barrel.
+      - "TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust."
+      - "Hub response wrapper must not expose ignored `includeToolCallIds`; tool_call id projection shape is Rust-owned."
+      - "Hub response wrapper option interfaces are internal only; `AnthropicResponseFromChatOptions` must not be exported from the response runtime barrel."
 
   - feature_id: hub.response_responses_chat_projection
     status: active
-    summary: OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers
+    summary: "OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers"
+    owner_kind: rust_ssot
+    owner_scope: "OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
     canonical_types:
       - ProviderRespInbound01Raw
@@ -856,14 +900,16 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust.
-      - Zero-consumer TS wrappers for `collectToolCallsFromResponses` and `resolveFinishReason` must remain physically deleted from the shared response utility surface.
-      - Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must remain physically deleted from TS/native bridge/Rust NAPI public surfaces.
-      - Server response converter must not run provider-specific bridge bypasses or post-bridge TS shape predicates to rebuild Responses payloads.
+      - "TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust."
+      - "Zero-consumer TS wrappers for `collectToolCallsFromResponses` and `resolveFinishReason` must remain physically deleted from the shared response utility surface."
+      - "Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must remain physically deleted from TS/native bridge/Rust NAPI public surfaces."
+      - "Server response converter must not run provider-specific bridge bypasses or post-bridge TS shape predicates to rebuild Responses payloads."
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active
-    summary: Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection
+    summary: "Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
+    owner_kind: rust_ssot
+    owner_scope: "Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubRespChatProcess03Governed
@@ -890,11 +936,13 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - Post-servertool runtime action planning, missing-executor error descriptors, and client projection decisions belong to Rust; TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors.
+      - "Post-servertool runtime action planning, missing-executor error descriptors, and client projection decisions belong to Rust; TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors."
 
   - feature_id: hub.response_responses_client_projection
     status: active
-    summary: OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore
+    summary: "OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
+    owner_kind: rust_ssot
+    owner_scope: "OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
     canonical_types:
       - HubRespOutbound04ClientSemantic
@@ -924,13 +972,15 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - JSON body and SSE frame client-visible Responses tool projection must stay Rust-owned; TS handler may parse SSE event/data boundaries, hold opaque native state, and write returned frames only.
-      - TS handler must not restore apply_patch function_call-to-custom_tool_call conversion, freeform argument parsing, delta aggregation, done de-duplication, frame heuristic routing, or projection fallback that writes the original frame on native failure.
-      - Client-visible response model and reasoning-effort restore must stay Rust-owned through `project_responses_client_payload_for_client`; TS must not parse metadata to patch response payloads.
+      - "JSON body and SSE frame client-visible Responses tool projection must stay Rust-owned; TS handler may parse SSE event/data boundaries, hold opaque native state, and write returned frames only."
+      - "TS handler must not restore apply_patch function_call-to-custom_tool_call conversion, freeform argument parsing, delta aggregation, done de-duplication, frame heuristic routing, or projection fallback that writes the original frame on native failure."
+      - "Client-visible response model and reasoning-effort restore must stay Rust-owned through `project_responses_client_payload_for_client`; TS must not parse metadata to patch response payloads."
 
   - feature_id: hub.response_provider_sse_materialization
     status: active
-    summary: Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry
+    summary: "Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry"
+    owner_kind: rust_ssot
+    owner_scope: "Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
     canonical_types:
       - ProviderRespInbound01Raw
@@ -958,13 +1008,15 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust.
-      - `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are zero-consumer callback signature detail aliases and must stay module-internal; public TS response entry remains `convertProviderResponse`.
-      - Dead provider-response-local `attachHubStageTopToContext` / `HubStageTopEntry` normalize/merge helpers were removed; hub stage top context attachment is owned by `hub-stage-timing.ts`.
+      - "TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust."
+      - "`ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are zero-consumer callback signature detail aliases and must stay module-internal; public TS response entry remains `convertProviderResponse`."
+      - "Dead provider-response-local `attachHubStageTopToContext` / `HubStageTopEntry` normalize/merge helpers were removed; hub stage top context attachment is owned by `hub-stage-timing.ts`."
 
   - feature_id: hub.response_provider_context_helpers
     status: active
-    summary: Provider response context helper resolution for client protocol, followup, display model, and client-facing request id
+    summary: "Provider response context helper resolution for client protocol, followup, display model, and client-facing request id"
+    owner_kind: rust_ssot
+    owner_scope: "Provider response context helper resolution for client protocol, followup, display model, and client-facing request id"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
     canonical_types:
       - HubRespOutbound04ClientSemantic
@@ -989,11 +1041,13 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - TS `provider-response-helpers.ts` is native invocation and field-name mapping only; clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser.
+      - "TS `provider-response-helpers.ts` is native invocation and field-name mapping only; clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser."
 
   - feature_id: tool.apply_patch_freeform_contract
     status: active
-    summary: apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance
+    summary: "apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance"
+    owner_kind: rust_ssot
+    owner_scope: "apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubReqChatProcess03Governed
@@ -1018,12 +1072,14 @@ owners:
       - npm run verify:apply-patch-regressions
     migration_target: rust
     notes:
-      - Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; no TS servertool handler may own apply_patch execution.
-      - Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers.
+      - "Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; no TS servertool handler may own apply_patch execution."
+      - "Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers."
 
   - feature_id: snapshot.stage_contract
     status: active
-    summary: --snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable
+    summary: "--snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable"
+    owner_kind: ts_runtime_owner
+    owner_scope: "--snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable"
     owner_module: src/utils
     canonical_types:
       - SnapshotStageSelector
@@ -1052,14 +1108,16 @@ owners:
       - npm run verify:architecture-snapshot-stage-owners
     migration_target: rust
     notes:
-      - Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch.
-      - Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written.
-      - Hub `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported.
-      - Hub snapshot recorder is TS observation glue only; payload normalization/trimming semantics must remain native-owned.
+      - "Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch."
+      - "Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written."
+      - "Hub `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported."
+      - "Hub snapshot recorder is TS observation glue only; payload normalization/trimming semantics must remain native-owned."
 
   - feature_id: responses.direct_tool_shape_contract
     status: active
-    summary: Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape
+    summary: "Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape"
+    owner_kind: rust_ssot
+    owner_scope: "Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - VrRoute04SelectedTarget
@@ -1090,16 +1148,18 @@ owners:
       - npm run test:ci:jest
     migration_target: rust
     notes:
-      - Direct/provider-direct/router-direct is same-protocol passthrough plus hooks only; live request body identity is preserved.
-      - Deleted old direct body builder, raw replay, route-params builder, and runtime tool-shape validator exports must stay deleted.
-      - Direct route decision may detect apply_patch for routing hooks, but must not validate Responses wire shape or force Hub relay for normal tools.
-      - same-protocol direct `apply_patch` declaration detection for servertool-mode relay must stay in Rust, not in `http-server/index.ts`.
-      - Direct must not read `metadata.__raw_request_body`, snapshot, context, or history to rebuild request payload.
-      - Historical tool-shape repair belongs in Hub/req_outbound compat, never in direct passthrough.
+      - "Direct/provider-direct/router-direct is same-protocol passthrough plus hooks only; live request body identity is preserved."
+      - "Deleted old direct body builder, raw replay, route-params builder, and runtime tool-shape validator exports must stay deleted."
+      - "Direct route decision may detect apply_patch for routing hooks, but must not validate Responses wire shape or force Hub relay for normal tools."
+      - "same-protocol direct `apply_patch` declaration detection for servertool-mode relay must stay in Rust, not in `http-server/index.ts`."
+      - "Direct must not read `metadata.__raw_request_body`, snapshot, context, or history to rebuild request payload."
+      - "Historical tool-shape repair belongs in Hub/req_outbound compat, never in direct passthrough."
 
   - feature_id: responses.request_compat_normalization
     status: active
-    summary: Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only
+    summary: "Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only"
+    owner_kind: rust_ssot
+    owner_scope: "Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1124,11 +1184,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - c4m/crs request compat and chat-style function tool normalization must remain in Rust stage3 compat; TS may only invoke `runReqOutboundStage3CompatJson`.
+      - "c4m/crs request compat and chat-style function tool normalization must remain in Rust stage3 compat; TS may only invoke `runReqOutboundStage3CompatJson`."
 
   - feature_id: responses.function_tool_normalization
     status: active
-    summary: chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust
+    summary: "chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1150,11 +1212,13 @@ owners:
       - npm run verify:responses-function-tool-normalization-rust-only
     migration_target: rust
     notes:
-      - chat-style `tools[].function` to Responses wire `tools[].name` normalization is shared Rust truth for c4m/crs and must not reappear in provider/server TS.
+      - "chat-style `tools[].function` to Responses wire `tools[].name` normalization is shared Rust truth for c4m/crs and must not reappear in provider/server TS."
 
   - feature_id: responses.tool_parameters_normalization
     status: active
-    summary: Responses function tool parameters must normalize to JSON object schema only in Rust
+    summary: "Responses function tool parameters must normalize to JSON object schema only in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "Responses function tool parameters must normalize to JSON object schema only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1175,11 +1239,13 @@ owners:
       - npm run verify:responses-tool-parameters-normalization-rust-only
     migration_target: rust
     notes:
-      - String/invalid tool parameter payloads must normalize into Responses wire object schema in Rust only; provider/server TS must not repair them.
+      - "String/invalid tool parameter payloads must normalize into Responses wire object schema in Rust only; provider/server TS must not repair them."
 
   - feature_id: responses.instructions_to_input_normalization
     status: active
-    summary: Responses instructions must normalize into leading system input_text only in Rust
+    summary: "Responses instructions must normalize into leading system input_text only in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "Responses instructions must normalize into leading system input_text only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1200,11 +1266,13 @@ owners:
       - npm run verify:responses-instructions-to-input-rust-only
     migration_target: rust
     notes:
-      - `instructions -> input[0]=system/input_text` plus HTML strip and truncation must stay in Rust only; provider/server TS must not reconstruct it.
+      - "`instructions -> input[0]=system/input_text` plus HTML strip and truncation must stay in Rust only; provider/server TS must not reconstruct it."
 
   - feature_id: responses.token_limit_field_normalization
     status: active
-    summary: Responses c4m token-limit compatibility fields must strip in Rust only
+    summary: "Responses c4m token-limit compatibility fields must strip in Rust only"
+    owner_kind: rust_ssot
+    owner_scope: "Responses c4m token-limit compatibility fields must strip in Rust only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1225,11 +1293,13 @@ owners:
       - npm run verify:responses-token-limit-field-normalization-rust-only
     migration_target: rust
     notes:
-      - `max_tokens/maxTokens/max_output_tokens/maxOutputTokens` stripping must stay in Rust only; provider/server TS must not sanitize these fields.
+      - "`max_tokens/maxTokens/max_output_tokens/maxOutputTokens` stripping must stay in Rust only; provider/server TS must not sanitize these fields."
 
   - feature_id: responses.c4m_request_compat
     status: active
-    summary: responses:c4m request compat must normalize instructions and token-limit fields only in Rust
+    summary: "responses:c4m request compat must normalize instructions and token-limit fields only in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "responses:c4m request compat must normalize instructions and token-limit fields only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1250,13 +1320,15 @@ owners:
       - npm run verify:responses-c4m-request-compat-rust-only
     migration_target: rust
     notes:
-      - Shared token-limit stripping truth lives in `responses.token_limit_field_normalization`.
-      - Shared instructions lift truth lives in `responses.instructions_to_input_normalization`.
-      - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
-      - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
+      - "Shared token-limit stripping truth lives in `responses.token_limit_field_normalization`."
+      - "Shared instructions lift truth lives in `responses.instructions_to_input_normalization`."
+      - "Shared function tool normalization truth lives in `responses.function_tool_normalization`."
+      - "Shared parameters normalization truth lives in `responses.tool_parameters_normalization`."
   - feature_id: responses.crs_request_compat
     status: active
-    summary: responses:crs request compat must strip temperature only in Rust
+    summary: "responses:crs request compat must strip temperature only in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "responses:crs request compat must strip temperature only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
     canonical_types:
       - HubReqOutbound05ProviderSemantic
@@ -1277,13 +1349,15 @@ owners:
       - npm run verify:responses-crs-request-compat-rust-only
     migration_target: rust
     notes:
-      - `temperature` stripping for crs is Rust-only.
-      - Shared function tool normalization truth lives in `responses.function_tool_normalization`.
-      - Shared parameters normalization truth lives in `responses.tool_parameters_normalization`.
+      - "`temperature` stripping for crs is Rust-only."
+      - "Shared function tool normalization truth lives in `responses.function_tool_normalization`."
+      - "Shared parameters normalization truth lives in `responses.tool_parameters_normalization`."
 
   - feature_id: config.path_resolution_surface
     status: active
-    summary: user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths
+    summary: "user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths"
+    owner_kind: ts_runtime_owner
+    owner_scope: "user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths"
     owner_module: src/config/config-paths.ts
     canonical_types:
       - ConfigPathOptions
@@ -1314,12 +1388,14 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Missing config is fail-fast; no fallback path result is allowed.
-      - Callers may pass explicit path, but auto-resolution truth stays in shared resolver.
+      - "Missing config is fail-fast; no fallback path result is allowed."
+      - "Callers may pass explicit path, but auto-resolution truth stays in shared resolver."
 
   - feature_id: config.user_config_codec
     status: active
-    summary: user config decode/parse truth for JSON and TOML lives in shared codec
+    summary: "user config decode/parse truth for JSON and TOML lives in shared codec"
+    owner_kind: ts_runtime_owner
+    owner_scope: "user config decode/parse truth for JSON and TOML lives in shared codec"
     owner_module: src/config/user-config-codec.ts
     canonical_types:
       - UserConfigFormat
@@ -1353,11 +1429,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - No caller may parse user config with raw JSON.parse/TOML logic outside codec owner.
+      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner."
 
   - feature_id: config.provider_config_codec
     status: active
-    summary: provider v2 config decode/parse truth for JSON and TOML lives in shared codec
+    summary: "provider v2 config decode/parse truth for JSON and TOML lives in shared codec"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider v2 config decode/parse truth for JSON and TOML lives in shared codec"
     owner_module: src/config/provider-config-codec.ts
     canonical_types:
       - ProviderConfigFormat
@@ -1385,11 +1463,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Provider config decode truth is shared; maintenance/admin must not raw-parse provider files.
+      - "Provider config decode truth is shared; maintenance/admin must not raw-parse provider files."
 
   - feature_id: config.user_config_materialization
     status: active
-    summary: runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain
+    summary: "runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain"
+    owner_kind: ts_runtime_owner
+    owner_scope: "runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain"
     owner_module: src/config/user-config-loader.ts
     canonical_types:
       - LoadedRouteCodexConfig
@@ -1414,11 +1494,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Runtime/config callers consume materialized config output; they must not rebuild VR/provider-profile semantics locally.
+      - "Runtime/config callers consume materialized config output; they must not rebuild VR/provider-profile semantics locally."
 
   - feature_id: config.user_config_write_surface
     status: active
-    summary: full user config write and scalar patch update live in shared writer; callers must not stringify config directly
+    summary: "full user config write and scalar patch update live in shared writer; callers must not stringify config directly"
+    owner_kind: ts_runtime_owner
+    owner_scope: "full user config write and scalar patch update live in shared writer; callers must not stringify config directly"
     owner_module: src/config/user-config-writer.ts
     canonical_types:
       - PersistedUserConfigFile
@@ -1442,11 +1524,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - User config writes must be atomic and must flow through one writer owner.
+      - "User config writes must be atomic and must flow through one writer owner."
 
   - feature_id: config.provider_config_write_surface
     status: active
-    summary: provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly
+    summary: "provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly"
     owner_module: src/config/provider-config-writer.ts
     canonical_types:
       - PersistedProviderConfigFile
@@ -1468,11 +1552,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Provider config writes must go through one writer owner regardless of JSON/TOML extension.
+      - "Provider config writes must go through one writer owner regardless of JSON/TOML extension."
 
   - feature_id: manager.routing_control_surface
     status: active
-    summary: routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only
+    summary: "routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only"
+    owner_kind: ts_runtime_owner
+    owner_scope: "routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
     canonical_types:
       - RoutingInstructionState
@@ -1499,11 +1585,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - Routing state persistence truth lives in Rust routing_state_store.rs; TS RoutingStateManagerModule is bridge.
-      - Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust.
+      - "Routing state persistence truth lives in Rust routing_state_store.rs; TS RoutingStateManagerModule is bridge."
+      - "Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust."
   - feature_id: manager.health_runtime
     status: active
-    summary: provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge
+    summary: "provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
     canonical_types:
       - ProviderHealthState
@@ -1534,11 +1622,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - Health truth (success/failure/runtime cooldown ladder) lives in Rust health.rs.
-      - Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics.
+      - "Health truth (success/failure/runtime cooldown ladder) lives in Rust health.rs."
+      - "Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics."
   - feature_id: manager.token_runtime
     status: active
-    summary: OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin
+    summary: "OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin"
+    owner_kind: ts_runtime_owner
+    owner_scope: "OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin"
     owner_module: src/token-daemon
     canonical_types:
       - TokenManagerLeaderInfo
@@ -1563,11 +1653,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: ts
     notes:
-      - token-daemon is the unique owner of token leader-lock + history-store semantics.
-      - Must not be co-located with quota/health/routing; forbids cross-module mutation.
+      - "token-daemon is the unique owner of token leader-lock + history-store semantics."
+      - "Must not be co-located with quota/health/routing; forbids cross-module mutation."
   - feature_id: manager.quota_lifecycle
     status: active
-    summary: provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface
+    summary: "provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface"
     owner_module: src/manager/quota
     canonical_types:
       - ProviderQuotaCenter
@@ -1590,11 +1682,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - lifecycle axis (hydration/persist/prune) != control axis (mutate quotas) of quota.unified_control_surface.
-      - Quota control mutations must still go through quota.unified_control_surface; this feature owns the persist side.
+      - "lifecycle axis (hydration/persist/prune) != control axis (mutate quotas) of quota.unified_control_surface."
+      - "Quota control mutations must still go through quota.unified_control_surface; this feature owns the persist side."
   - feature_id: daemon_admin.command_handlers
     status: active
-    summary: daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth
+    summary: "daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth"
+    owner_kind: server_projection
+    owner_scope: "daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth"
     owner_module: src/server/runtime/http-server/daemon-admin
     canonical_types:
       - DaemonAdminRouteOptions
@@ -1625,11 +1719,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: ts
     notes:
-      - daemon-admin is handler-family projection; it must not own quota/health/routing state.
-      - state mutators call into manager/* or llmswitch-core; daemon-admin only projects HTTP and auth.
+      - "daemon-admin is handler-family projection; it must not own quota/health/routing state."
+      - "state mutators call into manager/* or llmswitch-core; daemon-admin only projects HTTP and auth."
   - feature_id: server.http_runtime_entry
     status: active
-    summary: HTTP server entry / lifecycle / port registry / route wiring is a thin shell over handlers and manager modules
+    summary: "HTTP server entry / lifecycle / port registry / route wiring is a thin shell over handlers and manager modules"
+    owner_kind: ts_entry_shell
+    owner_scope: "HTTP server entry / lifecycle / port registry / route wiring is a thin shell over handlers and manager modules"
     owner_module: src/server/runtime/http-server
     canonical_types:
       - RouteCodexHttpServer
@@ -1652,10 +1748,12 @@ owners:
       - npm run verify:architecture-ci
     migration_target: ts
     notes:
-      - entry shell only: lifecycle, port registry, route wiring, restart runtime. No tool governance semantics.
+      - "entry shell only: lifecycle, port registry, route wiring, restart runtime. No tool governance semantics."
   - feature_id: server.models_capability_contract
     status: active
-    summary: `/v1/models` Codex-facing capability metadata for bare and provider-prefixed model aliases
+    summary: "`/v1/models` Codex-facing capability metadata for bare and provider-prefixed model aliases"
+    owner_kind: server_projection
+    owner_scope: "`/v1/models` Codex-facing capability metadata for bare and provider-prefixed model aliases"
     owner_module: src/server/runtime/http-server/routes.ts
     canonical_types:
       - ModelListItem
@@ -1679,11 +1777,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets`, `minimal_client_version`, modalities, reasoning, and tool metadata.
-      - Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields.
+      - "Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets`, `minimal_client_version`, modalities, reasoning, and tool metadata."
+      - "Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields."
   - feature_id: server.responses_handler_family
     status: active
-    summary: handlers/chat/config-admin/images/messages/responses project client protocol; Hub tool governance must stay out
+    summary: "handlers/chat/config-admin/images/messages/responses are HTTP transport adapters only; protocol semantics belong to Hub Pipeline"
+    owner_kind: server_projection
+    owner_scope: "handlers/chat/config-admin/images/messages/responses are HTTP transport adapters only; protocol semantics belong to Hub Pipeline"
     owner_module: src/server/handlers
     canonical_types:
       - HandlerContext
@@ -1708,13 +1808,118 @@ owners:
       - tests/server/handlers/chat-handler.started-sse-error.spec.ts
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
     required_gates:
+      - npm run verify:server-function-map-boundary
       - npm run verify:architecture-ci
     migration_target: ts
     notes:
-      - handler family is protocol projection; must delegate tool governance to llmswitch-core and never own it.
+      - "HTTP transport adapters only: request read/write, timeout, abort, headers, status, and logging are allowed."
+      - "Server handlers must do no protocol parsing, protocol conversion, protocol repair, or protocol projection; those belong to Hub Pipeline only."
+  - feature_id: server.responses_request_handler_bridge_surface
+    status: active
+    summary: "/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_kind: ts_bridge
+    owner_scope: "/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_module: src/modules/llmswitch/bridge/responses-request-bridge.ts
+    canonical_types:
+      - PrepareResponsesHandlerEntryForHttpArgs
+      - PrepareResponsesHandlerEntryForHttpResult
+    canonical_builders:
+      - finalizeResponsesHandlerPayloadForHttp
+      - prepareResponsesHandlerEntryForHttp
+      - captureResponsesRequestContextForHttp
+      - recordResponsesResponseForHttp
+      - clearResponsesConversationByRequestIdForHttp
+      - readResponsesSessionIdFromHttp
+      - readResponsesConversationIdFromHttp
+      - shouldPersistResponsesConversationForHttp
+      - readResponsesResponseIdFromHttp
+    allowed_paths:
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/server/handlers/responses-handler.ts
+      - src/modules/llmswitch/bridge.ts
+      - src/modules/llmswitch/bridge/index.ts
+      - docs/architecture
+      - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
+      - scripts/architecture/verify-server-function-map-boundary.mjs
+    forbidden_paths:
+      - src/server/handlers/handler-response-utils.ts
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/rust-core
+    forbidden_mentions_allowlist:
+      - captureResponsesRequestContextForHttp
+      - recordResponsesResponseForHttp
+      - clearResponsesConversationByRequestIdForHttp
+    required_tests:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+    required_gates:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "Request bridge may pass opaque payload, requestId, scope ids, and conversation-store IO only."
+      - "TS bridge must do no protocol parsing, protocol conversion, tool-shape normalization, or submit/protocol branching in TS."
+      - "Responses handler must not locally force `payload.stream = true` or call `applySystemPromptOverride(...)`; those request mutations may only sit behind the single request bridge surface until native owner replaces them."
+      - "Responses handler must not keep local session/conversation id readers, persistence eligibility checks, or response-id parsing; those request-side continuation helpers must stay behind the single request bridge surface."
+  - feature_id: server.responses_response_handler_bridge_surface
+    status: active
+    summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_kind: ts_bridge
+    owner_scope: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
+    canonical_types:
+      - ResponsesSseClientProjectionState
+    canonical_builders:
+      - assertDirectPassthroughResponsesSseFrameForHttp
+      - buildClientSseKeepaliveFrameForHttp
+      - isDirectPassthroughTransportKeepaliveFrameForHttp
+      - shouldDropClientSseFrameForHttp
+      - normalizeResponsesClientPayloadForHttp
+      - normalizeResponsesSseFrameForClientForHttp
+      - updateResponsesContractProbeFromSseChunkForHttp
+      - inspectResponsesTerminalStateFromSseChunkForHttp
+      - buildResponsesTerminalSseFramesFromProbeForHttp
+      - isToolCallContinuationResponseForHttp
+      - captureResponsesRequestContextForHttpProjection
+      - rebindResponsesConversationRequestIdForHttp
+      - clearResponsesConversationByRequestIdForHttpProjection
+      - recordResponsesResponseForHttpProjection
+      - finalizeResponsesConversationRequestRetentionForHttp
+      - persistResponsesConversationLifecycleForHttp
+      - createResponsesJsonToSseConverterForHttp
+      - buildResponsesPayloadFromChatForHttp
+      - projectResponsesClientPayloadForClientForHttp
+      - projectResponsesSseFrameForClientForHttp
+    allowed_paths:
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/server/handlers/handler-response-utils.ts
+      - src/modules/llmswitch/bridge.ts
+      - src/modules/llmswitch/bridge/index.ts
+      - docs/architecture
+      - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
+      - scripts/architecture/verify-server-function-map-boundary.mjs
+    forbidden_paths:
+      - src/server/handlers/responses-handler.ts
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/rust-core
+    required_tests:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+    required_gates:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "Response bridge may pass opaque SSE/body handoff state, request ids, and conversation-store IO only."
+      - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
+      - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
+      - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
+      - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
   - feature_id: cli.command_surface
     status: active
-    summary: CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics
+    summary: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"
+    owner_kind: ts_entry_shell
+    owner_scope: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"
     owner_module: src/cli/commands
     canonical_types:
       - CliCommandRegistrar
@@ -1749,11 +1954,13 @@ owners:
       - npm run verify:architecture-ci
     migration_target: ts
     notes:
-      - CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules.
+      - "CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules."
 
   - feature_id: sse.codec_registry_surface
     status: active
-    summary: SSE codec registry and public barrel dispatch surface; no payload repair or provider policy
+    summary: "SSE codec registry and public barrel dispatch surface; no payload repair or provider policy"
+    owner_kind: server_projection
+    owner_scope: "SSE codec registry and public barrel dispatch surface; no payload repair or provider policy"
     owner_module: sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
     canonical_types:
       - SseProtocol
@@ -1779,11 +1986,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - Registry dispatches explicit protocol codecs only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection.
+      - "Registry dispatches explicit protocol codecs only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection."
 
   - feature_id: sse.stream_parse_boundary
     status: active
-    summary: SSE wire parser boundary backed by native line/event parsers
+    summary: "SSE wire parser boundary backed by native line/event parsers"
+    owner_kind: server_projection
+    owner_scope: "SSE wire parser boundary backed by native line/event parsers"
     owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
     canonical_types:
       - RawSseEvent
@@ -1809,11 +2018,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - TS parser wrapper may only call native parser helpers and maintain stream buffering; semantic recovery must be explicit contract, not silent success truth.
+      - "TS parser wrapper may only call native parser helpers and maintain stream buffering; semantic recovery must be explicit contract, not silent success truth."
 
   - feature_id: sse.responses_decode_projection
     status: active
-    summary: OpenAI Responses SSE event stream to Responses JSON projection
+    summary: "OpenAI Responses SSE event stream to Responses JSON projection"
+    owner_kind: server_projection
+    owner_scope: "OpenAI Responses SSE event stream to Responses JSON projection"
     owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
     canonical_types:
       - ResponsesSseEvent
@@ -1839,11 +2050,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Decode projection may aggregate provider SSE into Responses JSON and surface decode failures; it must not own provider retry/reroute policy, Hub tool governance, or client frame repair.
+      - "Decode projection may aggregate provider SSE into Responses JSON and surface decode failures; it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
 
   - feature_id: sse.responses_encode_projection
     status: active
-    summary: Responses JSON to ordered client-visible Responses SSE event projection
+    summary: "Responses JSON to ordered client-visible Responses SSE event projection"
+    owner_kind: server_projection
+    owner_scope: "Responses JSON to ordered client-visible Responses SSE event projection"
     owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
     canonical_types:
       - ResponsesSseEvent
@@ -1871,11 +2084,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Encode projection emits client protocol frames only. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden.
+      - "Encode projection emits client protocol frames only. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden."
 
   - feature_id: sse.chat_stream_projection
     status: active
-    summary: OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas
+    summary: "OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas"
+    owner_kind: server_projection
+    owner_scope: "OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas"
     owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
     canonical_types:
       - ChatCompletionResponse
@@ -1900,11 +2115,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance.
+      - "Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance."
 
   - feature_id: sse.anthropic_gemini_stream_projection
     status: active
-    summary: Anthropic Messages and Gemini Chat protocol-specific SSE projection owners
+    summary: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners"
+    owner_kind: server_projection
+    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners"
     owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
     canonical_types:
       - AnthropicSseEvent
@@ -1935,11 +2152,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches.
+      - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches."
 
   - feature_id: error.pipeline_contract
     status: active
-    summary: ErrorErr01-06 provider/runtime error chain contract and architecture gate
+    summary: "ErrorErr01-06 provider/runtime error chain contract and architecture gate"
+    owner_kind: provider_runtime
+    owner_scope: "ErrorErr01-06 provider/runtime error chain contract and architecture gate"
     owner_module: src/providers/core/utils/provider-error-reporter.ts
     canonical_types:
       - ErrorErr01SourceRaised
@@ -1974,13 +2193,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Error is the ErrorErr01-06 contract module, not a second Error Center.
-      - Provider/runtime/direct/executor modules may raise, capture, or consume decisions only; router policy remains ErrorErr04 truth.
-      - Direct passthrough must report errors through ErrorErr hooks and rethrow without rewriting request/response payloads.
+      - "Error is the ErrorErr01-06 contract module, not a second Error Center."
+      - "Provider/runtime/direct/executor modules may raise, capture, or consume decisions only; router policy remains ErrorErr04 truth."
+      - "Direct passthrough must report errors through ErrorErr hooks and rethrow without rewriting request/response payloads."
 
   - feature_id: error.execution_decision_consumer
     status: active
-    summary: Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions
+    summary: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
+    owner_kind: ts_runtime_owner
+    owner_scope: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
     owner_module: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
     canonical_types:
       - RequestExecutorErrorErr04RouterPolicyEnvelope
@@ -2011,11 +2232,13 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - Request/direct executor may consume ErrorErr04 policy decisions and execute retry/reroute/fail-fast plans, but must not classify provider errors independently.
+      - "Request/direct executor may consume ErrorErr04 policy decisions and execute retry/reroute/fail-fast plans, but must not classify provider errors independently."
 
   - feature_id: error.client_projection
     status: active
-    summary: ErrorErr06 client-visible HTTP/SSE error projection
+    summary: "ErrorErr06 client-visible HTTP/SSE error projection"
+    owner_kind: server_projection
+    owner_scope: "ErrorErr06 client-visible HTTP/SSE error projection"
     owner_module: src/server/utils/http-error-mapper.ts
     canonical_types:
       - ErrorErr05ExecutionDecision
@@ -2048,4 +2271,4 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - ErrorErr06 may project client-visible error payloads only; it must not feed provider retry/reroute/cooldown policy.
+      - "ErrorErr06 may project client-visible error payloads only; it must not feed provider retry/reroute/cooldown policy."

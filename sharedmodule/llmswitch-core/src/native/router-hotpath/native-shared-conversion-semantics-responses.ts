@@ -1,3 +1,4 @@
+import { parseChatProcessMediaStripPayload } from './native-router-hotpath-analysis.js';
 import {
   failNativeRequired,
   isNativeDisabledByEnv
@@ -327,6 +328,36 @@ export function materializeResponsesContinuationPayloadWithNative(
       return fail('empty result');
     }
     return parseNullableResponsesConversationResumeResult(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function stripResponsesStoredContextInputMediaWithNative(
+  inputEntries: unknown,
+  placeholderText = '[Image omitted]'
+): { changed: boolean; messages: unknown[] } {
+  const capability = 'stripResponsesStoredContextInputMediaJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ changed: boolean; messages: unknown[] }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputEntriesJson = safeStringify(inputEntries ?? []);
+  if (!inputEntriesJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputEntriesJson, String(placeholderText || '[Image omitted]'));
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseChatProcessMediaStripPayload(raw) ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

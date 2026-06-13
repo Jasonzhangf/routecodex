@@ -341,7 +341,6 @@ function emitRealtimeSessionRequestLog(args: {
   const routePool = formatRoutePool(args.event.routeName, args.event.poolId);
   const provider = formatProvider(args.event.providerKey, args.event.model);
   const requestLabel = shortRequestId(args.event.requestId);
-  const finishReason = args.event.finishReason ?? 'unknown';
   const sessionAgg = sessionRollups.get(args.sessionId);
   const calls = sessionAgg?.usageCalls ?? 0;
   const retries = sessionAgg?.totalRetryCount ?? 0;
@@ -425,9 +424,7 @@ function emitRealtimeSessionRequestLog(args: {
     if (reqUsage.totalTokens !== undefined) tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
     parts.push(`usage(${tokParts.join(' ')})`);
   }
-  console.log(
-    `${colorize(parts.join(' '), sessionColor)} ${ANSI_WHITE}finish_reason=${finishReason}${ANSI_RESET}`
-  );
+  console.log(colorize(parts.join(' '), sessionColor));
 }
 
 function emitRealtimeVirtualRouterHitLog(args: {

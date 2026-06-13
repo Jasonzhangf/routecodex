@@ -28,6 +28,8 @@ async function assertFileExists(filePath, message) {
 async function main() {
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
+  const STOPLESS_PROMPT_SRC = path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/assets');
+  const STOPLESS_PROMPT_DIST = path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/servertool/assets');
   const CAMOUFOX_SRC = path.resolve(process.cwd(), 'scripts/camoufox');
   const CAMOUFOX_DIST = path.resolve(process.cwd(), 'dist/scripts/camoufox');
   const DEEPSEEK_SRC = path.resolve(process.cwd(), 'scripts/deepseek');
@@ -51,6 +53,20 @@ async function main() {
       }
     } catch (promptErr) {
       if (promptErr && promptErr.code !== 'ENOENT') throw promptErr;
+    }
+
+    try {
+      for await (const file of walk(STOPLESS_PROMPT_SRC)) {
+        const stats = await fs.stat(file);
+        if (stats.isFile()) {
+          const rel = path.relative(STOPLESS_PROMPT_SRC, file);
+          const dest = path.join(STOPLESS_PROMPT_DIST, rel);
+          await ensureDir(path.dirname(dest));
+          await fs.copyFile(file, dest);
+        }
+      }
+    } catch (stoplessPromptErr) {
+      if (stoplessPromptErr && stoplessPromptErr.code !== 'ENOENT') throw stoplessPromptErr;
     }
     // 不再复制 provider compat 资产；兼容层由 sharedmodule/llmswitch-core 提供
     try {

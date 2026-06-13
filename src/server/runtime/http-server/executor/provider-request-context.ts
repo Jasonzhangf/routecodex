@@ -31,10 +31,16 @@ export function resolveProviderRequestContext(options: {
     mergedMetadata
   } = options;
   const providerProtocol = handle.providerProtocol || (target.outboundProfile as ProviderProtocol);
-  const metadataModel =
+  const targetMetadata =
     mergedMetadata?.target && typeof mergedMetadata.target === 'object'
-      ? (mergedMetadata.target as Record<string, unknown>).clientModelId
+      ? (mergedMetadata.target as Record<string, unknown>)
       : undefined;
+  const metadataModel =
+    typeof targetMetadata?.modelId === 'string' && targetMetadata.modelId.trim()
+      ? targetMetadata.modelId.trim()
+      : typeof targetMetadata?.clientModelId === 'string' && targetMetadata.clientModelId.trim()
+        ? targetMetadata.clientModelId.trim()
+        : undefined;
   const payloadRecord =
     providerPayload && typeof providerPayload === 'object'
       ? (providerPayload as Record<string, unknown>)

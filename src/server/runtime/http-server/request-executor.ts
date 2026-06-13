@@ -63,7 +63,9 @@ import {
   isPoolExhaustedPipelineError,
   POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   mergeMetadataPreservingDefined,
+  resolvePoolCooldownWaitMs,
   resolvePoolExhaustedBackoffMs,
+  shouldBlockSingletonRoutePoolExhaustion,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -129,6 +131,10 @@ function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runH
     || readString(target?.routeName)
     || readString(target?.route)
     || readString(target?.routeId);
+}
+
+function shouldRebindResponsesConversationForEntry(entryEndpoint: string | undefined): boolean {
+  return typeof entryEndpoint === 'string' && entryEndpoint.startsWith('/v1/responses');
 }
 import {
   throwIfClientAbortSignalAborted,
@@ -577,6 +583,40 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
           if (isPoolExhaustedPipelineError(pipelineError)) {
+            const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
+            if (shouldBlockSingletonRoutePoolExhaustion({
+              pipelineError,
+              initialRoutePool,
+              explicitSingletonPool: blockingRecoverableRouteHoldState?.explicitSingletonPool === true,
+              excludedProviderCount: excludedProviderKeys.size
+            })) {
+              const waitMs = cooldownWaitMs ?? resolvePoolExhaustedBackoffMs(poolExhaustedBackoffAttempts);
+              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
+                waitMs,
+                candidateProviderCount:
+                  typeof ((pipelineError as { details?: { candidateProviderCount?: unknown } }).details?.candidateProviderCount) === 'number'
+                    ? (pipelineError as { details?: { candidateProviderCount?: number } }).details?.candidateProviderCount
+                    : undefined,
+                routePoolSize: initialRoutePool?.length ?? 0,
+                excludedProviderKeys: Array.from(excludedProviderKeys),
+                lastError: lastError instanceof Error ? lastError.message : (lastError ? String(lastError) : undefined),
+                poolError: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? 'Unknown error')
+              });
+              await waitWithClientAbortSignal(waitMs, clientAbortSignal, logRequestExecutorNonBlockingError);
+              logStage('provider.route_pool_cooldown_wait.completed', providerRequestId, {
+                waitMs,
+                candidateProviderCount:
+                  typeof ((pipelineError as { details?: { candidateProviderCount?: unknown } }).details?.candidateProviderCount) === 'number'
+                    ? (pipelineError as { details?: { candidateProviderCount?: number } }).details?.candidateProviderCount
+                    : undefined,
+                routePoolSize: initialRoutePool?.length ?? 0
+              });
+              excludedProviderKeys.clear();
+              blockingRecoverableRouteHoldState = null;
+              retryProviderKeyForNextAttempt = undefined;
+              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
+              continue;
+            }
             if (poolExhaustedBackoffAttempts < POOL_EXHAUSTED_BACKOFF_ATTEMPTS) {
               const waitMs = resolvePoolExhaustedBackoffMs(poolExhaustedBackoffAttempts);
               poolExhaustedBackoffAttempts += 1;
@@ -733,17 +773,19 @@ export class HubRequestExecutor implements RequestExecutor {
         const previousRequestId = input.requestId;
         if (providerContext.requestId !== input.requestId) {
           input.requestId = providerContext.requestId;
-          try {
-            await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
-          } catch (error) {
-            logStage('responsesConversation.rebindRequestId.error', input.requestId, {
-              previousRequestId,
-              providerKey: target.providerKey,
-              runtimeKey,
-              message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
-              attempt
-            });
-            throw error;
+          if (shouldRebindResponsesConversationForEntry(input.entryEndpoint)) {
+            try {
+              await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
+            } catch (error) {
+              logStage('responsesConversation.rebindRequestId.error', input.requestId, {
+                previousRequestId,
+                providerKey: target.providerKey,
+                runtimeKey,
+                message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+                attempt
+              });
+              throw error;
+            }
           }
         }
         logStage('provider.context_resolve.completed', input.requestId, {

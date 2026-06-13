@@ -6,7 +6,7 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { colorizeRequestLog, formatHighlightedFinishReasonLabel } from '../utils/request-log-color.js';
-import { deriveFinishReason } from '../utils/finish-reason.js';
+import { deriveFinishReasonWithVisibleSuccessFallback } from '../utils/finish-reason.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { formatRequestTimingSummary } from '../utils/stage-logger.js';
 import {
@@ -264,8 +264,8 @@ export function logRequestComplete(
   }
   const resolvedId = formatRequestId(requestId);
   const timestamp = formatTimestamp();
-  const finishReason = deriveFinishReason(body);
-  const finishReasonLabel = formatHighlightedFinishReasonLabel(finishReason);
+  const finishReason = deriveFinishReasonWithVisibleSuccessFallback(body);
+  const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
   const timingSuffix = options?.preserveTimingForUsage
     ? ''
     : formatRequestTimingSummary(resolvedId, { terminal: true });
@@ -299,7 +299,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const timestamp = formatTimestamp();
   const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
   const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
-  console.error(colorizeRequestLog(line, resolvedId) || line);
+  console.error(colorizeRequestLog(line, resolvedId, undefined, { isError: true }) || line);
   if (rawMeta && shouldLogHttpErrorMeta()) {
     const publicRawMeta = buildPublicRawErrorMeta({
       rawMeta,
@@ -313,7 +313,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
       rawErrorSnippet: publicRawMeta.rawErrorSnippet
     };
     const metaLine = `[http.error.meta] ${JSON.stringify(payload)}`;
-    console.error(colorizeRequestLog(metaLine, resolvedId) || metaLine);
+    console.error(colorizeRequestLog(metaLine, resolvedId, undefined, { isError: true }) || metaLine);
   }
 }
 

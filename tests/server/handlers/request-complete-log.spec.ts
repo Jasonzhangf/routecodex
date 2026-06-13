@@ -4,7 +4,7 @@ import { STREAM_LOG_FINISH_REASON_KEY } from '../../../src/server/utils/finish-r
 
 describe('logRequestComplete', () => {
   const originalMode = process.env.ROUTECODEX_HTTP_LOG_VERBOSE;
-  const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  const logSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
   beforeEach(() => {
     process.env.ROUTECODEX_HTTP_LOG_VERBOSE = '1';
@@ -30,7 +30,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=stop\x1b[0m'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=\x1b[97m200\x1b[0m'));
   });
 
   it('maps anthropic stop_reason into finish_reason', () => {
@@ -39,7 +39,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=tool_calls\x1b[0m'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=\x1b[97m200\x1b[0m'));
   });
 
   it('derives tool_calls for responses required_action payloads', () => {

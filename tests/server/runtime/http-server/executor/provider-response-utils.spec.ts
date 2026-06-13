@@ -3,6 +3,7 @@ import {
   buildProviderLabel,
   normalizeProviderResponse
 } from '../../../../../src/server/runtime/http-server/executor/provider-response-utils';
+import { resolveProviderRequestContext } from '../../../../../src/server/runtime/http-server/executor/provider-request-context';
 
 describe('buildProviderLabel', () => {
   it('deduplicates model suffix when providerKey already ends with model', () => {
@@ -39,5 +40,32 @@ describe('buildProviderLabel', () => {
         }
       }
     });
+  });
+
+  it('prefers target modelId over clientModelId for provider request context label', () => {
+    const resolved = resolveProviderRequestContext({
+      providerRequestId: 'req_test',
+      entryEndpoint: '/v1/responses',
+      target: {
+        providerKey: 'XL.key1.gpt-5.4',
+        outboundProfile: 'openai-responses'
+      },
+      handle: {
+        providerProtocol: 'openai-responses',
+        providerId: 'XL'
+      } as never,
+      runtimeKey: 'XL',
+      providerPayload: {},
+      mergedMetadata: {
+        target: {
+          modelId: 'gpt-5.4',
+          clientModelId: 'gpt-5.5'
+        }
+      }
+    });
+
+    expect(resolved.providerModel).toBe('gpt-5.4');
+    expect(resolved.providerLabel).toBe('XL.key1.gpt-5.4');
+    expect(resolved.requestId).toBe('req_test');
   });
 });

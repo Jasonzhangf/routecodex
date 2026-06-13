@@ -117,6 +117,39 @@ function extractApplyPatchArgs(doc, { allowRegressionOriginalArgs } = { allowReg
   return out;
 }
 
+function isCurrentApplyPatchContractArgs(args) {
+  if (typeof args !== 'string') return false;
+  const trimmed = args.trim();
+  if (!trimmed || trimmed === '{}') return false;
+  if (trimmed.includes('*** Begin Patch') || trimmed.includes('*** Update File:') || trimmed.includes('*** Add File:') || trimmed.includes('diff --git')) {
+    return true;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return false;
+    }
+    const nestedInput = parsed.input && typeof parsed.input === 'object' && !Array.isArray(parsed.input)
+      ? parsed.input
+      : null;
+    return typeof parsed.patch === 'string'
+      || typeof parsed.input === 'string'
+      || typeof parsed.filePath === 'string'
+      || typeof parsed.file_path === 'string'
+      || typeof parsed.fileContent === 'string'
+      || typeof parsed.file_content === 'string'
+      || (nestedInput
+        && (typeof nestedInput.patch === 'string'
+          || typeof nestedInput.input === 'string'
+          || typeof nestedInput.filePath === 'string'
+          || typeof nestedInput.file_path === 'string'
+          || typeof nestedInput.fileContent === 'string'
+          || typeof nestedInput.file_content === 'string'));
+  } catch {
+    return false;
+  }
+}
+
 function isContextMismatchReason(reason) {
   // We only capture/repair shape issues; context mismatches are not actionable here.
   // Keep this conservative: if a new reason is introduced, we still capture it unless
@@ -227,7 +260,8 @@ async function scanRoot(label, rootDir, validateToolCall, capture) {
     }
 
     const isRegressionFile = filePath.includes(`${path.sep}_regressions${path.sep}`);
-    const argsList = extractApplyPatchArgs(doc, { allowRegressionOriginalArgs: isRegressionFile });
+    const argsList = extractApplyPatchArgs(doc, { allowRegressionOriginalArgs: isRegressionFile })
+      .filter((args) => isRegressionFile || isCurrentApplyPatchContractArgs(args));
     if (!argsList.length) continue;
 
     const dedup = Array.from(new Set(argsList));

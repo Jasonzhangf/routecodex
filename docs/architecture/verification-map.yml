@@ -20,8 +20,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - If provider/client protocol shape changes, add targeted followup entry smoke.
-      - Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers.
+      - "If provider/client protocol shape changes, add targeted followup entry smoke."
+      - "Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers."
 
   - feature_id: hub.servertool_pending_session
     change_risk: high
@@ -43,7 +43,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns pending-session and pending-injection persist planning; TS may only execute env/file/save IO from native plans.
+      - "servertool-core owns pending-session and pending-injection persist planning; TS may only execute env/file/save IO from native plans."
 
   - feature_id: hub.servertool_pre_command_hooks
     change_risk: medium
@@ -62,7 +62,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO.
+      - "servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO."
 
   - feature_id: hub.servertool_engine_selection
     change_risk: medium
@@ -81,7 +81,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns primary auto-hook first-pass and rerun selection; TS may only execute runEngine calls from native plans.
+      - "servertool-core owns primary auto-hook first-pass and rerun selection; TS may only execute runEngine calls from native plans."
 
   - feature_id: hub.servertool_cli_projection
     change_risk: high
@@ -101,10 +101,10 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter.
-      - Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs.
-      - stop_message_auto lifecycle must prove CLI input/output carries flowId, repeatCount, and maxRepeats only; continuationPrompt/schema guidance/prompt preview/full input must not be client-visible.
-      - `servertool_fixture` must be dispatched by Rust CLI projection without restoring the deleted TS fixture handler.
+      - "Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter."
+      - "Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs."
+      - "stop_message_auto lifecycle must prove CLI input/output carries flowId, repeatCount, and maxRepeats only; continuationPrompt/schema guidance/prompt preview/full input must not be client-visible."
+      - "`servertool_fixture` must be dispatched by Rust CLI projection without restoring the deleted TS fixture handler."
 
   - feature_id: hub.servertool_stopless_cli_projection_seed
     change_risk: high
@@ -124,8 +124,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns stopless CLI projection seed planning; TS engine may only pass execution/finalChatResponse into native and consume the planned seed.
-      - Focused Rust gates: `cargo test -p servertool-core stop_message_cli_projection_seed --lib -- --nocapture` and `cargo test -p router-hotpath-napi plans_stop_message_cli_projection_seed_via_servertool_core_bridge --lib -- --nocapture`.
+      - "servertool-core owns stopless CLI projection seed planning; TS engine may only pass execution/finalChatResponse into native and consume the planned seed."
+      - "Focused Rust gates: `cargo test -p servertool-core stop_message_cli_projection_seed --lib -- --nocapture` and `cargo test -p router-hotpath-napi plans_stop_message_cli_projection_seed_via_servertool_core_bridge --lib -- --nocapture`."
 
   - feature_id: hub.servertool_flow_presentation
     change_risk: medium
@@ -143,7 +143,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; TS is a native wrapper only.
+      - "Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; TS is a native wrapper only."
 
   - feature_id: hub.servertool_loop_warning
     change_risk: high
@@ -162,7 +162,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Rust/followup-core owns warning text and repeat-count policy; TS must stay native payload/callback glue.
+      - "Rust/followup-core owns warning text and repeat-count policy; TS must stay native payload/callback glue."
 
   - feature_id: hub.servertool_orchestration_policy
     change_risk: high
@@ -184,7 +184,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns timeout watcher, client disconnect detection/watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans.
+      - "servertool-core owns timeout watcher, client disconnect detection/watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans."
 
   - feature_id: hub.servertool_backend_route_runtime
     change_risk: high
@@ -208,7 +208,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans.
+      - "servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans."
 
   - feature_id: error.provider_failure_policy
     change_risk: high
@@ -225,7 +225,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Run broader executor retry stack when classification semantics change.
+      - "Run broader executor retry stack when classification semantics change."
 
   - feature_id: error.backoff_action_queue
     change_risk: high
@@ -248,8 +248,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility.
-      - Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests.
+      - "Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
   - feature_id: vr.route_selection
     change_risk: high
@@ -267,7 +267,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - If route instruction parsing changes, include routing instruction regression set.
+      - "If route instruction parsing changes, include routing instruction regression set."
 
   - feature_id: quota.unified_control_surface
     change_risk: medium
@@ -284,7 +284,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint.
+      - "daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint."
 
   - feature_id: vr.route_availability_floor
     change_risk: high
@@ -302,7 +302,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Empty-pool closeout belongs to Rust VR selection only; no TS-side recovery or fallback is allowed.
+      - "Empty-pool closeout belongs to Rust VR selection only; no TS-side recovery or fallback is allowed."
 
   - feature_id: vr.provider_forwarder_runtime
     change_risk: high
@@ -320,8 +320,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics.
-      - Startup cooldown truth must give each real target one selected hit and must not be consumed by availability scans.
+      - "ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics."
+      - "Startup cooldown truth must give each real target one selected hit and must not be consumed by availability scans."
 
   - feature_id: hub.metadata_boundary
     change_risk: high
@@ -347,41 +347,41 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Any provider outbound metadata change must rerun provider metadata boundary suite.
-      - Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node.
-      - Retired image attachment metadata native export/module must stay deleted; media metadata semantics must use live Hub/Rust mainline owners only.
-      - Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) must stay deleted; do not restore standalone hint/reasoning-alias/response-governance/default-rules control surfaces.
-      - Retired standalone tool-governance native export/file (`governRequestJson`, `hub_tool_governance_semantics.rs`) must stay deleted; request/tool governance must remain in the active Hub Rust mainline owners.
-      - Retired zero-consumer response-tool NAPI export (`collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json`) must stay deleted; the later requested-tool public bridge deletion also keeps the private collector chain absent.
-      - Retired zero-consumer response-governance utility public bridges must stay deleted: `buildWebSearchToolAppendOperations*`, `prepareRespProcessToolGovernancePayload*`, `filterOutExecutedServerToolCalls*`, and `resolveRequestedToolNames*` cannot return as TS/NAPI public surfaces without a live runtime consumer and map update; old Rust `servertool_skeleton/finalize_strip.rs` bridge module must also stay absent. Rust-internal web_search append helper remains allowed only for req-process servertool injection.
-      - Retired zero-consumer servertool utility public bridges must stay deleted: `tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, `webSearchFindArrayWithNative`, continuation helpers, plus standalone NAPI `planChatServertoolOrchestrationBundleJson`, `resolveServertoolFollowupFlowProfileJson`, `webSearchFindArrayJson`, `runApplyPatchJson`, and continuation surfaces cannot return without a live runtime consumer and map update.
-      - Retired zero-consumer req_inbound standalone public bridges must stay deleted: `mapReqInboundResumeToolOutputsDetailedWithNative`, `resolveClientInjectReadyWithNative`, `normalizeContextCaptureLabelWithNative`, `shouldRunHubChatProcessWithNative`, `isShellLikeToolNameTokenWithNative`, `resolveReqInboundServerToolFollowupSnapshotWithNative`, `augmentReqInboundContextSnapshotWithNative`, `normalizeReqInboundToolCallIdStyleWithNative`, matching standalone NAPI JSON exports, and stale `coverage-hub-req-inbound-semantic-lift.mjs` cannot return without a live runtime consumer and map update.
-      - Retired zero-consumer req_inbound reasoning / semantic-lift public bridges must stay deleted: `normalizeReqInboundReasoningPayloadWithNative`, `normalizeReasoningPayloadV2WithNative`, `shouldNormalizeReasoningPayloadWithNative`, `applyReqInboundSemanticLiftWithNative` and matching standalone NAPI JSON exports `normalize_req_inbound_reasoning_payload_json`, `should_normalize_reasoning_payload_json`, `normalize_reasoning_payload_v2_json`, `apply_req_inbound_semantic_lift_json` cannot return as standalone TS/NAPI control surfaces without a live runtime consumer plus owner/feature map update. Rust keeps only the internal `apply_req_inbound_semantic_lift` helper called by `hub_pipeline_lib::engine`, plus lower-level `normalize_reasoning_in_*` / `normalize_resp_inbound_reasoning_payload_json` helpers that stay Rust-internal.
-      - Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) must stay deleted; do not expose internal VR cleanup/hashline helpers as standalone NAPI surfaces without runtime consumers.
-      - Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) must stay deleted; do not restore standalone passthrough wrappers without a live TS/runtime consumer and owner map update.
-      - Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) must stay deleted; do not restore per-stage public bridge APIs after total Hub Pipeline Rust entry closeout.
-      - Retired zero-consumer Hub orchestration public wrappers and standalone NAPI JSON exports must stay deleted; internal Rust helper functions may remain private to active Hub mainline/tests, but aggregate TS re-export and required-export gate must not preserve dead public surfaces.
-      - Retired zero-consumer session header helper NAPI wrappers must stay deleted; `extractSessionIdentifiersJson` is the only public session identifier bridge, and header helpers remain private Rust implementation details.
-      - Retired mappable-semantics public wrapper must stay deleted; process-mode mappable key detection is internal Rust logic, not standalone TS/NAPI control surface.
-      - Retired chat-process sanitize public wrapper must stay deleted; chat-process message sanitization remains private Rust request-governance/responses-context internals, not a standalone TS/NAPI bridge.
-      - Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update.
-      - Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection.
-      - Retired VR bootstrap provider-profile/routing/meta and stop-message parse/apply public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for Rust-internal bootstrap/profile/routing/meta or routing-instruction parse/apply helpers.
-      - Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers.
-      - Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge.
-      - Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal.
-      - Retired responses tool-call remap public wrapper must stay deleted; live remap entry remains `remapChatToolCalls*`.
-      - Retired req_outbound context/format/tool-session public wrappers must stay deleted, including standalone merge/normalize/style helper bridges; active Rust internals may remain only as mainline helpers, not standalone TS/NAPI bridge surfaces.
-      - Retired request-governance public bridge must stay deleted; `resolveGovernanceContext*` / `applyGoverned*` / `mergeGovernanceSummary*` / `finalizeGovernedRequest*` cannot return as public TS/NAPI bridge surfaces while active request governance is owned by the Rust Hub mainline.
-      - Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline.
-      - Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface.
-      - Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports.
-      - Retired SSE stats/timeout public wrappers must stay deleted; `extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` must not be kept alive by required-export gates without a live runtime consumer.
-      - Retired chat node-result public builder/descriptor/restore wrappers must stay deleted; request-executor/finish-reason live bridges must not be used to justify restoring standalone node-result builder exports or the stale coverage script.
-      - Retired Anthropic alias public bridge must stay deleted; live alias mapping may remain Rust-internal to shared tool mapping / Hub mainline, but required-export gates must not preserve `buildAnthropicToolAliasMapJson` without a live runtime consumer.
-      - Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers.
-      - Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts.
-      - Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge.
+      - "Any provider outbound metadata change must rerun provider metadata boundary suite."
+      - "Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node."
+      - "Retired image attachment metadata native export/module must stay deleted; media metadata semantics must use live Hub/Rust mainline owners only."
+      - "Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) must stay deleted; do not restore standalone hint/reasoning-alias/response-governance/default-rules control surfaces."
+      - "Retired standalone tool-governance native export/file (`governRequestJson`, `hub_tool_governance_semantics.rs`) must stay deleted; request/tool governance must remain in the active Hub Rust mainline owners."
+      - "Retired zero-consumer response-tool NAPI export (`collectToolNamesFromCandidateJson` / `collect_tool_names_from_candidate_json`) must stay deleted; the later requested-tool public bridge deletion also keeps the private collector chain absent."
+      - "Retired zero-consumer response-governance utility public bridges must stay deleted: `buildWebSearchToolAppendOperations*`, `prepareRespProcessToolGovernancePayload*`, `filterOutExecutedServerToolCalls*`, and `resolveRequestedToolNames*` cannot return as TS/NAPI public surfaces without a live runtime consumer and map update; old Rust `servertool_skeleton/finalize_strip.rs` bridge module must also stay absent. Rust-internal web_search append helper remains allowed only for req-process servertool injection."
+      - "Retired zero-consumer servertool utility public bridges must stay deleted: `tryPlanChatServerToolBundleWithNative`, `resolveServertoolFollowupFlowProfileWithNative`, `runApplyPatchWithNative`, `webSearchResolveToolNameWithNative`, `webSearchParseToolArgumentsWithNative`, `webSearchFindArrayWithNative`, continuation helpers, plus standalone NAPI `planChatServertoolOrchestrationBundleJson`, `resolveServertoolFollowupFlowProfileJson`, `webSearchFindArrayJson`, `runApplyPatchJson`, and continuation surfaces cannot return without a live runtime consumer and map update."
+      - "Retired zero-consumer req_inbound standalone public bridges must stay deleted: `mapReqInboundResumeToolOutputsDetailedWithNative`, `resolveClientInjectReadyWithNative`, `normalizeContextCaptureLabelWithNative`, `shouldRunHubChatProcessWithNative`, `isShellLikeToolNameTokenWithNative`, `resolveReqInboundServerToolFollowupSnapshotWithNative`, `augmentReqInboundContextSnapshotWithNative`, `normalizeReqInboundToolCallIdStyleWithNative`, matching standalone NAPI JSON exports, and stale `coverage-hub-req-inbound-semantic-lift.mjs` cannot return without a live runtime consumer and map update."
+      - "Retired zero-consumer req_inbound reasoning / semantic-lift public bridges must stay deleted: `normalizeReqInboundReasoningPayloadWithNative`, `normalizeReasoningPayloadV2WithNative`, `shouldNormalizeReasoningPayloadWithNative`, `applyReqInboundSemanticLiftWithNative` and matching standalone NAPI JSON exports `normalize_req_inbound_reasoning_payload_json`, `should_normalize_reasoning_payload_json`, `normalize_reasoning_payload_v2_json`, `apply_req_inbound_semantic_lift_json` cannot return as standalone TS/NAPI control surfaces without a live runtime consumer plus owner/feature map update. Rust keeps only the internal `apply_req_inbound_semantic_lift` helper called by `hub_pipeline_lib::engine`, plus lower-level `normalize_reasoning_in_*` / `normalize_resp_inbound_reasoning_payload_json` helpers that stay Rust-internal."
+      - "Retired zero-consumer utility NAPI exports (`cleanMalformedRoutingInstructionMarkersJson`, `runHashlineNativeEditJson`) must stay deleted; do not expose internal VR cleanup/hashline helpers as standalone NAPI surfaces without runtime consumers."
+      - "Retired zero-consumer passthrough-mode NAPI exports (`buildPassthroughGovernanceSkippedNodeJson`, `resolveHasInstructionRequestedPassthroughJson`, `resolveActiveProcessModeJson`, `buildPassthroughAuditJson`, `annotatePassthroughGovernanceSkipJson`, `attachPassthroughProviderInputAuditJson`) must stay deleted; do not restore standalone passthrough wrappers without a live TS/runtime consumer and owner map update."
+      - "Retired legacy stage bridge APIs (`runReqInboundPipelineJson`, `runReqProcessPipelineJson`, `runRespOutboundPipelineJson` and Rust `run_req_*` / `run_resp_outbound_*` stage functions) must stay deleted; do not restore per-stage public bridge APIs after total Hub Pipeline Rust entry closeout."
+      - "Retired zero-consumer Hub orchestration public wrappers and standalone NAPI JSON exports must stay deleted; internal Rust helper functions may remain private to active Hub mainline/tests, but aggregate TS re-export and required-export gate must not preserve dead public surfaces."
+      - "Retired zero-consumer session header helper NAPI wrappers must stay deleted; `extractSessionIdentifiersJson` is the only public session identifier bridge, and header helpers remain private Rust implementation details."
+      - "Retired mappable-semantics public wrapper must stay deleted; process-mode mappable key detection is internal Rust logic, not standalone TS/NAPI control surface."
+      - "Retired chat-process sanitize public wrapper must stay deleted; chat-process message sanitization remains private Rust request-governance/responses-context internals, not a standalone TS/NAPI bridge."
+      - "Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update."
+      - "Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection."
+      - "Retired VR bootstrap provider-profile/routing/meta and stop-message parse/apply public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for Rust-internal bootstrap/profile/routing/meta or routing-instruction parse/apply helpers."
+      - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
+      - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
+      - "Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal."
+      - "Retired responses tool-call remap public wrapper must stay deleted; live remap entry remains `remapChatToolCalls*`."
+      - "Retired req_outbound context/format/tool-session public wrappers must stay deleted, including standalone merge/normalize/style helper bridges; active Rust internals may remain only as mainline helpers, not standalone TS/NAPI bridge surfaces."
+      - "Retired request-governance public bridge must stay deleted; `resolveGovernanceContext*` / `applyGoverned*` / `mergeGovernanceSummary*` / `finalizeGovernedRequest*` cannot return as public TS/NAPI bridge surfaces while active request governance is owned by the Rust Hub mainline."
+      - "Retired heavy-input fastpath native export/wrapper/parser/test must stay deleted; no second request fastpath control surface outside Rust Hub mainline."
+      - "Retired target-utils native export/module must stay deleted; target application belongs to the Rust request route-select mainline, not a standalone zero-consumer NAPI control surface."
+      - "Retired standalone SSE sniffer helper native exports must stay deleted; SSE helper decisions remain Rust-internal to the active SSE parse exports."
+      - "Retired SSE stats/timeout public wrappers must stay deleted; `extractDecodeStatsJson` / `resolveSseTimeoutOptionsJson` must not be kept alive by required-export gates without a live runtime consumer."
+      - "Retired chat node-result public builder/descriptor/restore wrappers must stay deleted; request-executor/finish-reason live bridges must not be used to justify restoring standalone node-result builder exports or the stale coverage script."
+      - "Retired Anthropic alias public bridge must stay deleted; live alias mapping may remain Rust-internal to shared tool mapping / Hub mainline, but required-export gates must not preserve `buildAnthropicToolAliasMapJson` without a live runtime consumer."
+      - "Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers."
+      - "Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts."
+      - "Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge."
 
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium
@@ -398,8 +398,8 @@ verification:
       - npx tsc --noEmit --pretty false
       - npm run build:min
     notes:
-      - HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking.
-      - HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel.
+      - "HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking."
+      - "HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel."
 
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low
@@ -417,8 +417,8 @@ verification:
     build:
       - npm run verify:llmswitch-core-tsc
     notes:
-      - Public TS ChatEnvelope/StandardizedRequest types are limited to externally consumed bridge declarations.
-      - Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal.
+      - "Public TS ChatEnvelope/StandardizedRequest types are limited to externally consumed bridge declarations."
+      - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal."
 
   - feature_id: hub.stage_timing_observation
     change_risk: low
@@ -438,8 +438,8 @@ verification:
     build:
       - npm run verify:llmswitch-core-tsc
     notes:
-      - Timing top-summary writes only runtime metadata observation, never Hub request/response data payload.
-      - Retired `measureHubStage` wrappers are test-only residue and must not return.
+      - "Timing top-summary writes only runtime metadata observation, never Hub request/response data payload."
+      - "Retired `measureHubStage` wrappers are test-only residue and must not return."
 
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high
@@ -459,9 +459,9 @@ verification:
     build:
       - npm run verify:llmswitch-core-tsc
     notes:
-      - Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export. The legacy TS helper shell must remain physically deleted.
-      - `includeToolCallIds` is not a Hub response wrapper contract; scripts and residue gates must not restore the ignored option.
-      - `AnthropicResponseFromChatOptions` is internal wrapper input only; the public response-runtime barrel must not re-export it.
+      - "Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export. The legacy TS helper shell must remain physically deleted."
+      - "`includeToolCallIds` is not a Hub response wrapper contract; scripts and residue gates must not restore the ignored option."
+      - "`AnthropicResponseFromChatOptions` is internal wrapper input only; the public response-runtime barrel must not re-export it."
 
   - feature_id: hub.response_responses_chat_projection
     change_risk: high
@@ -484,9 +484,9 @@ verification:
     build:
       - npm run verify:llmswitch-core-tsc
     notes:
-      - Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics.
-      - Zero-consumer TS wrappers for tool-call collection and finish-reason resolution must stay removed from the shared response utility file.
-      - Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must stay removed from TS/native bridge/Rust NAPI public surfaces.
+      - "Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics."
+      - "Zero-consumer TS wrappers for tool-call collection and finish-reason resolution must stay removed from the shared response utility file."
+      - "Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must stay removed from TS/native bridge/Rust NAPI public surfaces."
 
   - feature_id: hub.response_post_servertool_client_projection
     change_risk: high
@@ -505,7 +505,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust.
+      - "TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust."
 
   - feature_id: hub.response_responses_client_projection
     change_risk: high
@@ -526,8 +526,8 @@ verification:
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
-      - Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames.
-      - Responses client-visible model/reasoning restore from metadata must stay Rust-owned; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`.
+      - "Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames."
+      - "Responses client-visible model/reasoning restore from metadata must stay Rust-owned; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`."
 
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high
@@ -547,9 +547,9 @@ verification:
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
-      - Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native.
-      - `ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are not public imports; keep them module-internal while preserving `convertProviderResponse`.
-      - Provider-response-local hub stage top attach/normalize/merge helpers are dead residue and must stay deleted; `hub-stage-timing.ts` owns context attachment.
+      - "Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native."
+      - "`ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are not public imports; keep them module-internal while preserving `convertProviderResponse`."
+      - "Provider-response-local hub stage top attach/normalize/merge helpers are dead residue and must stay deleted; `hub-stage-timing.ts` owns context attachment."
 
   - feature_id: hub.response_provider_context_helpers
     change_risk: medium
@@ -565,7 +565,7 @@ verification:
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
-      - Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names.
+      - "Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names."
 
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
@@ -583,8 +583,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together.
-      - apply_patch must not have a servertool handler; it remains native/freeform client tooling.
+      - "If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together."
+      - "apply_patch must not have a servertool handler; it remains native/freeform client tooling."
 
   - feature_id: snapshot.stage_contract
     change_risk: high
@@ -606,8 +606,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests.
-      - Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue.
+      - "Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests."
+      - "Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue."
 
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high
@@ -632,9 +632,9 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Rust now owns the contract; direct/provider guards must remain thin shells around the native validator, shared direct passthrough body builder, shared direct route decision helper, shared `apply_patch` relay detector, and shared direct routeParams override helper.
-      - same-protocol direct skip/relay regressions for `apply_patch` servertool mode and Responses custom `apply_patch` declarations must remain in CI, not local-only route tests.
-      - Raw direct replay payload selection and stream lift are part of the same Rust-owned direct contract and must not reappear in TS.
+      - "Rust now owns the contract; direct/provider guards must remain thin shells around the native validator, shared direct passthrough body builder, shared direct route decision helper, shared `apply_patch` relay detector, and shared direct routeParams override helper."
+      - "same-protocol direct skip/relay regressions for `apply_patch` servertool mode and Responses custom `apply_patch` declarations must remain in CI, not local-only route tests."
+      - "Raw direct replay payload selection and stream lift are part of the same Rust-owned direct contract and must not reappear in TS."
 
   - feature_id: responses.request_compat_normalization
     change_risk: high
@@ -651,7 +651,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - c4m/crs request compat and chat-style function tool normalization must stay inside Rust stage3 compat; TS bridge may only call the native stage runner.
+      - "c4m/crs request compat and chat-style function tool normalization must stay inside Rust stage3 compat; TS bridge may only call the native stage runner."
 
   - feature_id: responses.function_tool_normalization
     change_risk: high
@@ -667,7 +667,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+      - "Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
   - feature_id: responses.tool_parameters_normalization
     change_risk: high
@@ -683,7 +683,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Shared tool parameters normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+      - "Shared tool parameters normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
   - feature_id: responses.instructions_to_input_normalization
     change_risk: high
@@ -699,7 +699,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner.
+      - "Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
   - feature_id: responses.token_limit_field_normalization
     change_risk: high
@@ -715,7 +715,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Shared token-limit field stripping must stay inside Rust request compat; TS bridge may only call the native stage runner.
+      - "Shared token-limit field stripping must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
   - feature_id: responses.c4m_request_compat
     change_risk: high
@@ -730,11 +730,11 @@ verification:
     build:
       - npm run build:min
     notes:
-      - c4m closeout is now a thin composition shell over shared token-limit/instructions/tool normalization units.
-      - Shared token-limit stripping is verified under `responses.token_limit_field_normalization`.
-      - Shared instructions lift is verified under `responses.instructions_to_input_normalization`.
-      - Shared tool normalization is verified under `responses.function_tool_normalization`.
-      - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
+      - "c4m closeout is now a thin composition shell over shared token-limit/instructions/tool normalization units."
+      - "Shared token-limit stripping is verified under `responses.token_limit_field_normalization`."
+      - "Shared instructions lift is verified under `responses.instructions_to_input_normalization`."
+      - "Shared tool normalization is verified under `responses.function_tool_normalization`."
+      - "Shared parameters normalization is verified under `responses.tool_parameters_normalization`."
 
   - feature_id: config.path_resolution_surface
     change_risk: high
@@ -750,7 +750,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Missing config must fail fast; no fallback path result is allowed.
+      - "Missing config must fail fast; no fallback path result is allowed."
 
   - feature_id: config.user_config_codec
     change_risk: high
@@ -765,7 +765,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - User config JSON/TOML decode must stay centralized in shared codec.
+      - "User config JSON/TOML decode must stay centralized in shared codec."
 
   - feature_id: config.provider_config_codec
     change_risk: high
@@ -782,7 +782,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Provider config JSON/TOML decode must stay centralized in shared codec.
+      - "Provider config JSON/TOML decode must stay centralized in shared codec."
 
   - feature_id: config.user_config_materialization
     change_risk: high
@@ -798,7 +798,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Runtime materialization must remain the only place that validates v2 single-source layout and projects VR/provider profiles.
+      - "Runtime materialization must remain the only place that validates v2 single-source layout and projects VR/provider profiles."
 
   - feature_id: config.user_config_write_surface
     change_risk: high
@@ -813,7 +813,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - User config write/patch must stay in shared writer owner.
+      - "User config write/patch must stay in shared writer owner."
 
   - feature_id: config.provider_config_write_surface
     change_risk: high
@@ -828,7 +828,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Provider config writes must stay in shared writer owner.
+      - "Provider config writes must stay in shared writer owner."
 
   - feature_id: manager.routing_control_surface
     change_risk: high
@@ -844,7 +844,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Routing state store truth lives in Rust; TS RoutingStateManagerModule is bridge only.
+      - "Routing state store truth lives in Rust; TS RoutingStateManagerModule is bridge only."
 
   - feature_id: manager.health_runtime
     change_risk: high
@@ -859,7 +859,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Provider health / cooldown / runtime 503 family must stay in Rust; TS is persistence bridge.
+      - "Provider health / cooldown / runtime 503 family must stay in Rust; TS is persistence bridge."
 
   - feature_id: manager.token_runtime
     change_risk: medium
@@ -874,7 +874,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - token-daemon is the unique owner; no Rust twin.
+      - "token-daemon is the unique owner; no Rust twin."
 
   - feature_id: manager.quota_lifecycle
     change_risk: high
@@ -891,7 +891,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - lifecycle axis (hydration/persist/prune); control axis is quota.unified_control_surface.
+      - "lifecycle axis (hydration/persist/prune); control axis is quota.unified_control_surface."
 
   - feature_id: daemon_admin.command_handlers
     change_risk: high
@@ -908,7 +908,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - handler family must not own quota/health/routing state; calls into manager or llmswitch-core.
+      - "handler family must not own quota/health/routing state; calls into manager or llmswitch-core."
 
   - feature_id: server.http_runtime_entry
     change_risk: medium
@@ -923,7 +923,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - entry shell only: lifecycle, port registry, route wiring, restart runtime.
+      - "entry shell only: lifecycle, port registry, route wiring, restart runtime."
 
   - feature_id: server.models_capability_contract
     change_risk: high
@@ -938,8 +938,8 @@ verification:
     build:
       - npm run build:min
     notes:
-      - `/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`.
-      - Drift on capability-signaling fields is a release blocker because Codex client behavior depends on these flags.
+      - "`/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
+      - "Drift on capability-signaling fields is a release blocker because Codex client behavior depends on these flags."
 
   - feature_id: server.responses_handler_family
     change_risk: high
@@ -952,11 +952,47 @@ verification:
       - tests/server/handlers/chat-handler.started-sse-error.spec.ts
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
     smoke:
+      - npm run verify:server-function-map-boundary
       - npm run verify:architecture-ci
     build:
       - npm run build:min
     notes:
-      - handler family is protocol projection; must delegate tool governance to llmswitch-core.
+      - "Server handlers are HTTP transport adapters only; protocol semantics must stay out of server TS."
+  - feature_id: server.responses_request_handler_bridge_surface
+    change_risk: high
+    unit:
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/server/handlers/responses-handler.ts
+    contract:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Request bridge must stay facade-only and must not grow TS protocol semantics."
+      - "Request-side session/conversation id readers, persistence eligibility checks, and response-id parsing are covered by the same request-bridge gate."
+  - feature_id: server.responses_response_handler_bridge_surface
+    change_risk: high
+    unit:
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/server/handlers/handler-response-utils.ts
+    contract:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Response bridge must stay facade-only and must not grow TS response protocol semantics."
+      - "Continuation lifecycle orchestration for capture/record/finalize is covered by the same response-bridge gate and continuation-store regressions."
+      - "SSE terminal-state parsing for `response.completed` / `response.done` must stay behind the same response-bridge gate."
 
   - feature_id: cli.command_surface
     change_risk: medium
@@ -973,7 +1009,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - CLI surface is dispatch only; all actions go through http-server or manager modules.
+      - "CLI surface is dispatch only; all actions go through http-server or manager modules."
 
   - feature_id: responses.crs_request_compat
     change_risk: high
@@ -988,9 +1024,9 @@ verification:
     build:
       - npm run build:min
     notes:
-      - crs closeout focuses on temperature stripping only.
-      - Shared tool normalization is verified under `responses.function_tool_normalization`.
-      - Shared parameters normalization is verified under `responses.tool_parameters_normalization`.
+      - "crs closeout focuses on temperature stripping only."
+      - "Shared tool normalization is verified under `responses.function_tool_normalization`."
+      - "Shared parameters normalization is verified under `responses.tool_parameters_normalization`."
 
   - feature_id: sse.codec_registry_surface
     change_risk: high
@@ -1007,7 +1043,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Registry is dispatch-only; no payload repair, hidden protocol fallback, provider policy, or metadata mutation.
+      - "Registry is dispatch-only; no payload repair, hidden protocol fallback, provider policy, or metadata mutation."
 
   - feature_id: sse.stream_parse_boundary
     change_risk: high
@@ -1024,7 +1060,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - TS parser wrapper may only call native parser helpers and maintain stream buffering.
+      - "TS parser wrapper may only call native parser helpers and maintain stream buffering."
 
   - feature_id: sse.responses_decode_projection
     change_risk: high
@@ -1042,7 +1078,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Decode projection surfaces provider SSE decode failure; provider retry/reroute policy remains outside SSE.
+      - "Decode projection surfaces provider SSE decode failure; provider retry/reroute policy remains outside SSE."
 
   - feature_id: sse.responses_encode_projection
     change_risk: high
@@ -1062,7 +1098,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden.
+      - "Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden."
 
   - feature_id: sse.chat_stream_projection
     change_risk: high
@@ -1079,7 +1115,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE.
+      - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
   - feature_id: sse.anthropic_gemini_stream_projection
     change_risk: medium
@@ -1099,7 +1135,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Anthropic/Gemini stream differences stay inside protocol-specific SSE owners.
+      - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
 
   - feature_id: error.pipeline_contract
     change_risk: high
@@ -1122,7 +1158,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Completion requires provider/runtime/direct/executor errors to enter ErrorErr01-06 and direct passthrough to preserve payload semantics while reporting failures.
+      - "Completion requires provider/runtime/direct/executor errors to enter ErrorErr01-06 and direct passthrough to preserve payload semantics while reporting failures."
 
   - feature_id: error.execution_decision_consumer
     change_risk: high
@@ -1143,7 +1179,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Executor/direct code consumes ErrorErr04 policy into ErrorErr05 decisions only; classification stays in Error module/provider policy owners.
+      - "Executor/direct code consumes ErrorErr04 policy into ErrorErr05 decisions only; classification stays in Error module/provider policy owners."
 
   - feature_id: error.client_projection
     change_risk: medium
@@ -1163,4 +1199,4 @@ verification:
     build:
       - npm run build:min
     notes:
-      - Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy.
+      - "Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy."

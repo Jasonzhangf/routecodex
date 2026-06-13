@@ -201,6 +201,113 @@ describe('responses handler virtual-router empty-pool guard', () => {
     }
   });
 
+  it('blocks and retries singleton empty pool instead of surfacing PROVIDER_NOT_AVAILABLE', async () => {
+    const logStages: Array<{ stage: string; details: Record<string, unknown> }> = [];
+    let pipelineCalls = 0;
+    const providerKey = 'primary.gpt-test';
+    const executor = new HubRequestExecutor({
+      runtimeManager: {
+        resolveRuntimeKey: () => 'primary.key1',
+        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'primary.key1'
+          ? {
+              runtimeKey: 'primary.key1',
+              providerId: 'primary',
+              providerType: 'openai',
+              providerFamily: 'openai',
+              providerProtocol: 'openai-chat',
+              runtime: { runtimeKey: 'primary.key1' },
+              instance: {
+                initialize: async () => undefined,
+                cleanup: async () => undefined,
+                processIncoming: async () => ({
+                  status: 200,
+                  data: {
+                    id: 'chatcmpl_ok_singleton',
+                    object: 'chat.completion',
+                    model: 'gpt-test',
+                    choices: [{ index: 0, message: { role: 'assistant', content: 'ok_after_block' }, finish_reason: 'stop' }]
+                  }
+                })
+              }
+            }
+          : undefined,
+        getHandleByProviderKey: () => undefined,
+        disposeAll: async () => undefined,
+        initialize: async () => undefined
+      },
+      getHubPipeline: () => ({
+        execute: jest.fn(async (input: any) => {
+          pipelineCalls += 1;
+          if (pipelineCalls <= 2) {
+            throw Object.assign(new Error('No available providers after applying routing instructions'), {
+              code: 'PROVIDER_NOT_AVAILABLE',
+              details: {
+                routeName: 'default',
+                candidateProviderCount: 1,
+                minRecoverableCooldownMs: 1,
+                recoverableCooldownHints: [
+                  { providerKey, waitMs: 1, source: 'provider.error' }
+                ]
+              }
+            });
+          }
+          return {
+            requestId: input.requestId,
+            providerPayload: {},
+            target: {
+              providerKey,
+              providerType: 'openai',
+              outboundProfile: 'openai-chat',
+              runtimeKey: 'primary.key1'
+            },
+            routingDecision: { routeName: 'default', pool: [providerKey] },
+            metadata: {}
+          };
+        }),
+        updateVirtualRouterConfig: jest.fn()
+      }) as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: async () => undefined
+        }
+      }),
+      logStage: (stage: string, _requestId: string, details: Record<string, unknown>) => {
+        logStages.push({ stage, details });
+      },
+      stats: new StatsManager()
+    } as any);
+
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) =>
+      handleResponses(req, res, {
+        executePipeline: async (input) => executor.execute(input),
+        errorHandling: null
+      })
+    );
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-test',
+          input: 'hi'
+        })
+      });
+      const body = await response.json();
+
+      if (response.status !== 200) {
+        throw new Error(`singleton-empty-pool unexpected status=${response.status} pipelineCalls=${pipelineCalls} body=${JSON.stringify(body)} logs=${JSON.stringify(logStages)}`);
+      }
+      expect(body.output_text ?? body.choices?.[0]?.message?.content).toBeTruthy();
+      expect(pipelineCalls).toBe(3);
+      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toHaveLength(2);
+      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait.completed')).toHaveLength(2);
+      expect(body.error?.code).not.toBe('PROVIDER_NOT_AVAILABLE');
+    });
+  });
+
   it('rejects unsupported client stopMessage metadata at /v1/responses boundary', async () => {
     const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;

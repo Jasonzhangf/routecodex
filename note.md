@@ -404,6 +404,55 @@
     - `name=apply_patch`
     - `arguments={"patch":"*** Begin Patch\n*** Add File: tmp/apply_patch_smoke.txt\n+hello from smoke\n*** End Patch"}`
   - Conclusion: apply_patch tool path is alive at the HTTP server/runtime level; current screenshot failure is more likely request-shape/tool-declaration loss on the real Codex/client path, not intrinsic inability of the server to emit apply_patch tool calls.
+- 2026-06-13 server function-map boundary closeout:
+  - Existing function-map entries for `server.responses_handler_family`, `server.responses_request_handler_bridge_surface`, and `server.responses_response_handler_bridge_surface` were stale: they still described server-side protocol projection/bridge semantics too loosely.
+  - Updated function-map + verification-map to state the intended boundary explicitly:
+    - server handlers are HTTP transport adapters only
+    - request bridge is opaque request facade only
+    - response bridge is opaque SSE/body handoff facade only
+    - protocol parsing/conversion/projection must stay in Hub Pipeline/native owner
+  - Added gate `scripts/architecture/verify-server-function-map-boundary.mjs`, wired into `package.json` and `verify:architecture-ci`.
+  - Verified:
+    - `npm run verify:server-function-map-boundary` PASS
+    - `npm run verify:function-map-compile-gate` PASS
+  - Current root-trace lead for chat-shaped tool leakage:
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs`
+    - `normalize_chat_envelope_tool_calls(...)`
+    - `normalize_tool_definition(...)`
+    - this is the current strongest candidate for where `tools[].function.*` is being canonicalized into chat-shaped tool definitions before later direct misuse.
 
 - 2026-06-13 stopless 闭环最终推进：修复误用 `npx jest` 的测试入口，改用 `npm run jest:run`（node --experimental-vm-modules）后，`tests/servertool/stop-message-auto.spec.ts` 51/51 通过（8 skipped），`tests/servertool/stop-message-compare-context.spec.ts` 6/6 通过。
 - 2026-06-13 handler 薄壳新增 no-change glue：`stop-message-auto.ts` 计算 observationHash/toolSignatureHash，并基于上一轮 compare context 的 observationHash/observationStableCount 生成 `schemaGate.no_change_count`，把“三轮只作无变化 loop guard”真正闭到上游状态链。
+
+2026-06-13 direct server-side request shaping removal in progress
+- Removed server direct preflight payload contract/relay checks and direct model overrides from http-server/index.ts.
+- direct-passthrough-payload.ts is now object-only guard; direct request body must pass through unchanged.
+- Red tests updated toward new direct contract: no stream synthesis, no model overwrite, no tool/system/history rewrite.
+- Deleted dead server shim: src/server/runtime/http-server/responses-direct-contract-error.ts (no remaining references after direct preflight removal).
+- Moved Responses direct SSE protocol checks (allowlist/keepalive/required_action normalization entry) behind responses-response-bridge facade; server handler no longer owns those helpers.
+- Added bridge-surface gate to forbid local server tokens for Responses SSE allowlist/keepalive/required_action parsing in handler-response-utils.ts.
+- Moved Responses JSON required_action client-payload normalization behind responses-response-bridge facade; handler-response-utils no longer decides when to project body-level required_action.
+- Trace note: direct server path does not call coerce_standardized_request_from_payload/normalize_tool_definition; current chat-shaped tool source remains Rust standardized owners, but direct contamination must come from another ingress/store/projection path.
+- Moved Responses request-side stream/system-prompt mutation behind responses-request-bridge facade; responses-handler.ts no longer owns `payload.stream = true` or `applySystemPromptOverride(...)`.
+- Added request-side bridge-surface gate to forbid local stream/system-prompt mutation tokens in responses-handler.ts.
+
+## 2026-06-13 direct/server boundary cleanup
+- Resumed from handoff: direct request-shaping already removed from server runtime; next focus is handler protocol surface shrink + continuation/store tool-shape contamination trace.
+- Evidence from code: plan_responses_handler_entry() only decides mode (submit_tool_outputs/scope_materialize/none), not standardized_request coercion; current chat-shaped tools leak is likely later in store/materialize/projection, not entry planning.
+- Next actions: audit handler-response-utils remaining Responses semantics, audit responses-handler remaining bridge-only mutations, add red test for continuation/store preserving direct tool schema.
+- 2026-06-13: direct-owned scope continuation fixed at store owner: materializeLatestContinuationByScope now dispatches direct entries to remote restore; native restore skips tool reinjection for direct owner; wrapper now passes continuationOwner through to native and preserves released prefix as side-channel only for direct.
+2026-06-13 function-map audit remediation plan added at docs/goals/function-map-audit-remediation-plan.md.
+Confirmed current audit baseline: 28 feature entries in function-map, 28 in verification-map, responses request/response bridge surfaces already registered, but parser-clean map truth and explicit functional owner fields are still missing.
+2026-06-13 function-map owner schema baseline landed. docs/architecture/function-map.yml now carries owner_kind + owner_scope across 62 features; docs/architecture/function-map.yml and docs/architecture/verification-map.yml are YAML-parseable again. Added scripts/architecture/verify-architecture-function-map-parseable.mjs and wired it into verify:function-map-compile-gate + verify:architecture-ci. Current owner_kind distribution: rust_ssot=29, ts_runtime_owner=15, server_projection=10, ts_bridge=4, provider_runtime=2, ts_entry_shell=2. Remaining audit gap: hidden-owner full-repo scan and warning cleanup for server.responses_request_handler_bridge_surface forbidden mention.
+
+## 2026-06-13 responses handler bridge closeout slice
+- `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` had a false isolation gap: it mocked the bridge barrel, but `handler-response-utils.ts` imports `responses-response-bridge.js` directly. That caused the test to load real native/store paths and report `CustomGC` open handles.
+- Fixed test isolation by mocking `responses-response-bridge.(js|ts)` directly and providing the exact named exports used by the handler; `--detectOpenHandles` now exits cleanly.
+- Further shrank server boundary: `handler-response-utils.ts` no longer derives continuation persistence `providerKey/continuationOwner/sessionId/conversationId/timingRequestIds` locally before calling `persistResponsesConversationLifecycleForHttp(...)`; that assembly now happens inside `responses-response-bridge.ts`.
+- Further shrank server boundary again: local SSE terminal-state parser/state-machine update for `response.completed` / `response.done` was removed from `handler-response-utils.ts`; terminal-state inspection now lives behind `inspectResponsesTerminalStateFromSseChunkForHttp(...)` in `responses-response-bridge.ts`, and the single-bridge gate now forbids reviving `updateSseTerminalTrackerFromChunk(...)` in server TS.
+- Verified:
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/sharedmodule/responses-continuation-store.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` PASS
+  - `git diff --check` PASS

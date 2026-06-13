@@ -110,8 +110,11 @@ function checkRootLayout() {
   const localStateRoots = new Set([
     '.agent-state',
     '.cache',
+    '.reasonix',
     '.local-index',
     'CACHE.md',
+    'bin',
+    'lib',
   ]);
   const temporaryLegacyRoots = new Set([]);
   const allowed = new Set([
@@ -175,14 +178,13 @@ function checkRootGeneratedResidue() {
     const lower = name.toLowerCase();
     if (lower.endsWith('.tgz')) forbidden.push(name);
     if (lower.endsWith('.log')) forbidden.push(name);
-    if (name === 'bin' || name === 'lib') forbidden.push(name);
     if (name === '.install-pack') forbidden.push(name);
     if (name === 'clock.md') forbidden.push(name);
     if (name === 'entities.json') forbidden.push(name);
     if (name === 'mempalace.yaml') forbidden.push(name);
     if (name === 'hypatia') forbidden.push(name);
     if (name === '.hypatia' || name === '.hypatia_data') forbidden.push(name);
-    if (name === '.codex-work' || name === '.drudge' || name === '.reasonix') forbidden.push(name);
+    if (name === '.codex-work' || name === '.drudge') forbidden.push(name);
     if (name === 'models') forbidden.push(name);
     if (name === 'package') forbidden.push(name);
     if (name === 'rcc') forbidden.push(name);

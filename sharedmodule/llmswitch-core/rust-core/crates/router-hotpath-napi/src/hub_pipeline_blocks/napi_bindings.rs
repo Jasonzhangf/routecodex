@@ -88,6 +88,9 @@ fn evaluate_responses_direct_route_decision(
 }
 
 fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value) -> bool {
+    if stop_message_include_direct(metadata) {
+        return true;
+    }
     if has_stop_message_cli_result(payload) {
         return true;
     }
@@ -207,6 +210,38 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
         return false;
     }
     root.get("stopMessageExcludeDirect")
+        .map(|value| read_boolish(Some(value)))
+        .or_else(|| {
+            rt.and_then(|record| {
+                record
+                    .get("stopMessageExcludeDirect")
+                    .map(|value| read_boolish(Some(value)))
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn stop_message_include_direct(metadata: &Value) -> bool {
+    let Some(root) = metadata.as_object() else {
+        return false;
+    };
+    let rt = root.get("__rt").and_then(Value::as_object);
+    let stop_message_enabled = root
+        .get("stopMessageEnabled")
+        .map(|value| read_boolish(Some(value)))
+        .or_else(|| {
+            rt.and_then(|record| {
+                record
+                    .get("stopMessageEnabled")
+                    .map(|value| read_boolish(Some(value)))
+            })
+        })
+        .unwrap_or(false);
+    if !stop_message_enabled {
+        return false;
+    }
+    !root
+        .get("stopMessageExcludeDirect")
         .map(|value| read_boolish(Some(value)))
         .or_else(|| {
             rt.and_then(|record| {
@@ -378,6 +413,34 @@ mod responses_direct_route_decision_tests {
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);
         assert_eq!(decision["reason"], Value::Null);
+    }
+
+    #[test]
+    fn responses_request_relays_when_stop_message_includes_direct() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ]
+            }),
+            &serde_json::json!({
+                "stopMessageEnabled": true,
+                "stopMessageExcludeDirect": false
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("stopless-enabled direct requests must become relay decisions");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
     }
 
     #[test]
