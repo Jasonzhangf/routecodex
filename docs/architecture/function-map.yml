@@ -1840,6 +1840,7 @@ owners:
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
       - seedResponsesToolCallResponseForHttp
+      - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - readResponsesSessionIdFromHttp
       - readResponsesConversationIdFromHttp
@@ -1860,6 +1861,7 @@ owners:
     forbidden_mentions_allowlist:
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
+      - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - clearResponsesConversationByRequestIdForHttpProjection
     required_tests:
@@ -1870,12 +1872,14 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
+      - "Timeout/error-side continuation-store clear policy must stay behind `clearResponsesConversationOnHandlerFailureForHttp(...)`; handler only triggers the facade."
       - "Request bridge may pass opaque payload, requestId, scope ids, and conversation-store IO only."
       - "TS bridge must do no protocol parsing, protocol conversion, tool-shape normalization, or submit/protocol branching in TS."
       - "Responses handler must not locally force `payload.stream = true` or call `applySystemPromptOverride(...)`; those request mutations may only sit behind the single request bridge surface until native owner replaces them."
       - "Responses handler must not keep local session/conversation id readers, persistence eligibility checks, or response-id parsing; those request-side continuation helpers must stay behind the single request bridge surface."
       - "Responses handler must not keep local tool_calls -> responseId seed orchestration; that continuation seeding must stay behind the single request bridge surface."
       - "Responses handler must not keep local `/v1/responses*` conversation-management branch checks, local `responseIdFromPath -> payload.response_id` prewrite, or local `responsesRequestContext` fallback assembly; those request-side continuation/context helpers must stay behind the single request bridge surface."
+      - "Responses handler must not keep local continuation-expired or resume-client invalid_request_error payload shapes; those request-side resume error projections must stay behind the single request bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
@@ -1909,6 +1913,10 @@ owners:
       - persistResponsesConversationLifecycleForHttp
       - createResponsesJsonToSseConverterForHttp
       - prepareResponsesJsonBodyForSseBridgeForHttp
+      - buildResponsesSseErrorPayloadForHttp
+      - buildResponsesStructuredSseErrorPayloadForHttp
+      - buildResponsesMissingSseBridgeErrorPayloadForHttp
+      - buildResponsesStreamIncompleteErrorPayloadForHttp
       - normalizeResponsesJsonBodyForHttp
       - buildResponsesPayloadFromChatForHttp
       - projectResponsesClientPayloadForClientForHttp
@@ -1937,6 +1945,11 @@ owners:
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
       - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
+      - "Server handler must not keep local client-close cleanup eligibility, terminal-event requirement gating, or probe finish_reason resolution; those must stay behind the single response bridge surface."
+      - "Server handler must not keep local probe wrappers for continuation-persist decisions; probe-triggered continuation persistence must stay behind the single response bridge surface."
+      - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, or finish_reason derivation; those must stay behind the single response bridge surface."
+      - "Server handler must not keep local failure-to-clear continuation policy (`sse_stream_error` / `sse_incomplete` / `json*`); those must stay behind the single response bridge surface."
+      - "Server handler must not keep local Responses SSE `event:error` payload builders (`sse_bridge_error`, `upstream_stream_incomplete`, structured upstream SSE error projection); those must stay behind the single response bridge surface."
       - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
       - "Server handler must not keep local chat.completion -> response JSON normalization; that bridge shell must stay behind the single response bridge surface."
       - "Server handler must not keep local force-SSE body classification (`response` vs `chat.completion`) or probe-level tool-continuation / required_action inspection; those must stay behind the single response bridge surface."

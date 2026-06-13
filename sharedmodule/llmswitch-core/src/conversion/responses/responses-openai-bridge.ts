@@ -186,7 +186,7 @@ function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>):
   return '';
 }
 
-function readResumeDeltaInputFromChatSemantics(chat: Record<string, unknown>): BridgeInputItem[] | undefined {
+function readResumeInputFromChatSemantics(chat: Record<string, unknown>): BridgeInputItem[] | undefined {
   const semantics =
     chat?.semantics && typeof chat.semantics === 'object' && !Array.isArray(chat.semantics)
       ? (chat.semantics as Record<string, unknown>)
@@ -199,6 +199,10 @@ function readResumeDeltaInputFromChatSemantics(chat: Record<string, unknown>): B
     responses?.resume && typeof responses.resume === 'object' && !Array.isArray(responses.resume)
       ? (responses.resume as Record<string, unknown>)
       : undefined;
+  const fullInput = responsesResume?.fullInput;
+  if (Array.isArray(fullInput)) {
+    return jsonClone(fullInput as JsonValue) as BridgeInputItem[];
+  }
   const deltaInput = responsesResume?.deltaInput;
   return Array.isArray(deltaInput)
     ? (jsonClone(deltaInput as JsonValue) as BridgeInputItem[])
@@ -269,6 +273,7 @@ export function buildChatRequestFromResponses(
   payload: Record<string, unknown>,
   context: ResponsesRequestContext
 ): BuildChatRequestResult {
+  const chat = unwrapData(payload) as any;
   const requestId =
     typeof context.requestId === 'string' && context.requestId.trim().length
       ? context.requestId
@@ -276,11 +281,30 @@ export function buildChatRequestFromResponses(
   const toolsNormalized = Array.isArray(context.toolsNormalized) && context.toolsNormalized.length
     ? (context.toolsNormalized as unknown as ChatToolDefinition[])
     : (mapReqInboundBridgeToolsToChatWithNative((payload as any).tools) as unknown as ChatToolDefinition[]);
+  const topLevelPreviousResponseId =
+    typeof (payload as Record<string, unknown>).previous_response_id === 'string'
+      && String((payload as Record<string, unknown>).previous_response_id).trim().length > 0
+      ? String((payload as Record<string, unknown>).previous_response_id).trim()
+      : '';
+  const previousResponseId =
+    topLevelPreviousResponseId.length > 0
+      ? topLevelPreviousResponseId
+      : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
+  const stripHostFields = shouldStripHostManagedFields(context);
+  const continuationPreviousResponseId = stripHostFields ? '' : previousResponseId;
+  const resumedInput =
+    continuationPreviousResponseId.length > 0
+      ? readResumeInputFromChatSemantics(chat as Record<string, unknown>)
+      : undefined;
+  const inputForMessages =
+    continuationPreviousResponseId.length > 0 && Array.isArray(resumedInput)
+      ? resumedInput
+      : context.input;
 
   logHubStageTiming(requestId, 'req_inbound.responses.convert_input_to_messages', 'start');
   const convertStart = Date.now();
   let messages = convertBridgeInputToChatMessages({
-    input: context.input,
+    input: inputForMessages,
     tools: toolsNormalized,
     normalizeFunctionName: 'responses',
     toolResultFallbackText: '',
@@ -422,16 +446,6 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const forceWebSearch = bridgeDecisions.forceWebSearch === true;
   const toolCallIdStyle = bridgeDecisions.toolCallIdStyle;
   const historySeed = bridgeDecisions.historySeed as unknown as BridgeInputBuildResult | undefined;
-  const previousResponseId =
-    typeof bridgeDecisions.previousResponseId === 'string' && bridgeDecisions.previousResponseId.trim().length > 0
-      ? bridgeDecisions.previousResponseId.trim()
-      : readPreviousResponseIdFromChatSemantics(chat as Record<string, unknown>);
-  const stripHostFields = shouldStripHostManagedFields(ctx);
-  const continuationPreviousResponseId = stripHostFields ? '' : previousResponseId;
-  const resumedDeltaInput =
-    continuationPreviousResponseId.length > 0
-      ? readResumeDeltaInputFromChatSemantics(chat as Record<string, unknown>)
-      : undefined;
 
   // tools: 反向映射为 ResponsesToolDefinition 形状
   const chatTools: ChatToolDefinition[] = Array.isArray(chat.tools) ? (chat.tools as ChatToolDefinition[]) : [];
@@ -492,10 +506,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   } = history;
 
   // 不追加 metadata，以便 roundtrip 与原始 payload 对齐；系统提示直接写入 instructions。
-  const inputForUpstream =
-    continuationPreviousResponseId.length > 0 && Array.isArray(resumedDeltaInput)
-      ? resumedDeltaInput
-      : input;
+  const inputForUpstream = input;
   if (callIdTransformer) {
     enforceToolCallIdStyle(inputForUpstream, callIdTransformer);
   }

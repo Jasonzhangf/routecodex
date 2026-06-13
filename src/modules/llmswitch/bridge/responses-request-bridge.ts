@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
-// canonical_builders: prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
@@ -123,6 +123,66 @@ export function finalizeResponsesHandlerPayloadForHttp(args: {
 
 export function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
   return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+}
+
+export function buildResponsesScopeContinuationExpiredErrorForHttp(): {
+  error: {
+    message: string;
+    type: 'invalid_request_error';
+    code: 'responses_continuation_expired';
+  };
+} {
+  return {
+    error: {
+      message: 'Responses continuation expired or not found for local scope materialization',
+      type: 'invalid_request_error',
+      code: 'responses_continuation_expired',
+    },
+  };
+}
+
+export function buildResponsesResumeClientErrorForHttp(args: {
+  status?: number;
+  code?: string;
+  origin?: string;
+  message?: string;
+}): {
+  status: number;
+  body: {
+    error: {
+      message: string;
+      type: 'invalid_request_error';
+      code: string;
+      origin: string;
+    };
+  };
+} {
+  return {
+    status: typeof args.status === 'number' ? args.status : 422,
+    body: {
+      error: {
+        message:
+          typeof args.message === 'string' && args.message.trim()
+            ? args.message
+            : 'Unable to resume Responses conversation',
+        type: 'invalid_request_error',
+        code:
+          typeof args.code === 'string' && args.code.trim()
+            ? args.code
+            : 'responses_resume_failed',
+        origin:
+          typeof args.origin === 'string' && args.origin.trim()
+            ? args.origin
+            : 'client',
+      },
+    },
+  };
+}
+
+export function shouldProjectResponsesResumeClientErrorForHttp(args: {
+  origin?: string;
+}): boolean {
+  return typeof args.origin === 'string' && args.origin.trim() === 'client';
 }
 
 export function buildResponsesRequestContextForHttp(args: {
@@ -310,6 +370,16 @@ export async function clearResponsesConversationByRequestIdForHttp(
   requestId?: string
 ): Promise<void> {
   await clearResponsesConversationByRequestId(requestId);
+}
+
+export async function clearResponsesConversationOnHandlerFailureForHttp(args: {
+  requestId?: string;
+  stage: 'timeout' | 'timeout_started' | 'error';
+}): Promise<void> {
+  if (!args.requestId || !args.requestId.trim()) {
+    return;
+  }
+  await clearResponsesConversationByRequestIdForHttp(args.requestId);
 }
 
 export async function finalizeResponsesConversationRequestRetentionForHttp(

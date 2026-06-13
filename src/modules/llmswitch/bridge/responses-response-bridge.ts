@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -25,6 +25,7 @@ import {
   recordResponsesResponseForRequest,
 } from './runtime-integrations.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
+import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
 const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
   'error',
@@ -490,6 +491,94 @@ export function buildResponsesTerminalSseFramesFromProbeForHttp(
   return buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel);
 }
 
+export function shouldRequireResponsesTerminalEventForHttp(args: {
+  entryEndpoint?: string;
+  probe: unknown;
+}): boolean {
+  return (
+    Boolean(args.probe)
+    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+  );
+}
+
+export function shouldPersistResponsesConversationStateForHttp(args: {
+  entryEndpoint?: string;
+  probe: unknown;
+}): boolean {
+  return shouldRequireResponsesTerminalEventForHttp(args);
+}
+
+export function resolveResponsesTerminalProbeFinishReasonForHttp(args: {
+  finishReason?: string;
+  probe: unknown;
+}): string | undefined {
+  if (typeof args.finishReason === 'string' && args.finishReason.trim()) {
+    return args.finishReason.trim();
+  }
+  if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
+    return undefined;
+  }
+  const derived = deriveFinishReason(args.probe);
+  if (derived && derived.trim()) {
+    return derived.trim();
+  }
+  const probeRecord = args.probe as Record<string, unknown>;
+  const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
+  const sawCompletedAssistantMessage = output.some((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return false;
+    }
+    const row = item as Record<string, unknown>;
+    return row.type === 'message'
+      && row.role === 'assistant'
+      && typeof row.status === 'string'
+      && row.status.trim().toLowerCase() === 'completed';
+  });
+  if (sawCompletedAssistantMessage) {
+    return 'stop';
+  }
+  return undefined;
+}
+
+export function shouldClearResponsesConversationOnClientCloseForHttp(args: {
+  entryEndpoint?: string;
+  closeBeforeStreamEnd: boolean;
+}): boolean {
+  return args.closeBeforeStreamEnd && args.entryEndpoint === '/v1/responses';
+}
+
+export function shouldClearResponsesConversationOnFailureForHttp(args: {
+  entryEndpoint?: string;
+  status: number;
+  phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json';
+}): boolean {
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return false;
+  }
+  if (args.phase === 'sse_stream_error' || args.phase === 'sse_incomplete') {
+    return true;
+  }
+  return args.status >= 400;
+}
+
+export function resolveResponsesConversationClearReasonForHttp(
+  phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json'
+): 'sse-stream-error' | 'sse-incomplete' | 'json-empty-error' | 'json-error' {
+  switch (phase) {
+    case 'sse_stream_error':
+      return 'sse-stream-error';
+    case 'sse_incomplete':
+      return 'sse-incomplete';
+    case 'json_empty':
+      return 'json-empty-error';
+    case 'json':
+      return 'json-error';
+  }
+}
+
 export function isToolCallContinuationResponseForHttp(body: unknown): boolean {
   return isToolCallContinuationResponseNative(body);
 }
@@ -528,6 +617,13 @@ export function inspectResponsesContinuationProbeForHttp(args: {
         && !Array.isArray(probeRecord.required_action)
       ),
   };
+}
+
+export function shouldPersistResponsesContinuationOnProbeUpdateForHttp(args: {
+  entryEndpoint?: string;
+  probe: unknown;
+}): boolean {
+  return inspectResponsesContinuationProbeForHttp(args).isToolCallContinuation;
 }
 
 export function planResponsesContinuationCloseActionForHttp(args: {
@@ -926,6 +1022,80 @@ export async function createResponsesJsonToSseConverterForHttp() {
   return await createResponsesJsonToSseConverter();
 }
 
+export function buildResponsesSseErrorPayloadForHttp(args: {
+  requestLabel: string;
+  status: number;
+  message: string;
+  code: string;
+  error?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const payloadError: Record<string, unknown> = {
+    ...(args.error ?? {}),
+    message: args.message,
+    code: args.code,
+    request_id:
+      typeof args.error?.request_id === 'string' && args.error.request_id.trim()
+        ? args.error.request_id.trim()
+        : args.requestLabel,
+  };
+  return {
+    type: 'error',
+    status: args.status,
+    error: payloadError,
+  };
+}
+
+export function buildResponsesStructuredSseErrorPayloadForHttp(args: {
+  body: unknown;
+  requestLabel: string;
+  status: number;
+}): Record<string, unknown> | null {
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return null;
+  }
+  const record = args.body as Record<string, unknown>;
+  const error =
+    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  if (!error) {
+    return null;
+  }
+  const message =
+    typeof error.message === 'string' && error.message.trim()
+      ? error.message
+      : 'Upstream provider error';
+  const code =
+    typeof error.code === 'string' && error.code.trim()
+      ? error.code
+      : 'HTTP_HANDLER_ERROR';
+  return buildResponsesSseErrorPayloadForHttp({
+    requestLabel: args.requestLabel,
+    status: args.status,
+    message,
+    code,
+    error,
+  });
+}
+
+export function buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel: string, status = 502): Record<string, unknown> {
+  return buildResponsesSseErrorPayloadForHttp({
+    requestLabel,
+    status,
+    message: 'SSE stream missing from pipeline result',
+    code: 'sse_bridge_error',
+  });
+}
+
+export function buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel: string): Record<string, unknown> {
+  return buildResponsesSseErrorPayloadForHttp({
+    requestLabel,
+    status: 502,
+    message: 'stream closed before response.completed',
+    code: 'upstream_stream_incomplete',
+  });
+}
+
 export async function prepareResponsesJsonBodyForSseBridgeForHttp(args: {
   body: unknown;
   entryEndpoint?: string;
@@ -1087,6 +1257,84 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
   });
+}
+
+export function resolveResponsesClientPayloadFinishReasonForHttp(payload: unknown): string | undefined {
+  return deriveFinishReason(payload);
+}
+
+export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
+  responsesPayload: Record<string, unknown>;
+  entryEndpoint?: string;
+  requestLabel: string;
+  metadata?: Record<string, unknown>;
+  requestContext?: {
+    payload: AnyRecord;
+    context: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  };
+  hasSsePayload: (value: unknown) => boolean;
+}): Promise<{
+  normalizedPayload: Record<string, unknown>;
+  sanitizedPayload: Record<string, unknown>;
+  finishReason?: string;
+}> {
+  const normalizedPayload = await normalizeResponsesClientPayloadForHttp({
+    payload: args.responsesPayload,
+    entryEndpoint: args.entryEndpoint,
+    requestContext: args.requestContext,
+    metadata: args.metadata,
+    hasSsePayload: args.hasSsePayload,
+  }) as Record<string, unknown>;
+  const sanitizedPayload = stripInternalKeysDeep(normalizedPayload);
+  return {
+    normalizedPayload,
+    sanitizedPayload,
+    finishReason: resolveResponsesClientPayloadFinishReasonForHttp(normalizedPayload),
+  };
+}
+
+export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+  requestContext?: {
+    payload: AnyRecord;
+    context: AnyRecord;
+    sessionId?: string;
+    conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  };
+  metadata?: Record<string, unknown>;
+  hasSsePayload: (value: unknown) => boolean;
+  resolveBridge?: typeof importResponsesHandlerCoreDist;
+}): Promise<{
+  clientBody: unknown;
+  sanitizedBody: unknown;
+  finishReason?: string;
+}> {
+  const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
+    body: args.body,
+    entryEndpoint: args.entryEndpoint,
+    requestLabel: args.requestLabel,
+    resolveBridge: args.resolveBridge,
+  });
+  const clientBody = await normalizeResponsesClientPayloadForHttp({
+    payload: normalizedJsonBody,
+    entryEndpoint: args.entryEndpoint,
+    requestContext: args.requestContext,
+    metadata: args.metadata,
+    hasSsePayload: args.hasSsePayload,
+  });
+  return {
+    clientBody,
+    sanitizedBody: stripInternalKeysDeep(clientBody),
+    finishReason: resolveResponsesClientPayloadFinishReasonForHttp(clientBody),
+  };
 }
 
 export async function projectResponsesSseFrameForClientForHttp(args: {

@@ -44,14 +44,32 @@ export {
 export { convertProviderResponse } from './bridge/response-converter.js';
 export {
   prepareResponsesHandlerEntryForHttp,
+  buildResponsesScopeContinuationExpiredErrorForHttp,
+  buildResponsesResumeClientErrorForHttp,
+  shouldProjectResponsesResumeClientErrorForHttp,
   captureResponsesRequestContextForHttp,
   recordResponsesResponseForHttp,
-  clearResponsesConversationByRequestIdForHttp
+  clearResponsesConversationByRequestIdForHttp,
+  clearResponsesConversationOnHandlerFailureForHttp
 } from './bridge/responses-request-bridge.js';
 export {
   updateResponsesContractProbeFromSseChunkForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
+  buildResponsesMissingSseBridgeErrorPayloadForHttp,
+  buildResponsesSseErrorPayloadForHttp,
+  buildResponsesStreamIncompleteErrorPayloadForHttp,
+  buildResponsesStructuredSseErrorPayloadForHttp,
   isToolCallContinuationResponseForHttp,
+  prepareResponsesJsonClientDispatchPlanForHttp,
+  prepareResponsesJsonSseDispatchPlanForHttp,
+  resolveResponsesClientPayloadFinishReasonForHttp,
+  resolveResponsesConversationClearReasonForHttp,
+  resolveResponsesTerminalProbeFinishReasonForHttp,
+  shouldClearResponsesConversationOnClientCloseForHttp,
+  shouldClearResponsesConversationOnFailureForHttp,
+  shouldPersistResponsesContinuationOnProbeUpdateForHttp,
+  shouldPersistResponsesConversationStateForHttp,
+  shouldRequireResponsesTerminalEventForHttp,
   captureResponsesRequestContextForHttpProjection,
   rebindResponsesConversationRequestIdForHttp,
   clearResponsesConversationByRequestIdForHttpProjection,

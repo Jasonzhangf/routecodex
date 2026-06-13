@@ -121,23 +121,33 @@ import { isClientDisconnectAbortError } from '../runtime/http-server/executor-pr
 import {
   assertDirectPassthroughResponsesSseFrameForHttp,
   buildClientSseKeepaliveFrameForHttp,
+  buildResponsesMissingSseBridgeErrorPayloadForHttp,
+  buildResponsesSseErrorPayloadForHttp,
+  buildResponsesStreamIncompleteErrorPayloadForHttp,
+  buildResponsesStructuredSseErrorPayloadForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
-  clearResponsesConversationByRequestIdForHttpProjection,
   createResponsesJsonToSseConverterForHttp,
   clearResponsesConversationRequestIdsForHttp,
   finalizeResponsesConversationRequestRetentionForHttp,
   importResponsesHandlerCoreDist,
-  inspectResponsesContinuationProbeForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
   inspectResponsesTerminalStateFromSseChunkForHttp,
-  normalizeResponsesClientPayloadForHttp,
-  normalizeResponsesJsonBodyForHttp,
   normalizeResponsesSseFrameForClientForHttp,
   planResponsesStreamEndRepairForHttp,
   persistResponsesConversationLifecycleForHttp,
   planResponsesContinuationCloseActionForHttp,
+  prepareResponsesJsonClientDispatchPlanForHttp,
+  prepareResponsesJsonSseDispatchPlanForHttp,
   prepareResponsesJsonBodyForSseBridgeForHttp,
+  resolveResponsesClientPayloadFinishReasonForHttp,
+  resolveResponsesConversationClearReasonForHttp,
+  resolveResponsesTerminalProbeFinishReasonForHttp,
   resolveResponsesProviderProtocolHintFromSseFrameForHttp,
+  shouldClearResponsesConversationOnClientCloseForHttp,
+  shouldClearResponsesConversationOnFailureForHttp,
+  shouldPersistResponsesContinuationOnProbeUpdateForHttp,
+  shouldPersistResponsesConversationStateForHttp,
+  shouldRequireResponsesTerminalEventForHttp,
   summarizeResponsesSseFrameForLogForHttp,
   shouldDropClientSseFrameForHttp,
   updateResponsesContractProbeFromSseChunkForHttp
@@ -212,13 +222,6 @@ function updateContractProbeFromSseChunk(
   contractProbe: StreamContractProbeEnvelope
 ): void {
   contractProbe.probe = updateResponsesContractProbeFromSseChunkForHttp(chunk, contractProbe.probe);
-}
-
-function buildResponsesTerminalSseFramesFromProbe(
-  probe: Record<string, unknown> | undefined,
-  requestLabel: string,
-): string[] {
-  return buildResponsesTerminalSseFramesFromProbeForHttp(probe, requestLabel);
 }
 
 function assertClientSseFrameHasNoInternalCarriers(frame: string, requestId: string): void {
@@ -418,25 +421,6 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
     code: 'CLIENT_DISCONNECTED',
     name: 'AbortError',
     retryable: false
-  });
-}
-
-function cleanupAbandonedResponsesConversation(
-  requestLabel: string,
-  options: {
-    entryEndpoint?: string;
-    closeBeforeStreamEnd: boolean;
-    timingRequestIds?: string[];
-  }
-): void {
-  if (!options.closeBeforeStreamEnd || options.entryEndpoint !== '/v1/responses') {
-    return;
-  }
-  void clearResponsesConversationRequestIdsForHttp({
-    requestLabel,
-    timingRequestIds: options.timingRequestIds,
-    reason: 'client-close',
-    onNonBlockingError: logResponseNonBlockingError,
   });
 }
 
@@ -726,15 +710,7 @@ function createDirectPassthroughSseGuardStream(
 
 
 function sendSseBridgeError(res: Response, requestLabel: string, status = 502): void {
-  const payload = {
-    type: 'error',
-    status,
-    error: {
-      message: 'SSE stream missing from pipeline result',
-      code: 'sse_bridge_error',
-      request_id: requestLabel
-    }
-  };
+  const payload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, status);
   if (!res.headersSent) {
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -754,29 +730,11 @@ function sendSseBridgeError(res: Response, requestLabel: string, status = 502): 
 }
 
 function extractStructuredSseErrorPayload(body: unknown, requestLabel: string, status: number): Record<string, unknown> | null {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return null;
-  }
-  const record = body as Record<string, unknown>;
-  const error =
-    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
-      ? (record.error as Record<string, unknown>)
-      : undefined;
-  if (!error) {
-    return null;
-  }
-  const payloadError: Record<string, unknown> = {
-    ...error,
-    request_id:
-      typeof error.request_id === 'string' && error.request_id.trim()
-        ? error.request_id
-        : requestLabel
-  };
-  return {
-    type: 'error',
+  return buildResponsesStructuredSseErrorPayloadForHttp({
+    body,
+    requestLabel,
     status,
-    error: payloadError
-  };
+  });
 }
 
 function sendStructuredSseError(res: Response, requestLabel: string, payload: Record<string, unknown>): void {
@@ -839,16 +797,19 @@ async function streamResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs & {
   }
   try {
     const converter = await createResponsesJsonToSseConverterForHttp();
-    const normalizedResponsesPayload = await normalizeResponsesClientPayloadForHttp({
-      payload: args.responsesPayload,
+    const bridgePlan = await prepareResponsesJsonSseDispatchPlanForHttp({
+      responsesPayload: args.responsesPayload,
       entryEndpoint: args.entryEndpoint,
+      requestLabel: args.requestLabel,
+      metadata:
+        args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
+          ? args.result.metadata as Record<string, unknown>
+          : undefined,
       requestContext:
         args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
           ?? args.responsesRequestContext,
-      metadata: args.result.metadata,
       hasSsePayload,
-    }) as Record<string, unknown>;
-    const sanitizedResponsesPayload = stripInternalKeysDeep(normalizedResponsesPayload);
+    });
     await persistResponsesConversationLifecycleForHttp({
       entryEndpoint: args.entryEndpoint,
       requestLabel: args.requestLabel,
@@ -860,11 +821,11 @@ async function streamResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs & {
       requestContext:
         (args.result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
         ?? args.responsesRequestContext,
-      body: sanitizedResponsesPayload,
+      body: bridgePlan.sanitizedPayload,
       onTrace: (stage, details) => logResponsesContinuationTrace(`json-to-sse.persist.${stage}`, args.requestLabel, details),
       onNonBlockingError: logResponseNonBlockingError,
     });
-    const sse = await converter.convertResponseToJsonToSse(normalizedResponsesPayload, {
+    const sse = await converter.convertResponseToJsonToSse(bridgePlan.normalizedPayload, {
       requestId: args.requestLabel
     });
     const stream = toNodeReadable(sse);
@@ -879,7 +840,7 @@ async function streamResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs & {
       args.logResponseCompleted({
         status: args.status,
         mode: 'sse',
-        finishReason: deriveFinishReason(args.result.body)
+        finishReason: bridgePlan.finishReason
       });
     });
     stream.on('error', (error: Error) => {
@@ -898,24 +859,12 @@ async function streamResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs & {
   return true;
 }
 
-async function resolveResponsesJsonSseBridgePayload(args: {
-  body: unknown;
-  entryEndpoint?: string;
-  requestLabel: string;
-}): Promise<Record<string, unknown> | null> {
-  return await prepareResponsesJsonBodyForSseBridgeForHttp({
-    body: args.body,
-    entryEndpoint: args.entryEndpoint,
-    requestLabel: args.requestLabel,
-    hasSsePayload,
-  });
-}
-
 async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): Promise<boolean> {
-  const responsesPayload = await resolveResponsesJsonSseBridgePayload({
+  const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
     body: args.result.body,
     entryEndpoint: args.entryEndpoint,
     requestLabel: args.requestLabel,
+    hasSsePayload,
   });
   if (!responsesPayload) {
     return false;
@@ -1082,6 +1031,7 @@ export async function sendPipelineResponse(
   };
 
   if (forceSSE && !expectsStream) {
+    const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     if (await dispatchResponsesJsonAsSse({
       res,
       requestLabel,
@@ -1109,11 +1059,7 @@ export async function sendPipelineResponse(
         data: {
           mode: 'sse',
           status: 200,
-          payload: structuredErrorPayload ?? {
-            type: 'error',
-            status: 502,
-            error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' }
-          }
+          payload: structuredErrorPayload ?? missingSsePayload
         }
       }).catch((error) => {
         logResponseNonBlockingError(`writeServerSnapshot:sse_missing:${requestLabel}`, error);
@@ -1152,6 +1098,7 @@ export async function sendPipelineResponse(
         ? responseProjectionMetadata.clientConnectionState as { disconnected?: unknown }
         : undefined;
     if (!stream) {
+      const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
       logPipelineStage('response.sse.missing', requestLabel, {});
       logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
       if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
@@ -1162,11 +1109,7 @@ export async function sendPipelineResponse(
           data: {
             mode: 'sse',
             status: 200,
-            payload: {
-              type: 'error',
-              status: 502,
-              error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' }
-            }
+            payload: missingSsePayload
           }
         }).catch((error) => {
           logResponseNonBlockingError(`writeServerSnapshot:sse_missing_stream:${requestLabel}`, error);
@@ -1241,11 +1184,17 @@ export async function sendPipelineResponse(
         directPassthrough: isDirectPassthrough,
         clientConnectionDisconnected: clientConnectionState?.disconnected === true,
       });
-      cleanupAbandonedResponsesConversation(requestLabel, {
+      if (shouldClearResponsesConversationOnClientCloseForHttp({
         entryEndpoint,
         closeBeforeStreamEnd: true,
-        timingRequestIds: result.usageLogInfo?.timingRequestIds
-      });
+      })) {
+        void clearResponsesConversationRequestIdsForHttp({
+          requestLabel,
+          timingRequestIds: result.usageLogInfo?.timingRequestIds,
+          reason: 'client-close',
+          onNonBlockingError: logResponseNonBlockingError,
+        });
+      }
       try {
         const abortError = createSseClientResponseClosedError();
         if (typeof (stream as Readable).once === 'function') {
@@ -1334,8 +1283,10 @@ export async function sendPipelineResponse(
         : undefined,
       emitted: false
     };
-    terminalWatch.requiresResponsesTerminalEvent = Boolean(contractProbe.probe)
-      && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs');
+    terminalWatch.requiresResponsesTerminalEvent = shouldRequireResponsesTerminalEventForHttp({
+      entryEndpoint,
+      probe: contractProbe.probe,
+    });
     const effectiveResponsesRequestContext =
       (result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined)
       ?? options?.responsesRequestContext;
@@ -1347,15 +1298,10 @@ export async function sendPipelineResponse(
         logResponsesContinuationTrace('sse.persist.skip.already_persisted', requestLabel);
         return;
       }
-      if (
-        (
-        (entryEndpoint !== '/v1/responses'
-          && entryEndpoint !== '/v1/responses.submit_tool_outputs')
-        || !contractProbe.probe
-        || typeof contractProbe.probe !== 'object'
-        || Array.isArray(contractProbe.probe)
-        )
-      ) {
+      if (!shouldPersistResponsesConversationStateForHttp({
+        entryEndpoint,
+        probe: contractProbe.probe,
+      })) {
         logResponsesContinuationTrace('sse.persist.skip.not_eligible', requestLabel, {
           entryEndpoint: entryEndpoint ?? 'unknown',
           hasProbe: Boolean(contractProbe.probe)
@@ -1389,23 +1335,14 @@ export async function sendPipelineResponse(
         finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined
       });
     };
-    const resolveTerminalProbeFinishReason = (): string | undefined => {
-      if (finishTracker.finishReason && finishTracker.finishReason.trim()) {
-        return finishTracker.finishReason.trim();
-      }
-      if (!contractProbe.probe || typeof contractProbe.probe !== 'object' || Array.isArray(contractProbe.probe)) {
-        return undefined;
-      }
-      const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
-      const derived = deriveFinishReason(sanitizedProbeBody);
-      if (derived && derived.trim()) {
-        finishTracker.finishReason = derived.trim();
-        return finishTracker.finishReason;
-      }
-      return undefined;
-    };
     const finalizeSyntheticTerminalClose = (): void => {
-      const resolvedFinishReason = resolveTerminalProbeFinishReason();
+      const resolvedFinishReason = resolveResponsesTerminalProbeFinishReasonForHttp({
+        finishReason: finishTracker.finishReason,
+        probe:
+          contractProbe.probe && typeof contractProbe.probe === 'object' && !Array.isArray(contractProbe.probe)
+            ? stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>)
+            : contractProbe.probe,
+      });
       if (resolvedFinishReason) {
         finishTracker.finishReason = resolvedFinishReason;
       }
@@ -1530,11 +1467,14 @@ export async function sendPipelineResponse(
           closeBeforeStreamEnd,
           detectedBeforeStreamStart: !streamEnded
         });
-        cleanupAbandonedResponsesConversation(requestLabel, {
-          entryEndpoint,
-          closeBeforeStreamEnd,
-          timingRequestIds: result.usageLogInfo?.timingRequestIds
-        });
+        if (shouldClearResponsesConversationOnClientCloseForHttp({ entryEndpoint, closeBeforeStreamEnd })) {
+          void clearResponsesConversationRequestIdsForHttp({
+            requestLabel,
+            timingRequestIds: result.usageLogInfo?.timingRequestIds,
+            reason: 'client-close',
+            onNonBlockingError: logResponseNonBlockingError,
+          });
+        }
       })().catch((error) => {
         logResponseNonBlockingError(`response.sse.client_close.cleanup:${requestLabel}`, error);
       });
@@ -1577,7 +1517,12 @@ export async function sendPipelineResponse(
         sawTerminalEvent: finishTracker.seenTerminalEvent,
         finishReason: finishTracker.finishReason,
       });
-      const payload = { type: 'error', status: statusCode, error: { message, code, request_id: requestLabel } };
+      const payload = buildResponsesSseErrorPayloadForHttp({
+        requestLabel,
+        status: statusCode,
+        message,
+        code,
+      });
       writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.error.write_error_event');
       try {
         res.end();
@@ -1733,10 +1678,6 @@ export async function sendPipelineResponse(
           );
         });
     };
-    const readResponsesContinuationProbeState = () => inspectResponsesContinuationProbeForHttp({
-      entryEndpoint,
-      probe: contractProbe.probe,
-    });
     const writeTerminalProbeFramesAndClose = async (stage: string): Promise<void> => {
       if (ended || streamEnded || res.writableEnded || res.destroyed) {
         return;
@@ -1752,7 +1693,7 @@ export async function sendPipelineResponse(
       void persistNativeSseConversationState().catch((error) => {
         logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
       });
-      const framesToWrite = buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel);
+      const framesToWrite = buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel);
       if (framesToWrite.length === 0) {
         if (terminalWatch.sawAssistantMessageDoneTerminal || finishTracker.seenTerminalEvent) {
           finalizeSyntheticTerminalClose();
@@ -1865,7 +1806,10 @@ export async function sendPipelineResponse(
         terminalWatch.terminalSource = nextTerminalState.terminalSource;
         terminalWatch.pendingTerminalEvent = nextTerminalState.pendingTerminalEvent;
         updateContractProbeFromSseChunk(part, contractProbe);
-        if (readResponsesContinuationProbeState().isToolCallContinuation) {
+        if (shouldPersistResponsesContinuationOnProbeUpdateForHttp({
+          entryEndpoint,
+          probe: contractProbe.probe,
+        })) {
           void persistNativeSseConversationState().catch((error) => {
             logResponseNonBlockingError(`responses-conversation-native-sse-required-action:${requestLabel}`, error);
           });
@@ -1916,12 +1860,18 @@ export async function sendPipelineResponse(
         sawTerminalEvent: finishTracker.seenTerminalEvent,
         finishReason: finishTracker.finishReason,
       });
-      void clearResponsesConversationRequestIdsForHttp({
-        requestLabel,
-        timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        reason: 'sse-stream-error',
-        onNonBlockingError: logResponseNonBlockingError,
-      });
+      if (shouldClearResponsesConversationOnFailureForHttp({
+        entryEndpoint,
+        status: 500,
+        phase: 'sse_stream_error',
+      })) {
+        void clearResponsesConversationRequestIdsForHttp({
+          requestLabel,
+          timingRequestIds: result.usageLogInfo?.timingRequestIds,
+          reason: resolveResponsesConversationClearReasonForHttp('sse_stream_error'),
+          onNonBlockingError: logResponseNonBlockingError,
+        });
+      }
       logResponseCompleted({
         status: 500,
         mode: 'sse',
@@ -1933,15 +1883,12 @@ export async function sendPipelineResponse(
           ? 'SSE stream response projection failed'
           : error.message;
         const clientVisibleCode = readErrorCode(error) ?? 'sse_stream_error';
-        const payload = {
-          type: 'error',
+        const payload = buildResponsesSseErrorPayloadForHttp({
+          requestLabel,
           status: 500,
-          error: {
-            message: clientVisibleMessage,
-            code: clientVisibleCode,
-            request_id: requestLabel
-          }
-        };
+          message: clientVisibleMessage,
+          code: clientVisibleCode,
+        });
         writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream_error.write_error_event');
       } catch (writeError) {
         logResponseNonBlockingError(`response.sse.stream_error.write_error_event:${requestLabel}`, writeError);
@@ -2016,7 +1963,7 @@ export async function sendPipelineResponse(
         sawTerminalEvent: finishTracker.seenTerminalEvent === true,
       });
       const repairedTerminalFrames = streamEndRepairPlan.shouldRepairTerminalFrames
-        ? buildResponsesTerminalSseFramesFromProbe(contractProbe.probe, requestLabel)
+        ? buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel)
         : [];
       if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
         try {
@@ -2035,8 +1982,8 @@ export async function sendPipelineResponse(
           if (framesToWrite.length > 0) {
             finishTracker.seenTerminalEvent = true;
             terminalWatch.sawTerminalChunk = true;
-            terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame) => frame.includes('event: response.completed'));
-            terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
+            terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame: string) => frame.includes('event: response.completed'));
+            terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame: string) => frame.includes('event: response.done'));
             contractProbe.emitted = true;
           }
         } catch (repairWriteError) {
@@ -2059,7 +2006,7 @@ export async function sendPipelineResponse(
             sawTerminalEvent: finishTracker.seenTerminalEvent === true,
           });
           if (closedBeforeTerminalEvent && closedBeforeTerminalRepairPlan.shouldRepairContinuationTerminal) {
-            const repairedToolContinuationFrames = buildResponsesTerminalSseFramesFromProbe(
+            const repairedToolContinuationFrames = buildResponsesTerminalSseFramesFromProbeForHttp(
               contractProbe.probe,
               requestLabel
             );
@@ -2085,8 +2032,8 @@ export async function sendPipelineResponse(
                 }
                 finishTracker.seenTerminalEvent = true;
                 terminalWatch.sawTerminalChunk = true;
-                terminalWatch.sawResponsesCompletedChunk = true;
-                terminalWatch.sawResponsesDoneEvent = true;
+                terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || repairedToolContinuationFrames.some((frame: string) => frame.includes('event: response.completed'));
+                terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || repairedToolContinuationFrames.some((frame: string) => frame.includes('event: response.done'));
                 contractProbe.emitted = true;
               } catch (repairWriteError) {
                 logResponseNonBlockingError(
@@ -2105,14 +2052,23 @@ export async function sendPipelineResponse(
             sawTerminalEvent: finishTracker.seenTerminalEvent === true,
           });
           if (repairedClosedBeforeTerminalEvent && finalStreamEndRepairPlan.shouldProjectIncompleteError) {
+            const incompletePayload = buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel);
+            const incompleteError =
+              incompletePayload.error && typeof incompletePayload.error === 'object' && !Array.isArray(incompletePayload.error)
+                ? incompletePayload.error as Record<string, unknown>
+                : {};
+            const incompleteMessage =
+              typeof incompleteError.message === 'string' ? incompleteError.message : 'Upstream provider error';
+            const incompleteCode =
+              typeof incompleteError.code === 'string' ? incompleteError.code : 'HTTP_HANDLER_ERROR';
             logPipelineStage('response.sse.stream.error', requestLabel, {
-              message: 'stream closed before response.completed',
-              code: 'upstream_stream_incomplete'
+              message: incompleteMessage,
+              code: incompleteCode
             });
-            writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'upstream_stream_incomplete', {
+            writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, incompleteCode, {
               status: 502,
-              message: 'stream closed before response.completed',
-              code: 'upstream_stream_incomplete',
+              message: incompleteMessage,
+              code: incompleteCode,
               lastRawFrame: lastRawClientFrameSummary ?? undefined,
               lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
               probe: contractProbe.probe ?? undefined,
@@ -2121,25 +2077,22 @@ export async function sendPipelineResponse(
               sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
               finishReason: resolvedStreamFinishReason,
             });
-            void clearResponsesConversationRequestIdsForHttp({
-              requestLabel,
-              timingRequestIds: result.usageLogInfo?.timingRequestIds,
-              reason: 'sse-incomplete',
-              onNonBlockingError: logResponseNonBlockingError,
-            });
+            if (shouldClearResponsesConversationOnFailureForHttp({
+              entryEndpoint,
+              status: 502,
+              phase: 'sse_incomplete',
+            })) {
+              void clearResponsesConversationRequestIdsForHttp({
+                requestLabel,
+                timingRequestIds: result.usageLogInfo?.timingRequestIds,
+                reason: resolveResponsesConversationClearReasonForHttp('sse_incomplete'),
+                onNonBlockingError: logResponseNonBlockingError,
+              });
+            }
             if (!res.writableEnded && !res.destroyed) {
               try {
                 await clientWriteQueue;
-                const payload = {
-                  type: 'error',
-                  status: 502,
-                  error: {
-                    message: 'stream closed before response.completed',
-                    code: 'upstream_stream_incomplete',
-                    request_id: requestLabel
-                  }
-                };
-                writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream.end.write_error_event');
+                writeClientSseFrame(`event: error\ndata: ${JSON.stringify(incompletePayload)}\n\n`, 'response.sse.stream.end.write_error_event');
               } catch (writeError) {
                 logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
               }
@@ -2180,11 +2133,15 @@ export async function sendPipelineResponse(
 
   applyHeaders(res, result.headers, false);
   if (body === undefined || body === null) {
-    if (status >= 400) {
+    if (shouldClearResponsesConversationOnFailureForHttp({
+      entryEndpoint,
+      status,
+      phase: 'json_empty',
+    })) {
       await clearResponsesConversationRequestIdsForHttp({
         requestLabel,
         timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        reason: 'json-empty-error',
+        reason: resolveResponsesConversationClearReasonForHttp('json_empty'),
         onNonBlockingError: logResponseNonBlockingError,
       });
     }
@@ -2207,21 +2164,21 @@ export async function sendPipelineResponse(
   logPipelineStage('response.json.write', requestLabel, { status });
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
-  const normalizedJsonBody = await normalizeResponsesClientPayloadForHttp({
-    payload: await normalizeResponsesJsonBodyForHttp({
-      body,
-      entryEndpoint,
-      requestLabel,
-      resolveBridge: importResponsesHandlerCoreDist,
-    }),
+  const jsonDispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
+    body,
     entryEndpoint,
+    requestLabel,
     requestContext:
       result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined
         ?? options?.responsesRequestContext,
-    metadata: result.metadata,
+    metadata:
+      result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
+        ? result.metadata as Record<string, unknown>
+        : undefined,
     hasSsePayload,
+    resolveBridge: importResponsesHandlerCoreDist,
   });
-  const usageNormalized = normalizeChatUsagePayload(normalizedJsonBody, {
+  const usageNormalized = normalizeChatUsagePayload(jsonDispatchPlan.clientBody, {
     entryEndpoint,
     usageFallback: result.usageLogInfo?.usage
   });
@@ -2232,17 +2189,25 @@ export async function sendPipelineResponse(
   }
   const clientBody = usageNormalized.payload;
   assertClientResponseHasNoInternalCarriers(clientBody, requestLabel);
-  const sanitized = stripInternalKeysDeep(clientBody);
-  if (status >= 400) {
+  const sanitized = usageNormalized.normalized
+    ? stripInternalKeysDeep(clientBody)
+    : jsonDispatchPlan.sanitizedBody;
+  if (shouldClearResponsesConversationOnFailureForHttp({
+    entryEndpoint,
+    status,
+    phase: 'json',
+  })) {
     await clearResponsesConversationRequestIdsForHttp({
       requestLabel,
       timingRequestIds: result.usageLogInfo?.timingRequestIds,
       responseId: undefined,
-      reason: 'json-error',
+      reason: resolveResponsesConversationClearReasonForHttp('json'),
       onNonBlockingError: logResponseNonBlockingError,
     });
   }
-  const jsonFinishReason = deriveFinishReason(clientBody);
+  const jsonFinishReason = usageNormalized.normalized
+    ? resolveResponsesClientPayloadFinishReasonForHttp(clientBody)
+    : jsonDispatchPlan.finishReason;
   await persistResponsesConversationLifecycleForHttp({
     entryEndpoint,
     requestLabel,

@@ -175,9 +175,106 @@ const mockBridgeModule = async () => ({
       return frame;
     }
   }),
+  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: {
+    responsesPayload: Record<string, unknown>;
+  }) => ({
+    normalizedPayload: args.responsesPayload,
+    sanitizedPayload: args.responsesPayload,
+    finishReason:
+      Array.isArray(args.responsesPayload.output)
+      && args.responsesPayload.output.some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
+        ? 'tool_calls'
+        : undefined,
+  })),
+  prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async (args: {
+    body: unknown;
+  }) => ({
+    clientBody: args.body,
+    sanitizedBody: args.body,
+    finishReason:
+      args.body
+      && typeof args.body === 'object'
+      && !Array.isArray(args.body)
+      && Array.isArray((args.body as Record<string, unknown>).output)
+      && ((args.body as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
+        ? 'tool_calls'
+        : undefined,
+  })),
   persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
+  resolveResponsesConversationClearReasonForHttp: jest.fn((phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json') => {
+    switch (phase) {
+      case 'sse_stream_error':
+        return 'sse-stream-error';
+      case 'sse_incomplete':
+        return 'sse-incomplete';
+      case 'json_empty':
+        return 'json-empty-error';
+      case 'json':
+        return 'json-error';
+    }
+  }),
+  resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return undefined;
+    }
+    const record = payload as Record<string, unknown>;
+    const output = Array.isArray(record.output) ? record.output : [];
+    return output.some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
+      ? 'tool_calls'
+      : undefined;
+  }),
+  resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn((args: {
+    finishReason?: string;
+    probe: unknown;
+  }) => {
+    if (typeof args.finishReason === 'string' && args.finishReason.trim()) {
+      return args.finishReason.trim();
+    }
+    const probe = args.probe;
+    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
+      return undefined;
+    }
+    const value = (probe as Record<string, unknown>).finish_reason;
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
+  shouldClearResponsesConversationOnClientCloseForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    closeBeforeStreamEnd: boolean;
+  }) => args.closeBeforeStreamEnd && args.entryEndpoint === '/v1/responses'),
+  shouldClearResponsesConversationOnFailureForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    status: number;
+    phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json';
+  }) => {
+    if (args.entryEndpoint !== '/v1/responses' && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
+      return false;
+    }
+    if (args.phase === 'sse_stream_error' || args.phase === 'sse_incomplete') {
+      return true;
+    }
+    return args.status >= 400;
+  }),
+  shouldPersistResponsesConversationStateForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: unknown;
+  }) => (
+    Boolean(args.probe)
+    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+  )),
+  shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: unknown;
+  }) => (
+    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+    && Boolean(
+      args.probe
+      && typeof args.probe === 'object'
+      && !Array.isArray(args.probe)
+      && (args.probe as Record<string, unknown>).required_action
+    )
+  )),
   shouldRepairResponsesContinuationTerminalForHttp: jest.fn((args: {
     entryEndpoint?: string;
     probe: unknown;
@@ -189,6 +286,13 @@ const mockBridgeModule = async () => ({
       && !Array.isArray(args.probe)
       && (args.probe as Record<string, unknown>).required_action
     )
+  )),
+  shouldRequireResponsesTerminalEventForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: unknown;
+  }) => (
+    Boolean(args.probe)
+    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
   )),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),

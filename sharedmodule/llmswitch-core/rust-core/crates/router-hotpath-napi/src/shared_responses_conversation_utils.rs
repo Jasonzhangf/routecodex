@@ -1388,6 +1388,7 @@ fn restore_responses_continuation_payload(
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
+            "fullInput": normalize_responses_history_items(input_items.clone()),
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1487,6 +1488,7 @@ fn materialize_responses_continuation_payload(
             "incomingInputItems": input_items.len(),
             "continuationDeltaItems": continuation_delta.len(),
             "fullInputItems": full_input.len(),
+            "fullInput": full_input,
             "toolOutputsDetailed": submitted_details,
         }
     })

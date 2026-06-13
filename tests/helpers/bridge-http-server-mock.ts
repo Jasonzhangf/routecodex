@@ -69,11 +69,32 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     preloadCriticalBridgeRuntimeModules: async () => {},
     captureResponsesRequestContextForRequest: async () => {},
     recordResponsesResponseForRequest: async () => {},
+    buildResponsesScopeContinuationExpiredErrorForHttp: () => ({
+      error: {
+        message: 'Responses continuation expired or not found for local scope materialization',
+        type: 'invalid_request_error',
+        code: 'responses_continuation_expired',
+      },
+    }),
+    buildResponsesResumeClientErrorForHttp: (args: { status?: number; code?: string; origin?: string; message?: string }) => ({
+      status: typeof args.status === 'number' ? args.status : 422,
+      body: {
+        error: {
+          message: typeof args.message === 'string' ? args.message : 'Unable to resume Responses conversation',
+          type: 'invalid_request_error',
+          code: typeof args.code === 'string' ? args.code : 'responses_resume_failed',
+          origin: typeof args.origin === 'string' ? args.origin : 'client',
+        },
+      },
+    }),
+    shouldProjectResponsesResumeClientErrorForHttp: (args: { origin?: string }) =>
+      typeof args.origin === 'string' && args.origin.trim() === 'client',
     resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
     resumeLatestResponsesContinuationByScope: async () => null,
     materializeLatestResponsesContinuationByScope: async () => null,
     rebindResponsesConversationRequestId: async () => {},
     clearResponsesConversationByRequestId: async () => {},
+    clearResponsesConversationOnHandlerFailureForHttp: async () => {},
     finalizeResponsesConversationRequestRetention: async () => {},
     clearAllResponsesConversationState: async () => {},
     resetResponsesConversationStateForRestartSimulation: async () => {},

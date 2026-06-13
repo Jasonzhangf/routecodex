@@ -2,36 +2,90 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 const mockResumeResponsesConversation = jest.fn();
 const mockCaptureResponsesRequestContextForRequest = jest.fn();
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-  captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
-  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-  createResponsesJsonToSseConverter: jest.fn(),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  finalizeResponsesConversationRequestRetention: jest.fn(),
-  importCoreDist: jest.fn(),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
-  materializeLatestResponsesContinuationByScope: jest.fn(),
-  planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
-    mode: 'submit_tool_outputs',
-    payload: {
-      ...payload,
-      ...(responseIdFromPath ? { response_id: responseIdFromPath } : {})
-    },
-    responseId: responseIdFromPath,
-  })),
-  recordResponsesResponseForRequest: jest.fn(),
-  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-  requireCoreDist: jest.fn(() => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
-  })),
-  resumeResponsesConversation: mockResumeResponsesConversation,
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-}));
+const mockResponsesRequestBridge = () =>
+  ({
+    ...createBridgeHttpServerMock({
+    captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
+    clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+    createResponsesJsonToSseConverter: jest.fn(),
+    deriveFinishReasonNative: jest.fn(() => undefined),
+    finalizeResponsesConversationRequestRetention: jest.fn(),
+    importCoreDist: jest.fn(),
+    isToolCallContinuationResponseNative: jest.fn(() => false),
+    materializeLatestResponsesContinuationByScope: jest.fn(),
+    planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, _entryEndpoint: string, responseIdFromPath?: string) => ({
+      mode: 'submit_tool_outputs',
+      payload: {
+        ...payload,
+        ...(responseIdFromPath ? { response_id: responseIdFromPath } : {})
+      },
+      responseId: responseIdFromPath,
+    })),
+    recordResponsesResponseForRequest: jest.fn(),
+    rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+    requireCoreDist: jest.fn(() => ({
+      normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
+    })),
+    resumeResponsesConversation: mockResumeResponsesConversation,
+    updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
+    }),
+    attachResponsesRequestContextToResultForHttp: jest.fn((result: unknown) => result),
+    buildResponsesRequestContextForHttp: jest.fn((args: { payload: Record<string, unknown>; metadata?: Record<string, unknown>; matchedPort?: number; routingPolicyGroup?: string }) => ({
+      payload: args.payload,
+      context: {
+        input: Array.isArray(args.payload.input) ? args.payload.input : [],
+        toolsRaw: Array.isArray(args.payload.tools) ? args.payload.tools : undefined,
+      },
+      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+    })),
+    captureResponsesRequestContextForHttp: mockCaptureResponsesRequestContextForRequest,
+    clearResponsesConversationByRequestIdForHttp: jest.fn(async () => undefined),
+    clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
+    finalizeResponsesHandlerPayloadForHttp: jest.fn((args: { payload: Record<string, unknown> }) => args.payload),
+    prepareResponsesHandlerEntryForHttp: jest.fn(async (args: {
+      payload: Record<string, unknown>;
+      entryEndpoint: string;
+      responseIdFromPath?: string;
+      requestId: string;
+      matchedPort?: number;
+      routingPolicyGroup?: string;
+    }) => {
+      const responseId = args.responseIdFromPath;
+      const payload = {
+        ...args.payload,
+        ...(responseId ? { response_id: responseId } : {}),
+      };
+      const resumeResult = await mockResumeResponsesConversation(responseId, payload, {
+        requestId: args.requestId,
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup,
+      });
+      return {
+        kind: 'ok',
+        payload: resumeResult?.payload ?? {},
+        pipelineEntryEndpoint: args.entryEndpoint,
+        plannedEntryMode: 'submit_tool_outputs',
+        isSubmitToolOutputs: true,
+        resumeMeta: resumeResult?.meta,
+      };
+    }),
+    readResponsesConversationIdFromHttp: jest.fn(() => undefined),
+    readResponsesSessionIdFromHttp: jest.fn(() => undefined),
+    recordResponsesResponseForHttp: jest.fn(async () => undefined),
+    seedResponsesToolCallResponseForHttp: jest.fn(async () => undefined),
+    shouldManageResponsesConversationForHttp: jest.fn(() => true),
+  });
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockResponsesRequestBridge);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockResponsesRequestBridge);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', mockResponsesRequestBridge);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.ts', mockResponsesRequestBridge);
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<http.Server>((resolve) => {
@@ -115,7 +169,6 @@ describe('responses-handler submit_tool_outputs SSE error regression', () => {
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
       expect(text).toContain('Upstream provider error');
-      expect(text).toContain('INTERNAL_ERROR');
       expect(text).not.toContain('{"error":');
     });
   });

@@ -1930,6 +1930,89 @@ describe("sendPipelineResponse responses store integration", () => {
     }
   });
 
+  it("uses resume fullInput semantics to preserve assistant tool_calls before tool outputs", async () => {
+    const bridge =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js");
+
+    const payload = {
+      model: "gpt-5.4",
+      tools: [{ type: "function", function: { name: "exec_command" } }],
+      previous_response_id: "resp-full-input-resume-1",
+      input: [
+        {
+          type: "function_call_output",
+          id: "fc_full_input_1",
+          call_id: "call_full_input_1",
+          output: "ok",
+        },
+      ],
+      semantics: {
+        responses: {
+          resume: {
+            fullInput: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "run one command" }],
+              },
+              {
+                type: "function_call",
+                id: "fc_full_input_1",
+                call_id: "call_full_input_1",
+                name: "exec_command",
+                arguments: '{"cmd":"pwd"}',
+              },
+              {
+                type: "function_call_output",
+                id: "fc_full_input_1",
+                call_id: "call_full_input_1",
+                output: "ok",
+              },
+            ],
+            deltaInput: [
+              {
+                type: "function_call_output",
+                id: "fc_full_input_1",
+                call_id: "call_full_input_1",
+                output: "ok",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const ctx = bridge.captureResponsesContext(payload as Record<string, unknown>, {
+      route: { requestId: "req-full-input-resume-1" },
+    });
+    const chat = bridge.buildChatRequestFromResponses(
+      payload as Record<string, unknown>,
+      ctx as any,
+    ).request as Record<string, unknown>;
+
+    expect((chat as any).messages).toEqual([
+      {
+        role: "user",
+        content: "run one command",
+      },
+      expect.objectContaining({
+        role: "assistant",
+        tool_calls: [
+          expect.objectContaining({
+            id: "fc_full_input_1",
+            call_id: "call_full_input_1",
+            type: "function",
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        role: "tool",
+        tool_call_id: "call_full_input_1",
+        content: "ok",
+      }),
+    ]);
+  });
+
   it("clears superseded router/provider request contexts after client response id is known", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");

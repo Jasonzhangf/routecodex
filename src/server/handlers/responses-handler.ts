@@ -20,13 +20,16 @@ import {
 } from './handler-utils.js';
 import {
   attachResponsesRequestContextToResultForHttp,
+  buildResponsesResumeClientErrorForHttp,
   buildResponsesRequestContextForHttp,
+  buildResponsesScopeContinuationExpiredErrorForHttp,
   captureResponsesRequestContextForHttp,
-  clearResponsesConversationByRequestIdForHttp,
+  clearResponsesConversationOnHandlerFailureForHttp,
   finalizeResponsesHandlerPayloadForHttp,
   prepareResponsesHandlerEntryForHttp,
   readResponsesConversationIdFromHttp,
   readResponsesSessionIdFromHttp,
+  shouldProjectResponsesResumeClientErrorForHttp,
   shouldManageResponsesConversationForHttp,
   seedResponsesToolCallResponseForHttp
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
@@ -211,13 +214,7 @@ export async function handleResponses(
         ...responsesConversationPortScope
       });
       if (preparedEntry.kind === 'scope_continuation_expired') {
-        res.status(400).json({
-          error: {
-            message: 'Responses continuation expired or not found for local scope materialization',
-            type: 'invalid_request_error',
-            code: 'responses_continuation_expired'
-          }
-        });
+        res.status(400).json(buildResponsesScopeContinuationExpiredErrorForHttp());
         return;
       }
       payload = preparedEntry.payload as ResponsesPayload;
@@ -227,23 +224,18 @@ export async function handleResponses(
     } catch (error: unknown) {
       const structured = error as { status?: number; code?: string; origin?: string };
       const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
-      const status = typeof structured?.status === 'number'
-        ? structured.status
-        : origin === 'client'
-          ? 422
-          : 500;
+      const status = typeof structured?.status === 'number' ? structured.status : undefined;
       const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
       const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
       logRequestError(entryEndpoint, requestId, error);
-      if (origin === 'client') {
-        res.status(status).json({
-          error: {
-            message,
-            type: 'invalid_request_error',
-            code,
-            origin
-          }
+      if (shouldProjectResponsesResumeClientErrorForHttp({ origin })) {
+        const clientError = buildResponsesResumeClientErrorForHttp({
+          status,
+          code,
+          origin,
+          message,
         });
+        res.status(clientError.status).json(clientError.body);
         return;
       }
       const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
@@ -369,12 +361,12 @@ export async function handleResponses(
           } catch (endError) {
             logResponsesHandlerNonBlockingError('timeout.response_end', endError, { requestId });
           }
-          void clearResponsesConversationByRequestIdForHttp(requestId).catch((error) => {
+          void clearResponsesConversationOnHandlerFailureForHttp({ requestId, stage: 'timeout_started' }).catch((error) => {
             logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout_started', error, { requestId });
           });
           return;
         }
-        void clearResponsesConversationByRequestIdForHttp(requestId).catch((error) => {
+        void clearResponsesConversationOnHandlerFailureForHttp({ requestId, stage: 'timeout' }).catch((error) => {
           logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout', error, { requestId });
         });
         void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
@@ -430,7 +422,7 @@ export async function handleResponses(
     });
   } catch (error: unknown) {
     clearTimeoutHandle();
-    void clearResponsesConversationByRequestIdForHttp(requestId).catch((clearError) => {
+    void clearResponsesConversationOnHandlerFailureForHttp({ requestId, stage: 'error' }).catch((clearError) => {
       logResponsesHandlerNonBlockingError('responses_context.clear_on_error', clearError, { requestId });
     });
     if (timedOut) {

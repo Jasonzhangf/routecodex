@@ -79,6 +79,12 @@
 - Live issue A: 5520 openai-responses same-protocol requests with client tools are mis-gated to relay via reason=client_tools_require_hub_relay, causing upstream SSE to be materialized before first client byte and client_close before stream start.
 - Live issue B: 5555 DF DeepSeek-V4-Pro route targets /v1/chat/completions compat but outbound payload still carries content part type=input_text instead of text; upstream 400 InvalidParameter.
 
+## 2026-06-13 chat resume 2013 investigation
+- Failing shape: Minimax chat rejected `tool call result does not follow tool call (2013)`.
+- Root cause: `responsesResume.deltaInput` is only the resume delta, but `buildChatRequestFromResponses()` was treating it like the full history whenever `previous_response_id` existed.
+- Fix direction: carry `fullInput` through resume/materialize metadata from Rust and prefer that in the Chat bridge; keep `deltaInput` only as delta/diagnostic data.
+- Runtime probe: `node --import tsx` on `buildChatRequestFromResponses()` now yields full `user -> assistant.tool_calls -> tool` history when `responses.resume.fullInput` is present, even if the incoming context input is only the tool-output delta.
+
 - 2026-06-12 live log: 5520 direct SSE aborted by server.response_projection because event=response.custom_tool_call_input.delta was treated as non-Responses. Tool stream dies after first tool event.
 - 2026-06-12 repair in progress: `handler-response-utils.ts` direct Responses SSE allowlist widened minimally for `response.custom_tool_call_input.delta|done`; blackbox pair added to prove standard custom-tool delta passes while provider-specific `codex.rate_limits` still fails closed.
 - 2026-06-12 continuation ownership rule clarified by Jason: remote-owned `previous_response_id/responseId` must continue via direct; locally reconstructed relay-owned ids must continue via relay.
@@ -499,3 +505,21 @@ Confirmed current audit baseline: 28 feature entries in function-map, 28 in veri
 - Residual loophole: `tool.apply_patch_freeform_contract` has no `src/sharedmodule` source anchor; only test/script anchors exist.
 - Residual warning: `verify:function-map-boundary-mentions` warns on `server.responses_request_handler_bridge_surface` because `clearResponsesConversationByRequestIdForHttp` appears in a forbidden path.
 - User rule to keep: server handlers must not own protocol parsing; protocol normalization/parsing stays in bridge/native owner layers.
+2026-06-13 responses handler bridge closeout slice 5
+- moved response-side client-close cleanup eligibility, terminal-event requirement gating, and probe finish_reason resolution behind responses-response-bridge helpers
+- single-bridge gate PASS; root tsc PASS; focused jest PASS: required-action-split-frame, force-sse-json-responses, responses-continuation-store, direct-server-contract.red
+2026-06-13 responses handler bridge closeout slice 6
+- moved failure-to-clear continuation policy (`sse_stream_error` / `sse_incomplete` / `json*`) behind responses-response-bridge helpers; server now only executes clear action
+- verify PASS: single-bridge gate, root tsc, focused jest x4 after reason-string removal from handler
+
+2026-06-13 latest stopless sample audit
+- Audit scope: latest `/Volumes/extension/.rcc` provider samples + 5555 session truth, specifically checking whether bad stop schema or missing schema guidance caused extra stopless calls.
+- Verified negative evidence: latest MiniMax 5555 sample dirs (`req_1781338094550_ffce7713`, `req_1781337644140_d9709ce2`, `req_1781337206630_f91830d0`, `req_1781336510838_87340d58`) are not authoritative stopless samples. Their `__runtime.json` only contains request/provider metadata and does not contain `stopMessageState`, `serverToolLoopState`, `stopMessageCompareContext`, `observationStableCount`, `continuationPrompt`, or stop-schema fields.
+- Verified old stopless session evidence: `/Volumes/extension/.rcc/sessions/127.0.0.1_5555/session-stopless-*.json` from 2026-06-09 do contain stopless persisted state, and their `stopMessageText` already includes explicit guidance like '立即调用工具执行这个下一步'. This disproves 'missing guidance' for those samples.
+- Verified old-budget evidence: those old stopless sessions still show `stopMessageUsed` climbing to 3 while guidance still asks to continue, matching the historical bug '3 rounds treated as main budget' rather than proving a latest schema/guidance regression.
+- Verified latest 5555 session truth: only recent touched files are `session-rcc-OneStop.json` and `tmux-rcc-OneStop.json`; they record `stopMessageLastUsedAt`/`stopMessageUpdatedAt` (and tmux token stats) but no stop schema/guidance/compare-context payload. So current latest session truth is insufficient to prove latest extra calls were caused by bad schema or missing guidance.
+- Current audit conclusion: no direct evidence from latest samples that incorrect schema or missing schema guidance caused extra stopless calls; most latest samples inspected are not true stopless closure samples. Need a fresh live stopless probe to close the evidence gap if stronger proof is required.
+2026-06-13 responses handler bridge closeout slice 7
+- fixed request-side submit_tool_outputs red tests to mock the actual request-bridge submodule surface instead of the old barrel-only path; locked current contract that `routeHint` travels via `pipelineInput.metadata.responsesResume`, while capture store only receives request context plus optional providerKey pin
+- request-side timeout/error clear path now goes through `clearResponsesConversationOnHandlerFailureForHttp(...)`; `responses-handler.ts` no longer calls request-store clear API directly in timeout/error branches
+- verify PASS: `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`, `tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts`, `tests/server/handlers/responses-handler.request-timeout.blackbox.spec.ts`, `npm run verify:responses-handler-single-bridge-surface`, `npx tsc --noEmit --pretty false`
