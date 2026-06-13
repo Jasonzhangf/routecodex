@@ -296,15 +296,127 @@ fn is_output_only_resume_tool_result(payload: &Map<String, Value>, input_items: 
             .all(|entry| !entry.is_object() || is_responses_tool_output_item(entry))
 }
 
+fn responses_function_call_semantic_signature(entry: &Value) -> Option<String> {
+    let row = entry.as_object()?;
+    if !is_responses_function_call_item(entry) {
+        return None;
+    }
+    let call_id = read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))?;
+    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
+    let arguments = match row.get("arguments") {
+        Some(Value::String(value)) => value.trim().to_string(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| format!("{other:?}")),
+        None => String::new(),
+    };
+    Some(format!("{call_id}\u{1f}{name}\u{1f}{arguments}"))
+}
+
+fn responses_tool_output_call_id(entry: &Value) -> Option<String> {
+    let row = entry.as_object()?;
+    if !is_responses_tool_output_item(entry) {
+        return None;
+    }
+    read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))
+}
+
+fn dedupe_identical_responses_tool_history_entries(input_items: Vec<Value>) -> Vec<Value> {
+    let mut repeated_semantic_call_ids = std::collections::HashSet::<String>::new();
+    let mut semantic_call_signature_counts = std::collections::HashMap::<String, usize>::new();
+    for entry in &input_items {
+        let Some(signature) = responses_function_call_semantic_signature(entry) else {
+            continue;
+        };
+        let count = semantic_call_signature_counts.entry(signature.clone()).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            if let Some((call_id, _)) = signature.split_once('\u{1f}') {
+                repeated_semantic_call_ids.insert(call_id.to_string());
+            }
+        }
+    }
+
+    let mut seen_function_call_signatures = std::collections::HashSet::<String>::new();
+    let mut seen_output_signatures = std::collections::HashSet::<String>::new();
+    let mut seen_replayed_output_call_ids = std::collections::HashSet::<String>::new();
+    let mut deduped = Vec::with_capacity(input_items.len());
+
+    for entry in input_items {
+        if let Some(signature) = responses_function_call_semantic_signature(&entry) {
+            if !seen_function_call_signatures.insert(signature) {
+                continue;
+            }
+            deduped.push(entry);
+            continue;
+        }
+
+        if let Some(call_id) = responses_tool_output_call_id(&entry) {
+            if repeated_semantic_call_ids.contains(call_id.as_str())
+                && !seen_replayed_output_call_ids.insert(call_id.clone())
+            {
+                continue;
+            }
+            let signature = serde_json::to_string(&entry)
+                .unwrap_or_else(|_| format!("{entry:?}"));
+            if !seen_output_signatures.insert(signature) {
+                continue;
+            }
+        }
+        deduped.push(entry);
+    }
+
+    deduped
+}
+
 fn drop_stale_orphan_responses_tool_outputs(
     payload: &Map<String, Value>,
     input_items: Vec<Value>,
 ) -> Vec<Value> {
-    if input_items.iter().any(is_responses_function_call_item) {
-        return input_items;
-    }
+    let input_items = dedupe_identical_responses_tool_history_entries(input_items);
     if is_output_only_resume_tool_result(payload, input_items.as_slice()) {
         return input_items;
+    }
+    let has_function_call = input_items.iter().any(is_responses_function_call_item);
+    if has_function_call {
+        let mut pending_call_ids = std::collections::HashSet::new();
+        for entry in input_items.iter() {
+            let Some(row) = entry.as_object() else {
+                continue;
+            };
+            if !is_responses_function_call_item(entry) {
+                continue;
+            }
+            let Some(call_id) = read_trimmed_string(row.get("call_id"))
+                .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                .or_else(|| read_trimmed_string(row.get("id")))
+            else {
+                continue;
+            };
+            pending_call_ids.insert(call_id);
+        }
+        return input_items
+            .into_iter()
+            .filter(|entry| {
+                if !is_responses_tool_output_item(entry) {
+                    return true;
+                }
+                let Some(row) = entry.as_object() else {
+                    return false;
+                };
+                let call_id = read_trimmed_string(row.get("call_id"))
+                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(row.get("id")));
+                match call_id {
+                    Some(id) => pending_call_ids.contains(id.as_str()),
+                    None => false,
+                }
+            })
+            .collect();
     }
     input_items
         .into_iter()
@@ -431,6 +543,144 @@ mod tests {
             .expect("semantics input");
         assert_eq!(semantics_input.len(), 2);
         assert_eq!(semantics_input[1]["type"], json!("function_call_output"));
+    }
+
+    #[test]
+    fn responses_standardization_drops_stale_tool_output_when_new_function_call_exists() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "continue" }] },
+                    { "type": "function_call_output", "call_id": "call_stale", "output": "stale output from prior turn" },
+                    { "type": "function_call", "call_id": "call_live", "name": "exec_command", "arguments": "{}" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let messages = output["standardizedRequest"]["messages"]
+            .as_array()
+            .expect("messages");
+        let serialized = serde_json::to_string(messages).unwrap();
+        assert!(!serialized.contains("call_stale"));
+        assert!(!serialized.contains("stale output from prior turn"));
+    }
+
+    #[test]
+    fn responses_standardization_keeps_matching_tool_output_for_current_function_call() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "function_call", "call_id": "call_live", "name": "exec_command", "arguments": "{}" },
+                    { "type": "function_call_output", "call_id": "call_live", "output": "ok" },
+                    { "type": "function_call_output", "call_id": "call_stale", "output": "stale" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let messages = output["standardizedRequest"]["messages"]
+            .as_array()
+            .expect("messages");
+        let serialized = serde_json::to_string(messages).unwrap();
+        assert!(!serialized.contains("call_stale"));
+    }
+
+    #[test]
+    fn responses_standardization_dedupes_identical_duplicate_tool_history_block() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "continue" }] },
+                    { "type": "function_call", "call_id": "call_dup", "id": "call_dup", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "id": "out_dup", "output": "{\"stdout\":\"/tmp\"}" },
+                    { "type": "function_call", "call_id": "call_dup", "id": "call_dup", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "id": "out_dup", "output": "{\"stdout\":\"/tmp\"}" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let messages = output["standardizedRequest"]["messages"]
+            .as_array()
+            .expect("messages");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert_eq!(messages[2]["role"], json!("tool"));
+    }
+
+    #[test]
+    fn responses_standardization_dedupes_duplicate_tool_history_block_with_different_chunk_headers() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "continue" }] },
+                    { "type": "function_call", "call_id": "call_dup", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "output": "Chunk ID: aaa\\nOutput:\\n/tmp\\n" },
+                    { "type": "function_call", "call_id": "call_dup", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "output": "Chunk ID: bbb\\nOutput:\\n/tmp\\n" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let messages = output["standardizedRequest"]["messages"]
+            .as_array()
+            .expect("messages");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert_eq!(messages[2]["role"], json!("tool"));
+    }
+
+    #[test]
+    fn responses_standardization_keeps_distinct_duplicate_tool_outputs_invalid() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    { "type": "function_call", "call_id": "call_dup", "id": "call_dup", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "id": "out_dup_1", "output": "{\"stdout\":\"/tmp\"}" },
+                    { "type": "function_call_output", "call_id": "call_dup", "id": "out_dup_2", "output": "{\"stdout\":\"/var\"}" }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "chat"
+            }
+        });
+
+        let error = coerce_standardized_request_from_payload(&input).unwrap_err();
+        assert!(error.contains("already-consumed"));
     }
 
     #[test]
