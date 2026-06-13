@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: hasResponsesSsePayloadForHttp, shouldDispatchResponsesSseToClientForHttp, resolveResponsesRequestContextForHttp, assertDirectPassthroughResponsesSseMetadataIsolationForHttp, updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -25,6 +25,7 @@ import {
   recordResponsesResponseForRequest,
 } from './runtime-integrations.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
+import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
 const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
@@ -96,6 +97,169 @@ type ResponsesRequestContextForHttp = {
   matchedPort?: number;
   routingPolicyGroup?: string;
 };
+
+export function resolveResponsesRequestContextForHttp(args: {
+  metadata?: unknown;
+  fallback?: ResponsesRequestContextForHttp;
+}): ResponsesRequestContextForHttp | undefined {
+  const metadata = args.metadata;
+  const fromMetadata =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>).responsesRequestContext
+      : undefined;
+  if (fromMetadata && typeof fromMetadata === 'object' && !Array.isArray(fromMetadata)) {
+    return fromMetadata as ResponsesRequestContextForHttp;
+  }
+  return args.fallback;
+}
+
+type ChatUsageNormalizationResultForHttp = {
+  payload: unknown;
+  normalized: boolean;
+  source?: 'body' | 'usage_log';
+};
+
+function isChatCompletionsEndpointForHttp(entryEndpoint?: string): boolean {
+  return typeof entryEndpoint === 'string' && entryEndpoint.toLowerCase().includes('/v1/chat/completions');
+}
+
+function sanitizeNumericUsageFieldForHttp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function resolveNormalizedChatUsageForHttp(
+  body: unknown,
+  options: {
+    entryEndpoint?: string;
+    usageFallback?: Record<string, unknown>;
+  }
+): { usage?: Record<string, unknown>; source?: 'body' | 'usage_log' } {
+  if (!isChatCompletionsEndpointForHttp(options.entryEndpoint)) {
+    return {};
+  }
+  const record =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : undefined;
+  const rawUsage = record?.usage;
+  const normalizedFromBody = normalizeUsage(rawUsage);
+  const normalizedFromFallback = normalizeUsage(options.usageFallback);
+  const normalized = normalizedFromBody ?? normalizedFromFallback;
+  if (!normalized) {
+    return {};
+  }
+  const usageSource: 'body' | 'usage_log' = normalizedFromBody ? 'body' : 'usage_log';
+  const usageRecord =
+    rawUsage && typeof rawUsage === 'object' && !Array.isArray(rawUsage)
+      ? ({ ...(rawUsage as Record<string, unknown>) } as Record<string, unknown>)
+      : {};
+  const promptTokens = sanitizeNumericUsageFieldForHttp(normalized.prompt_tokens);
+  const completionTokens = sanitizeNumericUsageFieldForHttp(normalized.completion_tokens);
+  let totalTokens = sanitizeNumericUsageFieldForHttp(normalized.total_tokens);
+  if (totalTokens === undefined && promptTokens !== undefined && completionTokens !== undefined) {
+    totalTokens = promptTokens + completionTokens;
+  }
+  if (promptTokens !== undefined) {
+    usageRecord.input_tokens = promptTokens;
+    usageRecord.prompt_tokens = promptTokens;
+  }
+  if (completionTokens !== undefined) {
+    usageRecord.output_tokens = completionTokens;
+    usageRecord.completion_tokens = completionTokens;
+  }
+  if (totalTokens !== undefined) {
+    usageRecord.total_tokens = totalTokens;
+  }
+  return { usage: usageRecord, source: usageSource };
+}
+
+function asRecordForHttp(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export function hasResponsesSsePayloadForHttp(body: unknown): body is { __sse_responses?: unknown } {
+  return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
+}
+
+export function buildResponsesRequestLogContextForHttp(args: {
+  metadata?: unknown;
+  usageLogInfo?: Record<string, unknown> | null;
+}): Record<string, unknown> {
+  const metadata = asRecordForHttp(args.metadata);
+  const usageLogInfo = asRecordForHttp(args.usageLogInfo);
+  return {
+    logSessionColorKey: usageLogInfo.logSessionColorKey ?? metadata.logSessionColorKey,
+    clientTmuxSessionId: usageLogInfo.clientTmuxSessionId ?? metadata.clientTmuxSessionId,
+    client_tmux_session_id: usageLogInfo.client_tmux_session_id ?? metadata.client_tmux_session_id,
+    tmuxSessionId: usageLogInfo.tmuxSessionId ?? metadata.tmuxSessionId,
+    tmux_session_id: usageLogInfo.tmux_session_id ?? metadata.tmux_session_id,
+    rccSessionClientTmuxSessionId:
+      usageLogInfo.rccSessionClientTmuxSessionId ?? metadata.rccSessionClientTmuxSessionId,
+    rcc_session_client_tmux_session_id:
+      usageLogInfo.rcc_session_client_tmux_session_id ?? metadata.rcc_session_client_tmux_session_id,
+    sessionId: usageLogInfo.sessionId ?? metadata.sessionId,
+    session_id: usageLogInfo.session_id ?? metadata.session_id,
+    conversationId: usageLogInfo.conversationId ?? metadata.conversationId,
+    conversation_id: usageLogInfo.conversation_id ?? metadata.conversation_id
+  };
+}
+
+export function normalizeChatUsagePayloadForHttp(
+  body: unknown,
+  options: {
+    entryEndpoint?: string;
+    usageFallback?: Record<string, unknown>;
+  }
+): ChatUsageNormalizationResultForHttp {
+  if (!isChatCompletionsEndpointForHttp(options.entryEndpoint)) {
+    return { payload: body, normalized: false };
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { payload: body, normalized: false };
+  }
+  const record = body as Record<string, unknown>;
+  if ('__sse_responses' in record) {
+    return { payload: body, normalized: false };
+  }
+  const resolved = resolveNormalizedChatUsageForHttp(body, options);
+  if (!resolved.usage) {
+    return { payload: body, normalized: false };
+  }
+  return {
+    payload: {
+      ...record,
+      usage: resolved.usage
+    },
+    normalized: true,
+    source: resolved.source
+  };
+}
+
+export function shouldDispatchResponsesSseToClientForHttp(args: {
+  body: unknown;
+  forceSSE: boolean;
+  metadata?: Record<string, unknown>;
+}): boolean {
+  if (!hasResponsesSsePayloadForHttp(args.body)) {
+    return false;
+  }
+  if (args.forceSSE) {
+    return true;
+  }
+  const metadata = args.metadata;
+  return metadata?.outboundStream === true || metadata?.stream === true;
+}
 
 type InspectResponsesTerminalStateFromSseChunkForHttpInput = {
   chunk: unknown;
@@ -196,6 +360,75 @@ export function assertDirectPassthroughResponsesSseFrameForHttp(frame: string, r
       new Error(`[server.response_projection] direct passthrough SSE must not rewrite response.required_action into output_item/function_call frames (requestId=${requestId})`),
       { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
     );
+  }
+}
+
+function isInternalMetadataCarrierForHttp(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).some(
+    (key) => key.startsWith('__routecodex') || key.startsWith('__rt') || key === 'providerKey'
+  );
+}
+
+export function assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame: string, requestId: string): void {
+  assertDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) {
+      continue;
+    }
+    const dataText = line.slice(5).trim();
+    if (!dataText || dataText === '[DONE]') {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(dataText);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      continue;
+    }
+    const stack: unknown[] = [parsed];
+    const seen = new WeakSet<object>();
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        continue;
+      }
+      if (seen.has(current as object)) {
+        continue;
+      }
+      seen.add(current as object);
+      const record = current as Record<string, unknown>;
+      const metadata = record.metadata;
+      if (metadata !== undefined) {
+        if (isInternalMetadataCarrierForHttp(metadata)) {
+          throw new Error(
+            `[server.response_projection] direct passthrough SSE metadata contains internal control fields (requestId=${requestId})`
+          );
+        }
+        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+          stack.push(metadata);
+        }
+      }
+      for (const [key, value] of Object.entries(record)) {
+        if (key === 'metadata') {
+          continue;
+        }
+        if (key === 'metaCarrier' || key === 'runtimeMetadata' || key === 'errorCarrier' || key === '__rt') {
+          throw new Error(
+            `[server.response_projection] client response contains internal carrier field "${key}" (requestId=${requestId})`
+          );
+        }
+        if (value && typeof value === 'object') {
+          stack.push(value);
+        }
+      }
+    }
   }
 }
 

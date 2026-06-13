@@ -1,17 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  captureResponsesRequestContextForRequest: jest.fn(),
-  clearResponsesConversationByRequestId: jest.fn(),
-  createResponsesJsonToSseConverter: jest.fn(),
-  finalizeResponsesConversationRequestRetention: jest.fn(),
-  importCoreDist: jest.fn(),
-  recordResponsesResponseForRequest: jest.fn(),
-  rebindResponsesConversationRequestId: jest.fn(),
-  resumeResponsesConversation: jest.fn(),
-  requireCoreDist: jest.fn(() => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
-  })),
+  ...createBridgeHttpServerMock(),
 }));
 
 function makeReq(body: Record<string, unknown> = {}) {

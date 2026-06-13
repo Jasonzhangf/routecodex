@@ -116,7 +116,7 @@ describe('responses conversation store plain continuation restore', () => {
     expect(restored?.meta).toMatchObject({
       previousRequestId: 'req-resp-store-1',
       restoredFromResponseId: 'resp-store-1',
-      scopeKey: 'session:sess-1',
+      scopeKey: 'entry:responses|owner:relay|session:sess-1',
       providerKey: 'crs.direct.gpt-5.4',
       restored: true
     });
@@ -607,10 +607,202 @@ describe('responses conversation store plain continuation restore', () => {
     expect(materialized?.meta).toMatchObject({
       previousRequestId: 'req-resp-store-1',
       restoredFromResponseId: 'resp-store-materialize-1',
-      scopeKey: 'session:sess-1',
+      scopeKey: 'entry:responses|owner:relay|session:sess-1',
       materialized: true,
       materializedMode: 'local_full_input'
     });
+  });
+
+  it('does not restore a responses continuation for a non-responses entry kind', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-entry-kind-1'),
+      sessionId: 'sess-entry-kind',
+      conversationId: 'conv-entry-kind',
+      payload: {
+        model: 'gpt-5.4',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello responses' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-entry-kind-1'),
+      response: {
+        id: 'resp-entry-kind-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'world responses' }]
+          }
+        ]
+      }
+    });
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-entry-kind-2'),
+      sessionId: 'sess-entry-kind',
+      conversationId: 'conv-entry-kind',
+      entryKind: 'chat',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next chat turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(restored).toBeNull();
+  });
+
+  it('fails fast when direct and relay continuations coexist under one scope without explicit owner', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-owner-relay-1'),
+      sessionId: 'sess-owner-split',
+      conversationId: 'conv-owner-split',
+      payload: {
+        model: 'gpt-5.4',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'relay branch' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-owner-relay-1'),
+      response: {
+        id: 'resp-owner-relay-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'relay response' }]
+          }
+        ]
+      }
+    });
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-owner-direct-1'),
+      sessionId: 'sess-owner-split',
+      conversationId: 'conv-owner-split',
+      providerKey: 'provider.direct.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'direct branch' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-owner-direct-1'),
+      providerKey: 'provider.direct.gpt-5.4',
+      continuationOwner: 'direct',
+      response: {
+        id: 'resp-owner-direct-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'direct response' }]
+          }
+        ]
+      }
+    });
+    releaseResponsesConversationRequestPayload('req-resp-store-owner-direct-1');
+
+    const ambiguous = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-owner-next-1'),
+      sessionId: 'sess-owner-split',
+      conversationId: 'conv-owner-split',
+      entryKind: 'responses',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+    expect(ambiguous).toBeNull();
+
+    const relayOnly = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-owner-next-relay'),
+      sessionId: 'sess-owner-split',
+      conversationId: 'conv-owner-split',
+      entryKind: 'responses',
+      continuationOwner: 'relay',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn relay' }]
+          }
+        ]
+      }
+    });
+    expect(relayOnly?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-owner-relay-1',
+      continuationOwner: 'relay',
+      materialized: true
+    });
+
+    const directOnly = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-owner-next-direct'),
+      sessionId: 'sess-owner-split',
+      conversationId: 'conv-owner-split',
+      entryKind: 'responses',
+      continuationOwner: 'direct',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn direct' }]
+          }
+        ]
+      }
+    });
+    expect(directOnly?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-owner-direct-1',
+      continuationOwner: 'direct',
+      restored: true,
+      providerKey: 'provider.direct.gpt-5.4'
+    });
+    expect(directOnly?.payload.previous_response_id).toBe('resp-owner-direct-1');
   });
 
   it('materializes full input by session scope even after request payload was released', () => {
@@ -979,8 +1171,8 @@ describe('responses conversation store plain continuation restore', () => {
     expect(rawStore.requestMap?.has('req-resp-store-2')).toBe(true);
     expect(rawStore.responseIndex?.has('resp-store-supersede-1')).toBe(false);
     expect(rawStore.responseIndex?.has('resp-store-supersede-2')).toBe(true);
-    expect(rawStore.scopeIndex?.has('session:sess-supersede')).toBe(true);
-    expect(rawStore.scopeIndex?.has('conversation:conv-supersede')).toBe(true);
+    expect(rawStore.scopeIndex?.has('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
+    expect(rawStore.scopeIndex?.has('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-3',

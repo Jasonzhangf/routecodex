@@ -965,6 +965,7 @@ verification:
       - src/server/handlers/responses-handler.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
     integration: []
     smoke:
       - npm run verify:server-function-map-boundary
@@ -979,10 +980,19 @@ verification:
       - "Request-side tool_calls -> responseId continuation seeding is covered by the same request-bridge gate."
       - "Request-side `/v1/responses*` conversation-management branch checks, `responseIdFromPath` prewrite, and `responsesRequestContext` fallback assembly are covered by the same request-bridge gate."
       - "continuation-expired and resume-client invalid_request_error payload projection is covered by the same request-bridge gate."
+      - "request-side malformed tool-history contract errorsample capture is covered by the same request-bridge gate and bridge unit test."
+      - "request-context capture gating, result metadata attach, and tool-call response seeding are covered by the same request-bridge gate and submit_tool_outputs handler regressions."
+      - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
+      - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
+      - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts
+      - src/server/handlers/handler-response-common.ts
+      - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
@@ -995,6 +1005,9 @@ verification:
       - npm run build:min
     notes:
       - "Response bridge must stay facade-only and must not grow TS response protocol semantics."
+      - "Server SSE transport ownership is split physically: `handler-response-sse.ts` owns SSE path, `handler-response-common.ts` owns shared non-protocol helpers, and `handler-response-utils.ts` must stay dispatcher + JSON path only."
+      - "response-side `responsesRequestContext` fallback resolution is covered by the response-bridge unit test plus single-bridge gate; handler files must not locally choose between result metadata and fallback context."
+      - "direct passthrough SSE metadata/internal-carrier guard is covered by the response-bridge unit test plus direct-contract/force-SSE regressions; handler SSE file must not locally parse metadata control fields."
       - "Continuation lifecycle orchestration for capture/record/finalize is covered by the same response-bridge gate and continuation-store regressions."
       - "SSE terminal-state parsing for `response.completed` / `response.done` must stay behind the same response-bridge gate."
       - "client-close cleanup eligibility, terminal-event requirement gating, and probe finish_reason resolution are covered by the same response-bridge gate."
@@ -1003,8 +1016,10 @@ verification:
       - "failure-to-clear continuation policy for `sse_stream_error` / `sse_incomplete` / `json*` is covered by the same response-bridge gate."
       - "Responses SSE `event:error` payload builders (`sse_bridge_error`, `upstream_stream_incomplete`, structured upstream SSE error projection) are covered by the same response-bridge gate and SSE blackbox regressions."
       - "SSE frame summary parsing and provider-protocol hint detection for usage/logging must stay behind the same response-bridge gate."
+      - "JSON chat usage normalization and request log context projection must stay behind the same response-bridge gate; `handler-response-utils.ts` is dispatcher only."
       - "chat.completion -> response JSON normalization shell is covered by the same response-bridge gate."
       - "force-SSE body classification and continuation-probe (`tool_calls` / `required_action`) inspection are covered by the same response-bridge gate."
+      - "SSE dispatch eligibility and `__sse_responses` payload-shape detection are covered by the same response-bridge gate plus force-SSE/direct contract regressions."
       - "client-close continuation cleanup policy and closed-before-terminal continuation repair policy are covered by the same response-bridge gate."
       - "stream-end terminal-repair / continuation-repair / incomplete-error decision policy is covered by the same response-bridge gate."
 

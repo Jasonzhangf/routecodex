@@ -1835,17 +1835,25 @@ owners:
       - finalizeResponsesHandlerPayloadForHttp
       - shouldManageResponsesConversationForHttp
       - buildResponsesRequestContextForHttp
+      - captureResponsesPipelineRequestContextForHttp
       - attachResponsesRequestContextToResultForHttp
+      - finalizeResponsesPipelineResultForHttp
       - prepareResponsesHandlerEntryForHttp
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
       - seedResponsesToolCallResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
+      - captureResponsesInboundToolHistoryErrorsampleForHttp
       - readResponsesSessionIdFromHttp
       - readResponsesConversationIdFromHttp
       - shouldPersistResponsesConversationForHttp
       - readResponsesResponseIdFromHttp
+      - buildResponsesConversationPortScopeForHttp
+      - planResponsesHandlerStreamForHttp
+      - prepareResponsesRequestBodyForHttp
+      - prepareResponsesHandlerRuntimeForHttp
+      - buildResponsesPipelineMetadataForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/server/handlers/responses-handler.ts
@@ -1880,6 +1888,11 @@ owners:
       - "Responses handler must not keep local tool_calls -> responseId seed orchestration; that continuation seeding must stay behind the single request bridge surface."
       - "Responses handler must not keep local `/v1/responses*` conversation-management branch checks, local `responseIdFromPath -> payload.response_id` prewrite, or local `responsesRequestContext` fallback assembly; those request-side continuation/context helpers must stay behind the single request bridge surface."
       - "Responses handler must not keep local continuation-expired or resume-client invalid_request_error payload shapes; those request-side resume error projections must stay behind the single request bridge surface."
+      - "Responses handler must not locally classify `Tool history contract violated` malformed-request errors or write `responses.inbound_tool_history_contract` errorsamples; that request-side contract capture must stay behind the single request bridge surface."
+      - "Responses handler must not locally orchestrate request-context capture gating, result metadata attach, or tool-call response seeding; those request-side lifecycle hooks must stay behind the single request bridge surface."
+      - "Responses handler must not keep local stream-intent derivation, request-start stream metadata assembly, or port-scope parsing; those request-side stream/scope decisions must stay behind the single request bridge surface."
+      - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."
+      - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
@@ -1911,6 +1924,10 @@ owners:
       - recordResponsesResponseForHttpProjection
       - finalizeResponsesConversationRequestRetentionForHttp
       - persistResponsesConversationLifecycleForHttp
+      - buildResponsesRequestLogContextForHttp
+      - normalizeChatUsagePayloadForHttp
+      - resolveResponsesRequestContextForHttp
+      - assertDirectPassthroughResponsesSseMetadataIsolationForHttp
       - createResponsesJsonToSseConverterForHttp
       - prepareResponsesJsonBodyForSseBridgeForHttp
       - buildResponsesSseErrorPayloadForHttp
@@ -1923,6 +1940,8 @@ owners:
       - projectResponsesSseFrameForClientForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/server/handlers/handler-response-common.ts
+      - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
       - src/modules/llmswitch/bridge.ts
       - src/modules/llmswitch/bridge/index.ts
@@ -1942,6 +1961,9 @@ owners:
     migration_target: ts
     notes:
       - "Response bridge may pass opaque SSE/body handoff state, request ids, and conversation-store IO only."
+      - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
+      - "Response-side `responsesRequestContext` resolution (`result.metadata.responsesRequestContext` vs handler fallback) must stay behind the single response bridge surface; server dispatcher/SSE files may only pass opaque metadata/fallback inputs."
+      - "Direct passthrough SSE metadata/internal-carrier guard must stay behind the single response bridge surface; server SSE file may only pass frame text + requestId into the bridge guard."
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
       - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
@@ -1953,6 +1975,7 @@ owners:
       - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
       - "Server handler must not keep local chat.completion -> response JSON normalization; that bridge shell must stay behind the single response bridge surface."
       - "Server handler must not keep local force-SSE body classification (`response` vs `chat.completion`) or probe-level tool-continuation / required_action inspection; those must stay behind the single response bridge surface."
+      - "Server handler must not keep local SSE dispatch eligibility or `__sse_responses` payload-shape detection; those dispatch-entry decisions must stay behind the single response bridge surface."
       - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
   - feature_id: cli.command_surface
     status: active

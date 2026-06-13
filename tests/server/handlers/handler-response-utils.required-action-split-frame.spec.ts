@@ -5,8 +5,44 @@ import { describe, expect, it, jest } from '@jest/globals';
 const mockBridgeModule = async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
+  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
+  buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
+    type: 'error',
+    status,
+    error: {
+      message: 'SSE stream missing from pipeline result',
+      code: 'sse_bridge_error',
+      request_id: requestLabel,
+    },
+  })),
   buildResponsesPayloadFromChatForHttp: jest.fn((payload: unknown) => payload),
+  buildResponsesSseErrorPayloadForHttp: jest.fn((args: {
+    requestLabel: string;
+    status: number;
+    message: string;
+    code: string;
+    error?: Record<string, unknown>;
+  }) => ({
+    type: 'error',
+    status: args.status,
+    error: {
+      ...(args.error ?? {}),
+      message: args.message,
+      code: args.code,
+      request_id: args.requestLabel,
+    },
+  })),
+  buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn((requestLabel: string) => ({
+    type: 'error',
+    status: 502,
+    error: {
+      message: 'stream closed before response.completed',
+      code: 'upstream_stream_incomplete',
+      request_id: requestLabel,
+    },
+  })),
+  buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => null),
   buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn((probe: Record<string, unknown> | undefined) => {
     if (!probe?.required_action) return [];
     const response = { ...probe, status: 'requires_action' };
@@ -23,6 +59,21 @@ const mockBridgeModule = async () => ({
   })),
   deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
+  hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
+    body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>)
+  )),
+  resolveResponsesRequestContextForHttp: jest.fn((args: {
+    metadata?: unknown;
+    fallback?: Record<string, unknown>;
+  }) => {
+    const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
+      ? args.metadata as Record<string, unknown>
+      : undefined;
+    const requestContext = metadata?.responsesRequestContext;
+    return requestContext && typeof requestContext === 'object' && !Array.isArray(requestContext)
+      ? requestContext
+      : args.fallback;
+  }),
   importCoreDist: jest.fn(async (subpath?: string) => {
     if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
       return {
@@ -38,6 +89,11 @@ const mockBridgeModule = async () => ({
     return {};
   }),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
+  normalizeChatUsagePayloadForHttp: jest.fn((body: unknown) => ({
+    payload: body,
+    normalized: false,
+    source: undefined,
+  })),
   inspectResponsesContinuationProbeForHttp: jest.fn((args: {
     entryEndpoint?: string;
     probe: unknown;
@@ -239,6 +295,19 @@ const mockBridgeModule = async () => ({
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   }),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
+  shouldDispatchResponsesSseToClientForHttp: jest.fn((args: {
+    body: unknown;
+    forceSSE: boolean;
+    metadata?: Record<string, unknown>;
+  }) => {
+    if (!args.body || typeof args.body !== 'object' || !('__sse_responses' in (args.body as Record<string, unknown>))) {
+      return false;
+    }
+    if (args.forceSSE) {
+      return true;
+    }
+    return args.metadata?.outboundStream === true || args.metadata?.stream === true;
+  }),
   shouldClearResponsesConversationOnClientCloseForHttp: jest.fn((args: {
     entryEndpoint?: string;
     closeBeforeStreamEnd: boolean;

@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 
 const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
+  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
@@ -118,7 +119,27 @@ const mockBridgeModule = async () => ({
     }
   })),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
+  hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
+    body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>)
+  )),
+  resolveResponsesRequestContextForHttp: jest.fn((args: {
+    metadata?: unknown;
+    fallback?: Record<string, unknown>;
+  }) => {
+    const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
+      ? args.metadata as Record<string, unknown>
+      : undefined;
+    const requestContext = metadata?.responsesRequestContext;
+    return requestContext && typeof requestContext === 'object' && !Array.isArray(requestContext)
+      ? requestContext
+      : args.fallback;
+  }),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
+  normalizeChatUsagePayloadForHttp: jest.fn((body: unknown) => ({
+    payload: body,
+    normalized: false,
+    source: undefined,
+  })),
   resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn((args: {
     finishReason?: string;
     probe: unknown;
@@ -270,6 +291,19 @@ const mockBridgeModule = async () => ({
         ? 'tool_calls'
         : 'stop',
   })),
+  shouldDispatchResponsesSseToClientForHttp: jest.fn((args: {
+    body: unknown;
+    forceSSE: boolean;
+    metadata?: Record<string, unknown>;
+  }) => {
+    if (!args.body || typeof args.body !== 'object' || !('__sse_responses' in (args.body as Record<string, unknown>))) {
+      return false;
+    }
+    if (args.forceSSE) {
+      return true;
+    }
+    return args.metadata?.outboundStream === true || args.metadata?.stream === true;
+  }),
   shouldClearResponsesConversationOnClientCloseForHttp: jest.fn((args: {
     entryEndpoint?: string;
     closeBeforeStreamEnd: boolean;

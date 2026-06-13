@@ -48,6 +48,7 @@ export {
   buildResponsesResumeClientErrorForHttp,
   shouldProjectResponsesResumeClientErrorForHttp,
   captureResponsesRequestContextForHttp,
+  captureResponsesInboundToolHistoryErrorsampleForHttp,
   recordResponsesResponseForHttp,
   clearResponsesConversationByRequestIdForHttp,
   clearResponsesConversationOnHandlerFailureForHttp
@@ -55,6 +56,7 @@ export {
 export {
   updateResponsesContractProbeFromSseChunkForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
+  hasResponsesSsePayloadForHttp,
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStreamIncompleteErrorPayloadForHttp,
@@ -66,6 +68,7 @@ export {
   resolveResponsesConversationClearReasonForHttp,
   resolveResponsesTerminalProbeFinishReasonForHttp,
   shouldClearResponsesConversationOnClientCloseForHttp,
+  shouldDispatchResponsesSseToClientForHttp,
   shouldClearResponsesConversationOnFailureForHttp,
   shouldPersistResponsesContinuationOnProbeUpdateForHttp,
   shouldPersistResponsesConversationStateForHttp,

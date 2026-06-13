@@ -62,25 +62,43 @@ type ResponsesConversationStoreLike = {
     context: AnyRecord;
     sessionId?: string;
     conversationId?: string;
+    providerKey?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    matchedPort?: number;
+    routingPolicyGroup?: string;
     routeHint?: string;
   }) => void;
   recordResponse?: (args: {
     requestId: string;
     response: AnyRecord;
-    routeHint?: string;
     sessionId?: string;
     conversationId?: string;
+    providerKey?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+    allowScopeContinuation?: boolean;
+    routeHint?: string;
   }) => void;
   resumeConversation?: (
     responseId: string,
     submitPayload: AnyRecord,
-    options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
+    options?: {
+      requestId?: string;
+      entryKind?: 'responses' | 'chat' | 'messages';
+      continuationOwner?: 'direct' | 'relay';
+      matchedPort?: number;
+      routingPolicyGroup?: string;
+    },
   ) => { payload: AnyRecord; meta: AnyRecord };
   resumeLatestContinuationByScope?: (args: {
     payload: AnyRecord;
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
     matchedPort?: number;
     routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
@@ -89,6 +107,8 @@ type ResponsesConversationStoreLike = {
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
     matchedPort?: number;
     routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
@@ -113,23 +133,27 @@ type ResponsesConversationModule = {
     context: AnyRecord;
     sessionId?: string;
     conversationId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
     routeHint?: string;
   }) => void;
   recordResponsesResponse?: (args: {
     requestId: string;
     response: AnyRecord;
+    entryKind?: 'responses' | 'chat' | 'messages';
     routeHint?: string;
   }) => void;
   resumeResponsesConversation?: (
     responseId: string,
     submitPayload: AnyRecord,
-    options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
+    options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
   ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
   resumeLatestResponsesContinuationByScope?: (args: {
     payload: AnyRecord;
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
     matchedPort?: number;
     routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
@@ -138,6 +162,8 @@ type ResponsesConversationModule = {
     sessionId?: string;
     conversationId?: string;
     requestId?: string;
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
     matchedPort?: number;
     routingPolicyGroup?: string;
   }) => { payload: AnyRecord; meta: AnyRecord } | null;
@@ -181,6 +207,7 @@ export async function captureResponsesRequestContextForRequest(args: {
   conversationId?: string;
   routeHint?: string;
   providerKey?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<void> {
@@ -206,6 +233,7 @@ export async function recordResponsesResponseForRequest(args: {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
   continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
@@ -233,7 +261,7 @@ export async function recordResponsesResponseForRequest(args: {
 export async function resumeResponsesConversation(
   responseId: string,
   submitPayload: AnyRecord,
-  options?: { requestId?: string; matchedPort?: number; routingPolicyGroup?: string },
+  options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
 ): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
   const globalStore = readGlobalResponsesConversationStore();
   if (typeof globalStore?.resumeConversation === "function") {
@@ -323,6 +351,8 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   sessionId?: string;
   conversationId?: string;
   requestId?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
@@ -345,6 +375,8 @@ export async function materializeLatestResponsesContinuationByScope(args: {
   sessionId?: string;
   conversationId?: string;
   requestId?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
+  continuationOwner?: 'direct' | 'relay';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {

@@ -26,6 +26,7 @@ export {
   buildResponsesResumeClientErrorForHttp,
   shouldProjectResponsesResumeClientErrorForHttp,
   captureResponsesRequestContextForHttp,
+  captureResponsesInboundToolHistoryErrorsampleForHttp,
   recordResponsesResponseForHttp,
   clearResponsesConversationByRequestIdForHttp,
   clearResponsesConversationOnHandlerFailureForHttp
@@ -33,6 +34,7 @@ export {
 export {
   assertDirectPassthroughResponsesSseFrameForHttp,
   buildClientSseKeepaliveFrameForHttp,
+  hasResponsesSsePayloadForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
   prepareResponsesJsonSseDispatchPlanForHttp,
@@ -40,6 +42,7 @@ export {
   resolveResponsesConversationClearReasonForHttp,
   resolveResponsesTerminalProbeFinishReasonForHttp,
   shouldClearResponsesConversationOnClientCloseForHttp,
+  shouldDispatchResponsesSseToClientForHttp,
   shouldClearResponsesConversationOnFailureForHttp,
   shouldPersistResponsesContinuationOnProbeUpdateForHttp,
   shouldPersistResponsesConversationStateForHttp,

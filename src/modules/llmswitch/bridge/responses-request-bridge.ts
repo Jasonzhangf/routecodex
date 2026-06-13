@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
-// canonical_builders: prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, captureResponsesPipelineRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
@@ -20,6 +20,7 @@ import {
 } from './runtime-integrations.js';
 import { planResponsesHandlerEntry } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
+import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
@@ -44,6 +45,134 @@ export type PrepareResponsesHandlerEntryForHttpArgs = {
   routingPolicyGroup?: string;
 };
 
+export type ResponsesConversationPortScopeForHttp = {
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+};
+
+export type ResponsesHandlerStreamPlanForHttp = {
+  originalStream: boolean;
+  outboundStream: boolean;
+  inboundStream: boolean;
+  acceptsSse: boolean;
+  requestStartMeta: Record<string, unknown>;
+};
+
+export type PrepareResponsesHandlerRuntimeForHttpArgs = {
+  payload: AnyRecord;
+  entryEndpoint: string;
+  responseIdFromPath?: string;
+  requestId: string;
+  portScope?: ResponsesConversationPortScopeForHttp;
+  forceStream?: boolean;
+  acceptsSse: boolean;
+  requestTimeoutMs?: number;
+};
+
+export type PrepareResponsesHandlerRuntimeForHttpResult =
+  | {
+      kind: 'ok';
+      payload: AnyRecord;
+      requestContext: ResponsesRequestContextForHttp;
+      pipelineEntryEndpoint: string;
+      isSubmitToolOutputs: boolean;
+      resumeMeta?: Record<string, unknown>;
+      streamPlan: ResponsesHandlerStreamPlanForHttp;
+    }
+  | {
+      kind: 'client_error';
+      status: number;
+      body: Record<string, unknown>;
+      streamPlan: ResponsesHandlerStreamPlanForHttp;
+    };
+
+export type PreparedResponsesRequestBodyForHttp = {
+  requestBodyMetadata?: Record<string, unknown>;
+  pipelineBody: AnyRecord;
+};
+
+export function prepareResponsesRequestBodyForHttp(
+  payload: AnyRecord
+): PreparedResponsesRequestBodyForHttp {
+  const requestBodyMetadata = readRequestBodyMetadataForHttp(payload);
+  return {
+    requestBodyMetadata,
+    pipelineBody: stripRequestBodyMetadataForPipelineForHttp(payload),
+  };
+}
+
+export function buildResponsesPipelineMetadataForHttp(args: {
+  streamPlan: ResponsesHandlerStreamPlanForHttp;
+  clientRequestId?: string;
+  clientHeaders?: Record<string, unknown>;
+  clientConnectionState?: unknown;
+  resumeMeta?: Record<string, unknown>;
+  requestContext: ResponsesRequestContextForHttp;
+}): Record<string, unknown> {
+  return {
+    stream: args.streamPlan.outboundStream,
+    clientRequestId: args.clientRequestId,
+    clientStream: args.streamPlan.acceptsSse || undefined,
+    inboundStream: args.streamPlan.inboundStream,
+    outboundStream: args.streamPlan.outboundStream,
+    providerProtocol: 'openai-responses',
+    clientAbortSignal: readClientAbortSignalForHttp(args.clientConnectionState),
+    clientHeaders: args.clientHeaders,
+    clientConnectionState: args.clientConnectionState,
+    ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
+    responsesRequestContext: args.requestContext,
+  };
+}
+
+export function buildResponsesConversationPortScopeForHttp(
+  portContext: {
+    matchedPort?: unknown;
+    localPort?: unknown;
+    routingPolicyGroup?: unknown;
+  } | null | undefined
+): ResponsesConversationPortScopeForHttp {
+  const matchedPort = typeof portContext?.matchedPort === 'number'
+    ? portContext.matchedPort
+    : typeof portContext?.localPort === 'number'
+      ? portContext.localPort
+      : undefined;
+  const routingPolicyGroup = typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()
+    ? portContext.routingPolicyGroup.trim()
+    : undefined;
+  return {
+    ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+  };
+}
+
+export function planResponsesHandlerStreamForHttp(args: {
+  payload: AnyRecord;
+  forceStream?: boolean;
+  acceptsSse: boolean;
+  requestTimeoutMs?: number;
+}): ResponsesHandlerStreamPlanForHttp {
+  const hasExplicitStream = typeof args.payload?.stream === 'boolean';
+  const originalStream = args.payload?.stream === true;
+  const outboundStream = typeof args.forceStream === 'boolean'
+    ? args.forceStream
+    : (hasExplicitStream ? originalStream : true);
+  const inboundStream = outboundStream;
+  return {
+    originalStream,
+    outboundStream,
+    inboundStream,
+    acceptsSse: args.acceptsSse,
+    requestStartMeta: {
+      inboundStream,
+      outboundStream,
+      clientAcceptsSse: args.acceptsSse,
+      originalStream,
+      type: args.payload?.type,
+      timeoutMs: args.requestTimeoutMs
+    }
+  };
+}
+
 export function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
   const value = typeof metadata?.session_id === 'string'
     ? metadata.session_id
@@ -62,6 +191,50 @@ export function readResponsesConversationIdFromHttp(metadata: Record<string, unk
       : undefined;
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || undefined;
+}
+
+export function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const raw = (payload as Record<string, unknown>).metadata;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+  } catch {
+    return { ...(raw as Record<string, unknown>) };
+  }
+}
+
+export function stripRequestBodyMetadataForPipelineForHttp<T>(payload: T): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const record = payload as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, 'metadata')) {
+    return payload;
+  }
+  const { metadata: _metadata, ...withoutMetadata } = record;
+  return withoutMetadata as T;
+}
+
+export function readClientAbortSignalForHttp(clientConnectionState: unknown): AbortSignal | undefined {
+  if (!clientConnectionState || typeof clientConnectionState !== 'object') {
+    return undefined;
+  }
+  const abortSignalSymbol = Reflect.ownKeys(clientConnectionState as object).find(
+    (key) => typeof key === 'symbol' && key.description === 'routecodex.clientConnectionAbortSignal'
+  );
+  if (!abortSignalSymbol) {
+    return undefined;
+  }
+  const signal = Reflect.get(clientConnectionState as object, abortSignalSymbol);
+  if (signal && typeof signal === 'object' && 'aborted' in (signal as object)) {
+    return signal as AbortSignal;
+  }
+  return undefined;
 }
 
 export function shouldPersistResponsesConversationForHttp(payload: unknown): boolean {
@@ -235,6 +408,7 @@ export async function prepareResponsesHandlerEntryForHttp(
     }
     const resumeResult = await resumeResponsesConversation(responseId, payload, {
       requestId: args.requestId,
+      entryKind: 'responses',
       matchedPort: args.matchedPort,
       routingPolicyGroup: args.routingPolicyGroup,
     });
@@ -255,6 +429,7 @@ export async function prepareResponsesHandlerEntryForHttp(
       requestId: args.requestId,
       sessionId: args.sessionId,
       conversationId: args.conversationId,
+      entryKind: 'responses',
       matchedPort: args.matchedPort,
       routingPolicyGroup: args.routingPolicyGroup,
     });
@@ -281,6 +456,82 @@ export async function prepareResponsesHandlerEntryForHttp(
   };
 }
 
+export async function prepareResponsesHandlerRuntimeForHttp(
+  args: PrepareResponsesHandlerRuntimeForHttpArgs
+): Promise<PrepareResponsesHandlerRuntimeForHttpResult> {
+  const streamPlan = planResponsesHandlerStreamForHttp({
+    payload: args.payload,
+    forceStream: args.forceStream,
+    acceptsSse: args.acceptsSse,
+    requestTimeoutMs: args.requestTimeoutMs,
+  });
+  const requestBodyMetadata = readRequestBodyMetadataForHttp(args.payload);
+  const sessionId = readResponsesSessionIdFromHttp(requestBodyMetadata);
+  const conversationId = readResponsesConversationIdFromHttp(requestBodyMetadata);
+  try {
+    const preparedEntry = await prepareResponsesHandlerEntryForHttp({
+      payload: args.payload,
+      entryEndpoint: args.entryEndpoint,
+      responseIdFromPath: args.responseIdFromPath,
+      requestId: args.requestId,
+      sessionId,
+      conversationId,
+      matchedPort: args.portScope?.matchedPort,
+      routingPolicyGroup: args.portScope?.routingPolicyGroup,
+    });
+    if (preparedEntry.kind === 'scope_continuation_expired') {
+      const clientError = buildResponsesScopeContinuationExpiredErrorForHttp();
+      return {
+        kind: 'client_error',
+        status: 400,
+        body: clientError as unknown as Record<string, unknown>,
+        streamPlan,
+      };
+    }
+    const payload = finalizeResponsesHandlerPayloadForHttp({
+      payload: preparedEntry.payload,
+      entryEndpoint: args.entryEndpoint,
+      isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
+      outboundStream: streamPlan.outboundStream,
+    });
+    return {
+      kind: 'ok',
+      payload,
+      requestContext: buildResponsesRequestContextForHttp({
+        payload,
+        metadata: requestBodyMetadata,
+        matchedPort: args.portScope?.matchedPort,
+        routingPolicyGroup: args.portScope?.routingPolicyGroup,
+      }),
+      pipelineEntryEndpoint: preparedEntry.pipelineEntryEndpoint,
+      isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
+      resumeMeta: preparedEntry.resumeMeta,
+      streamPlan,
+    };
+  } catch (error: unknown) {
+    const structured = error as { status?: number; code?: string; origin?: string };
+    const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
+    if (!shouldProjectResponsesResumeClientErrorForHttp({ origin })) {
+      throw error;
+    }
+    const status = typeof structured?.status === 'number' ? structured.status : undefined;
+    const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
+    const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
+    const clientError = buildResponsesResumeClientErrorForHttp({
+      status,
+      code,
+      origin,
+      message,
+    });
+    return {
+      kind: 'client_error',
+      status: clientError.status,
+      body: clientError.body as unknown as Record<string, unknown>,
+      streamPlan,
+    };
+  }
+}
+
 export async function captureResponsesRequestContextForHttp(args: {
   requestId: string;
   payload: AnyRecord;
@@ -288,10 +539,30 @@ export async function captureResponsesRequestContextForHttp(args: {
   sessionId?: string;
   conversationId?: string;
   providerKey?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<void> {
-  await captureResponsesRequestContextForRequest(args);
+  await captureResponsesRequestContextForRequest({
+    ...args,
+    entryKind: args.entryKind ?? 'responses',
+  });
+}
+
+export async function captureResponsesPipelineRequestContextForHttp(args: {
+  entryEndpoint?: string;
+  requestId: string;
+  requestContext: ResponsesRequestContextForHttp;
+  providerKey?: string;
+}): Promise<void> {
+  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
+    return;
+  }
+  await captureResponsesRequestContextForHttp({
+    requestId: args.requestId,
+    ...args.requestContext,
+    providerKey: args.providerKey,
+  });
 }
 
 export function attachResponsesRequestContextToResultForHttp(args: {
@@ -318,8 +589,12 @@ export async function recordResponsesResponseForHttp(args: {
   routingPolicyGroup?: string;
   sessionId?: string;
   conversationId?: string;
+  entryKind?: 'responses' | 'chat' | 'messages';
 }): Promise<void> {
-  await recordResponsesResponseForRequest(args);
+  await recordResponsesResponseForRequest({
+    ...args,
+    entryKind: args.entryKind ?? 'responses',
+  });
 }
 
 export async function seedResponsesToolCallResponseForHttp(args: {
@@ -366,6 +641,36 @@ export async function seedResponsesToolCallResponseForHttp(args: {
   }
 }
 
+export async function finalizeResponsesPipelineResultForHttp(args: {
+  entryEndpoint?: string;
+  body: unknown;
+  resultMetadata: Record<string, unknown> | undefined;
+  requestContext: ResponsesRequestContextForHttp;
+  providerKey?: string;
+}): Promise<Record<string, unknown> | undefined> {
+  const nextMetadata = attachResponsesRequestContextToResultForHttp({
+    entryEndpoint: args.entryEndpoint,
+    resultMetadata: args.resultMetadata,
+    requestContext: args.requestContext,
+  });
+  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
+    return nextMetadata;
+  }
+  await seedResponsesToolCallResponseForHttp({
+    body: args.body,
+    requestContext: nextMetadata?.responsesRequestContext as {
+      payload?: Record<string, unknown>;
+      context?: Record<string, unknown>;
+      sessionId?: string;
+      conversationId?: string;
+      matchedPort?: number;
+      routingPolicyGroup?: string;
+    } | undefined,
+    providerKey: args.providerKey,
+  });
+  return nextMetadata;
+}
+
 export async function clearResponsesConversationByRequestIdForHttp(
   requestId?: string
 ): Promise<void> {
@@ -380,6 +685,51 @@ export async function clearResponsesConversationOnHandlerFailureForHttp(args: {
     return;
   }
   await clearResponsesConversationByRequestIdForHttp(args.requestId);
+}
+
+export async function captureResponsesInboundToolHistoryErrorsampleForHttp(args: {
+  requestId: string;
+  entryEndpoint: string;
+  body: unknown;
+  error: unknown;
+}): Promise<void> {
+  const errorRecord = args.error && typeof args.error === 'object'
+    ? (args.error as Record<string, unknown>)
+    : undefined;
+  const code = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
+  if (code !== 'MALFORMED_REQUEST') {
+    return;
+  }
+  const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
+  const details = errorRecord && typeof errorRecord.details === 'object'
+    ? (errorRecord.details as Record<string, unknown>)
+    : undefined;
+  if (
+    !message.includes('Tool history contract violated')
+    && !Boolean(details?.toolHistoryContractViolation)
+  ) {
+    return;
+  }
+  await writeErrorsampleJson({
+    group: 'payload-contract-error',
+    kind: 'responses.inbound_tool_history_contract',
+    payload: {
+      kind: 'responses.inbound_tool_history_contract',
+      timestamp: new Date().toISOString(),
+      requestId: args.requestId,
+      entryEndpoint: args.entryEndpoint,
+      body: args.body,
+      error:
+        args.error && typeof args.error === 'object'
+          ? {
+              name: (args.error as { name?: unknown }).name,
+              message: (args.error as { message?: unknown }).message,
+              code: (args.error as { code?: unknown }).code,
+              details: (args.error as { details?: unknown }).details
+            }
+          : { message: String(args.error ?? 'unknown_error') }
+    }
+  });
 }
 
 export async function finalizeResponsesConversationRequestRetentionForHttp(

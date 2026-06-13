@@ -22,7 +22,29 @@ const checks = [
       "responseIdFromPath && !payload.response_id",
       "pipelineEntryEndpoint === '/v1/responses'",
       "pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'",
+      'Tool history contract violated',
+      'toolHistoryContractViolation',
+      'responses.inbound_tool_history_contract',
+      'queueInboundToolHistoryErrorsample(',
       'clearResponsesConversationByRequestIdForHttp(',
+      'res.write(`event: error',
+      'attachResponsesRequestContextToResultForHttp(',
+      'captureResponsesRequestContextForHttp(',
+      'seedResponsesToolCallResponseForHttp(',
+      'shouldManageResponsesConversationForHttp(',
+      'const originalStream =',
+      'const outboundStream =',
+      'const inboundStream =',
+      'function buildResponsesConversationPortScope(',
+      'buildResponsesScopeContinuationExpiredErrorForHttp(',
+      'buildResponsesResumeClientErrorForHttp(',
+      'shouldProjectResponsesResumeClientErrorForHttp(',
+      "providerProtocol: 'openai-responses'",
+      'responsesResume:',
+      'responsesRequestContext,',
+      'readRequestBodyMetadata(',
+      'stripRequestBodyMetadataForPipeline(',
+      'clientAbortSignal: (() => {',
     ],
     forbiddenTokens: [
       'planResponsesHandlerEntry',
@@ -36,6 +58,10 @@ const checks = [
   {
     file: 'src/server/handlers/handler-response-utils.ts',
     allowedImport: '../../modules/llmswitch/bridge/responses-response-bridge.js',
+    requiredImports: [
+      './handler-response-sse.js',
+      './handler-response-common.js',
+    ],
     forbiddenLocalTokens: [
       'RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS',
       'isResponsesRequiredActionFrame(',
@@ -54,6 +80,9 @@ const checks = [
       'const readResponsesContinuationProbeState =',
       'const resolveTerminalProbeFinishReason =',
       'async function resolveResponsesJsonSseBridgePayload(',
+      'function resolveNormalizedChatUsage(',
+      'function normalizeChatUsagePayload(',
+      'function buildRequestLogContext(',
       'deriveFinishReason(args.result.body)',
       'const jsonFinishReason = deriveFinishReason(clientBody);',
       'const normalizedJsonBody = await normalizeResponsesClientPayloadForHttp(',
@@ -64,14 +93,32 @@ const checks = [
       'status >= 400',
       'function summarizeSseFrameForLog(',
       'function resolveProviderProtocolHintFromSseFrame(',
+      'export function hasSsePayload(',
+      'function shouldDispatchSseToClient(',
+      '?? options?.responsesRequestContext',
       'function isResponsesJsonBody(',
       'function isChatCompletionJsonBody(',
+      'function createClientVisibleSseProjectionStream(',
+      'function createDirectPassthroughSseGuardStream(',
+      'function isInternalMetadataCarrier(',
+      'function assertDirectPassthroughSseFrameHasNoInternalMetadataControls(',
+      'function sendSseBridgeError(',
+      'function sendStructuredSseError(',
+      'function withSseClientProjectionTimeout(',
+      'function createClientSseSnapshotRecorder(',
+      'function maybeAttachClientSseSnapshotStream(',
+      'function writeSseDiagnosticSnapshot(',
+      'function logSseClientCloseDiagnosis(',
       'const hasResponsesToolCallContinuationProbe =',
       'const hasResponsesRequiredActionContinuationProbe =',
       "'SSE stream missing from pipeline result'",
       "'sse_bridge_error'",
       "'stream closed before response.completed'",
       "'upstream_stream_incomplete'",
+      'response.sse.stream.start',
+      'response.sse.client_close',
+      'response.sse.terminal.write_frame',
+      '?? args.responsesRequestContext',
     ],
     forbiddenTokens: [
       'buildResponsesTerminalSseFramesFromProbeNative',
@@ -100,6 +147,11 @@ for (const check of checks) {
   const source = fs.readFileSync(abs, 'utf8');
   if (!source.includes(check.allowedImport)) {
     failures.push(`${check.file}: missing required single-surface import ${check.allowedImport}`);
+  }
+  for (const requiredImport of check.requiredImports ?? []) {
+    if (!source.includes(requiredImport)) {
+      failures.push(`${check.file}: missing required import ${requiredImport}`);
+    }
   }
   for (const token of check.forbiddenLocalTokens ?? []) {
     if (source.includes(token)) {

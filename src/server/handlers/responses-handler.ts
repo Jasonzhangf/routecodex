@@ -15,30 +15,23 @@ import {
   logRequestError,
   captureClientHeaders,
   mergePipelineMetadata,
-  readRequestBodyMetadata,
-  stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
 import {
-  attachResponsesRequestContextToResultForHttp,
-  buildResponsesResumeClientErrorForHttp,
-  buildResponsesRequestContextForHttp,
-  buildResponsesScopeContinuationExpiredErrorForHttp,
-  captureResponsesRequestContextForHttp,
+  buildResponsesConversationPortScopeForHttp,
+  buildResponsesPipelineMetadataForHttp,
+  captureResponsesInboundToolHistoryErrorsampleForHttp,
+  captureResponsesPipelineRequestContextForHttp,
   clearResponsesConversationOnHandlerFailureForHttp,
-  finalizeResponsesHandlerPayloadForHttp,
-  prepareResponsesHandlerEntryForHttp,
-  readResponsesConversationIdFromHttp,
-  readResponsesSessionIdFromHttp,
-  shouldProjectResponsesResumeClientErrorForHttp,
-  shouldManageResponsesConversationForHttp,
-  seedResponsesToolCallResponseForHttp
+  finalizeResponsesPipelineResultForHttp,
+  planResponsesHandlerStreamForHttp,
+  prepareResponsesRequestBodyForHttp,
+  prepareResponsesHandlerRuntimeForHttp,
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { markClientConnectionDisconnected, trackClientConnectionState } from '../utils/client-connection-state.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
-import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 interface ResponsesHandlerOptions {
@@ -54,22 +47,6 @@ type ResponsesPayload = {
   [key: string]: unknown;
 };
 
-
-function buildResponsesConversationPortScope(ctx: HandlerContext): { matchedPort?: number; routingPolicyGroup?: string } {
-  const matchedPort = typeof ctx.portContext?.matchedPort === 'number'
-    ? ctx.portContext.matchedPort
-    : typeof ctx.portContext?.localPort === 'number'
-      ? ctx.portContext.localPort
-      : undefined;
-  const routingPolicyGroup = typeof ctx.portContext?.routingPolicyGroup === 'string' && ctx.portContext.routingPolicyGroup.trim()
-    ? ctx.portContext.routingPolicyGroup.trim()
-    : undefined;
-  return {
-    ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
-    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
-  };
-}
-
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
     const detailSuffix = details && Object.keys(details).length
@@ -79,39 +56,6 @@ function logResponsesHandlerNonBlockingError(stage: string, error: unknown, deta
   } catch {
     // Never throw from non-blocking logging.
   }
-}
-
-function queueInboundToolHistoryErrorsample(args: {
-  requestId: string;
-  entryEndpoint: string;
-  body: unknown;
-  error: unknown;
-}): void {
-  void writeErrorsampleJson({
-    group: 'payload-contract-error',
-    kind: 'responses.inbound_tool_history_contract',
-    payload: {
-      kind: 'responses.inbound_tool_history_contract',
-      timestamp: new Date().toISOString(),
-      requestId: args.requestId,
-      entryEndpoint: args.entryEndpoint,
-      body: args.body,
-      error:
-        args.error && typeof args.error === 'object'
-          ? {
-              name: (args.error as { name?: unknown }).name,
-              message: (args.error as { message?: unknown }).message,
-              code: (args.error as { code?: unknown }).code,
-              details: (args.error as { details?: unknown }).details
-            }
-          : { message: String(args.error ?? 'unknown_error') }
-    }
-  }).catch((error) => {
-    logResponsesHandlerNonBlockingError('tool_history_errorsample.write', error, {
-      requestId: args.requestId,
-      entryEndpoint: args.entryEndpoint
-    });
-  });
 }
 
 export async function handleResponses(
@@ -175,90 +119,42 @@ export async function handleResponses(
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
-    const originalStream = payload?.stream === true;
-    // Responses API stream contract is driven by payload.stream, not Accept.
-    // Accept only indicates the client can consume SSE if stream=true.
-    // Do not upgrade stream=false requests into SSE-visible execution just because the client advertises SSE.
-    const outboundStream = typeof options.forceStream === 'boolean'
-      ? options.forceStream
-      : originalStream;
-    // submit_tool_outputs is a synthetic entrypoint: keep transport intent aligned with outbound stream.
-    // Some upstreams do not implement streaming on submit paths; we must not infer it from Accept headers.
-    const inboundStream = outboundStream;
+    const responsesConversationPortScope = buildResponsesConversationPortScopeForHttp(ctx.portContext);
+    const preparedRuntime = await prepareResponsesHandlerRuntimeForHttp({
+      payload: payload as Record<string, unknown>,
+      entryEndpoint,
+      responseIdFromPath: options.responseIdFromPath,
+      requestId,
+      portScope: responsesConversationPortScope,
+      forceStream: options.forceStream,
+      acceptsSse,
+      requestTimeoutMs,
+    });
     emitRequestStart({
       clientRequestId,
-      inboundStream: outboundStream,
-      outboundStream,
-      clientAcceptsSse: acceptsSse,
-      originalStream,
-      type: payload?.type,
-      timeoutMs: requestTimeoutMs
+      ...preparedRuntime.streamPlan.requestStartMeta,
     });
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
-    const requestBodyMetadata = readRequestBodyMetadata(payload);
-    const sessionIdForResume = readResponsesSessionIdFromHttp(requestBodyMetadata);
-    const conversationIdForResume = readResponsesConversationIdFromHttp(requestBodyMetadata);
-    const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
-    let resumeMeta: Record<string, unknown> | undefined;
-    try {
-      const preparedEntry = await prepareResponsesHandlerEntryForHttp({
-        payload: payload as Record<string, unknown>,
-        entryEndpoint,
-        responseIdFromPath: options.responseIdFromPath,
-        requestId,
-        sessionId: sessionIdForResume,
-        conversationId: conversationIdForResume,
-        ...responsesConversationPortScope
-      });
-      if (preparedEntry.kind === 'scope_continuation_expired') {
-        res.status(400).json(buildResponsesScopeContinuationExpiredErrorForHttp());
-        return;
-      }
-      payload = preparedEntry.payload as ResponsesPayload;
-      isSubmitToolOutputs = preparedEntry.isSubmitToolOutputs;
-      pipelineEntryEndpoint = preparedEntry.pipelineEntryEndpoint;
-      resumeMeta = preparedEntry.resumeMeta;
-    } catch (error: unknown) {
-      const structured = error as { status?: number; code?: string; origin?: string };
-      const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
-      const status = typeof structured?.status === 'number' ? structured.status : undefined;
-      const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
-      const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
-      logRequestError(entryEndpoint, requestId, error);
-      if (shouldProjectResponsesResumeClientErrorForHttp({ origin })) {
-        const clientError = buildResponsesResumeClientErrorForHttp({
-          status,
-          code,
-          origin,
-          message,
-        });
-        res.status(clientError.status).json(clientError.body);
-        return;
-      }
-      const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
-      await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStreamForError });
+    if (preparedRuntime.kind === 'client_error') {
+      res.status(preparedRuntime.status).json(preparedRuntime.body);
       return;
     }
-    payload = finalizeResponsesHandlerPayloadForHttp({
-      payload: payload as Record<string, unknown>,
-      entryEndpoint,
-      isSubmitToolOutputs,
-      outboundStream,
-    }) as ResponsesPayload;
-    const pipelineBody = stripRequestBodyMetadataForPipeline(payload);
-    const responsesRequestContext = buildResponsesRequestContextForHttp({
-      payload: pipelineBody as Record<string, unknown>,
-      metadata: requestBodyMetadata,
-      ...responsesConversationPortScope
-    });
+    let resumeMeta: Record<string, unknown> | undefined;
+    payload = preparedRuntime.payload as ResponsesPayload;
+    isSubmitToolOutputs = preparedRuntime.isSubmitToolOutputs;
+    pipelineEntryEndpoint = preparedRuntime.pipelineEntryEndpoint;
+    resumeMeta = preparedRuntime.resumeMeta;
+    const preparedPipelineBody = prepareResponsesRequestBodyForHttp(payload as Record<string, unknown>);
+    const pipelineBody = preparedPipelineBody.pipelineBody;
+    const requestContext = preparedRuntime.requestContext;
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
       requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
     }
-    const wantsStream = outboundStream;
+    const wantsStream = preparedRuntime.streamPlan.outboundStream;
 
     const warmupCheck = detectWarmupRequest(req.headers, payload as Record<string, unknown>);
     if (warmupCheck.isWarmup) {
@@ -278,40 +174,23 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: pipelineBody,
-      metadata: mergePipelineMetadata(requestBodyMetadata, {
-        stream: wantsStream,
+      metadata: mergePipelineMetadata(preparedPipelineBody.requestBodyMetadata, buildResponsesPipelineMetadataForHttp({
+        streamPlan: preparedRuntime.streamPlan,
         clientRequestId,
-        clientStream: acceptsSse || undefined,
-        inboundStream: wantsStream,
-        outboundStream,
-        providerProtocol: 'openai-responses',
-        clientAbortSignal: (() => {
-          const ac = clientConnectionState;
-          if (!ac) return undefined;
-          const sym = Reflect.ownKeys(ac as object).find(
-            (k) => typeof k === 'symbol' && k.description === 'routecodex.clientConnectionAbortSignal'
-          );
-          if (sym) {
-            const s = Reflect.get(ac as object, sym);
-            if (s && typeof s === 'object' && 'aborted' in (s as object)) return s as AbortSignal;
-          }
-          return undefined;
-        })(),
         clientHeaders,
         clientConnectionState,
-	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
-        responsesRequestContext,
-	      })
+        resumeMeta,
+        requestContext,
+      }))
 	    };
-    if (shouldManageResponsesConversationForHttp(pipelineEntryEndpoint)) {
-      await captureResponsesRequestContextForHttp({
-        requestId,
-        ...responsesRequestContext,
-        providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
-      }).catch((error) => {
-        logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
-      });
-    }
+    await captureResponsesPipelineRequestContextForHttp({
+      entryEndpoint: pipelineEntryEndpoint,
+      requestId,
+      requestContext,
+      providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
+    }).catch((error) => {
+      logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
+    });
 
     const activeRequestTimeoutMs =
       typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
@@ -325,7 +204,7 @@ export async function handleResponses(
           code: 'HTTP_REQUEST_TIMEOUT',
           status: 504
         });
-        const wantsStreamForError = outboundStream;
+        const wantsStreamForError = preparedRuntime.streamPlan.outboundStream;
         try {
           logRequestError(entryEndpoint, requestId, err);
         } catch (loggingError) {
@@ -338,23 +217,14 @@ export async function handleResponses(
           logResponsesHandlerNonBlockingError('timeout.mark_connection_disconnected', stateError, { requestId });
         }
         if (res.headersSent) {
-          // If we've already started an SSE response, try to emit an explicit error event
-          // so SSE clients don't hang on a silent TCP close.
           if (wantsStreamForError) {
-            try {
-              const payload = {
-                type: 'error',
-                status: 504,
-                error: {
-                  message: err.message,
-                  code: 'HTTP_REQUEST_TIMEOUT',
-                  request_id: requestId
-                }
-              };
-              res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-            } catch (writeError) {
-              logResponsesHandlerNonBlockingError('timeout.sse_error_frame_write', writeError, { requestId });
-            }
+            void writeStartedSsePipelineError(res, ctx, err, entryEndpoint, requestId).catch((writeError) => {
+              logResponsesHandlerNonBlockingError('timeout.started_sse_pipeline_error', writeError, { requestId });
+            });
+            void clearResponsesConversationOnHandlerFailureForHttp({ requestId, stage: 'timeout_started' }).catch((error) => {
+              logResponsesHandlerNonBlockingError('responses_context.clear_on_timeout_started', error, { requestId });
+            });
+            return;
           }
           try {
             res.end();
@@ -381,43 +251,21 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
-    result.metadata = attachResponsesRequestContextToResultForHttp({
+    result.metadata = await finalizeResponsesPipelineResultForHttp({
       entryEndpoint: pipelineEntryEndpoint,
+      body: result.body,
       resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
-      requestContext: responsesRequestContext,
+      requestContext,
+      providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
     });
     if (!hasSsePayload(result.body)) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
     }
-    if (shouldManageResponsesConversationForHttp(pipelineEntryEndpoint)) {
-      try {
-        await seedResponsesToolCallResponseForHttp({
-          body: result.body,
-          requestContext: result.metadata?.responsesRequestContext as {
-            payload?: Record<string, unknown>;
-            context?: Record<string, unknown>;
-            sessionId?: string;
-            conversationId?: string;
-            matchedPort?: number;
-            routingPolicyGroup?: string;
-          } | undefined,
-          providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
-        });
-      } catch (error) {
-        logResponsesHandlerNonBlockingError('responses_context.seed_response_id', error, { requestId: effectiveRequestId });
-      }
-    }
     await sendPipelineResponse(res, result, effectiveRequestId, {
       forceSSE: wantsStream,
       entryEndpoint: pipelineEntryEndpoint,
-      responsesRequestContext: result.metadata?.responsesRequestContext as {
-        payload: Record<string, unknown>;
-        context: Record<string, unknown>;
-        sessionId?: string;
-        conversationId?: string;
-      } | undefined,
       ...(isVideoRequest ? { sseTotalTimeoutMs: requestTimeoutMs } : {})
     });
   } catch (error: unknown) {
@@ -425,28 +273,19 @@ export async function handleResponses(
     void clearResponsesConversationOnHandlerFailureForHttp({ requestId, stage: 'error' }).catch((clearError) => {
       logResponsesHandlerNonBlockingError('responses_context.clear_on_error', clearError, { requestId });
     });
+    void captureResponsesInboundToolHistoryErrorsampleForHttp({
+      requestId,
+      entryEndpoint,
+      body: req.body,
+      error
+    }).catch((captureError) => {
+      logResponsesHandlerNonBlockingError('tool_history_errorsample.write', captureError, {
+        requestId,
+        entryEndpoint
+      });
+    });
     if (timedOut) {
       return;
-    }
-    const errorRecord = error as Record<string, unknown> | null;
-    const code = typeof errorRecord?.code === 'string' ? String(errorRecord.code) : '';
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    const details = errorRecord && typeof errorRecord.details === 'object'
-      ? (errorRecord.details as Record<string, unknown>)
-      : undefined;
-    if (
-      code === 'MALFORMED_REQUEST'
-      && (
-        message.includes('Tool history contract violated')
-        || Boolean(details?.toolHistoryContractViolation)
-      )
-    ) {
-      queueInboundToolHistoryErrorsample({
-        requestId,
-        entryEndpoint,
-        body: req.body,
-        error
-      });
     }
     logRequestError(entryEndpoint, requestId, error);
     try {
@@ -468,9 +307,13 @@ export async function handleResponses(
     } catch {}
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
-    const bodyPayload = req.body && typeof req.body === 'object' ? req.body as ResponsesPayload : undefined;
-    const originalStream = bodyPayload?.stream === true;
-    const wantsStream = options.forceStream === true || originalStream;
+    const failureStreamPlan = planResponsesHandlerStreamForHttp({
+      payload: req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {},
+      forceStream: options.forceStream,
+      acceptsSse,
+      requestTimeoutMs,
+    });
+    const wantsStream = failureStreamPlan.outboundStream;
     if (res.headersSent) {
       if (wantsStream && !res.writableEnded) {
         await writeStartedSsePipelineError(res, ctx, error, entryEndpoint, requestId);
