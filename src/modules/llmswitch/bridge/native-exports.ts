@@ -118,6 +118,18 @@ type NativeHubBridgePolicySemantics = {
 
 type NativeRouterHotpathJsonBinding = {
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
+  buildResponsesPayloadFromChatJson?: (
+    payloadJson: string,
+    contextJson?: string
+  ) => string;
+  projectResponsesClientPayloadForClientJson?: (
+    payloadJson: string,
+    toolsRawJson?: string,
+    metadataJson?: string
+  ) => string;
+  projectResponsesSseFrameForClientJson?: (
+    inputJson: string
+  ) => string;
   evaluateSingletonRoutePoolExhaustionJson?: (
     inputJson: string
   ) => string;
@@ -629,6 +641,64 @@ export function evaluateResponsesDirectRouteDecisionNative(input: {
     requiresHubRelay: boolean;
     reason?: string;
     hasDeclaredApplyPatchTool?: boolean;
+  };
+}
+
+export function buildResponsesPayloadFromChatNative(
+  payload: unknown,
+  context?: Record<string, unknown>
+): Record<string, unknown> {
+  const parsed = invokeRouterHotpathJsonCapability('buildResponsesPayloadFromChatJson', [
+    payload ?? null,
+    context ?? null,
+  ]);
+  return assertNativeObject('buildResponsesPayloadFromChatJson', parsed);
+}
+
+export function projectResponsesClientPayloadForClientNative(args: {
+  payload: unknown;
+  toolsRaw: unknown[];
+  metadata?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const parsed = invokeRouterHotpathJsonCapability('projectResponsesClientPayloadForClientJson', [
+    args.payload ?? null,
+    Array.isArray(args.toolsRaw) ? args.toolsRaw : [],
+    args.metadata ?? null,
+  ]);
+  return assertNativeObject('projectResponsesClientPayloadForClientJson', parsed);
+}
+
+export function projectResponsesSseFrameForClientNative(args: {
+  frame: string;
+  eventName?: string;
+  data: Record<string, unknown>;
+  toolsRaw: unknown[];
+  metadata?: Record<string, unknown>;
+  state: {
+    pendingApplyPatchArgumentDeltas: Record<string, string>;
+    applyPatchCallIds: string[];
+    emittedApplyPatchDoneCallIds: string[];
+  };
+}): {
+  emit: boolean;
+  frame: string;
+  state: {
+    pendingApplyPatchArgumentDeltas: Record<string, string>;
+    applyPatchCallIds: string[];
+    emittedApplyPatchDoneCallIds: string[];
+  };
+} {
+  const parsed = invokeRouterHotpathJsonCapability('projectResponsesSseFrameForClientJson', [
+    args,
+  ]);
+  return assertNativeObject('projectResponsesSseFrameForClientJson', parsed) as {
+    emit: boolean;
+    frame: string;
+    state: {
+      pendingApplyPatchArgumentDeltas: Record<string, string>;
+      applyPatchCallIds: string[];
+      emittedApplyPatchDoneCallIds: string[];
+    };
   };
 }
 

@@ -24,6 +24,11 @@ import {
   finalizeResponsesConversationRequestRetention,
   recordResponsesResponseForRequest,
 } from './runtime-integrations.js';
+import {
+  buildResponsesPayloadFromChatNative,
+  projectResponsesClientPayloadForClientNative,
+  projectResponsesSseFrameForClientNative,
+} from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
@@ -1085,7 +1090,6 @@ export async function persistResponsesConversationLifecycleForHttp(
   if (
     isContinuation
     && shouldPersistResponsesToolCallContinuationRecordForHttp(args.entryEndpoint, args.requestContext)
-    && args.requestContext
     && args.body
     && typeof args.body === 'object'
     && !Array.isArray(args.body)
@@ -1105,36 +1109,38 @@ export async function persistResponsesConversationLifecycleForHttp(
       timingRequestIds: persisted.timingRequestIds,
       responseId,
     });
-    for (const requestId of requestIds) {
-      await captureResponsesRequestContextForHttpProjection({
-        requestId,
-        payload: args.requestContext.payload,
-        context: args.requestContext.context,
-        sessionId: args.requestContext.sessionId,
-        conversationId: args.requestContext.conversationId,
-        providerKey: persisted.providerKey,
-        matchedPort: args.requestContext.matchedPort,
-        routingPolicyGroup: args.requestContext.routingPolicyGroup,
-      }).catch((error) => {
-        args.onTrace?.('capture.error', {
-          captureRequestId: requestId,
-          responseId,
-          message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+    if (args.requestContext) {
+      for (const requestId of requestIds) {
+        await captureResponsesRequestContextForHttpProjection({
+          requestId,
+          payload: args.requestContext.payload,
+          context: args.requestContext.context,
+          sessionId: args.requestContext.sessionId,
+          conversationId: args.requestContext.conversationId,
+          providerKey: persisted.providerKey,
+          matchedPort: args.requestContext.matchedPort,
+          routingPolicyGroup: args.requestContext.routingPolicyGroup,
+        }).catch((error) => {
+          args.onTrace?.('capture.error', {
+            captureRequestId: requestId,
+            responseId,
+            message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+          });
+          args.onNonBlockingError?.(`responses-conversation-capture:${requestId}`, error);
         });
-        args.onNonBlockingError?.(`responses-conversation-capture:${requestId}`, error);
-      });
+      }
     }
 
     for (const requestId of requestIds) {
       await recordResponsesResponseForHttpProjection({
         requestId,
         response: args.body as AnyRecord,
-        sessionId: persisted.sessionId ?? args.requestContext.sessionId,
-        conversationId: persisted.conversationId ?? args.requestContext.conversationId,
+        sessionId: persisted.sessionId ?? args.requestContext?.sessionId,
+        conversationId: persisted.conversationId ?? args.requestContext?.conversationId,
         providerKey: persisted.providerKey,
         continuationOwner: persisted.continuationOwner,
-        matchedPort: args.requestContext.matchedPort,
-        routingPolicyGroup: args.requestContext.routingPolicyGroup,
+        matchedPort: args.requestContext?.matchedPort,
+        routingPolicyGroup: args.requestContext?.routingPolicyGroup,
       }).catch((error) => {
         args.onTrace?.('record.error', {
           recordRequestId: requestId,
@@ -1409,13 +1415,7 @@ export async function buildResponsesPayloadFromChatForHttp(
   payload: unknown,
   context?: Record<string, unknown>
 ): Promise<unknown> {
-  const mod = await importResponsesHandlerCoreDist<{
-    buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown;
-  }>('conversion/responses/responses-openai-bridge');
-  if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-    throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-  }
-  return mod.buildResponsesPayloadFromChat(payload, context);
+  return buildResponsesPayloadFromChatNative(payload, context);
 }
 
 export async function projectResponsesClientPayloadForClientForHttp(args: {
@@ -1423,21 +1423,7 @@ export async function projectResponsesClientPayloadForClientForHttp(args: {
   toolsRaw: unknown[];
   metadata?: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {
-  const mod = await importResponsesHandlerCoreDist<{
-    projectResponsesClientPayloadForClientWithNative?: (
-      payload: unknown,
-      toolsRaw: unknown[],
-      metadata?: Record<string, unknown>
-    ) => Record<string, unknown>;
-  }>('native/router-hotpath/native-hub-pipeline-resp-semantics');
-  if (typeof mod.projectResponsesClientPayloadForClientWithNative !== 'function') {
-    throw new Error('[handler-response] projectResponsesClientPayloadForClientWithNative not available');
-  }
-  return mod.projectResponsesClientPayloadForClientWithNative(
-    args.payload,
-    args.toolsRaw,
-    args.metadata
-  );
+  return projectResponsesClientPayloadForClientNative(args);
 }
 
 function readResponsesClientToolsRawForHttp(requestContext?: {
@@ -1644,32 +1630,7 @@ export async function projectResponsesSseFrameForClientForHttp(args: {
     emittedApplyPatchDoneCallIds: string[];
   };
 }> {
-  const mod = await importResponsesHandlerCoreDist<{
-    projectResponsesSseFrameForClientWithNative?: (input: {
-      frame: string;
-      eventName?: string;
-      data: Record<string, unknown>;
-      toolsRaw: unknown[];
-      metadata?: Record<string, unknown>;
-      state: {
-        pendingApplyPatchArgumentDeltas: Record<string, string>;
-        applyPatchCallIds: string[];
-        emittedApplyPatchDoneCallIds: string[];
-      };
-    }) => {
-      emit: boolean;
-      frame: string;
-      state: {
-        pendingApplyPatchArgumentDeltas: Record<string, string>;
-        applyPatchCallIds: string[];
-        emittedApplyPatchDoneCallIds: string[];
-      };
-    };
-  }>('native/router-hotpath/native-hub-pipeline-resp-semantics');
-  if (typeof mod.projectResponsesSseFrameForClientWithNative !== 'function') {
-    throw new Error('[handler-response] projectResponsesSseFrameForClientWithNative not available');
-  }
-  return mod.projectResponsesSseFrameForClientWithNative(args);
+  return projectResponsesSseFrameForClientNative(args);
 }
 
 function readResponsesSseCallIdForHttp(data: Record<string, unknown>): string | undefined {
