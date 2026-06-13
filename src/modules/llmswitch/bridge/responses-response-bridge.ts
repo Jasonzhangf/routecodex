@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -827,6 +827,32 @@ export async function finalizeResponsesConversationRequestRetentionForHttp(
 
 export async function createResponsesJsonToSseConverterForHttp() {
   return await createResponsesJsonToSseConverter();
+}
+
+export function normalizeResponsesJsonBodyForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+  resolveBridge?: typeof requireResponsesHandlerCoreDist;
+}): unknown {
+  if (args.entryEndpoint !== '/v1/responses') {
+    return args.body;
+  }
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return args.body;
+  }
+  if ((args.body as Record<string, unknown>).object !== 'chat.completion') {
+    return args.body;
+  }
+  const mod = (args.resolveBridge ?? requireResponsesHandlerCoreDist)<{
+    buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown
+  }>('conversion/responses/responses-openai-bridge');
+  if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
+    throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
+  }
+  return mod.buildResponsesPayloadFromChat(args.body, {
+    requestId: args.requestLabel
+  });
 }
 
 export function requireResponsesHandlerCoreDist<TModule extends object>(

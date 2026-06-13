@@ -24,9 +24,8 @@ import {
   finalizeResponsesHandlerPayloadForHttp,
   prepareResponsesHandlerEntryForHttp,
   readResponsesConversationIdFromHttp,
-  readResponsesResponseIdFromHttp,
   readResponsesSessionIdFromHttp,
-  recordResponsesResponseForHttp
+  seedResponsesToolCallResponseForHttp
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
@@ -35,7 +34,6 @@ import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
-import { deriveFinishReason } from '../utils/finish-reason.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -442,41 +440,18 @@ export async function handleResponses(
       )
     ) {
       try {
-        const responseId = readResponsesResponseIdFromHttp(result.body);
-        const finishReason = deriveFinishReason(result.body);
-        if (responseId && finishReason === 'tool_calls') {
-          const requestContext = result.metadata?.responsesRequestContext as {
+        await seedResponsesToolCallResponseForHttp({
+          body: result.body,
+          requestContext: result.metadata?.responsesRequestContext as {
             payload?: Record<string, unknown>;
             context?: Record<string, unknown>;
             sessionId?: string;
             conversationId?: string;
             matchedPort?: number;
             routingPolicyGroup?: string;
-          } | undefined;
-          if (requestContext?.payload && requestContext?.context) {
-            await captureResponsesRequestContextForHttp({
-              requestId: responseId,
-              payload: requestContext.payload,
-              context: requestContext.context,
-              sessionId: requestContext.sessionId,
-              conversationId: requestContext.conversationId,
-              matchedPort: requestContext.matchedPort,
-              routingPolicyGroup: requestContext.routingPolicyGroup,
-              providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
-            });
-            if (result.body && typeof result.body === 'object' && !Array.isArray(result.body)) {
-              await recordResponsesResponseForHttp({
-                requestId: responseId,
-                response: result.body as Record<string, unknown>,
-                providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined,
-                matchedPort: requestContext.matchedPort,
-                routingPolicyGroup: requestContext.routingPolicyGroup,
-                sessionId: requestContext.sessionId,
-                conversationId: requestContext.conversationId
-              });
-            }
-          }
-        }
+          } | undefined,
+          providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
+        });
       } catch (error) {
         logResponsesHandlerNonBlockingError('responses_context.seed_response_id', error, { requestId: effectiveRequestId });
       }

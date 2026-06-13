@@ -132,6 +132,7 @@ import {
   inspectResponsesTerminalStateFromSseChunkForHttp,
   isToolCallContinuationResponseForHttp,
   normalizeResponsesClientPayloadForHttp,
+  normalizeResponsesJsonBodyForHttp,
   normalizeResponsesSseFrameForClientForHttp,
   persistResponsesConversationLifecycleForHttp,
   requireResponsesHandlerCoreDist,
@@ -609,33 +610,6 @@ function maybeUpdateUsageLogInfoFromSseFrame(
   }
   usageLogInfo.usage = usage as unknown as Record<string, unknown>;
 }
-
-export function normalizeResponsesJsonBody(
-  body: unknown,
-  entryEndpoint?: string,
-  requestLabel?: string,
-  resolveBridge: typeof requireResponsesHandlerCoreDist = requireResponsesHandlerCoreDist
-): unknown {
-  if (entryEndpoint !== '/v1/responses') {
-    return body;
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return body;
-  }
-  if ((body as Record<string, unknown>).object !== 'chat.completion') {
-    return body;
-  }
-  const mod = resolveBridge<{ buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown }>(
-    'conversion/responses/responses-openai-bridge'
-  );
-  if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-    throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-  }
-  return mod.buildResponsesPayloadFromChat(body, {
-    requestId: requestLabel
-  });
-}
-
 
 function createClientVisibleSseProjectionStream(
   stream: Readable,
@@ -1718,12 +1692,12 @@ export async function sendPipelineResponse(
           if (!normalizedFrame) {
             logPipelineStage('response.sse.project_frame', requestLabel, {
               emit: false,
-              raw: summarizeSseFrameForLog(frame) ?? undefined
+              raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined
             });
             return;
           }
-          lastRawClientFrameSummary = summarizeSseFrameForLog(frame);
-          lastProjectedClientFrameSummary = summarizeSseFrameForLog(normalizedFrame);
+          lastRawClientFrameSummary = summarizeResponsesSseFrameForLogForHttp(frame);
+          lastProjectedClientFrameSummary = summarizeResponsesSseFrameForLogForHttp(normalizedFrame);
           logPipelineStage('response.sse.project_frame', requestLabel, {
             emit: true,
             raw: lastRawClientFrameSummary ?? undefined,
@@ -1738,7 +1712,7 @@ export async function sendPipelineResponse(
             logPipelineStage('response.sse.projection.cancelled_after_client_close', requestLabel, {
               reason,
               sourceCode,
-              raw: summarizeSseFrameForLog(frame) ?? undefined,
+              raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
             });
             return;
           }
@@ -1753,7 +1727,7 @@ export async function sendPipelineResponse(
             message: projectionError.message,
             reason,
             sourceCode,
-            raw: summarizeSseFrameForLog(frame) ?? undefined,
+            raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
           });
           endWithSseError(
             readErrorCode(projectionError) ?? 'SSE_CLIENT_PROJECTION_FAILED',
@@ -1837,8 +1811,8 @@ export async function sendPipelineResponse(
           if (normalizedFrame) {
             logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
               stage,
-              raw: summarizeSseFrameForLog(frame) ?? undefined,
-              projected: summarizeSseFrameForLog(normalizedFrame) ?? undefined
+              raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
+              projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
             });
             writeClientSseFrame(normalizedFrame, `${stage}.write_terminal`);
           }
@@ -2074,8 +2048,8 @@ export async function sendPipelineResponse(
             if (normalizedFrame) {
               logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
                 stage: 'response.sse.stream.end.write_terminal_probe',
-                raw: summarizeSseFrameForLog(frame) ?? undefined,
-                projected: summarizeSseFrameForLog(normalizedFrame) ?? undefined
+                raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
+                projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
               });
               writeClientSseFrame(normalizedFrame, 'response.sse.stream.end.write_terminal_probe');
             }
@@ -2115,8 +2089,8 @@ export async function sendPipelineResponse(
                   if (normalizedFrame) {
                     logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
                       stage: 'response.sse.stream.end.write_tool_continuation_terminal_probe',
-                      raw: summarizeSseFrameForLog(frame) ?? undefined,
-                      projected: summarizeSseFrameForLog(normalizedFrame) ?? undefined
+                      raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
+                      projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
                     });
                     writeClientSseFrame(
                       normalizedFrame,
@@ -2242,7 +2216,12 @@ export async function sendPipelineResponse(
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
   const normalizedJsonBody = await normalizeResponsesClientPayloadForHttp({
-    payload: normalizeResponsesJsonBody(body, entryEndpoint, requestLabel),
+    payload: normalizeResponsesJsonBodyForHttp({
+      body,
+      entryEndpoint,
+      requestLabel,
+      resolveBridge: requireResponsesHandlerCoreDist,
+    }),
     entryEndpoint,
     requestContext:
       result.metadata?.responsesRequestContext as DispatchOptions['responsesRequestContext'] | undefined

@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
 import { sendPipelineResponse } from '../../../src/server/handlers/handler-response-utils.js';
-import { normalizeResponsesJsonBody } from '../../../src/server/handlers/handler-response-utils.js';
+import { normalizeResponsesJsonBodyForHttp } from '../../../src/modules/llmswitch/bridge/responses-response-bridge.js';
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
   it('keeps direct raw SSE frames on the same client-frame metadata guard', async () => {
@@ -378,8 +378,8 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
   });
 
   it('normalizes chat.completion JSON into response object for /v1/responses JSON dispatch', async () => {
-    const normalized = normalizeResponsesJsonBody(
-      {
+    const normalized = normalizeResponsesJsonBodyForHttp({
+      body: {
         id: 'chatcmpl_json_dispatch_1',
         object: 'chat.completion',
         model: 'gpt-5.4-medium',
@@ -394,9 +394,9 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
           }
         ]
       },
-      '/v1/responses',
-      'req_json_dispatch_chat_bridge',
-      (() => ({
+      entryEndpoint: '/v1/responses',
+      requestLabel: 'req_json_dispatch_chat_bridge',
+      resolveBridge: (() => ({
         buildResponsesPayloadFromChat: (payload: unknown) => ({
           ...(payload as Record<string, unknown>),
           object: 'response',
@@ -404,7 +404,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
           output: []
         })
       })) as any
-    ) as Record<string, unknown>;
+    }) as Record<string, unknown>;
 
     expect(normalized.object).toBe('response');
     expect(normalized.object).not.toBe('chat.completion');

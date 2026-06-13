@@ -15,10 +15,22 @@ const TS_OWNER_WHITELIST = new Set([
   'daemon_admin.command_handlers', // HTTP handler projection shell
   'server.http_runtime_entry', // HTTP entry shell
   'server.responses_handler_family', // handler family projection shell
+  'server.models_capability_contract', // server projection shell for /v1/models capability metadata
+  'server.responses_request_handler_bridge_surface', // request-side opaque bridge shell
+  'server.responses_response_handler_bridge_surface', // response-side opaque bridge shell
   'cli.command_surface', // CLI dispatch shell
   'manager.token_runtime', // token-daemon is the unique owner; no Rust twin
   'quota.unified_control_surface', // control surface bridge over Rust host
   'manager.quota_lifecycle', // lifecycle bridge over TS provider-quota-center
+  'config.path_resolution_surface', // path resolution surface is TS config glue
+  'config.user_config_codec', // user config codec is TS config glue
+  'config.provider_config_codec', // provider config codec is TS config glue
+  'config.user_config_materialization', // user config materialization is TS config glue
+  'config.user_config_write_surface', // user config write surface is TS config glue
+  'config.provider_config_write_surface', // provider config write surface is TS config glue
+  'error.pipeline_contract', // provider/runtime error chain contract is TS-owned boundary glue
+  'error.execution_decision_consumer', // executor decision consumer is TS-owned policy glue
+  'error.client_projection', // client error projection is TS-owned projection shell
 ]);
 
 function parseOwners(text) {

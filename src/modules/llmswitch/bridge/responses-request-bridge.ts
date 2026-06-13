@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
-// canonical_builders: prepareResponsesHandlerEntryForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, clearResponsesConversationByRequestIdForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: prepareResponsesHandlerEntryForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
@@ -19,6 +19,7 @@ import {
   resumeResponsesConversation,
 } from './runtime-integrations.js';
 import { planResponsesHandlerEntry } from './native-exports.js';
+import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 
 export type PrepareResponsesHandlerEntryForHttpArgs = {
   payload: AnyRecord;
@@ -208,6 +209,50 @@ export async function recordResponsesResponseForHttp(args: {
   conversationId?: string;
 }): Promise<void> {
   await recordResponsesResponseForRequest(args);
+}
+
+export async function seedResponsesToolCallResponseForHttp(args: {
+  body: unknown;
+  requestContext?: {
+    payload?: Record<string, unknown>;
+    context?: Record<string, unknown>;
+    sessionId?: string;
+    conversationId?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  };
+  providerKey?: string;
+}): Promise<void> {
+  const responseId = readResponsesResponseIdFromHttp(args.body);
+  const finishReason = deriveFinishReason(args.body);
+  if (!responseId || finishReason !== 'tool_calls') {
+    return;
+  }
+  const requestContext = args.requestContext;
+  if (!requestContext?.payload || !requestContext?.context) {
+    return;
+  }
+  await captureResponsesRequestContextForHttp({
+    requestId: responseId,
+    payload: requestContext.payload,
+    context: requestContext.context,
+    sessionId: requestContext.sessionId,
+    conversationId: requestContext.conversationId,
+    matchedPort: requestContext.matchedPort,
+    routingPolicyGroup: requestContext.routingPolicyGroup,
+    providerKey: args.providerKey
+  });
+  if (args.body && typeof args.body === 'object' && !Array.isArray(args.body)) {
+    await recordResponsesResponseForHttp({
+      requestId: responseId,
+      response: args.body as Record<string, unknown>,
+      providerKey: args.providerKey,
+      matchedPort: requestContext.matchedPort,
+      routingPolicyGroup: requestContext.routingPolicyGroup,
+      sessionId: requestContext.sessionId,
+      conversationId: requestContext.conversationId
+    });
+  }
 }
 
 export async function clearResponsesConversationByRequestIdForHttp(

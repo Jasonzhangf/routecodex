@@ -99,6 +99,8 @@ const mockBridgeModule = async () => ({
   }),
   persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
+  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
+  summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((input: {
     chunk: unknown;

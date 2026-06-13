@@ -15,6 +15,7 @@ const checks = [
       'function shouldPersistResponsesConversation(',
       'function shouldPersistResponsesConversationForEndpoint(',
       'function readResponsesResponseId(',
+      'function normalizeResponsesJsonBody(',
     ],
     forbiddenTokens: [
       'planResponsesHandlerEntry',

@@ -88,7 +88,7 @@ owners:
 
   - feature_id: hub.servertool_pre_command_hooks
     status: active
-    summary: "servertool pre-command hook config and runtime-rule normalization"
+    summary: "servertool pre-command hook config and rule normalization"
     owner_kind: rust_ssot
     owner_scope: "servertool pre-command hook config and runtime-rule normalization"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
@@ -376,7 +376,7 @@ owners:
 
   - feature_id: hub.servertool_backend_route_runtime
     status: active
-    summary: "servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning"
+    summary: "servertool backend-route followup endpoint, payload, injection, metadata, error envelope, and bootstrap replay planning"
     owner_kind: rust_ssot
     owner_scope: "servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
@@ -734,6 +734,8 @@ owners:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/src/router
+    forbidden_mentions_allowlist:
+      - HubPipeline
     required_tests:
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -773,6 +775,10 @@ owners:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+    forbidden_mentions_allowlist:
+      - AdapterContext
+      - StandardizedRequest
+      - ProcessedRequest
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/chat-semantics-stage1.spec.ts
@@ -907,7 +913,7 @@ owners:
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active
-    summary: "Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
+    summary: "Post-servertool response action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
     owner_kind: rust_ssot
     owner_scope: "Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
@@ -1487,6 +1493,8 @@ owners:
       - src/server/runtime/http-server/daemon-admin
       - src/cli/commands
       - src/commands
+    forbidden_mentions_allowlist:
+      - LoadedRouteCodexConfig
     required_tests:
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
@@ -1828,6 +1836,7 @@ owners:
       - prepareResponsesHandlerEntryForHttp
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
+      - seedResponsesToolCallResponseForHttp
       - clearResponsesConversationByRequestIdForHttp
       - readResponsesSessionIdFromHttp
       - readResponsesConversationIdFromHttp
@@ -1849,6 +1858,7 @@ owners:
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
       - clearResponsesConversationByRequestIdForHttp
+      - clearResponsesConversationByRequestIdForHttpProjection
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
     required_gates:
@@ -1861,6 +1871,7 @@ owners:
       - "TS bridge must do no protocol parsing, protocol conversion, tool-shape normalization, or submit/protocol branching in TS."
       - "Responses handler must not locally force `payload.stream = true` or call `applySystemPromptOverride(...)`; those request mutations may only sit behind the single request bridge surface until native owner replaces them."
       - "Responses handler must not keep local session/conversation id readers, persistence eligibility checks, or response-id parsing; those request-side continuation helpers must stay behind the single request bridge surface."
+      - "Responses handler must not keep local tool_calls -> responseId seed orchestration; that continuation seeding must stay behind the single request bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
@@ -1889,6 +1900,7 @@ owners:
       - finalizeResponsesConversationRequestRetentionForHttp
       - persistResponsesConversationLifecycleForHttp
       - createResponsesJsonToSseConverterForHttp
+      - normalizeResponsesJsonBodyForHttp
       - buildResponsesPayloadFromChatForHttp
       - projectResponsesClientPayloadForClientForHttp
       - projectResponsesSseFrameForClientForHttp
@@ -1917,6 +1929,7 @@ owners:
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
       - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
       - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
+      - "Server handler must not keep local chat.completion -> response JSON normalization; that bridge shell must stay behind the single response bridge surface."
       - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
   - feature_id: cli.command_surface
     status: active
@@ -1981,6 +1994,9 @@ owners:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+    forbidden_mentions_allowlist:
+      - SseProtocol
+      - SseCodec
     required_tests:
       - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
       - tests/sharedmodule/sse-stream-mode-native.spec.ts
@@ -2044,6 +2060,8 @@ owners:
       - src/server/runtime/http-server/executor
       - src/server/handlers
       - sharedmodule/llmswitch-core/src/conversion/hub/response
+    forbidden_mentions_allowlist:
+      - ResponsesResponse
     required_tests:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
       - tests/server/http-server/provider-response-sse-marker.blackbox.spec.ts
@@ -2264,6 +2282,8 @@ owners:
       - src/providers/core/runtime
       - src/providers/core/utils/provider-error-reporter.ts
       - src/server/runtime/http-server/executor
+    forbidden_mentions_allowlist:
+      - ErrorErr05ExecutionDecision
     required_tests:
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts

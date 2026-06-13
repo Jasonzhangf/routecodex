@@ -975,6 +975,7 @@ verification:
     notes:
       - "Request bridge must stay facade-only and must not grow TS protocol semantics."
       - "Request-side session/conversation id readers, persistence eligibility checks, and response-id parsing are covered by the same request-bridge gate."
+      - "Request-side tool_calls -> responseId continuation seeding is covered by the same request-bridge gate."
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
@@ -994,6 +995,7 @@ verification:
       - "Continuation lifecycle orchestration for capture/record/finalize is covered by the same response-bridge gate and continuation-store regressions."
       - "SSE terminal-state parsing for `response.completed` / `response.done` must stay behind the same response-bridge gate."
       - "SSE frame summary parsing and provider-protocol hint detection for usage/logging must stay behind the same response-bridge gate."
+      - "chat.completion -> response JSON normalization shell is covered by the same response-bridge gate."
 
   - feature_id: cli.command_surface
     change_risk: medium
