@@ -55,6 +55,11 @@ import {
   type RouterDirectResult,
 } from './router-direct-pipeline.js';
 import {
+  captureRouterDirectFailureSnapshots,
+  captureRouterDirectProviderRequestSnapshot,
+  captureRouterDirectProviderResponseSnapshot,
+} from './router-direct-failure-snapshot.js';
+import {
   applyMinimalDirectOverrides,
   assertDirectRouteDecision,
   evaluateDirectRouteDecision,
@@ -177,7 +182,7 @@ import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/p
 import { runHubPipeline } from './executor-pipeline.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
-import { deriveFinishReason } from '../../utils/finish-reason.js';
+import { deriveFinishReason, deriveFinishReasonWithVisibleSuccessFallback } from '../../utils/finish-reason.js';
 import { mapProviderProtocol } from './provider-utils.js';
 import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 import { emitRequestExecutorProviderRetryTelemetry } from './executor/request-executor-retry-telemetry.js';
@@ -1376,6 +1381,14 @@ export class RouteCodexHttpServer {
       routecodexPortMode: portConfig.mode,
       routecodexPortBinding: portConfig.providerBinding,
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
+      stopMessageEnabled:
+        typeof portConfig?.stopMessage?.enabled === 'boolean'
+          ? portConfig.stopMessage.enabled
+          : true,
+      stopMessageExcludeDirect:
+        portConfig?.stopMessage?.includeDirect === true
+          ? false
+          : true,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
     const portSessionDir = this.resolvePortSessionDir(portConfig, portConfig.port);
@@ -1601,6 +1614,7 @@ export class RouteCodexHttpServer {
     let capturedUsage: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
     let directRetryRequested = false;
+    let directProviderRequestCaptured = false;
     try {
       directOutcome = await executeRouterDirectPipeline({
       portConfig,
@@ -1627,6 +1641,21 @@ export class RouteCodexHttpServer {
         if (typeof target.modelId === 'string' && target.modelId.trim()) {
           payload.model = target.modelId.trim();
         }
+        directProviderRequestCaptured = true;
+        void captureRouterDirectProviderRequestSnapshot({
+          requestId: input.requestId,
+          payload,
+          entryEndpoint: input.entryEndpoint,
+          providerKey: ctx.providerKey,
+          providerId: directProviderHandle.providerId,
+          metadata: metadataForHub,
+        }).catch((error) => {
+          logRouterDirectNonBlockingError('snapshot.provider-request', error, {
+            requestId: input.requestId,
+            providerKey: ctx.providerKey,
+            directAttempt,
+          });
+        });
         this.logStage('router-direct.send.start', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1638,6 +1667,20 @@ export class RouteCodexHttpServer {
         });
       },
       onSnapshotAfter: (response, ctx) => {
+        void captureRouterDirectProviderResponseSnapshot({
+          requestId: input.requestId,
+          response,
+          entryEndpoint: input.entryEndpoint,
+          providerKey: ctx.providerKey,
+          providerId: directProviderHandle.providerId,
+          metadata: metadataForHub,
+        }).catch((error) => {
+          logRouterDirectNonBlockingError('snapshot.provider-response', error, {
+            requestId: input.requestId,
+            providerKey: ctx.providerKey,
+            directAttempt,
+          });
+        });
         const responseRecord =
           response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
         const handle = this.resolveProviderHandleForBinding(ctx.providerKey, metadataForHub)
@@ -1666,6 +1709,17 @@ export class RouteCodexHttpServer {
         });
       },
       onProviderError: async (error, ctx) => {
+        await captureRouterDirectFailureSnapshots({
+          requestId: input.requestId,
+          payload: ctx.payload,
+          error,
+          entryEndpoint: input.entryEndpoint,
+          providerKey: ctx.providerKey,
+          providerId: directProviderHandle.providerId,
+          metadata: metadataForHub,
+          requestCaptured: directProviderRequestCaptured,
+        });
+        directProviderRequestCaptured = true;
         const runtimeScope = readRuntimeScopeFromMetadata(metadataForHub);
         const retryError = extractRetryErrorSnapshot(error);
         const statusCode = typeof retryError.statusCode === 'number'
@@ -1841,9 +1895,13 @@ export class RouteCodexHttpServer {
       input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
         ? ((input.body as any).model as string)
         : undefined;
+    const providerModel =
+      normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)
+        ? this.extractProviderModel(normalized.body as Record<string, unknown>) ?? requestModel
+        : requestModel;
     const finishReason =
       normalized.body && typeof normalized.body === 'object'
-        ? deriveFinishReason(normalized.body as Record<string, unknown>)
+        ? deriveFinishReasonWithVisibleSuccessFallback(normalized.body as Record<string, unknown>)
         : undefined;
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
@@ -1886,7 +1944,7 @@ export class RouteCodexHttpServer {
       usageLogInfo: {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
-        model: requestModel,
+        model: providerModel,
         routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
@@ -1941,9 +1999,10 @@ export class RouteCodexHttpServer {
       input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
         ? ((input.body as any).model as string)
         : undefined;
+    const providerModel = this.extractProviderModel(payload) ?? requestModel;
     const finishReason =
       normalized.body && typeof normalized.body === 'object'
-        ? deriveFinishReason(normalized.body as Record<string, unknown>)
+        ? deriveFinishReasonWithVisibleSuccessFallback(normalized.body as Record<string, unknown>)
         : undefined;
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
@@ -1983,7 +2042,7 @@ export class RouteCodexHttpServer {
       usageLogInfo: {
         ...(normalized.usageLogInfo ?? {}),
         providerKey: providerBinding,
-        model: requestModel ?? this.extractProviderModel(payload),
+        model: providerModel,
         routeName: 'port.provider-direct',
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,
