@@ -1833,6 +1833,9 @@ owners:
       - PrepareResponsesHandlerEntryForHttpResult
     canonical_builders:
       - finalizeResponsesHandlerPayloadForHttp
+      - shouldManageResponsesConversationForHttp
+      - buildResponsesRequestContextForHttp
+      - attachResponsesRequestContextToResultForHttp
       - prepareResponsesHandlerEntryForHttp
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
@@ -1872,6 +1875,7 @@ owners:
       - "Responses handler must not locally force `payload.stream = true` or call `applySystemPromptOverride(...)`; those request mutations may only sit behind the single request bridge surface until native owner replaces them."
       - "Responses handler must not keep local session/conversation id readers, persistence eligibility checks, or response-id parsing; those request-side continuation helpers must stay behind the single request bridge surface."
       - "Responses handler must not keep local tool_calls -> responseId seed orchestration; that continuation seeding must stay behind the single request bridge surface."
+      - "Responses handler must not keep local `/v1/responses*` conversation-management branch checks, local `responseIdFromPath -> payload.response_id` prewrite, or local `responsesRequestContext` fallback assembly; those request-side continuation/context helpers must stay behind the single request bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
@@ -1893,6 +1897,10 @@ owners:
       - resolveResponsesProviderProtocolHintFromSseFrameForHttp
       - buildResponsesTerminalSseFramesFromProbeForHttp
       - isToolCallContinuationResponseForHttp
+      - inspectResponsesContinuationProbeForHttp
+      - planResponsesContinuationCloseActionForHttp
+      - shouldRepairResponsesContinuationTerminalForHttp
+      - planResponsesStreamEndRepairForHttp
       - captureResponsesRequestContextForHttpProjection
       - rebindResponsesConversationRequestIdForHttp
       - clearResponsesConversationByRequestIdForHttpProjection
@@ -1900,6 +1908,7 @@ owners:
       - finalizeResponsesConversationRequestRetentionForHttp
       - persistResponsesConversationLifecycleForHttp
       - createResponsesJsonToSseConverterForHttp
+      - prepareResponsesJsonBodyForSseBridgeForHttp
       - normalizeResponsesJsonBodyForHttp
       - buildResponsesPayloadFromChatForHttp
       - projectResponsesClientPayloadForClientForHttp
@@ -1930,6 +1939,7 @@ owners:
       - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
       - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
       - "Server handler must not keep local chat.completion -> response JSON normalization; that bridge shell must stay behind the single response bridge surface."
+      - "Server handler must not keep local force-SSE body classification (`response` vs `chat.completion`) or probe-level tool-continuation / required_action inspection; those must stay behind the single response bridge surface."
       - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
   - feature_id: cli.command_surface
     status: active

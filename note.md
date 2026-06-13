@@ -458,3 +458,44 @@ Confirmed current audit baseline: 28 feature entries in function-map, 28 in veri
   - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/sharedmodule/responses-continuation-store.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts` PASS
   - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` PASS
   - `git diff --check` PASS
+
+2026-06-13 responses handler single-bridge closeout goal prompt
+- Created implementation doc at `docs/goals/responses-handler-single-bridge-closeout-plan.md` so the next `/goal` can stay short while still pointing to one executable source of truth.
+
+2026-06-13 responses handler bridge closeout slice 2
+- Moved remaining server-side Responses force-SSE body classification (`response` vs `chat.completion`) behind `prepareResponsesJsonBodyForSseBridgeForHttp(...)` in `src/modules/llmswitch/bridge/responses-response-bridge.ts`; `handler-response-utils.ts` no longer keeps local `isResponsesJsonBody` / `isChatCompletionJsonBody`.
+- Moved probe-level continuation inspection behind `inspectResponsesContinuationProbeForHttp(...)`; server handler no longer owns local `tool_calls` / `required_action` probe inspection helpers.
+- Single-bridge gate updated to forbid reviving those local helpers in `handler-response-utils.ts`.
+- Focused test isolation closed: force-SSE suite now mocks `server/utils/finish-reason.js`, and `--detectOpenHandles` exits cleanly.
+- Verified:
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts tests/sharedmodule/responses-continuation-store.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --detectOpenHandles --runTestsByPath tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts` PASS
+  - `git diff --check` PASS
+
+2026-06-13 responses handler bridge closeout slice 3
+- Request-side handler no longer keeps local `responseIdFromPath -> payload.response_id` prewrite, local `/v1/responses*` conversation-management branch checks, or local `responsesRequestContext` fallback assembly; moved into request bridge via `shouldManageResponsesConversationForHttp(...)`, `buildResponsesRequestContextForHttp(...)`, and `attachResponsesRequestContextToResultForHttp(...)`.
+- Response-side client-close continuation policy no longer branches purely in server TS; moved behind response bridge via `planResponsesContinuationCloseActionForHttp(...)` and `shouldRepairResponsesContinuationTerminalForHttp(...)`.
+- Single-bridge gate updated to forbid reviving request-side local `pipelineEntryEndpoint === '/v1/responses*'` checks and `responseIdFromPath` prewrite.
+- Verified:
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts tests/sharedmodule/responses-continuation-store.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts` PASS
+  - `git diff --check` PASS
+
+2026-06-13 responses handler bridge closeout slice 4
+- Response-side stream-end terminal repair / continuation repair / incomplete-error decision no longer branches purely in server TS; moved behind response bridge via `planResponsesStreamEndRepairForHttp(...)`.
+- Handler still owns stream write / res.end / snapshot / logging / timers, but the Responses-specific decision of “need terminal repair?”, “need continuation repair?”, “need incomplete error projection?” is now bridge-owned.
+- Verified:
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts tests/sharedmodule/responses-continuation-store.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts` PASS
+  - `git diff --check` PASS
+
+2026-06-13 function-map audit check
+- Current map baseline: 62 function-map features, 62 verification-map features.
+- Gates green: `verify:function-map-compile-gate`, `verify:architecture-owner-queryability`, `verify:architecture-feature-map-growth-discipline`, `verify:architecture-provider-specific-leaks`, `verify:architecture-thin-wrapper-only`, `verify:architecture-error-chain-bypass`, `verify:architecture-metadata-leak-boundary`, `verify:architecture-nonadjacent-conversion`, `verify:architecture-forbidden-path-growth`.
+- Residual loophole: `tool.apply_patch_freeform_contract` has no `src/sharedmodule` source anchor; only test/script anchors exist.
+- Residual warning: `verify:function-map-boundary-mentions` warns on `server.responses_request_handler_bridge_surface` because `clearResponsesConversationByRequestIdForHttp` appears in a forbidden path.
+- User rule to keep: server handlers must not own protocol parsing; protocol normalization/parsing stays in bridge/native owner layers.

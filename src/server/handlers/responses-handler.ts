@@ -19,12 +19,15 @@ import {
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
 import {
+  attachResponsesRequestContextToResultForHttp,
+  buildResponsesRequestContextForHttp,
   captureResponsesRequestContextForHttp,
   clearResponsesConversationByRequestIdForHttp,
   finalizeResponsesHandlerPayloadForHttp,
   prepareResponsesHandlerEntryForHttp,
   readResponsesConversationIdFromHttp,
   readResponsesSessionIdFromHttp,
+  shouldManageResponsesConversationForHttp,
   seedResponsesToolCallResponseForHttp
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
@@ -144,7 +147,7 @@ export async function handleResponses(
   let requestTimeoutMs = configuredRequestTimeoutMs;
   let isVideoRequest = false;
   let timedOut = false;
-  let isSubmitToolOutputs = entryEndpoint === '/v1/responses.submit_tool_outputs';
+  let isSubmitToolOutputs = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {
     if (timeoutHandle) {
@@ -196,9 +199,6 @@ export async function handleResponses(
     const sessionIdForResume = readResponsesSessionIdFromHttp(requestBodyMetadata);
     const conversationIdForResume = readResponsesConversationIdFromHttp(requestBodyMetadata);
     const responsesConversationPortScope = buildResponsesConversationPortScope(ctx);
-    if (options.responseIdFromPath && !payload.response_id) {
-      payload.response_id = options.responseIdFromPath;
-    }
     let resumeMeta: Record<string, unknown> | undefined;
     try {
       const preparedEntry = await prepareResponsesHandlerEntryForHttp({
@@ -256,6 +256,12 @@ export async function handleResponses(
       isSubmitToolOutputs,
       outboundStream,
     }) as ResponsesPayload;
+    const pipelineBody = stripRequestBodyMetadataForPipeline(payload);
+    const responsesRequestContext = buildResponsesRequestContextForHttp({
+      payload: pipelineBody as Record<string, unknown>,
+      metadata: requestBodyMetadata,
+      ...responsesConversationPortScope
+    });
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
       requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
@@ -273,9 +279,6 @@ export async function handleResponses(
       res.status(200).json({ status: 'ready' });
       return;
     }
-
-
-    const pipelineBody = stripRequestBodyMetadataForPipeline(payload);
 	    const pipelineInput = {
 	      entryEndpoint: pipelineEntryEndpoint,
 	      method: req.method,
@@ -305,34 +308,13 @@ export async function handleResponses(
         clientHeaders,
         clientConnectionState,
 	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
-        responsesRequestContext: {
-            payload: pipelineBody as Record<string, unknown>,
-            context: {
-              input: Array.isArray(payload.input) ? payload.input : [],
-              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
-            },
-            sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
-            conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
-            ...responsesConversationPortScope,
-          }
+        responsesRequestContext,
 	      })
 	    };
-    if (
-      (
-        pipelineEntryEndpoint === '/v1/responses'
-        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
-      )
-    ) {
+    if (shouldManageResponsesConversationForHttp(pipelineEntryEndpoint)) {
       await captureResponsesRequestContextForHttp({
         requestId,
-        payload: pipelineBody as Record<string, unknown>,
-        context: {
-          input: Array.isArray(payload.input) ? payload.input : [],
-          toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
-        },
-        sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
-        conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
-        ...responsesConversationPortScope,
+        ...responsesRequestContext,
         providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
       }).catch((error) => {
         logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
@@ -407,38 +389,17 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
-    if (
-      (
-        pipelineEntryEndpoint === '/v1/responses'
-        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
-      )
-    ) {
-      result.metadata = {
-        ...(result.metadata || {}),
-          responsesRequestContext:
-          (result.metadata?.responsesRequestContext as Record<string, unknown> | undefined)
-          ?? {
-            payload: pipelineBody as Record<string, unknown>,
-            context: {
-              input: Array.isArray(payload.input) ? payload.input : [],
-              toolsRaw: Array.isArray(payload.tools) ? payload.tools : undefined,
-            },
-            sessionId: readResponsesSessionIdFromHttp(requestBodyMetadata),
-            conversationId: readResponsesConversationIdFromHttp(requestBodyMetadata),
-          },
-      };
-    }
+    result.metadata = attachResponsesRequestContextToResultForHttp({
+      entryEndpoint: pipelineEntryEndpoint,
+      resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
+      requestContext: responsesRequestContext,
+    });
     if (!hasSsePayload(result.body)) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
     }
-    if (
-      (
-        pipelineEntryEndpoint === '/v1/responses'
-        || pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'
-      )
-    ) {
+    if (shouldManageResponsesConversationForHttp(pipelineEntryEndpoint)) {
       try {
         await seedResponsesToolCallResponseForHttp({
           body: result.body,

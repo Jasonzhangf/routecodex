@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
-// canonical_builders: prepareResponsesHandlerEntryForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
@@ -20,6 +20,18 @@ import {
 } from './runtime-integrations.js';
 import { planResponsesHandlerEntry } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
+
+export type ResponsesRequestContextForHttp = {
+  payload: AnyRecord;
+  context: {
+    input: unknown[];
+    toolsRaw?: unknown[];
+  };
+  sessionId?: string;
+  conversationId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+};
 
 export type PrepareResponsesHandlerEntryForHttpArgs = {
   payload: AnyRecord;
@@ -107,6 +119,29 @@ export function finalizeResponsesHandlerPayloadForHttp(args: {
     applySystemPromptOverride(args.entryEndpoint, payload);
   }
   return payload;
+}
+
+export function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
+  return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+}
+
+export function buildResponsesRequestContextForHttp(args: {
+  payload: AnyRecord;
+  metadata?: Record<string, unknown>;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}): ResponsesRequestContextForHttp {
+  return {
+    payload: args.payload,
+    context: {
+      input: Array.isArray(args.payload.input) ? args.payload.input : [],
+      toolsRaw: Array.isArray(args.payload.tools) ? args.payload.tools : undefined,
+    },
+    sessionId: readResponsesSessionIdFromHttp(args.metadata),
+    conversationId: readResponsesConversationIdFromHttp(args.metadata),
+    ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+    ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+  };
 }
 
 export async function prepareResponsesHandlerEntryForHttp(
@@ -197,6 +232,22 @@ export async function captureResponsesRequestContextForHttp(args: {
   routingPolicyGroup?: string;
 }): Promise<void> {
   await captureResponsesRequestContextForRequest(args);
+}
+
+export function attachResponsesRequestContextToResultForHttp(args: {
+  entryEndpoint?: string;
+  resultMetadata: Record<string, unknown> | undefined;
+  requestContext: ResponsesRequestContextForHttp;
+}): Record<string, unknown> | undefined {
+  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
+    return args.resultMetadata;
+  }
+  return {
+    ...(args.resultMetadata || {}),
+    responsesRequestContext:
+      (args.resultMetadata?.responsesRequestContext as Record<string, unknown> | undefined)
+      ?? args.requestContext,
+  };
 }
 
 export async function recordResponsesResponseForHttp(args: {

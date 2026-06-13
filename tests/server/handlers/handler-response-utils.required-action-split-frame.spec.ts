@@ -38,6 +38,59 @@ const mockBridgeModule = async () => ({
     return {};
   }),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
+  inspectResponsesContinuationProbeForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: unknown;
+  }) => {
+    if (args.entryEndpoint !== '/v1/responses' && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
+      return { isToolCallContinuation: false, hasRequiredAction: false };
+    }
+    const probe = args.probe;
+    const isToolCallContinuation = Boolean(
+      probe
+      && typeof probe === 'object'
+      && !Array.isArray(probe)
+      && (probe as Record<string, unknown>).required_action
+    );
+    return {
+      isToolCallContinuation,
+      hasRequiredAction: isToolCallContinuation,
+    };
+  }),
+  planResponsesContinuationCloseActionForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    requestContextPresent: boolean;
+    probe: unknown;
+  }) => {
+    const isToolCallContinuation =
+      (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+      && args.requestContextPresent
+      && Boolean(
+        args.probe
+        && typeof args.probe === 'object'
+        && !Array.isArray(args.probe)
+        && (args.probe as Record<string, unknown>).required_action
+      );
+    return isToolCallContinuation
+      ? { action: 'persist_continuation', keepForSubmitToolOutputs: true }
+      : { action: 'clear_abandoned', keepForSubmitToolOutputs: false };
+  }),
+  planResponsesStreamEndRepairForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: Record<string, unknown> | undefined;
+    sawResponsesCompletedChunk: boolean;
+    sawResponsesDoneEvent: boolean;
+    sawTerminalEvent: boolean;
+  }) => {
+    const isContinuation =
+      (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+      && Boolean(args.probe?.required_action);
+    return {
+      shouldRepairTerminalFrames: !args.sawResponsesCompletedChunk || !args.sawResponsesDoneEvent,
+      shouldRepairContinuationTerminal: !args.sawTerminalEvent && isContinuation,
+      shouldProjectIncompleteError: !args.sawTerminalEvent && !isContinuation,
+    };
+  }),
   isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
   isToolCallContinuationResponseForHttp: jest.fn((body: unknown) => Boolean(
     body
@@ -46,7 +99,32 @@ const mockBridgeModule = async () => ({
     && (body as Record<string, unknown>).required_action
   )),
   requireCoreDist: jest.fn(() => ({})),
+  prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn(async ({
+    body,
+    entryEndpoint,
+    hasSsePayload,
+  }: {
+    body: unknown;
+    entryEndpoint?: string;
+    hasSsePayload: (value: unknown) => boolean;
+  }) => {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+      return null;
+    }
+    const record = body as Record<string, unknown>;
+    if (
+      (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+      && (record.object === 'response' || typeof record.output === 'object' || typeof record.status === 'string')
+    ) {
+      return record;
+    }
+    if (entryEndpoint !== '/v1/responses' || record.object !== 'chat.completion') {
+      return null;
+    }
+    return record;
+  }),
   normalizeResponsesClientPayloadForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
+  normalizeResponsesJsonBodyForHttp: jest.fn(async ({ body }: { body: unknown }) => body),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => {
     if (!frame.includes('response.required_action')) {
       return frame;
@@ -100,6 +178,18 @@ const mockBridgeModule = async () => ({
   persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
+  shouldRepairResponsesContinuationTerminalForHttp: jest.fn((args: {
+    entryEndpoint?: string;
+    probe: unknown;
+  }) => (
+    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
+    && Boolean(
+      args.probe
+      && typeof args.probe === 'object'
+      && !Array.isArray(args.probe)
+      && (args.probe as Record<string, unknown>).required_action
+    )
+  )),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((input: {

@@ -16,6 +16,9 @@ const checks = [
       'function shouldPersistResponsesConversationForEndpoint(',
       'function readResponsesResponseId(',
       'function normalizeResponsesJsonBody(',
+      "responseIdFromPath && !payload.response_id",
+      "pipelineEntryEndpoint === '/v1/responses'",
+      "pipelineEntryEndpoint === '/v1/responses.submit_tool_outputs'",
     ],
     forbiddenTokens: [
       'planResponsesHandlerEntry',
@@ -44,6 +47,10 @@ const checks = [
       'function updateSseTerminalTrackerFromChunk(',
       'function summarizeSseFrameForLog(',
       'function resolveProviderProtocolHintFromSseFrame(',
+      'function isResponsesJsonBody(',
+      'function isChatCompletionJsonBody(',
+      'const hasResponsesToolCallContinuationProbe =',
+      'const hasResponsesRequiredActionContinuationProbe =',
     ],
     forbiddenTokens: [
       'buildResponsesTerminalSseFramesFromProbeNative',

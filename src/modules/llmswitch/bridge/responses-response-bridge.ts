@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -494,6 +494,103 @@ export function isToolCallContinuationResponseForHttp(body: unknown): boolean {
   return isToolCallContinuationResponseNative(body);
 }
 
+export function inspectResponsesContinuationProbeForHttp(args: {
+  entryEndpoint?: string;
+  probe: unknown;
+}): {
+  isToolCallContinuation: boolean;
+  hasRequiredAction: boolean;
+} {
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return {
+      isToolCallContinuation: false,
+      hasRequiredAction: false,
+    };
+  }
+  if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
+    return {
+      isToolCallContinuation: false,
+      hasRequiredAction: false,
+    };
+  }
+  const isToolCallContinuation = isToolCallContinuationResponseForHttp(args.probe);
+  const probeRecord = args.probe as Record<string, unknown>;
+  return {
+    isToolCallContinuation,
+    hasRequiredAction:
+      isToolCallContinuation
+      && Boolean(
+        probeRecord.required_action
+        && typeof probeRecord.required_action === 'object'
+        && !Array.isArray(probeRecord.required_action)
+      ),
+  };
+}
+
+export function planResponsesContinuationCloseActionForHttp(args: {
+  entryEndpoint?: string;
+  requestContextPresent: boolean;
+  probe: unknown;
+}): {
+  action: 'persist_continuation' | 'clear_abandoned';
+  keepForSubmitToolOutputs: boolean;
+} {
+  const probeState = inspectResponsesContinuationProbeForHttp({
+    entryEndpoint: args.entryEndpoint,
+    probe: args.probe,
+  });
+  if (args.requestContextPresent && probeState.isToolCallContinuation) {
+    return {
+      action: 'persist_continuation',
+      keepForSubmitToolOutputs: true,
+    };
+  }
+  return {
+    action: 'clear_abandoned',
+    keepForSubmitToolOutputs: false,
+  };
+}
+
+export function shouldRepairResponsesContinuationTerminalForHttp(args: {
+  entryEndpoint?: string;
+  probe: unknown;
+}): boolean {
+  return inspectResponsesContinuationProbeForHttp({
+    entryEndpoint: args.entryEndpoint,
+    probe: args.probe,
+  }).isToolCallContinuation;
+}
+
+export function planResponsesStreamEndRepairForHttp(args: {
+  entryEndpoint?: string;
+  probe: Record<string, unknown> | undefined;
+  sawResponsesCompletedChunk: boolean;
+  sawResponsesDoneEvent: boolean;
+  sawTerminalEvent: boolean;
+}): {
+  shouldRepairTerminalFrames: boolean;
+  shouldRepairContinuationTerminal: boolean;
+  shouldProjectIncompleteError: boolean;
+} {
+  const shouldRepairTerminalFrames =
+    !args.sawResponsesCompletedChunk || !args.sawResponsesDoneEvent;
+  const shouldRepairContinuationTerminal =
+    !args.sawTerminalEvent
+    && shouldRepairResponsesContinuationTerminalForHttp({
+      entryEndpoint: args.entryEndpoint,
+      probe: args.probe,
+    });
+  return {
+    shouldRepairTerminalFrames,
+    shouldRepairContinuationTerminal,
+    shouldProjectIncompleteError:
+      !args.sawTerminalEvent && !shouldRepairContinuationTerminal,
+  };
+}
+
 export async function captureResponsesRequestContextForHttpProjection(args: {
   requestId: string;
   payload: AnyRecord;
@@ -829,29 +926,61 @@ export async function createResponsesJsonToSseConverterForHttp() {
   return await createResponsesJsonToSseConverter();
 }
 
+export async function prepareResponsesJsonBodyForSseBridgeForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+  hasSsePayload: (value: unknown) => boolean;
+}): Promise<Record<string, unknown> | null> {
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body) || args.hasSsePayload(args.body)) {
+    return null;
+  }
+  const record = args.body as Record<string, unknown>;
+  const isResponsesEndpoint =
+    args.entryEndpoint === '/v1/responses'
+    || args.entryEndpoint === '/v1/responses.submit_tool_outputs';
+  if (
+    isResponsesEndpoint
+    && (
+      record.object === 'response'
+      || typeof record.output === 'object'
+      || typeof record.status === 'string'
+    )
+  ) {
+    return record;
+  }
+  if (args.entryEndpoint !== '/v1/responses' || record.object !== 'chat.completion') {
+    return null;
+  }
+  return await buildResponsesPayloadFromChatForHttp(args.body, {
+    requestId: args.requestLabel
+  }) as Record<string, unknown>;
+}
+
 export function normalizeResponsesJsonBodyForHttp(args: {
   body: unknown;
   entryEndpoint?: string;
   requestLabel?: string;
-  resolveBridge?: typeof requireResponsesHandlerCoreDist;
-}): unknown {
+  resolveBridge?: typeof importResponsesHandlerCoreDist;
+}): Promise<unknown> {
   if (args.entryEndpoint !== '/v1/responses') {
-    return args.body;
+    return Promise.resolve(args.body);
   }
   if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
-    return args.body;
+    return Promise.resolve(args.body);
   }
   if ((args.body as Record<string, unknown>).object !== 'chat.completion') {
-    return args.body;
+    return Promise.resolve(args.body);
   }
-  const mod = (args.resolveBridge ?? requireResponsesHandlerCoreDist)<{
+  return (args.resolveBridge ?? importResponsesHandlerCoreDist)<{
     buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown
-  }>('conversion/responses/responses-openai-bridge');
-  if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-    throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-  }
-  return mod.buildResponsesPayloadFromChat(args.body, {
-    requestId: args.requestLabel
+  }>('conversion/responses/responses-openai-bridge').then((mod) => {
+    if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
+      throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
+    }
+    return mod.buildResponsesPayloadFromChat(args.body, {
+      requestId: args.requestLabel
+    });
   });
 }
 
@@ -867,11 +996,11 @@ export async function importResponsesHandlerCoreDist<TModule extends object>(
   return await importCoreDist<TModule>(specifier);
 }
 
-export function buildResponsesPayloadFromChatForHttp(
+export async function buildResponsesPayloadFromChatForHttp(
   payload: unknown,
   context?: Record<string, unknown>
-): unknown {
-  const mod = requireResponsesHandlerCoreDist<{
+): Promise<unknown> {
+  const mod = await importResponsesHandlerCoreDist<{
     buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown;
   }>('conversion/responses/responses-openai-bridge');
   if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
