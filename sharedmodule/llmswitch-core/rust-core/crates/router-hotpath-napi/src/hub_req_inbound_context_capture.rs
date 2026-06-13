@@ -1,12 +1,15 @@
 use crate::hub_bridge_actions::convert_bridge_input_to_chat_messages;
 use crate::hub_bridge_actions::BridgeInputToChatInput;
+use crate::hub_req_inbound_tool_call_normalization::normalize_apply_patch_output_text;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{
     filter_namespace_mcp_aggregator_tool_definitions, normalize_tool_session_messages,
 };
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tool_mapping::enforce_builtin_tool_schema;
-use crate::shared_tooling::strip_provider_tool_sentinel_residue;
+use crate::shared_tooling::{
+    strip_provider_tool_sentinel_residue, unwrap_chunked_exec_transcript_shape,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -172,6 +175,54 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
+fn canonicalize_tool_arguments_value(value: Option<&Value>) -> String {
+    let Some(raw) = value else {
+        return String::new();
+    };
+    match raw {
+        Value::String(text) => {
+            let stripped = strip_provider_tool_sentinel_residue(text.as_str());
+            if let Ok(parsed) = serde_json::from_str::<Value>(stripped.as_str()) {
+                return serde_json::to_string(&parsed).unwrap_or(stripped);
+            }
+            stripped.trim().to_string()
+        }
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+fn build_function_call_semantic_signature(row: &Map<String, Value>) -> Option<String> {
+    let name = read_trimmed_string(row.get("name"))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())?;
+    let arguments = canonicalize_tool_arguments_value(
+        row.get("arguments")
+            .or_else(|| row.get("input"))
+            .or_else(|| row.get("args"))
+            .or_else(|| row.get("payload")),
+    );
+    Some(format!("{name}\n{arguments}"))
+}
+
+fn normalize_tool_output_text_for_storage(raw: &str) -> String {
+    let stripped = strip_provider_tool_sentinel_residue(raw);
+    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(stripped.as_str()) {
+        return unwrapped;
+    }
+    stripped.trim().to_string()
+}
+
+fn canonicalize_tool_output_text_for_compare(tool_name: Option<&str>, raw: &str) -> String {
+    let normalized = normalize_tool_output_text_for_storage(raw);
+    if tool_name
+        .map(|value| value.trim().eq_ignore_ascii_case("apply_patch"))
+        .unwrap_or(false)
+    {
+        return normalize_apply_patch_output_text(normalized.as_str());
+    }
+    normalized
+}
+
 fn build_duplicate_responses_call_id_rewrites(
     items: &[Value],
     allowed_tool_names: &std::collections::HashSet<String>,
@@ -180,6 +231,7 @@ fn build_duplicate_responses_call_id_rewrites(
     struct CallIdOccurrences {
         call_indexes: Vec<usize>,
         output_indexes: Vec<usize>,
+        call_signatures: Vec<Option<String>>,
     }
 
     let mut occurrences = std::collections::HashMap::<String, CallIdOccurrences>::new();
@@ -215,10 +267,13 @@ fn build_duplicate_responses_call_id_rewrites(
                 continue;
             };
             occurrences
-                .entry(call_id)
-                .or_default()
-                .call_indexes
-                .push(index);
+                .entry(call_id.clone())
+                .or_default();
+            let occurrence = occurrences.get_mut(&call_id).expect("occurrence inserted");
+            occurrence.call_indexes.push(index);
+            occurrence
+                .call_signatures
+                .push(build_function_call_semantic_signature(row));
             continue;
         }
 
@@ -249,11 +304,32 @@ fn build_duplicate_responses_call_id_rewrites(
         }
 
         let mut rewritten_ids = Vec::with_capacity(occurrence.call_indexes.len());
+        let mut signature_to_group = std::collections::HashMap::<String, usize>::new();
+        let mut next_group_ordinal = 0usize;
         for (ordinal, call_index) in occurrence.call_indexes.iter().enumerate() {
-            let rewritten = if ordinal == 0 {
+            let group_ordinal = occurrence
+                .call_signatures
+                .get(ordinal)
+                .and_then(|signature| signature.as_ref())
+                .map(|signature| {
+                    if let Some(existing) = signature_to_group.get(signature.as_str()) {
+                        *existing
+                    } else {
+                        let assigned = next_group_ordinal;
+                        signature_to_group.insert(signature.clone(), assigned);
+                        next_group_ordinal += 1;
+                        assigned
+                    }
+                })
+                .unwrap_or_else(|| {
+                    let assigned = next_group_ordinal;
+                    next_group_ordinal += 1;
+                    assigned
+                });
+            let rewritten = if group_ordinal == 0 {
                 raw_call_id.clone()
             } else {
-                format!("{raw_call_id}__rcc_occurrence_{}", ordinal + 1)
+                format!("{raw_call_id}__rcc_occurrence_{}", group_ordinal + 1)
             };
             rewritten_ids.push(rewritten.clone());
             rewrites.insert(*call_index, rewritten);
@@ -503,8 +579,8 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
             if items.is_empty() {
                 return None;
             }
-            let has_previous_response_id =
-                read_trimmed_string(raw_request.get("previous_response_id")).is_some();
+    let has_previous_response_id =
+        read_trimmed_string(raw_request.get("previous_response_id")).is_some();
             let allow_output_only_resume = has_previous_response_id
                 && items.iter().all(|entry| {
                     let Some(row) = entry.as_object() else {
@@ -545,7 +621,10 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
 
             let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
             let mut valid_call_ids = std::collections::HashSet::new();
+            let mut tool_name_by_call_id = std::collections::HashMap::<String, String>::new();
             let mut saw_function_calls = false;
+            let mut seen_function_call_signatures =
+                std::collections::HashSet::<String>::new();
             let mut completed_tool_output_signatures =
                 std::collections::HashMap::<String, std::collections::HashSet<String>>::new();
 
@@ -583,6 +662,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     .or_else(|| read_trimmed_string(row.get("id")));
                 let effective_call_id = call_id_rewrites.get(&index).cloned().or(call_id);
                 if let Some(value) = effective_call_id {
+                    tool_name_by_call_id.insert(value.clone(), lowered_name);
                     valid_call_ids.insert(value);
                 }
             }
@@ -618,6 +698,13 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         .or_else(|| read_trimmed_string(row.get("id")));
                     let effective_call_id = call_id_rewrites.get(&index).cloned().or(call_id);
                     if let Some(value) = effective_call_id {
+                        let semantic_signature = build_function_call_semantic_signature(row)
+                            .map(|signature| format!("{value}\n{signature}"))
+                            .unwrap_or_else(|| value.clone());
+                        if seen_function_call_signatures.contains(semantic_signature.as_str()) {
+                            continue;
+                        }
+                        seen_function_call_signatures.insert(semantic_signature);
                         valid_call_ids.insert(value);
                     }
                     normalized.push(Value::Object(
@@ -650,11 +737,22 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     if saw_function_calls && !valid_call_ids.contains(call_id.as_str()) {
                         continue;
                     }
-                    let rewritten_row =
+                    let mut rewritten_row =
                         rewrite_responses_tool_history_entry_call_id(index, row, &call_id_rewrites);
-                    let payload_signature =
-                        serde_json::to_string(&Value::Object(rewritten_row.clone()))
-                            .unwrap_or_else(|_| format!("{:?}", row));
+                    if let Some(output_value) = rewritten_row.get("output").and_then(Value::as_str) {
+                        rewritten_row.insert(
+                            "output".to_string(),
+                            Value::String(normalize_tool_output_text_for_storage(output_value)),
+                        );
+                    }
+                    let compare_tool_name =
+                        tool_name_by_call_id.get(call_id.as_str()).map(String::as_str);
+                    let compare_output = rewritten_row
+                        .get("output")
+                        .and_then(Value::as_str)
+                        .map(|text| canonicalize_tool_output_text_for_compare(compare_tool_name, text))
+                        .unwrap_or_default();
+                    let payload_signature = format!("{call_id}\n{compare_output}");
                     let seen_signatures = completed_tool_output_signatures
                         .entry(call_id.clone())
                         .or_default();
@@ -1293,6 +1391,48 @@ mod tests {
     }
 
     #[test]
+    fn normalize_responses_input_items_dedupes_wrapper_only_duplicate_function_call_outputs() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "id": "fc_dup",
+              "call_id": "fc_dup",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_1",
+              "call_id": "fc_dup",
+              "output": "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 0\nOriginal token count: 10\nOutput:\n/tmp"
+            },
+            {
+              "type": "function_call_output",
+              "id": "out_dup_2",
+              "call_id": "fc_dup",
+              "output": "/tmp"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[1]["output"], "/tmp");
+    }
+
+    #[test]
     fn normalize_responses_input_items_keeps_distinct_duplicate_function_call_outputs() {
         let raw_request = json!({
           "tools": [
@@ -1333,6 +1473,51 @@ mod tests {
         assert_eq!(normalized[1]["type"], "function_call_output");
         assert_eq!(normalized[2]["type"], "function_call_output");
         assert_eq!(normalized[2]["output"], "{\"stdout\":\"/var\"}");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_dedupes_identical_duplicate_function_calls() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo first\"}",
+              "call_id": "call_dup"
+            },
+            {
+              "type": "function_call",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo first\"}",
+              "call_id": "call_dup"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_dup",
+              "output": "same"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_dup",
+              "output": "same"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["call_id"], "call_dup");
+        assert_eq!(normalized[1]["call_id"], "call_dup");
     }
 
     #[test]
@@ -1384,6 +1569,45 @@ mod tests {
         assert_eq!(normalized[2]["tool_call_id"], "call_1");
         assert_eq!(normalized[3]["call_id"], "call_1__rcc_occurrence_2");
         assert_eq!(normalized[3]["tool_call_id"], "call_1__rcc_occurrence_2");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_dedupes_repeated_apply_patch_error_statuses() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "id": "call_patch_1",
+              "call_id": "call_patch_1",
+              "name": "apply_patch",
+              "arguments": "*** Begin Patch\n*** Update File: src/main.ts\n@@\n-old\n+new\n*** End Patch"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_patch_1",
+              "output": "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_patch_1",
+              "output": "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers."
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[1]["type"], "function_call_output");
     }
 
     #[test]

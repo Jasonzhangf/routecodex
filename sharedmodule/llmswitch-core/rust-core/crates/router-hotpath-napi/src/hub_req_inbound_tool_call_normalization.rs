@@ -11,7 +11,7 @@ fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
 }
 
-fn normalize_apply_patch_output_text(raw: &str) -> String {
+pub(crate) fn normalize_apply_patch_output_text(raw: &str) -> String {
     const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
     const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers. Keep using apply_patch for line edits instead of switching tools.";
 

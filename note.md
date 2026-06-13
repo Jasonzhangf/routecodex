@@ -106,6 +106,13 @@
 - Follow-up live proof after keepalive fix: same 5520 direct probe no longer dies on `keepalive`, but next failure moved to `response.image_generation_call.partial_image`. Local OpenAI SDK types under `node_modules/openai/resources/responses/responses.d.ts` confirm it is a standard Responses event; direct gate allowlist must include this image partial frame too.
 - Full protocol closeout rule for this owner: stop patching one event at a time. Diff `RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS` against local OpenAI SDK `responses.d.ts` and admit the full standard `response.*` event set (`audio.*`, `code_interpreter_call.*`, `code_interpreter_call_code.*`, `file_search_call.*`, `mcp_call_arguments.*`, `output_text.annotation.added`, `queued`, `incomplete`); keep transport-only `keepalive` as drop-only and keep non-standard provider events fail-fast.
 
+2026-06-12 reasonix chat usage cache 0% investigation
+- Symptom confirmed from user evidence: Reasonix chat-entry cache badge reads the latest usage event, not session average; it expects camelCase `cacheHitTokens/cacheMissTokens` on the client-visible `usage` payload.
+- RouteCodex current chat response projection owner is `src/server/handlers/handler-response-utils.ts::resolveNormalizedChatUsage/normalizeChatUsagePayload`.
+- Root-cause candidate confirmed in code: chat response normalization currently backfills only `input_tokens/output_tokens/prompt_tokens/completion_tokens/total_tokens`; it does not project internal normalized cache fields (`cache_read_input_tokens`, `cache_creation_input_tokens`) into client-visible camelCase cache fields.
+- Additional evidence: `maybeUpdateUsageLogInfoFromSseFrame()` stores normalized internal snake_case usage into `usageLogInfo.usage`, and non-stream JSON response path later reuses that shape directly unless chat normalization rewrites it.
+- Minimal fix direction: extend chat usage normalization to expose Reasonix-compatible cache aliases from normalized usage (`cacheHitTokens`, derived `cacheMissTokens`), plus keep existing snake_case aliases unchanged.
+
 2026-06-12 direct Responses SSE live revalidation after terminal-probe repair
 - Global install/restart truth: current runtime on 5520/5555 is `0.90.3058`; `routecodex --version`, `rcc --version`, and both `/health` endpoints all report `0.90.3058`.
 - Positive live probe on 5520: explicit function-tool `/v1/responses` request forced `exec_command`; stream emitted `response.function_call_arguments.done -> response.output_item.done -> response.completed -> response.done` with HTTP 200. This confirms the Rust `shared_responses_response_utils.rs` probe repair now synthesizes terminal frames correctly instead of surfacing `upstream_stream_incomplete`.
@@ -140,3 +147,228 @@
 - Fresh runtime truth: `curl http://127.0.0.1:{5520,5555,10000}/health` all returned `ready=true`, `pipelineReady=true`, version `0.90.3059`.
 - Fresh client-side SSE probe on 5520: function-tool `/v1/responses` request with prompt `finish_reason_probe_5520` returned HTTP 200 and emitted the standard chain `response.created -> response.in_progress -> response.output_item.added -> response.function_call_arguments.delta/done -> response.output_item.done -> response.completed -> response.done`.
 - Fresh server-side truth on current runtime: latest 5520 and 10000 log lines around 20:25-20:27 show repeated `completed (finish_reason=tool_calls)` plus matching `session-request/usage finish_reason=tool_calls`; no new `finish_reason=unknown` sample appeared during this recheck window.
+
+2026-06-12 5520 direct tool-call silent-stop audit
+- User sample `openai-responses-router-gpt-5.4-20260612T203357639-339278-1191` proved remaining gap is not generic SSE hang: server logged `completed finish_reason=tool_calls`, but no continuation request followed, and no `client_close` / `upstream_stream_incomplete` appeared around the request.
+- Snapshot evidence: `~/.rcc/codex-samples/openai-responses/port-5520/req_1781267637639_72e027b1/` contained only provider request/response metadata; no raw direct SSE event sample existed, so prior evidence was insufficient to tell whether upstream emitted `response.required_action`.
+- Root-cause direction tightened:
+  1. direct `sendPipelineResponse()` only auto-closes tool continuations when the terminal probe path runs;
+  2. Rust terminal-frame builder only synthesized `response.completed/done` from `output.function_call` probe, but did not synthesize `required_action` payload when probe lacked explicit `required_action`;
+  3. TS close scheduling must stay gated by actual terminal/close window, otherwise `response.output_item.done(function_call)` can cause premature close before real terminal events.
+- Repair applied:
+  1. Rust `shared_responses_response_utils.rs` now synthesizes `required_action.submit_tool_outputs.tool_calls` from `output[].type=function_call` when explicit `required_action` is absent, and marks synthesized response status as `requires_action`.
+  2. TS `handler-response-utils.ts` keeps terminal probe close scheduling only on terminal/auto-close path, not immediately on any tool-call probe, avoiding early close regression.
+  3. Test expectation aligned with current client-visible Responses contract: client sees `response.output_item.added/function_call_arguments/output_item.done -> response.completed -> response.done`, not raw `response.required_action`.
+- Focused verification PASS:
+  - `cargo test -p router-hotpath-napi terminal_frames_synthesize_required_action_from_output_function_calls --lib -- --nocapture`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx jest tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false`
+- Next required evidence: rebuild/install/restart current runtime, then re-run 5520 live tool-call probe and check whether direct tool turn now deterministically emits client-visible tool frames plus continuation stop turn.
+
+2026-06-12 current-runtime multi-turn responses proof
+- Controlled `/v1/responses` two-turn function-tool conversation on 5520 current `0.90.3059` succeeded end to end.
+- Turn 1 client JSON truth: response `resp_0b30648bdc1ed361016a2bfc389b6c8191825900ad5673e0ba` returned `output=[function_call ping_tool]`.
+- Turn 1 server log truth: request `openai-responses-router-gpt-5.4-20260612T203146306-339260-1173` completed with `finish_reason=tool_calls`, and matching `session-request` / `usage` also recorded `finish_reason=tool_calls`.
+- Turn 2 client JSON truth: continuation with `previous_response_id + function_call_output` returned `output=[message "Done."]`.
+- Turn 2 server log truth: request `openai-responses-router-gpt-5.4-20260612T203154811-339262-1175` completed with `finish_reason=stop`, and matching `session-request` / `usage` also recorded `finish_reason=stop`.
+
+2026-06-12 current-runtime stopless live loop proof
+- Controlled relay `/v1/responses` stopless probe on 10000 current `0.90.3059` succeeded end to end.
+- Turn 1 client JSON truth: plain request without client tools returned `status=requires_action`, `output=[reasoning,function_call]`, projected tool `exec_command`, command `routecodex servertool run stop_message_auto --input-json '{"flowId":"stop_message_flow","maxRepeats":3,"repeatCount":1}'`.
+- Server log truth for turn 1: request `openai-responses-DF.key1-DeepSeek-V4-Flash-20260612T203340435-339276-1189` logged `[servertool] ... result=trigger_stop_schema_missing ... used=0 left=3`, then completed with `finish_reason=tool_calls`.
+- Real tool execution truth: local `routecodex servertool run stop_message_auto ...` was executed for repeat counts 1, 2, and 3; each stdout JSON was submitted back as normal `function_call_output`.
+- Continuation loop truth: turns 2 and 3 again returned `requires_action + exec_command`; server logs `...1194` and `...1195` continued as `finish_reason=tool_calls`.
+
+2026-06-13 zterm apply_patch patch-failure shape audit + request-side repair
+- Jason clarified the current slice boundary: focus on `apply_patch`-related patch-failure compatibility first, under the rule "only normalize shape, do not change semantics".
+- Real failing shape classes confirmed from zterm/diag samples:
+  1. repeated replay blocks where the same `call_id` replays identical `function_call` plus identical `function_call_output`;
+  2. zterm transport wrapper noise around tool outputs (`Chunk ID`, `Wall time`, `Original token count`, `Process exited with code`, `Output:`), which makes semantically identical outputs look different;
+  3. repeated `apply_patch` terminal status carryover, especially `APPLY_PATCH_ERROR` / `apply_patch verification failed` lines echoed into later turns.
+- Unique owner confirmed: request-side Responses input normalization in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`. No second bridge or TS duplicate owner was introduced.
+- Repair applied in Rust request normalization only:
+  1. duplicate `function_call` entries now dedupe by semantic signature (`tool name + canonicalized arguments`) instead of raw occurrence only;
+  2. tool outputs are compare-normalized after zterm transcript wrapper unwrapping, so wrapper-only duplicates collapse;
+  3. `apply_patch` outputs reuse `normalize_apply_patch_output_text` for compare-only canonicalization, so repeated failure/result status carryover dedupes without mutating stored visible output.
+- Focused verification PASS:
+  - `cargo test -p router-hotpath-napi normalize_responses_input_items --lib -- --nocapture` -> 13 passed
+  - `cargo test -p router-hotpath-napi responses_standardization --lib -- --nocapture` -> 8 passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs` -> native/core build passed
+  - Native replay on real error sample `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json` with wrapped `{ payload, normalized }` input now passes `coerceStandardizedRequestFromPayloadWithNative`, returning `messages=33`, `tools=16` instead of failing request standardization.
+- Next required evidence: global install/restart current runtime, then rerun a live/runtime probe to confirm the built server process picks up the request-shape fix.
+
+2026-06-12 request/response/usage concise log cleanup
+- User target: standard `virtual-router-hit -> completed -> session-request -> usage` logs should be shorter, keep request id / request-response pairing / core usage / single finish_reason signal, and avoid repeated finish_reason clutter.
+- Unique owner direction: only log presentation files are in scope: `src/server/handlers/handler-utils.ts`, `src/server/handlers/handler-response-utils.ts`, `src/server/runtime/http-server/executor/usage-logger.ts`, `src/server/utils/request-log-color.ts`, plus existing log-color/usage tests. No Hub/VR/provider payload or routing semantics change.
+- Color rule: normal request/response lines must share one non-red/non-white/non-gray session color with numeric values highlighted white; error request/response lines are red. Existing session palette already excludes red/white/gray; fallback gray must not be used for normal HTTP request logs.
+- Final stop truth: turn 4 returned `status=completed` with final assistant message summary; server log request `openai-responses-DF.key1-DeepSeek-V4-Flash-20260612T203429599-339283-1196` completed with `finish_reason=stop`, and matching `session-request` / `usage` also recorded `finish_reason=stop`.
+
+2026-06-12 5520 XL direct responses html-shell root cause
+- Live failing samples `openai-responses-router-gpt-5.4-20260612T215430477-339436-1349`, `...1350`, `...1351` are not pure SSE terminal-repair failures. Snapshot truth shows `XL.key1.gpt-5.4` direct `/v1/responses` upstream returned `: keepalive`, `event: ping`, then an HTML shell page (`<!doctype html> ... <title>New API</title>`), not valid Responses SSE.
+- Evidence:
+  - `~/.rcc/codex-samples/openai-responses/port-5520/req_1781272470477_7f6ec698/provider-response.json`
+  - `~/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-router-gpt-5.4-20260612T215430477-339436-1349/client-response_server.json`
+  - `.../client-response.error_server.json` shows `probe: {}` and `upstream_stream_incomplete`
+- Conclusion: current same-protocol direct gate is too weak for `openai-responses`; protocol-name match alone is insufficient. Need a direct capability/support gate before entering router-direct for Responses, so HTML-shell providers like `XL.key1.gpt-5.4 -> https://yunpansou.cn/responses` are blocked from direct and forced to relay or excluded earlier.
+
+2026-06-12 XL runtime config truth corrected
+- Jason provided the intended direct profile truth for XL: `base_url=https://yunpansou.cn/v1`, `wire_api=responses`, OpenAI auth, no CRS compat layer.
+- Local runtime source of truth was inconsistent: `~/.rcc/provider/XL/config.v2.toml` still had `baseURL=https://yunpansou.cn` and `compatibilityProfile=responses:crs`.
+- Action taken: removed `compatibilityProfile` from the live runtime provider config and rewrote `baseURL` to `https://yunpansou.cn/v1`.
+- Next verification required: restart/reload runtime and recheck whether direct `/v1/responses` still emits HTML/ping shell or now returns valid Responses frames from `/v1/responses`.
+
+2026-06-12 router-direct failure sample capture + concise logs
+- Investigating direct failure hooks in http-server/index.ts; canonical snapshot owner is src/providers/core/utils/snapshot-writer.ts.
+- Current log slice still has test gaps: request-complete spy target, usage finish_reason single-occurrence, request-log-color ESM import owner.
+
+2026-06-12 XL label mismatch
+- provider-request/provider-response/__runtime all show providerKey=XL.key1.gpt-5.4 and URL=https://yunpansou.cn/v1/responses.
+- server log usage/session-request still prints XL.key1.gpt-5.4.gpt-5.5, so current residual issue is provider label/model decoration, not outbound target/baseURL.
+- Unique owner likely buildProviderLabel/log usage path; direct transport truth already matches /v1 and gpt-5.4.
+
+2026-06-12 XL provider label owner fixed
+- Root cause: resolveProviderRequestContext preferred clientModelId when payload lacked model, so usage/session logs combined providerKey XL.key1.gpt-5.4 with client/default model gpt-5.5 into false label XL.key1.gpt-5.4.gpt-5.5.
+- Fix: prefer mergedMetadata.target.modelId over clientModelId for providerModel derivation in provider-request-context.
+- Gate: added red regression asserting XL.key1.gpt-5.4 + target.modelId=gpt-5.4 + clientModelId=gpt-5.5 resolves to providerLabel XL.key1.gpt-5.4.
+
+2026-06-12 5520 orphan_tool_result live sample
+- User sample: 22:28:37 tools route -> XL.key1.gpt-5.4-mini failed with orphan_tool_result unknown or already-consumed call_id.
+- Next action: inspect matching codex-samples request/client/provider snapshots and locate single owner for tool_result call_id consumption/normalization.
+
+## 2026-06-12 5520 orphan_tool_result + direct label residual
+
+2026-06-13 responses same-response continuation / orphan_tool_result audit
+- 用户新证据确认：新 session 也会 400，不是旧历史污染；样本为 `orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id`。
+- 先做真实两步回放复现：第一轮 `/v1/responses` 返回 `function_call`；第二轮带 `previous_response_id + function_call_output`。当前运行时在第二轮先报 `Responses conversation expired or not found`，说明问题先落在 continuation store 持久化/恢复，而不是客户端会话。
+- 真因已定位到唯一 owner：`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`。`captureRequestContext()` 因 `store:false` 把 `allowContinuation=false`，后续 `recordResponse()` 即便看到 pending tool calls 也没有把 `allowContinuation` 打开，导致同一 response 的 tool continuation 不能恢复。
+- 已改 contract：`store:false` 仍允许 same-response tool continuation；仍不允许 scope continuation/materialize。对应回归已改在 `tests/sharedmodule/responses-continuation-store.spec.ts`。
+- focused gate 已绿：`tests/sharedmodule/responses-continuation-store.spec.ts` 22/22 PASS。下一步必须 build/global-install/restart 后重跑真实两步回放，确认 live runtime 不再 400。
+- Live error sample: openai-responses-router-gpt-5.4-20260612T222837601-339482-1395 failed with orphan_tool_result for call_JYbsLnCRByKN0SjpmyWDiFHY.
+- Evidence shows same call_id already existed in earlier provider-request snapshots 339477-1390 and 339478-1391, so current root-cause direction is continuation/history pollution, not provider generating a fresh bad call id.
+- Residual 5520 direct usage/session provider label still shows XL.key1.gpt-5.4.gpt-5.5 / XL.key1.gpt-5.4-mini.gpt-5.5 after one owner was fixed; there is still a second owner/path.
+
+- 2026-06-12 fix slice: Rust standardized_request now drops stale responses tool_result items when a new function_call turn arrives, while keeping only outputs matching current pending call ids. Added paired tests for stale-drop and non-stale retention boundary.
+- 2026-06-12 fix slice: direct usageLogInfo model source now prefers provider wire/response model instead of client request model, preventing labels like XL.key1.gpt-5.4.gpt-5.5 in direct logs.
+- Verification: cargo test -p router-hotpath-napi standardized_request --lib -- --nocapture PASS; jest tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts tests/server/runtime/http-server/executor/provider-response-utils.spec.ts PASS; root tsc PASS.
+
+2026-06-12 continue: preparing live replay from old 5520 orphan_tool_result sample 339478/1391 against runtime 0.90.3059 to verify stale tool_result is dropped before bridge validation.
+
+2026-06-12 replay result: old orphan_tool_result 339477/339478 bodies replayed against 5520 runtime 0.90.3059 no longer fail at bridge/orphan; both progressed to upstream HTTP_403 auth failure on asxs.crsa.gpt-5.4-mini. This is live evidence stale tool_result pollution is removed before provider send.
+
+2026-06-12 live log check after 0.90.3059 restart: no new orphan_tool_result found in post-restart 5520 window; replayed requests 339522/339523 failed only at upstream HTTP_403. Next evidence path is successful direct log label on current runtime.
+
+2026-06-12 correction: old-sample replay was insufficient. New live session openai-responses-router-gpt-5.4-20260612T225507928-339537-1450 still fails orphan_tool_result on fresh call_MqPgTUSSFb19Em58JUUEd6xV, so root cause remains in live-session request shaping/continuation path. Must inspect fresh sample, not infer from historical replay.
+
+2026-06-12 gate update: added paired regression tests for materialized responses continuation pending tool-call replay duplication in tests/sharedmodule/responses-continuation-store.spec.ts; using repo jest:run path because plain npx jest cannot load llmswitch-core ESM native bridge.
+
+2026-06-12 note: source tests for responses continuation materialize require rebuilding native hotpath after Rust changes; otherwise tsx/jest still call stale router_hotpath_napi.node and can falsely stay red/null.
+
+2026-06-12 previous_response_id lifecycle + miss policy audit
+- External truth (official/OpenAI + local codex audit):
+  - Responses `previous_response_id` depends on a stored prior response object. Official guidance indicates stored response/application state is retained for up to 30 days when `store=true`; `store=false` / ZDR paths do not guarantee later resume lookup.
+  - Official miss guidance for websocket/incremental flows: if cached previous response context is unavailable, send a fresh create with `previous_response_id=null` and the full input/context; do not try to continue from partial delta.
+  - Local codex source truth:
+    - `rollout-trace/src/reducer/conversation.rs` explicitly errors on unknown previous id: `unknown previous_response_id ...`.
+    - `core/src/client.rs` only sends `previous_response_id` when the new request is an exact prefix continuation; otherwise it sends a full create without `previous_response_id`.
+    - `core/tests/suite/client_websockets.rs` locks that behavior: prefix match => use `previous_response_id`; non-prefix or post-error => full create without `previous_response_id`.
+- RouteCodex current local truth:
+  - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` already has a local TTL cache, currently `TTL_MS = 30min`; this is a local continuation cache, not upstream retention truth.
+  - `resumeConversation()` already fail-fast returns `expired_or_unknown_response_id` when the local store misses.
+  - The dangerous gap is scope materialization/reconstruction after release: if local scope miss or malformed replay is treated as resumable delta, later bridge validation can surface `orphan_tool_result`.
+- Required closeout direction:
+  - Scope-based continuation miss must never fabricate partial delta. If full input is available and prefix match fails, create a fresh full request without `previous_response_id`; if request is submit-tool-outputs/partial-delta only, fail-fast with explicit expired/unknown continuation error.
+  - `orphan_tool_result` must become impossible from store miss/TTL expiry; store miss should stop at continuation owner/store boundary, not later at bridge tool_result validation.
+2026-06-12 singleton empty-pool blocking retry progress
+- root cause confirmed: hub pool exhaustion on singleton/default-only pools previously allowed terminal no-provider after bounded backoff; this violates Jason rule that empty pool must not be terminal.
+- executor change: request-executor now detects singleton/last-candidate pool exhaustion from VR details (candidateProviderCount=1 / initialRoutePool len=1 / explicitSingletonPool) and enters provider.route_pool_cooldown_wait, clears exclusions, then reruns route selection instead of terminal no-provider.
+- additional fix: chat success path no longer loads responses conversation rebind or native empty-assistant semantics when normal chat body already contains visible assistant payload; otherwise singleton blackbox was falsely failing after successful provider response.
+- verification green so far: focused helper spec + chat handler singleton blackbox + root tsc.
+
+2026-06-12 /v1/responses handler bridge surface audit
+- Current duplicated bridge surface was confirmed at both handler ends:
+  - request side `src/server/handlers/responses-handler.ts` directly imported entry planning/resume/materialize/capture/record/clear helpers from `bridge.js`
+  - response side `src/server/handlers/handler-response-utils.ts` directly imported SSE probe/projection/conversation lifecycle helpers plus core-dist loaders from `bridge.js`
+- Convergence direction fixed:
+  - request side unique owner facade: `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+  - response side unique owner facade: `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+- New architecture gate truth: `scripts/architecture/verify-responses-handler-single-bridge-surface.mjs` must fail if handler files re-import responses bridge primitives from `bridge.js` instead of the side-specific facade.
+- Function/verification map truth split from coarse `server.responses_handler_family` into two dedicated features:
+  - `server.responses_request_handler_bridge_surface`
+  - `server.responses_response_handler_bridge_surface`
+
+- 2026-06-12 router-direct finish_reason=unknown 排查：usage/session rollup 只吃 direct result usageLogInfo.finishReason；direct 路径此前仅用 deriveFinishReasonNative，对无显式 finish_reason 但已有可见 assistant 成功内容的 chat-like/direct 响应会落 unknown。计划把成功可见响应推断统一收口到 finish-reason util，并补 direct 红测锁定。
+
+- 2026-06-13 stopless 未触发排查：10000 端口 stopMessageEnabled 默认 true，request-executor/provider-response-converter 也会把 servertool 能力传入；当前怀疑点收敛到 Rust bridge 后的 response payload 形态或 stopGatewayContext 覆盖，导致 isStopEligibleForServerTool=false，需补 /v1/responses stop blackbox 锁定。
+2026-06-13 stopless direct root cause
+ - 10000 port default sameProtocolBehavior=direct and default stopMessageExcludeDirect=true. This bypasses response conversion/orchestration for same-protocol /v1/responses.
+ - Fix direction: when port stopMessage.includeDirect=true, same-protocol direct must relay instead of bypassing stopless; added Rust direct-decision red/green and HTTP blackbox; updated ~/.rcc/config.toml port 10000 stopMessage={ enabled=true, includeDirect=true }.
+
+## 2026-06-13 stopless live verify blocked by startup export drift
+- install/global 0.90.3059 completed, but 10000 runtime cannot be reloaded yet.
+- current live blocker: startup error `./index.js does not provide an export named captureResponsesRequestContextForRequest`.
+- next action: inspect bridge facade/export owner and fix startup regression before live stopless probe.
+
+- 2026-06-13 current blocker narrowed: previous install likely packed stale dist; rebuilt local dist now shows corrected runtime-integrations import in responses-request-bridge.js. Re-running isolated install-global before live port 10000 restart.
+
+- 2026-06-13 continue after live proof: next gap is test proof for new stopless/direct blackbox; attempt repo jest path first.
+
+- 2026-06-13 verification update: provider-response-rust-plan.spec.ts PASS (17/17); live 10000 stopless probe PASS; router-direct-passthrough.blackbox.spec.ts still hangs in current repo jest environment, so not claimed green.
+
+- 2026-06-13 blackbox fix: router-direct-passthrough.blackbox used forbidden client metadata.routeHint; moved route hint to x-route-hint header to match current req_adapter contract before rerun.
+2026-06-13 stopless blackbox status
+- Direct live 10000 proof already green.
+- HTTP blackbox current blocker is Jest execution mode, not stopless assertion: plain ./node_modules/.bin/jest fails immediately on ESM/import.meta in src/server/runtime/http-server/index.ts.
+- Need to verify same case under node --experimental-vm-modules jest runner; npm run jest:run appears silent/hanging so testing runner behavior separately.
+- HTTP blackbox stopless case under correct VM-modules runner now produces a real red result, not a hang.
+- Current red shape: request still ends as 502 with [llmswitch-bridge] native-failure-policy not available after direct path failure; this mixes stopless relay verification with missing native bridge capability in source-test env.
+- Evidence: node --experimental-vm-modules jest run at 2026-06-13 08:27 shows virtual-router-hit -> direct provider request id -> SSE_TO_JSON_ERROR -> native-failure-policy not available.
+
+2026-06-13 orphan_tool_result duplicate-history closeout in progress
+- New live failing request `openai-responses-provider-20260613T091618631-339813-1726` is a fresh-session failure, not old expired continuation state.
+- Diag truth: `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json` contains identical `function_call` + `function_call_output` blocks replayed twice in one inbound `input[]`.
+- Bridge fail-fast is correct: second identical tool_result for same call_id is rejected as `already-consumed`; fix must happen before bridge conversion.
+- Repair owner selected: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs`.
+- Boundary locked in code/tests: dedupe only exact duplicate tool-history entries before orphan filtering; distinct repeated outputs for the same call_id remain invalid and must still error.
+2026-06-13 10000 backup minimax m3
+- User request: add MiniMax M3 as backup in 10000 port config.
+- Source of truth: ~/.rcc/config.toml, routingPolicyGroup gateway_coding_10000.
+- Existing state: fwd.minimax.MiniMax-M3 already defined globally; 10000 only uses it in multimodal, not in coding/thinking/tools/search/web_search/longcontext/vision/default.
+- Planned minimal change: append fwd.minimax.MiniMax-M3 as secondary target for 10000 route entries, preserve current primary order.
+2026-06-13 zterm patch-failure shape audit
+- Evidence set for current audit:
+  - `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260613T091618631-339813-1726.json`
+  - `~/.rcc/codex-samples/openai-responses/port-5520/openai-responses-router-gpt-5.4-20260612T225434051-339532-1445/provider-request.json`
+  - `~/.rcc/codex-samples/openai-responses/port-5520/req_1781280510486_c4745c3f/provider-request.json`
+  - `~/.rcc/codex-samples/openai-responses/port-5520/req_1781315630127_4eebb92b/provider-request.json`
+- Confirmed shape classes:
+  1. duplicated replay block: same `call_id` reappears with repeated `function_call` + repeated `function_call_output`; representative `...339532-1445/provider-request.json`
+  2. transport wrapper noise: `function_call_output.output` may be wrapped by `Chunk ID` / `Wall time` / `Original token count` / `Process exited with code` / `Output:`; representative `...339528-1441/provider-request.json`
+  3. repeated apply_patch status carryover: many later requests still carry historical `APPLY_PATCH_ERROR: apply_patch did not apply...` or `Success. Updated the following files:` outputs with same call ids across turns; representative `req_1781280510486_c4745c3f/provider-request.json` and `req_1781315630127_4eebb92b/provider-request.json`
+- Existing Rust request normalization already does:
+  - duplicate call-id rewrite by occurrence
+  - exact payload-signature dedup for repeated tool outputs
+  - orphan tool output filtering
+- Current gap:
+  - duplicate replay with same semantic call/result is rewritten, not collapsed
+  - payload-signature dedup happens before stripping zterm wrapper noise, so wrapper-only differences evade dedup
+  - historical apply_patch terminal statuses can accumulate as repeated tool history across turns
+- Intended repair direction for approval:
+  - unique owner stays request-side Rust normalization before bridge/tool-result validation
+  - only shape normalization, no patch/body semantic rewrite
+  - collapse replayed identical tool history by semantic identity after output-wrapper canonicalization
+  - keep true conflicts fail-fast
+
+2026-06-13 stopless schema guidance tighten
+- User reports: stopless can still spend 3 consecutive turns without calling tool. Need stronger guidance across these 3 hops, schema-guided, and next inspection must also check schema.
+- Must inspect Rust/TS owner for stop_message_auto CLI projection seed + schema gate + next-turn inspection path before editing.
+
+2026-06-13 build install restart after stopless guidance tighten
+- User requested: compile, global install, restart server after Rust prompt tightening.
+- Need runtime evidence after install: versions + health on 5520/5555/10000.
+
+2026-06-13 ignore generated dirs for repo-sanity
+- User confirmed bin/lib generated; add bin/ lib/ .reasonix/ to .gitignore and rerun repo-sanity.
+
+2026-06-13 stopless prompts md-source migration
+- Move stopless default prompt text from Rust hardcode to source asset under code tree, build copy to dist, runtime read from dist.
+- Must keep single owner and add tests for round1/2/3 + schema mention + next-check mention.
