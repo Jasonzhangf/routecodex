@@ -14,7 +14,7 @@ import {
 import { extractCapturedChatSeed } from '../backend-route-seed.js';
 import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 import { isStopEligibleForServerTool, resolveStopGatewayContext } from '../stop-gateway-context.js';
-import { attachStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
+import { attachStopMessageCompareContext, readStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
 import {
   resolveStopMessageDebugEnabled,
   resolveStopMessageDefaultEnabled,
@@ -61,6 +61,7 @@ import {
   extractCurrentAssistantStopTextWithNative,
   planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
+import crypto from 'node:crypto';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
@@ -97,6 +98,39 @@ const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTE
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
 const FLOW_ID = 'stop_message_flow';
 const STOP_SCHEMA_CONSECUTIVE_STOP_MAX_REPEATS = 3;
+
+function buildStopSchemaObservation(args: {
+  assistantStopText: string;
+  schemaGate: { reason_code?: string; missing_fields?: string[]; parsed?: Record<string, unknown> | null };
+}): { observationHash: string; toolSignatureHash: string } {
+  const parsed = args.schemaGate.parsed && typeof args.schemaGate.parsed === 'object'
+    ? args.schemaGate.parsed as Record<string, unknown>
+    : {};
+  const nextStep = typeof parsed.next_step === 'string' ? parsed.next_step.trim() : '';
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : '';
+  const stopreason = parsed.stopreason ?? null;
+  const missingFields = Array.isArray(args.schemaGate.missing_fields)
+    ? [...args.schemaGate.missing_fields].map(String).sort()
+    : [];
+  const observationHash = crypto
+    .createHash('sha1')
+    .update(JSON.stringify({ assistantStopText: args.assistantStopText.trim(), reasonCode: String(args.schemaGate.reason_code ?? ''), stopreason, reason, nextStep, missingFields }))
+    .digest('hex');
+  const toolSignatureHash = crypto
+    .createHash('sha1')
+    .update(JSON.stringify({ nextStep, missingFields }))
+    .digest('hex');
+  return { observationHash, toolSignatureHash };
+}
+
+function resolveStopSchemaNoChangeCount(args: { previous?: StopMessageCompareContext; observationHash: string; countBudget: boolean }): number {
+  if (!args.countBudget) return 0;
+  const previousHash = typeof args.previous?.observationHash === 'string' ? args.previous.observationHash.trim() : '';
+  const previousStable = typeof args.previous?.observationStableCount === 'number' ? Math.max(0, Math.floor(args.previous.observationStableCount)) : 0;
+  if (!previousHash) return 1;
+  return previousHash === args.observationHash ? previousStable + 1 : 1;
+}
+
 function applyStopSummaryPrefix(payload: JsonObject, prefix: unknown): JsonObject {
   return buildStopMessageTerminalVisiblePayloadWithNative({
     payload,
@@ -272,6 +306,7 @@ const handler: ServerToolHandler = async (
   }
   const record = ctx.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>) ?? {};
+  const previousCompare = readStopMessageCompareContext(ctx.adapterContext);
 
   // ── Build native decision context ──
   const followupFlowId = readServerToolFollowupFlowId(rt)
@@ -450,8 +485,24 @@ const handler: ServerToolHandler = async (
       used: decision.used,
       maxRepeats: decision.max_repeats
     });
+    const observation = buildStopSchemaObservation({
+      assistantStopText,
+      schemaGate
+    });
+    const noChangeCount = resolveStopSchemaNoChangeCount({
+      previous: previousCompare,
+      observationHash: observation.observationHash,
+      countBudget: schemaGate.count_budget !== false
+    });
+    schemaGate = {
+      ...schemaGate,
+      no_change_count: noChangeCount
+    };
     const schemaUsedBeforeCount = decision.used;
     compare.reason = schemaGate.reason_code || compare.reason;
+    compare.observationHash = observation.observationHash;
+    compare.observationStableCount = noChangeCount;
+    compare.toolSignatureHash = observation.toolSignatureHash;
     if (schemaGate.action === 'fail_fast') {
       const prefixed = applyStopSummaryPrefix(ctx.base, '');
       clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));

@@ -96,6 +96,24 @@ describe('servertool stop-message compare context', () => {
     });
   });
 
+
+  test('attach preserves observation hash, stable count, and tool signature for no-change loop tracking', () => {
+    const adapterContext: Record<string, unknown> = {};
+    attachStopMessageCompareContext(adapterContext, {
+      ...BASE_CONTEXT,
+      observationHash: 'same-observation',
+      observationStableCount: 3.9,
+      toolSignatureHash: 'tool-signature'
+    } as StopMessageCompareContext);
+
+    expect(readStopMessageCompareContext(adapterContext)).toEqual({
+      ...BASE_CONTEXT,
+      observationHash: 'same-observation',
+      observationStableCount: 3,
+      toolSignatureHash: 'tool-signature'
+    });
+  });
+
   test('invalid adapter context fails instead of swallowing metadata write errors', () => {
     expect(() => attachStopMessageCompareContext(null, BASE_CONTEXT)).toThrow(
       'ensureRuntimeMetadata requires object carrier'

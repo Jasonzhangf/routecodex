@@ -226,9 +226,9 @@ function buildStopChatResponse(id = 'chatcmpl-stopmessage-double-dispatch'): Jso
 function testStopMessageDecision(ctx: Record<string, unknown>): Record<string, unknown> {
   const defaultPrompt = (used: number): string => {
     const prompts = [
-      '第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，直接调用工具补证据；若目标已完成或阻塞，给出简洁结论并附 stop schema。',
-      '第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证；只有完成或确实阻塞时，才给用户结论并附 stop schema。',
-      '第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。'
+      '第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，必须直接调用工具补证据；本轮结尾必须按 stop schema 输出，且明确下一轮仍要先检查 schema 再继续。',
+      '第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证，不能空转；本轮结尾必须按 stop schema 输出，且下一轮进入前仍要先检查 schema。',
+      '第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步；若仍未完成，必须先调用工具再总结；末尾必须附 stop schema，且下一次检查仍先看 schema。'
     ];
     return prompts[Math.min(Math.max(used, 0), prompts.length - 1)];
   };

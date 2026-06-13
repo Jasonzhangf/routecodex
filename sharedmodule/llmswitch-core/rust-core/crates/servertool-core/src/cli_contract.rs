@@ -692,6 +692,11 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
 }
 
 fn read_stop_message_followup_text(execution: &Value) -> String {
+    let schema_guidance = stopless_schema_guidance();
+    let schema_text = serde_json::to_string(&schema_guidance).unwrap_or_default();
+    let schema_hint = format!(
+        "stop schema guidance: {schema_text}; 继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。下一轮继续前先检查 stop schema 是否完整。"
+    );
     let decision_text = execution
         .get("context")
         .and_then(Value::as_object)
@@ -702,7 +707,8 @@ fn read_stop_message_followup_text(execution: &Value) -> String {
                 .or_else(|| read_optional_string_from_object(decision, "followup_text"))
         });
     if let Some(text) = decision_text.filter(|text| !looks_like_stop_schema_guidance(text)) {
-        return text;
+        return format!("{schema_hint}
+{text}");
     }
     let ops = execution
         .get("followup")
@@ -722,11 +728,12 @@ fn read_stop_message_followup_text(execution: &Value) -> String {
             if let Some(text) = read_optional_string_from_object(record, "text")
                 .filter(|text| !looks_like_stop_schema_guidance(text))
             {
-                return text;
+                return format!("{schema_hint}
+{text}");
             }
         }
     }
-    "继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结、道歉、复述状态或输出计划。只有目标已经完成时，才输出最终简短结果，并说明完成证据。".to_string()
+    schema_hint
 }
 
 fn looks_like_stop_schema_guidance(text: &str) -> bool {
@@ -1672,11 +1679,38 @@ mod tests {
         })
         .expect("seed");
         assert_eq!(seed.flow_id, "stop_message_flow");
-        assert_eq!(seed.continuation_prompt, "decision followup");
+        assert!(seed.continuation_prompt.contains("stop schema guidance"));
+        assert!(seed.continuation_prompt.contains("decision followup"));
         assert_eq!(seed.reasoning_text, "visible stop summary");
         assert_eq!(seed.repeat_count, 2);
         assert_eq!(seed.max_repeats, 4);
-        assert_eq!(seed.input["continuationPrompt"], "decision followup");
+        let prompt = seed.input["continuationPrompt"].as_str().expect("continuationPrompt string");
+        assert!(prompt.contains("stop schema guidance"));
+        assert!(prompt.contains("decision followup"));
+    }
+
+    #[test]
+    fn stop_message_cli_projection_seed_keeps_schema_guidance_in_continuation_prompt() {
+        let seed = plan_stop_message_cli_projection_seed(StopMessageCliProjectionSeedInput {
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "assistantStopText": "需要补齐 schema",
+                    "decision": { "followupText": "第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，必须直接调用工具补证据；本轮结尾必须按 stop schema 输出，且明确下一轮仍要先检查 schema 再继续。" },
+                    "serverToolLoopState": {
+                        "repeatCount": 0,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            final_chat_response: json!({}),
+        })
+        .expect("schema guidance seed");
+        assert!(seed.continuation_prompt.contains("stop schema guidance"));
+        assert!(seed.continuation_prompt.contains("stop schema"));
+        assert!(seed.continuation_prompt.contains("下一轮"));
+        assert_eq!(seed.repeat_count, 0);
+        assert_eq!(seed.max_repeats, 3);
     }
 
     #[test]
@@ -1714,7 +1748,8 @@ mod tests {
             }),
         })
         .expect("seed");
-        assert_eq!(seed.continuation_prompt, "new followup");
+        assert!(seed.continuation_prompt.contains("stop schema guidance"));
+        assert!(seed.continuation_prompt.ends_with("new followup"));
         assert_eq!(seed.reasoning_text, "assistant from chat");
         assert_eq!(seed.repeat_count, 1);
         assert_eq!(seed.max_repeats, 3);
@@ -1741,7 +1776,7 @@ mod tests {
         })
         .expect("seed");
         assert!(seed.continuation_prompt.contains("继续执行"));
-        assert!(!seed.continuation_prompt.contains("stopreason"));
+        assert!(seed.continuation_prompt.contains("stop schema guidance"));
         assert!(!seed.continuation_prompt.contains("第一轮核对"));
     }
 

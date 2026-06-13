@@ -388,3 +388,22 @@
 - Added Rust red tests for guidance-before-gate, missing-schema-no-count, and missing-schema-reissues-guidance.
 - stop_message_cli_projection_seed now injects stopless_schema_guidance into continuationPrompt and appends next-round schema-check hint.
 - Rust evidence: targeted cargo tests passed for cli seed + stop-message persist/gate contract.
+2026-06-13 function-map audit start: scanning architecture docs, registry, gates, gaps, and risk surfaces.
+2026-06-13 plan requested: create actionable function-map audit remediation plan + audit current state against plan.
+2026-06-13 new sample audit: process drift, not runtime bug
+- Evidence from screenshot: agent wrote `plan requested: create actionable function-map audit remediation plan + audit current state against plan`, then read `docs/agent-routing/10-runtime-ssot-routing.md` and `docs/goals/function-map-longtail-closeout.md`, then stated `计划落盘后，做审计：现状 vs 计划`.
+- Conclusion: execution drifted from the active `apply_patch` real-sample workflow into a separate function-map audit branch.
+- Correct branch for this slice stays fixed: red test first -> shape-only repair -> green -> live replay old/new samples. No function-map audit work should interleave until this slice is closed.
+
+- 2026-06-13 stopless 闭环继续收口：Rust `stop-message-core` 已改为 stop schema 缺项枚举、finished/blocked 补齐即停、continue_needed 缺 next_step 强制补齐；三轮只作为 no_change loop guard，不再按普通 used 计数封顶。
+- 2026-06-13 stopless continuation guidance 已由 `servertool-core::cli_contract` 强制前缀注入 stop schema guidance，并要求下一轮先检查 schema，再决定是否继续工具调用。
+- 2026-06-13 Rust gate 证据：`stop-message-core` 51/51、`servertool-core` 252/252。下一步：全局安装、重启 5555/5520/10000、在线验证 stopless 行为。
+- 2026-06-13 apply_patch live probe:
+  - `/v1/responses` without explicit `tools` only produced plain text (`I’m unable to directly use apply_patch from here`); this probe is not sufficient to prove server tool path failure because the request itself did not declare `apply_patch`.
+  - `/v1/responses` with explicit `tools=[{type:function,name:apply_patch,...}]` and `tool_choice=required` on `127.0.0.1:5555` returned a valid `function_call`:
+    - `name=apply_patch`
+    - `arguments={"patch":"*** Begin Patch\n*** Add File: tmp/apply_patch_smoke.txt\n+hello from smoke\n*** End Patch"}`
+  - Conclusion: apply_patch tool path is alive at the HTTP server/runtime level; current screenshot failure is more likely request-shape/tool-declaration loss on the real Codex/client path, not intrinsic inability of the server to emit apply_patch tool calls.
+
+- 2026-06-13 stopless 闭环最终推进：修复误用 `npx jest` 的测试入口，改用 `npm run jest:run`（node --experimental-vm-modules）后，`tests/servertool/stop-message-auto.spec.ts` 51/51 通过（8 skipped），`tests/servertool/stop-message-compare-context.spec.ts` 6/6 通过。
+- 2026-06-13 handler 薄壳新增 no-change glue：`stop-message-auto.ts` 计算 observationHash/toolSignatureHash，并基于上一轮 compare context 的 observationHash/observationStableCount 生成 `schemaGate.no_change_count`，把“三轮只作无变化 loop guard”真正闭到上游状态链。

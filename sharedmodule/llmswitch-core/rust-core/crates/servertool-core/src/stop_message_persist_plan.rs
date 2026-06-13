@@ -69,8 +69,9 @@ pub fn plan_stop_message_persist_snapshot(
         decision_max_repeats
     };
     let state_used = state_update.and_then(|row| read_non_negative_floor(row.get("used")));
+    let no_change_count = read_non_negative_floor(input.schema_gate.get("no_change_count").or_else(|| input.schema_gate.get("noChangeCount"))).unwrap_or(0);
     let next_used = if should_count_budget {
-        state_used.unwrap_or(schema_used_before_count + 1)
+        no_change_count.max(state_used.unwrap_or(schema_used_before_count + 1))
     } else {
         decision_used
     };
@@ -196,6 +197,24 @@ mod tests {
         assert_eq!(plan.snapshot.text, "default");
         assert_eq!(plan.snapshot.source, "default");
         assert_eq!(plan.snapshot.stage_mode, "on");
+    }
+
+    #[test]
+    fn missing_schema_gate_does_not_advance_budget() {
+        let plan = plan_stop_message_persist_snapshot(&StopMessagePersistPlanInput {
+            schema_gate: json!({ "count_budget": false, "max_repeats": 3 }),
+            decision: json!({ "used": 2, "max_repeats": 3 }),
+            state_update: Some(json!({ "used": 3, "text": "should not count" })),
+            default_text: Some("default".to_string()),
+            schema_used_before_count: Some(json!(2)),
+            current_provider_key: None,
+        });
+
+        assert_eq!(plan.compare_max_repeats, 3);
+        assert_eq!(plan.next_max_repeats, 3);
+        assert_eq!(plan.next_used, 2);
+        assert_eq!(plan.snapshot.used, 2);
+        assert_eq!(plan.snapshot.max_repeats, 3);
     }
 
     #[test]
