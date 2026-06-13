@@ -64,6 +64,53 @@ function findMixedAnthropicToolResultAndText(payload: unknown): string | null {
   return null;
 }
 
+function findAnthropicToolOrderingViolation(payload: unknown): string | null {
+  const messages = (payload as any)?.messages;
+  if (!Array.isArray(messages)) return null;
+  const pending = new Set<string>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const content = Array.isArray(message?.content) ? message.content : [];
+    if (message?.role === 'assistant') {
+      const toolUseIds = content
+        .filter((block) => block?.type === 'tool_use' && typeof block.id === 'string')
+        .map((block) => String(block.id));
+      if (toolUseIds.length > 0) {
+        if (pending.size > 0) {
+          return `assistant_tool_use_before_previous_results_at_${index}`;
+        }
+        for (const id of toolUseIds) pending.add(id);
+      } else if (pending.size > 0) {
+        return `assistant_text_before_tool_results_at_${index}`;
+      }
+      continue;
+    }
+    if (message?.role === 'user') {
+      const resultIds = content
+        .filter((block) => block?.type === 'tool_result' && typeof block.tool_use_id === 'string')
+        .map((block) => String(block.tool_use_id));
+      const hasNonResultContent = content.some((block) => block?.type !== 'tool_result');
+      if (pending.size > 0) {
+        if (resultIds.length === 0) {
+          return `non_tool_result_user_content_before_tool_results_at_${index}`;
+        }
+        for (const id of resultIds) {
+          if (!pending.has(id)) return `orphan_tool_result_at_${index}`;
+          pending.delete(id);
+        }
+        if (hasNonResultContent && pending.size > 0) {
+          return `mixed_user_content_before_all_tool_results_at_${index}`;
+        }
+      }
+      continue;
+    }
+    if (pending.size > 0) {
+      return `non_tool_message_before_tool_results_at_${index}`;
+    }
+  }
+  return pending.size > 0 ? 'dangling_tool_use_at_end' : null;
+}
+
 function findOpenAiChatToolOrderingViolation(payload: unknown): string | null {
   const messages = (payload as any)?.messages;
   if (!Array.isArray(messages)) return null;
@@ -524,6 +571,115 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     }
   });
 
+  it('does not corrupt plain-text tool results that merely mention image_url/video_url in a new session', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'anthropic',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'anthropic:claude-code',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let capturedProviderPayload: unknown;
+    const app = express();
+    app.use(express.json({ limit: '2mb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_anthropic_plain_text_tool_result_mentions_media_keys',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'thinking',
+              stream: false,
+              inboundStream: false,
+              outboundStream: false,
+            }
+          });
+          capturedProviderPayload = result.providerPayload;
+          const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
+          if (danglingId) {
+            return {
+              status: 400,
+              headers: {},
+              body: {
+                error: {
+                  message: 'invalid params, tool call result does not follow tool call (2013)',
+                  type: 'invalid_request_error',
+                  code: 'HTTP_400',
+                  danglingId
+                }
+              }
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              id: 'resp_http_anthropic_plain_text_tool_result_mentions_media_keys',
+              object: 'response',
+              status: 'completed',
+              model: 'MiniMax-M3',
+              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+            }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          input: [
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Skill already has rich content. Let me inspect the file.' }] },
+            { type: 'function_call', call_id: 'call_docs_1', name: 'exec_command', arguments: '{"cmd":"cat .agents/skills/rcc-dev-skills/SKILL.md | head -5"}' },
+            { type: 'function_call_output', call_id: 'call_docs_1', output: 'documentation mentioning "image_url" and "video_url" should stay plain text' },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Continue with note review.' }] },
+            { type: 'function_call', call_id: 'call_docs_2', name: 'exec_command', arguments: '{"cmd":"cat note.md | head -5"}' },
+            { type: 'function_call_output', call_id: 'call_docs_2', output: 'note head ok' }
+          ],
+          tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_http_anthropic_plain_text_tool_result_mentions_media_keys');
+      expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      const serializedProviderPayload = JSON.stringify(capturedProviderPayload);
+      expect(serializedProviderPayload).toContain('call_docs_1');
+      expect(serializedProviderPayload).toContain('documentation mentioning \\"image_url\\" and \\"video_url\\" should stay plain text');
+      expect(serializedProviderPayload).not.toContain('[Image omitted]');
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+    }
+  });
+
   it('preserves paired Responses custom_tool_call_output through the Anthropic provider payload', async () => {
     const artifacts = await bootstrapVirtualRouterConfig({
       providers: {
@@ -630,6 +786,132 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
       expect(serializedProviderPayload).toContain('apply_patch');
       expect(serializedProviderPayload).toContain('Success. Updated the following files');
       expect(serializedProviderPayload).toContain('apply_patch_test/01-add.txt');
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+    }
+  });
+
+  it('does not replace pending Anthropic tool_result turns with plain user placeholder text', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'anthropic',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'anthropic:claude-code',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let capturedProviderPayload: unknown;
+    const app = express();
+    app.use(express.json({ limit: '512kb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_anthropic_placeholder_tool_result_history',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'thinking',
+              stream: true,
+              inboundStream: true,
+              outboundStream: true,
+            }
+          });
+          capturedProviderPayload = result.providerPayload;
+          const orderingViolation = findAnthropicToolOrderingViolation(result.providerPayload);
+          if (orderingViolation) {
+            return {
+              status: 400,
+              headers: {},
+              body: {
+                error: {
+                  message: 'invalid params, tool call result does not follow tool call (2013)',
+                  type: 'invalid_request_error',
+                  code: 'HTTP_400',
+                  orderingViolation
+                }
+              }
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              id: 'resp_http_anthropic_placeholder_tool_result_history',
+              object: 'response',
+              status: 'completed',
+              model: 'MiniMax-M3',
+              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+            }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const hugeToolOutput = [
+        'Chunk ID: 43a0cd',
+        'Wall time: 0.0000 seconds',
+        'Process exited with code 0',
+        'Original token count: 8993',
+        'Output:',
+        '---',
+        'name: rcc-dev-skills',
+        'description: RouteCodex/llmswitch-core',
+        'Total output lines: 624',
+        '[Image omitted]'
+      ].join('\n');
+
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          accept: 'text/event-stream',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: true,
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: '整理 rcc-dev-skills' }] },
+            { role: 'assistant', content: [{ type: 'output_text', text: '继续读取上下文' }] },
+            { type: 'function_call', name: 'exec_command', call_id: 'call_list_sizes', arguments: '{"cmd":"wc -l note.md CACHE.md MEMORY.md"}' },
+            { type: 'function_call_output', call_id: 'call_list_sizes', output: '624 note.md\n109 CACHE.md\n3188 MEMORY.md' },
+            { type: 'function_call', name: 'exec_command', call_id: 'call_paths', arguments: '{"cmd":"find .agents -maxdepth 2 -type f"}' },
+            { type: 'function_call_output', call_id: 'call_paths', output: '.agents/skills/rcc-dev-skills/SKILL.md' },
+            { type: 'function_call', name: 'exec_command', call_id: 'call_skill_dump', arguments: '{"cmd":"sed -n 1,260p .agents/skills/rcc-dev-skills/SKILL.md"}' },
+            { type: 'function_call_output', call_id: 'call_skill_dump', output: hugeToolOutput }
+          ],
+          tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_http_anthropic_placeholder_tool_result_history');
+      expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      expect(findMixedAnthropicToolResultAndText(capturedProviderPayload)).toBeNull();
+      expect(findAnthropicToolOrderingViolation(capturedProviderPayload)).toBeNull();
+      expect(JSON.stringify(capturedProviderPayload)).toContain('call_skill_dump');
     } finally {
       await closeServer(server);
       pipeline.dispose?.();

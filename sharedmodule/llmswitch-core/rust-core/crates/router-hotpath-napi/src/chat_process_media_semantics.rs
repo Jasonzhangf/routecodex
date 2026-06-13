@@ -258,10 +258,41 @@ fn text_for_part(part: &Value) -> Option<String> {
 }
 
 fn string_contains_inline_media(value: &str) -> bool {
-    value.contains("data:image")
-        || value.contains("data:video")
-        || value.contains("\"image_url\"")
-        || value.contains("\"video_url\"")
+    if value.contains("data:image") || value.contains("data:video") {
+        return true;
+    }
+    serde_json::from_str::<Value>(value)
+        .ok()
+        .map(|parsed| value_contains_structured_media_payload(&parsed))
+        .unwrap_or(false)
+}
+
+fn value_contains_structured_media_payload(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(value_contains_structured_media_payload),
+        Value::Object(obj) => {
+            if read_media_candidate(obj, "image_url").is_some()
+                || read_media_candidate(obj, "video_url").is_some()
+                || read_media_candidate(obj, "source").is_some()
+            {
+                return true;
+            }
+            let type_value = obj
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if (type_value.contains("image") || type_value.contains("video"))
+                && !read_part_media_candidate(&Value::Object(obj.clone()))
+                    .trim()
+                    .is_empty()
+            {
+                return true;
+            }
+            obj.values().any(value_contains_structured_media_payload)
+        }
+        _ => false,
+    }
 }
 
 fn tool_result_media_text_from_parts(parts: &[Value], placeholder: &str) -> Option<String> {
@@ -1116,6 +1147,41 @@ mod tests {
         assert_eq!(
             output.messages[0]["content"][0]["type"].as_str(),
             Some("tool_use")
+        );
+    }
+
+    #[test]
+    fn does_not_treat_plain_text_mentions_of_image_url_as_media_payload() {
+        let output = strip_chat_process_historical_images(
+            vec![
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"tool_use","id":"call_exec","name":"exec_command","input":{"cmd":"cat skill.md"}}]
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{
+                        "type":"tool_result",
+                        "tool_use_id":"call_exec",
+                        "content":"documentation mentioning \\\"image_url\\\" and \\\"video_url\\\" should stay plain text"
+                    }]
+                }),
+                json!({
+                    "role": "assistant",
+                    "content": [{"type":"text","text":"continue"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(!output.changed);
+        assert_eq!(
+            output.messages[1]["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            output.messages[1]["content"][0]["content"].as_str(),
+            Some("documentation mentioning \\\"image_url\\\" and \\\"video_url\\\" should stay plain text")
         );
     }
 }
