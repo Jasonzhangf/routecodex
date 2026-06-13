@@ -1878,6 +1878,8 @@ owners:
       - normalizeResponsesSseFrameForClientForHttp
       - updateResponsesContractProbeFromSseChunkForHttp
       - inspectResponsesTerminalStateFromSseChunkForHttp
+      - summarizeResponsesSseFrameForLogForHttp
+      - resolveResponsesProviderProtocolHintFromSseFrameForHttp
       - buildResponsesTerminalSseFramesFromProbeForHttp
       - isToolCallContinuationResponseForHttp
       - captureResponsesRequestContextForHttpProjection
@@ -1914,6 +1916,7 @@ owners:
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
       - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
+      - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
       - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
   - feature_id: cli.command_surface
     status: active

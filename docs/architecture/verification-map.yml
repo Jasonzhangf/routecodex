@@ -993,6 +993,7 @@ verification:
       - "Response bridge must stay facade-only and must not grow TS response protocol semantics."
       - "Continuation lifecycle orchestration for capture/record/finalize is covered by the same response-bridge gate and continuation-store regressions."
       - "SSE terminal-state parsing for `response.completed` / `response.done` must stay behind the same response-bridge gate."
+      - "SSE frame summary parsing and provider-protocol hint detection for usage/logging must stay behind the same response-bridge gate."
 
   - feature_id: cli.command_surface
     change_risk: medium

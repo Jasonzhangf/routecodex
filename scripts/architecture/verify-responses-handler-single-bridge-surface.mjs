@@ -41,6 +41,8 @@ const checks = [
       'finalizeResponsesConversationNonToolResponse(',
       'shouldPersistResponsesToolCallContinuationRecord(',
       'function updateSseTerminalTrackerFromChunk(',
+      'function summarizeSseFrameForLog(',
+      'function resolveProviderProtocolHintFromSseFrame(',
     ],
     forbiddenTokens: [
       'buildResponsesTerminalSseFramesFromProbeNative',
