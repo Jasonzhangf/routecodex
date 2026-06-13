@@ -135,6 +135,8 @@ import {
   normalizeResponsesSseFrameForClientForHttp,
   persistResponsesConversationLifecycleForHttp,
   requireResponsesHandlerCoreDist,
+  resolveResponsesProviderProtocolHintFromSseFrameForHttp,
+  summarizeResponsesSseFrameForLogForHttp,
   shouldDropClientSseFrameForHttp,
   updateResponsesContractProbeFromSseChunkForHttp
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
@@ -378,92 +380,12 @@ function logResponsesContinuationTrace(
   }
 }
 
-function summarizeSseFrameForLog(frame: string): Record<string, unknown> | null {
-  const lines = frame.split(/\r?\n/);
-  const eventName = lines.find((line) => line.startsWith('event:'))?.slice('event:'.length).trim();
-  const dataText = lines
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice('data:'.length).trim())
-    .join('\n');
-  const summary: Record<string, unknown> = {};
-  if (eventName) {
-    summary.event = eventName;
-  }
-  if (!dataText || dataText === '[DONE]') {
-    if (dataText === '[DONE]') {
-      summary.done = true;
-    }
-    return Object.keys(summary).length > 0 ? summary : null;
-  }
-  try {
-    const parsed = JSON.parse(dataText);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      summary.dataKind = typeof parsed;
-      return summary;
-    }
-    const record = parsed as Record<string, unknown>;
-    const response =
-      record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-        ? (record.response as Record<string, unknown>)
-        : undefined;
-    const requiredAction =
-      (record.required_action && typeof record.required_action === 'object' && !Array.isArray(record.required_action)
-        ? record.required_action
-        : undefined)
-      ?? (response?.required_action && typeof response.required_action === 'object' && !Array.isArray(response.required_action)
-        ? response.required_action
-        : undefined);
-    const output =
-      Array.isArray(record.output) ? record.output
-      : Array.isArray(response?.output) ? response.output
-      : [];
-    const functionCallCount = output.filter((item) => {
-      return item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call';
-    }).length;
-    const requiredToolCalls =
-      requiredAction
-      && typeof requiredAction === 'object'
-      && !Array.isArray(requiredAction)
-      && typeof (requiredAction as Record<string, unknown>).submit_tool_outputs === 'object'
-      && !Array.isArray((requiredAction as Record<string, unknown>).submit_tool_outputs)
-      && Array.isArray(((requiredAction as Record<string, unknown>).submit_tool_outputs as Record<string, unknown>).tool_calls)
-        ? (((requiredAction as Record<string, unknown>).submit_tool_outputs as Record<string, unknown>).tool_calls as unknown[]).length
-        : undefined;
-    if (typeof record.type === 'string') {
-      summary.type = record.type;
-    }
-    if (typeof record.status === 'string') {
-      summary.status = record.status;
-    } else if (typeof response?.status === 'string') {
-      summary.status = response.status;
-    }
-    if (typeof record.finish_reason === 'string') {
-      summary.finishReason = record.finish_reason;
-    } else if (typeof response?.finish_reason === 'string') {
-      summary.finishReason = response.finish_reason;
-    }
-    if (requiredAction) {
-      summary.hasRequiredAction = true;
-    }
-    if (requiredToolCalls !== undefined) {
-      summary.requiredToolCalls = requiredToolCalls;
-    }
-    if (functionCallCount > 0) {
-      summary.outputFunctionCalls = functionCallCount;
-    }
-    return Object.keys(summary).length > 0 ? summary : null;
-  } catch {
-    summary.dataParse = 'non_json';
-    return summary;
-  }
-}
-
 function logSseFrameProjection(
   requestLabel: string,
   stage: string,
   frame: string
 ): void {
-  const summary = summarizeSseFrameForLog(frame);
+  const summary = summarizeResponsesSseFrameForLogForHttp(frame);
   if (!summary) {
     return;
   }
@@ -658,16 +580,6 @@ function normalizeChatUsagePayload(
   };
 }
 
-function resolveProviderProtocolHintFromSseFrame(frame: string): string | undefined {
-  if (/\bevent:\s*response\./.test(frame) || /"type"\s*:\s*"response\./.test(frame)) {
-    return 'openai-responses';
-  }
-  if (/\bevent:\s*message_/.test(frame) || /"type"\s*:\s*"message_/.test(frame)) {
-    return 'anthropic';
-  }
-  return undefined;
-}
-
 function maybeUpdateUsageLogInfoFromSseFrame(
   result: PipelineExecutionResult,
   frame: string
@@ -681,7 +593,7 @@ function maybeUpdateUsageLogInfoFromSseFrame(
       bodyText: frame
     }
   }, {
-    providerProtocol: resolveProviderProtocolHintFromSseFrame(frame)
+    providerProtocol: resolveResponsesProviderProtocolHintFromSseFrameForHttp(frame)
   });
   if (!usage) {
     return;
