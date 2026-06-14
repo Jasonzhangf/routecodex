@@ -99,10 +99,15 @@ export function buildInitRouting(args: {
 }
 
 function extractCurrentPolicyId(virtualRouter: UnknownRecord): string {
-  const active = typeof virtualRouter.activeRoutingPolicyGroup === 'string'
-    ? virtualRouter.activeRoutingPolicyGroup.trim()
-    : '';
-  return active || 'default';
+  const groups = asRecord(virtualRouter.routingPolicyGroups);
+  if (isRecord(groups.default)) {
+    return 'default';
+  }
+  const names = Object.keys(groups)
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return names[0] || 'default';
 }
 
 function extractCurrentPolicyGroup(virtualRouter: UnknownRecord, policyId: string): UnknownRecord {
@@ -177,7 +182,6 @@ export function buildV2ConfigObject(args: {
       port: args.port
     },
     virtualrouter: {
-      activeRoutingPolicyGroup: policyId,
       routingPolicyGroups: nextGroups
     }
   };

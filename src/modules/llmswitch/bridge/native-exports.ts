@@ -128,7 +128,12 @@ type NativeRouterHotpathJsonBinding = {
     metadataJson?: string
   ) => string;
   projectResponsesSseFrameForClientJson?: (
-    inputJson: string
+    frameJson: string,
+    eventNameJson: string,
+    dataJson: string,
+    toolsRawJson: string,
+    metadataJson: string,
+    stateJson: string
   ) => string;
   evaluateSingletonRoutePoolExhaustionJson?: (
     inputJson: string
@@ -685,11 +690,20 @@ export function projectResponsesSseFrameForClientNative(args: {
   state: {
     pendingApplyPatchArgumentDeltas: Record<string, string>;
     applyPatchCallIds: string[];
-    emittedApplyPatchDoneCallIds: string[];
-  };
+      emittedApplyPatchDoneCallIds: string[];
+    };
 } {
   const parsed = invokeRouterHotpathJsonCapability('projectResponsesSseFrameForClientJson', [
-    args,
+    args.frame ?? '',
+    args.eventName ?? null,
+    args.data ?? null,
+    Array.isArray(args.toolsRaw) ? args.toolsRaw : [],
+    args.metadata ?? {},
+    args.state ?? {
+      pendingApplyPatchArgumentDeltas: {},
+      applyPatchCallIds: [],
+      emittedApplyPatchDoneCallIds: [],
+    },
   ]);
   return assertNativeObject('projectResponsesSseFrameForClientJson', parsed) as {
     emit: boolean;

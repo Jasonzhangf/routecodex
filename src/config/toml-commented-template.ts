@@ -30,11 +30,9 @@ virtualrouterMode = "v2"
 
 #------------------------------------------------------------------------------
 # Virtual Router 路由策略
-# activeRoutingPolicyGroup 指定当前激活的策略组
-# routingPolicyGroups 定义各组路由规则
+# routingPolicyGroups 定义命名路由策略组；每个 router 端口通过 httpserver.ports[].routingPolicyGroup 选择
 #------------------------------------------------------------------------------
 [virtualrouter]
-activeRoutingPolicyGroup = "default"
 
 #------------------------------------------------------------------------------
 # 策略组: default (示例)
