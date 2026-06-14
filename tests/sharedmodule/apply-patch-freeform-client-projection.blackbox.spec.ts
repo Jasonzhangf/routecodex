@@ -5,6 +5,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 const PATCH = '*** Begin Patch\n*** Add File: tmp/apft/01-hello.txt\n+hello from apply_patch\n*** End Patch';
+const APPLY_PATCH_GRAMMAR = 'start: begin_patch hunk+ end_patch\nbegin_patch: "*** Begin Patch" LF\nend_patch: "*** End Patch" LF?\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: "*** Add File: " filename LF add_line+\ndelete_hunk: "*** Delete File: " filename LF\nupdate_hunk: "*** Update File: " filename LF change_move? change?\nfilename: /(.+)/\nadd_line: "+" /(.*)/ LF\nchange_move: "*** Move to: " filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: ("@@" | "@@ " /(.+)/) LF\nchange_line: ("+" | "-" | " ") /(.*)/ LF\neof_line: "*** End of File" LF\n%import common.LF';
 
 function buildResponsesPayload() {
   const rawArguments = JSON.stringify({ patch: PATCH });
@@ -50,7 +51,7 @@ function buildCodexFreeformApplyPatchTool() {
       format: {
         type: 'grammar',
         syntax: 'lark',
-        definition: 'start: begin_patch hunk+ end_patch',
+        definition: APPLY_PATCH_GRAMMAR,
       },
     },
   ];

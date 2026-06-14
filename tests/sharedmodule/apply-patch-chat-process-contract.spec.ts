@@ -42,17 +42,6 @@ function buildApplyPatchRequest(): StandardizedRequest {
         function: {
           name: 'apply_patch',
           description: 'canonical client apply_patch tool',
-          parameters: {
-            type: 'object',
-            properties: {
-              patch: {
-                type: 'string',
-                description: 'Patch text using *** Begin Patch / *** End Patch grammar.',
-              },
-            },
-            required: ['patch'],
-            additionalProperties: false,
-          },
         },
       },
     ],
@@ -109,11 +98,13 @@ describe('apply_patch freeform chat-process contract', () => {
       'req-apply-patch-client-mode-contract',
     );
 
-    const tool = (processedRequest as any)?.tools?.[0]?.function;
+    const tool = (processedRequest as any)?.tools?.[0];
+    expect(tool?.type).toBe('custom');
     expect(tool?.name).toBe('apply_patch');
-    const properties = tool?.parameters?.properties ?? {};
-    expect(Object.keys(properties).sort()).toEqual(['patch']);
-    expect(JSON.stringify(tool)).toContain('*** Begin Patch');
+    expect(tool?.format?.type).toBe('grammar');
+    expect(tool?.format?.syntax).toBe('lark');
+    expect(tool?.parameters).toBeUndefined();
+    expect(JSON.stringify(tool)).not.toContain('"patch"');
     expect(JSON.stringify(tool)).not.toContain('fileContent');
     expect(JSON.stringify(tool)).not.toContain('servertool');
   });
@@ -128,14 +119,16 @@ describe('apply_patch freeform chat-process contract', () => {
       'req-apply-patch-legacy-servertool-mode-contract',
     );
 
-    const tool = (processedRequest as any)?.tools?.[0]?.function;
+    const tool = (processedRequest as any)?.tools?.[0];
+    expect(tool?.type).toBe('custom');
     expect(tool?.name).toBe('apply_patch');
     const toolJson = JSON.stringify(tool);
-    expect(toolJson).toContain('*** Begin Patch');
+    expect(tool?.format?.type).toBe('grammar');
+    expect(tool?.format?.syntax).toBe('lark');
     expect(toolJson.toLowerCase()).not.toContain('hashline');
     expect(toolJson).not.toContain('fileContent');
     expect(toolJson).not.toContain('servertool');
-    expect(tool?.parameters?.required).toEqual(['patch']);
+    expect(tool?.parameters).toBeUndefined();
   });
 
   it('never executes apply_patch locally through server-side tool engine', async () => {

@@ -39,6 +39,26 @@ requireIncludes(
   'Anthropic outbound apply_patch must carry canonical freeform patch guidance'
 );
 requireIncludes(
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs',
+  'begin_patch: "*** Begin Patch" LF',
+  'apply_patch request owner must publish complete lark grammar'
+);
+requireIncludes(
+  'scripts/tests/apply-patch-freeform-10000-online.mjs',
+  'begin_patch: "*** Begin Patch" LF',
+  'online apply_patch smoke must use complete lark grammar'
+);
+requireExcludes(
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs',
+  '"definition": "start: begin_patch hunk+ end_patch"',
+  'truncated one-line apply_patch grammar in request owner'
+);
+requireExcludes(
+  'scripts/tests/apply-patch-freeform-10000-online.mjs',
+  "definition: 'start: begin_patch hunk+ end_patch'",
+  'truncated one-line apply_patch grammar in online smoke'
+);
+requireIncludes(
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs',
   'Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar.',
   'inbound apply_patch retry text must use raw patch grammar'
