@@ -274,7 +274,7 @@ export interface StoplessOrchestrationActionInput {
 }
 
 export interface StoplessOrchestrationActionPlan {
-  action: 'cli_projection' | 'terminal_final' | 'followup_mainline';
+  action: 'terminal_final' | 'cli_projection' | 'followup_mainline';
   isStopMessageFlow: boolean;
   reason: string;
 }
@@ -1473,7 +1473,7 @@ export function planStoplessOrchestrationActionWithNative(
   }
   const record = parsed as Record<string, unknown>;
   const action = record.action;
-  if (action !== 'cli_projection' && action !== 'terminal_final' && action !== 'followup_mainline') {
+  if (action !== 'terminal_final' && action !== 'cli_projection' && action !== 'followup_mainline') {
     throw new Error('planStoplessOrchestrationActionJson native returned invalid action');
   }
   const isStopMessageFlow = record.isStopMessageFlow ?? record.is_stop_message_flow;

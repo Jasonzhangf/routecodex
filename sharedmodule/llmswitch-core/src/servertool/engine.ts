@@ -18,9 +18,9 @@ import {
 import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
+import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
-import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
 import {
   planStopMessageCliProjectionSeedWithNative,
   planStoplessOrchestrationActionWithNative

@@ -41,8 +41,8 @@ async function main() {
       });
       assert.equal(result.ok, true, 'line-number-only hunk should validate');
       const parsed = parseNormalizedArgs(result);
-      assert.equal(parsed.patch.includes('@@ -20,1 +20,1 @@'), false, 'guessed line-number hunk must be rebuilt');
-      assert.ok(parsed.patch.includes(' alpha\n-beta\n+beta2\n gamma'), 'live context must be injected');
+      assert.equal(parsed.patch.includes('@@ -20,1 +20,1 @@'), false, 'line-number hunk header must be removed');
+      assert.ok(parsed.patch.includes('@@\n alpha\n-beta\n+beta2\n gamma'), 'live context must be injected for executable canonical hunk');
     }
 
     // 3) mixed internal + GNU should be normalized into canonical apply_patch
@@ -54,7 +54,7 @@ async function main() {
       const parsed = parseNormalizedArgs(result);
       assert.ok(parsed.patch.includes('*** Begin Patch'));
       assert.ok(parsed.patch.includes('*** Update File: demo.txt'));
-      assert.ok(parsed.patch.includes('@@ -1 +1 @@'));
+      assert.ok(parsed.patch.includes('@@\n-old\n+new'));
       assert.equal(parsed.input, undefined);
     }
 
@@ -114,6 +114,17 @@ PATCH"`;
         'native verdict must plus-prefix add-file content'
       );
       assert.equal(parsed.input, undefined);
+    }
+
+    // 6) GNU line-number hunk with inline context trailer must collapse to canonical @@ hunk
+    {
+      const result = validateApplyPatchArgumentsWithNative({
+        patch: `*** Begin Patch\n*** Update File: ${absPath}\n@@ -1,2 +1,3 @@ alpha\n beta\n+beta2\n gamma\n*** End Patch`
+      });
+      assert.equal(result.ok, true, 'line-number hunk with inline context trailer should validate');
+      const parsed = parseNormalizedArgs(result);
+      assert.equal(parsed.patch.includes('@@ -1,2 +1,3 @@'), false, 'GNU line-number hunk header must be removed');
+      assert.ok(parsed.patch.includes('@@\n alpha\n beta\n+beta2\n gamma'), 'inline context trailer must become canonical apply_patch context');
     }
 
     console.log('✅ apply_patch native regression matrix passed');

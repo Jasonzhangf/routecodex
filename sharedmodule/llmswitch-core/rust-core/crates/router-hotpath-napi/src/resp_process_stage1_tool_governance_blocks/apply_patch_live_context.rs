@@ -158,6 +158,40 @@ fn parse_unified_hunk_header_line_numbers(line: &str) -> Option<(usize, usize, u
     Some((old_start, old_len, new_start, new_len))
 }
 
+fn extract_unified_hunk_inline_context(line: &str) -> Option<String> {
+    let caps = Regex::new(r"^@@\s*-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s*@@\s*(.*)$")
+        .ok()?
+        .captures(line.trim())?;
+    let text = caps.get(1)?.as_str().trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn rebuild_line_number_hunk_to_apply_patch_context(
+    header: &str,
+    body: &[String],
+) -> Option<Vec<String>> {
+    parse_unified_hunk_header_line_numbers(header)?;
+    let inline_context = extract_unified_hunk_inline_context(header);
+    let mut rebuilt = Vec::<String>::new();
+    rebuilt.push("@@".to_string());
+    if let Some(context) = inline_context {
+        let already_present = body
+            .first()
+            .and_then(|line| line.strip_prefix(' '))
+            .map(|line| line.trim() == context.trim())
+            .unwrap_or(false);
+        if !already_present {
+            rebuilt.push(format!(" {}", context));
+        }
+    }
+    rebuilt.extend(body.iter().cloned());
+    Some(rebuilt)
+}
+
 fn try_rebuild_line_number_hunk_with_live_context(
     file_path: &str,
     header: &str,
@@ -294,6 +328,10 @@ pub(crate) fn repair_line_number_update_hunks_with_live_context(patch_text: &str
                 )
             });
             if let Some(rebuilt) = rebuilt {
+                out.extend(rebuilt);
+            } else if let Some(rebuilt) =
+                rebuild_line_number_hunk_to_apply_patch_context(header.as_str(), body.as_slice())
+            {
                 out.extend(rebuilt);
             } else {
                 out.push(header);

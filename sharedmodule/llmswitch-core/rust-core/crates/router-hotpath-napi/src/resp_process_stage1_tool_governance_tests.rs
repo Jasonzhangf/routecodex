@@ -2306,6 +2306,32 @@ fn test_validate_apply_patch_arguments_accepts_newline_escaped_raw_patch_string(
 }
 
 #[test]
+fn test_validate_apply_patch_arguments_repairs_line_number_hunk_with_inline_context_trailer() {
+    let raw = json!({
+        "arguments": {
+            "patch": "*** Begin Patch\n*** Update File: /Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs\n@@ -94,6 +94,7 @@ mod shared_tool_mapping;\n mod shared_tooling;\n+mod primary_exhausted_to_default_pool_blocks;\n mod snapshot_tool_failures;\n mod stop_message_auto_blocks;\n*** End Patch"
+        }
+    });
+    let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+    let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+    assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+    let normalized = parsed
+        .get("normalizedArguments")
+        .and_then(Value::as_str)
+        .expect("normalizedArguments");
+    let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+    let patch = normalized_value
+        .get("patch")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(patch.contains("*** Update File: "));
+    assert!(patch.ends_with("*** End Patch"));
+    assert!(patch.contains("src/lib.rs"));
+    assert!(!patch.contains("@@ -94,6 +94,7 @@"));
+    assert!(patch.contains("@@\n mod shared_tool_mapping;\n mod shared_tooling;\n+mod primary_exhausted_to_default_pool_blocks;"));
+}
+
+#[test]
 fn test_validate_apply_patch_arguments_classifies_structured_missing_changes() {
     let raw = json!({
         "arguments": {
