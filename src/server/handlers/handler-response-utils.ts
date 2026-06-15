@@ -19,17 +19,19 @@ import { registerRequestLogContext } from '../utils/request-log-color.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildResponsesRequestLogContextForHttp,
-  clearResponsesConversationRequestIdsForHttp,
   hasResponsesSsePayloadForHttp,
   importResponsesHandlerCoreDist,
   normalizeChatUsagePayloadForHttp,
-  persistResponsesConversationLifecycleForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
   resolveResponsesRequestContextForHttp,
   resolveResponsesClientPayloadFinishReasonForHttp,
+  shouldDispatchResponsesSseToClientForHttp,
+} from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
+import {
+  clearResponsesConversationRequestIdsForHttp,
+  persistResponsesConversationLifecycleForHttp,
   resolveResponsesConversationClearReasonForHttp,
   shouldClearResponsesConversationOnFailureForHttp,
-  shouldDispatchResponsesSseToClientForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 export {

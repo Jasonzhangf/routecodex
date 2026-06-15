@@ -253,3 +253,29 @@ description: <1 句中文 ≤ 50 字>
 - owner / gate / `~/.rcc` 三件套在 references/40 / 50 / 70 写明反查/正查/新增流程。
 - 验证矩阵 12 行全 PASS；`git diff --check` 干净。
 - 没改运行时、没 push、没碰 worker / daemon。
+
+## 验证矩阵证据（2026-06-14 skill-routing pass）
+
+| # | 验证项 | 命令 / 路径 | 结果 |
+| - | --- | --- | --- |
+| 1 | `note.md` 顶部 consolidation index | `head -25 note.md` | PASS（包含 latest-wins、recheck 转绿、promoted facts） |
+| 2 | `note.md` raw 调查保留 | `rg '^2026-0[0-9]' note.md \| wc -l` | PASS（raw 调查未删） |
+| 3 | `MEMORY.md` 2026-06-14 三段 | `rg '^## 2026-06-14' MEMORY.md` | PASS（3 段：routing truth / owner registry / `~/.rcc` truth） |
+| 4 | `SKILL.md` 行数 | `wc -l .agents/skills/rcc-dev-skills/SKILL.md` | PASS（87 行，≤ 200） |
+| 5 | `description` 长度 | `sed -n '1,5p' .agents/skills/rcc-dev-skills/SKILL.md` | PASS（19 字，≤ 50） |
+| 6 | references 数量与每文件行数 | `ls .agents/skills/rcc-dev-skills/references/ \| wc -l` + `wc -l ...` | PASS（11 个，最大 102 行，均 ≤ 200） |
+| 7 | owner 三件套反查 | `rg -n 'feature_id: hub\.servertool_followup' docs/architecture/function-map.yml docs/architecture/verification-map.yml` + `rg -n '//\s*feature_id: hub\.servertool_followup' sharedmodule src tests` | PASS（function-map.yml:8 / verification-map.yml:8 / `sharedmodule/.../src/chat_servertool_orchestration.rs:1` 三处全 hit） |
+| 8 | `verify:architecture-function-map-parseable` | `npm run verify:architecture-function-map-parseable` | PASS（`ok - function-map and verification-map are valid YAML and machine-parseable`） |
+| 9 | `verify:architecture-owner-queryability` | `npm run verify:architecture-owner-queryability` | PASS（`ok - checked features: 63`，`exit=0`） |
+| 10 | `verify:architecture-feature-map-growth-discipline` | `npm run verify:architecture-feature-map-growth-discipline` | PASS（`ok - checked source feature anchors: 62`，`exit=0`） |
+| 11 | `verify:function-map-compile-gate` | `npm run verify:function-map-compile-gate` | PASS（13/13 子 gate 全 `ok`，总 `exit=0`，63 features / 249 canonical builders unique） |
+| 12 | live SSE 收尾 | `curl -sS -N -X POST http://127.0.0.1:5555/v1/responses -H 'Content-Type: application/json' -H 'Accept: text/event-stream' --max-time 60 -d '{"model":"openai-responses-router-gpt-5.5","input":"say exactly RCC_NOTE_CONSOLIDATION_OK and nothing else","stream":true,"max_output_tokens":32}'` | PASS（`response.completed` + `response.done`，文本 `RCC_NOTE_CONSOLIDATION_OK`，无 `event:error`） |
+| 13 | `~/.rcc` 真源路径 | `ls ~/.rcc/provider/1token/ && sed -n '1,60p' ~/.rcc/provider/1token/config.v2.toml && cat ~/.rcc/install/current` | PASS（字段：`version`、`providerId`、`[provider]`、`[provider.auth]`、`[provider.responses]`、`[provider.concurrency]`、`[provider.models.*]`） |
+| 14 | `git diff --check` | `git diff --check` | PASS（无输出，无 whitespace / conflict 错误） |
+
+## 完成声明
+
+- 验证矩阵 12/12 + 增量项 2 = 14/14 全部 PASS。
+- `SKILL.md` / references / note.md / MEMORY.md / plan 五件套均按本 plan 设计。
+- `hub.servertool_followup` 三件套可被独立反查。
+- 未 push；未动 worker / daemon；未改运行时行为；worktree 中本任务真实改动仅为 `SKILL.md` description 缩短 + `note.md` 顶部 consolidation index 追加。

@@ -1,6 +1,6 @@
 ---
 name: rcc-dev-skills
-description: RouteCodex 调试与架构索引入口，按主题路由到唯一真源。
+description: RouteCodex 调试与架构路由入口
 ---
 
 # RCC Dev Skills

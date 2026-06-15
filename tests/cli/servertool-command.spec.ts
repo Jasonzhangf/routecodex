@@ -70,13 +70,15 @@ describe('servertool CLI command', () => {
 
     expect(errors).toEqual([]);
     expectNoPrivateServertoolCarrier(output[0] ?? '');
-    expect(JSON.parse(output[0] ?? '{}')).toMatchObject({
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
-      continuationPrompt: '继续执行原任务',
       repeatCount: 2,
       maxRepeats: 3
     });
+    expect(String(payload.continuationPrompt ?? '')).toContain('必须主动调用停止 hook');
+    expect(payload.schemaGuidance?.requiredFields).toContain('stopreason');
   });
 
   it('passes explicit repeat flags through to the standalone Rust binary', async () => {
@@ -115,10 +117,11 @@ describe('servertool CLI command', () => {
       repeatCount: 2,
       maxRepeats: 5,
       input: {
-        repeatCount: 1,
-        maxRepeats: 3
+        repeatCount: 2,
+        maxRepeats: 5
       }
     });
+    expect(String(payload.continuationPrompt ?? '')).toContain('必须主动调用停止 hook');
   });
 
   it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(

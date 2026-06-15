@@ -47,13 +47,6 @@ function hasStructuredChangesSchema(parameters) {
   return Object.prototype.hasOwnProperty.call(props, 'changes');
 }
 
-function hasFreeformPatchSchema(parameters) {
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return false;
-  const props = parameters.properties;
-  if (!props || typeof props !== 'object' || Array.isArray(props)) return false;
-  return Object.prototype.hasOwnProperty.call(props, 'patch') || Object.prototype.hasOwnProperty.call(props, 'input');
-}
-
 function hasLegacyFilePathSchema(parameters) {
   if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return false;
   const props = parameters.properties;
@@ -77,12 +70,11 @@ async function main() {
     !hasLegacyFilePathSchema(mapped.function?.parameters),
     'expected apply_patch schema to NOT include legacy filePath/changes contract'
   );
-  if (mapped.function?.parameters) {
-    assert.ok(
-      hasFreeformPatchSchema(mapped.function?.parameters),
-      'expected optional shared apply_patch schema, when present, to use patch/input only'
-    );
-  }
+  assert.equal(
+    mapped.function?.parameters,
+    undefined,
+    'expected apply_patch shared mapping to omit structured parameters entirely'
+  );
 
   console.log('✅ apply_patch freeform-only tool schema regression passed');
 }

@@ -127,6 +127,11 @@ const DELETED_STOP_VISIBLE_TEXT_TS_FILES = [
 const DELETED_CLI_RESULT_GUARD_TS_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-result-guard.ts`,
 ];
+const DELETED_STOPLESS_TRANSPARENT_FILES = [
+  `${ROOT}/tests/servertool/stopless-sessionid-transparent.spec.ts`,
+  `${ROOT}/docs/goals/stopless-sessionid-transparent-plan.md`,
+  `${ROOT}/docs/goals/stopless-sessionid-transparent-goal-prompt.md`,
+];
 const DELETED_AI_FOLLOWUP_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`,
@@ -147,8 +152,8 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
     'tests/servertool/vision-flow.spec.ts',
     'tests/servertool/servertool-mixed-tools.spec.ts',
   ],
-  'hub.servertool_stopless_cli_projection_seed': [
-    'tests/servertool/stop-message-auto.spec.ts',
+  'hub.servertool_stopless_cli_continuation': [
+    'tests/servertool/stopless-cli-continuation.spec.ts',
     'tests/servertool/servertool-cli-projection.spec.ts',
   ],
 });
@@ -448,7 +453,7 @@ function checkServertoolCliProjectionMap() {
     'cli-projection-command-contract',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
     rustCliContract,
-    'routecodex servertool run {} --input-json'
+    'routecodex hook run {} --input-json {}'
   );
   assertContains(
     'cli-projection-command-contract',
@@ -821,6 +826,14 @@ function checkStoplessNoReenterContract() {
     fail('stopless-no-reenter-contract', 'obsolete stopless-goal-reenter.spec.ts must stay physically deleted');
   } else {
     pass('stopless-no-reenter-contract', 'obsolete stopless reenter spec is absent');
+  }
+  for (const file of DELETED_STOPLESS_TRANSPARENT_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'stopless-no-reenter-contract',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; stopless transparent continuation contract was removed`
+      );
+    }
   }
   const files = [
     ...ACTIVE_RUNTIME_SCAN_PATHS.flatMap((dir) => listFiles(dir)),
@@ -4060,13 +4073,6 @@ function checkStopVisibleTextRustOwner() {
     stopMessageHandler,
     'buildStopMessageTerminalVisiblePayloadWithNative'
   );
-  assertContains(
-    'stop-visible-text-thin-shell',
-    `${SERVERTOOL_TS_DIR}/engine.ts`,
-    servertoolEngine,
-    'planStopMessageCliProjectionSeedWithNative'
-  );
-
   for (const [file, content] of [
     [STOP_MESSAGE_AUTO_HANDLER, stopMessageHandler],
     [`${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine],
@@ -4095,49 +4101,6 @@ function checkStopVisibleTextRustOwner() {
     }
   }
   pass('stop-visible-text-rust-owner', 'servertool-core owns stop_schema visible text cleanup');
-}
-
-// ── Check 15c: stopless CLI projection seed has Rust owner ────
-function checkStopMessageCliProjectionSeedRustOwner() {
-  const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
-  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
-  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
-  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
-  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const servertoolEngine = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
-
-  for (const [check, file, content, needle] of [
-    ['stop-message-cli-projection-seed-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn plan_stop_message_cli_projection_seed'],
-    ['stop-message-cli-projection-seed-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stop_message_cli_projection_seed_json'],
-    ['stop-message-cli-projection-seed-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stop_message_cli_projection_seed_json'],
-    ['stop-message-cli-projection-seed-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStopMessageCliProjectionSeedJson'],
-    ['stop-message-cli-projection-seed-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStopMessageCliProjectionSeedWithNative'],
-    ['stop-message-cli-projection-seed-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine, 'planStopMessageCliProjectionSeedWithNative'],
-  ]) {
-    assertContains(check, file, content, needle);
-  }
-
-  for (const keyword of [
-    'function readStopMessageFollowupText',
-    'function readStopMessageAssistantStopText',
-    'function readAssistantStopTextFromChat',
-    'function collectTextFromContentParts',
-    'function readStopMessageRuntimeMetadata',
-    'function readStopMessageLoopNumber',
-    'stripStopSchemaControlTextWithNative',
-    'Number.isFinite(value)',
-    'Math.floor(value)',
-    '继续完成当前用户目标。若仍需操作',
-    '模型以 finish_reason=stop 结束，RouteCodex 正在请求继续执行。',
-  ]) {
-    if (servertoolEngine.includes(keyword)) {
-      fail(
-        'stop-message-cli-projection-seed-no-ts-owner',
-        `Forbidden TS stopless projection seed semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/engine.ts`
-      );
-    }
-  }
-  pass('stop-message-cli-projection-seed-rust-owner', 'servertool-core owns stopless CLI projection seed planning');
 }
 
 // ── Check 15d: stopless orchestration action has Rust owner ───
@@ -4604,7 +4567,6 @@ checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkStopVisibleTextRustOwner();
-checkStopMessageCliProjectionSeedRustOwner();
 checkStoplessOrchestrationActionRustOwner();
 checkStoplessGoalStateSyncRustOwner();
 checkStopMessageBlockedReportRustOwner();

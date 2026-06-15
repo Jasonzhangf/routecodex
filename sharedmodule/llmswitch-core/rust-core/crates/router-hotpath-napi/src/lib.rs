@@ -58,6 +58,7 @@ mod hub_submit_tool_outputs;
 mod hub_text_markup_normalizer;
 mod hub_tool_session_compat;
 mod openai_openai_codec;
+mod primary_exhausted_to_default_pool_blocks;
 mod req_outbound_stage3_compat;
 mod req_process_stage1_tool_governance;
 mod req_process_stage1_tool_governance_blocks;
@@ -1617,12 +1618,6 @@ pub fn resolve_adapter_context_provider_key_json(input_json: String) -> NapiResu
 #[napi]
 pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_client_exec_cli_projection_output_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn plan_stop_message_cli_projection_seed_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_stop_message_cli_projection_seed_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

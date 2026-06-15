@@ -172,4 +172,24 @@ describe('http entry port snapshot isolation red tests', () => {
     expect(secondPortLog).toContain('[port:5555 group:gateway_priority_5555] [entry-port-test] second-port-line');
     expect(secondPortLog).not.toContain('first-port-line');
   });
+
+  it('preserves nested ansi color inside port-prefixed logs', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-entry-port-ansi-'));
+    const logRoot = path.join(root, 'logs');
+    process.env.ROUTECODEX_PORT_LOG_ROOT = logRoot;
+    installPortLogConsoleRouter();
+
+    runWithPortRequestContext({
+      localPort: 5520,
+      matchedPort: 5520,
+      routingPolicyGroup: 'gateway_priority_5520'
+    }, () => {
+      console.log('\x1b[36m[usage] total=\x1b[97m123ms\x1b[0m');
+    });
+    closePortLogConsoleRouterFiles();
+
+    const portLog = fs.readFileSync(path.join(logRoot, '5520', 'server-5520.log'), 'utf8');
+    expect(portLog).toContain('[port:5520 group:gateway_priority_5520]');
+    expect(portLog).toContain('\x1b[97m123ms');
+  });
 });

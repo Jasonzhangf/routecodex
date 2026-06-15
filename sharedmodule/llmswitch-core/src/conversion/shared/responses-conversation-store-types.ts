@@ -41,6 +41,21 @@ export interface ResumeResult {
   meta: AnyRecord;
 }
 
+export interface ContinuationLookupOptions {
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}
+
+export interface ContinuationLookupResult {
+  responseId: string;
+  providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
+  entryKind?: ResponsesContinuationEntryKind;
+  requestId?: string;
+}
+
 export interface RestoreByScopeArgs {
   payload: AnyRecord;
   sessionId?: string;

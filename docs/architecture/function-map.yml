@@ -199,48 +199,64 @@ owners:
     migration_target: rust
     notes:
       - "Phase 1 keeps existing injection/interception but projects execution to real client exec_command."
-      - "CLI command is `routecodex servertool run <toolName> --input-json <json>`; no opaque state handle is used."
+      - "CLI command is `routecodex hook run <toolName> --input-json <json>`; no opaque state handle is used."
       - "stop_message_auto CLI input must include only flowId, repeatCount, and maxRepeats when stopless state is available; continuationPrompt/schema guidance/prompt preview are request-side internal material and must not be client-visible."
       - "CLI execution path must not call server-side followup/reenter for migrated flows."
       - "`apply_patch` is excluded; it remains native/freeform client tooling."
       - "`servertool_fixture` CLI projection dispatch is Rust-owned; the old TS fixture handler file must stay physically deleted."
 
-  - feature_id: hub.servertool_stopless_cli_projection_seed
+  - feature_id: hub.servertool_stopless_cli_continuation
     status: active
-    summary: "stop_message_auto stopless CLI projection seed planning"
+    summary: "stop_message_auto sessionId-scoped CLI continuation planning"
     owner_kind: rust_ssot
-    owner_scope: "stop_message_auto stopless CLI projection seed planning"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+    owner_scope: "stop_message_auto sessionId-only scope + CLI continuation planning"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
     canonical_types:
-      - StopMessageCliProjectionSeedInput
-      - StopMessageCliProjectionSeed
+      - StoplessOrchestrationPlanInput
+      - StoplessOrchestrationPlan
+      - StoplessGoalStateReadPlan
+      - StoplessGoalStatePersistPlan
     canonical_builders:
-      - plan_stop_message_cli_projection_seed
+      - plan_stopless_orchestration_action
+      - plan_stopless_goal_state_read
+      - plan_stopless_goal_state_persist
+      - resolve_stop_message_session_scope
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
       - sharedmodule/llmswitch-core/src/servertool/engine.ts
-      - tests/servertool/stop-message-auto.spec.ts
-      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/stop-message-auto.goal-default.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
       - docs
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
-      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/stop-schema-lifecycle-contract.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "servertool-core owns stopless CLI projection seed planning for internal continuationPrompt seed, reasoningText, repeatCount, maxRepeats, assistant stop text cleanup, final-chat text fallback, and followup injection text extraction; client-visible CLI projection remains status-only."
-      - "TS `engine.ts` may only call `planStopMessageCliProjectionSeedWithNative` and pass the Rust seed into the generic CLI projection shell."
-      - "Do not restore local `readStopMessageFollowupText`, assistant text extraction, loop-number parsing, stop-schema stripping, or default stopless prompt text in TS."
+      - "servertool-core owns stopless sessionId-only state matching and CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
+      - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
+      - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
+      - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (`stop_message_auto`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
+      - "If `finish_reason=stop` arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed."
+      - "For invalid/malformed schema, the stop hook must return the parse/interpretation result itself plus field/value/shape errors, so the model receives a corrective guidance loop instead of a bare rejection."
+      - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook."
+      - "When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history."
+      - "CLI command input stays status-only (`flowId/repeatCount/maxRepeats`); continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string."
+      - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
+      - "Do not restore tmux/conversation/inject scope fallback or server-side stopless followup/reenter."
 
   - feature_id: hub.servertool_flow_presentation
     status: active
@@ -306,7 +322,7 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/stop-message-auto.goal-default.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -448,6 +464,7 @@ owners:
       - tests/red-tests/error_chain_singleton_truth.test.ts
       - tests/server/runtime/executor-provider.retryable.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
+      - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
     required_gates:
       - npm run verify:provider-failure-ban-blackbox
     migration_target: rust
@@ -536,6 +553,41 @@ owners:
     migration_target: rust
     notes:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
+
+  - feature_id: virtual_router.primary_exhausted_to_default_pool
+    status: active
+    summary: "primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only"
+    owner_kind: rust_ssot
+    owner_scope: "primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    canonical_types:
+      - PrimaryExhaustedPlanInput
+      - PrimaryExhaustedToDefaultPoolPlan
+      - PrimaryExhaustedPlanStatus
+    canonical_builders:
+      - plan_primary_exhausted_to_default_pool
+      - plan_primary_exhausted_to_default_pool_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/handlers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/router
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run build:min
+    migration_target: rust
+    notes:
+      - "Host must consume Rust plan only; no local synthesis of default-pool chain."
+      - "Unknown target and empty default-pool are explicit contract states, never fallback."
+      - "Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list."
 
   - feature_id: quota.unified_control_surface
     status: active
@@ -975,6 +1027,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
@@ -1053,6 +1106,44 @@ owners:
     notes:
       - "TS `provider-response-helpers.ts` is native invocation and field-name mapping only; clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser."
 
+  - feature_id: hub.req_inbound_responses_context_capture
+    status: active
+    summary: "Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
+    owner_kind: rust_ssot
+    owner_scope: "Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+    canonical_types:
+      - HubReqInbound02Standardized
+      - ResponsesContextCaptureInput
+    canonical_builders:
+      - capture_req_inbound_responses_context_snapshot
+      - capture_req_inbound_responses_context_snapshot_json
+      - normalize_responses_input_items
+      - sanitize_format_envelope
+      - normalize_provider_protocol_token
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_output_snapshot.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-responses.ts
+      - docs/architecture
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+    forbidden_paths:
+      - src/server/handlers
+      - src/providers/core/runtime
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+    required_tests:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Duplicate/orphan tool-history truth belongs to Rust req_inbound capture, not TS request bridge or server handler."
+      - "If identical duplicate `function_call` batches repeat, normalized relay context must collapse same-call outputs to the latest output for that call_id before reuse."
+      - "TS bridge may only call native capture and reuse the normalized snapshot; it must not locally reserialize raw duplicate tool history or repair orphan tool_result ordering."
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: "apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance"
@@ -1066,6 +1157,7 @@ owners:
     canonical_builders:
       - normalize_apply_patch_schema_args
       - validate_apply_patch_arguments_json
+      - repair_line_number_update_hunks_with_live_context
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/scripts/tests
@@ -1077,13 +1169,16 @@ owners:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_tests.rs
     required_gates:
       - npm run verify:apply-patch-freeform-contract
       - npm run verify:apply-patch-regressions
+      - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
       - "Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; no TS servertool handler may own apply_patch execution."
       - "Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers."
+      - "GNU line-number hunks with inline context trailers must be canonicalized into executable apply_patch `@@` hunks inside Rust before client/server execution."
 
   - feature_id: snapshot.stage_contract
     status: active
@@ -1900,54 +1995,57 @@ owners:
       - "Responses handler must not keep local stream-intent derivation, request-start stream metadata assembly, or port-scope parsing; those request-side stream/scope decisions must stay behind the single request bridge surface."
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
-  - feature_id: server.responses_response_handler_bridge_surface
+  - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
+    summary: "/v1/responses SSE path uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
     owner_kind: ts_bridge
-    owner_scope: "/v1/responses response handler uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
-    owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
+    owner_scope: "/v1/responses SSE path uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_module: src/modules/llmswitch/bridge/responses-sse-bridge.ts
     canonical_types:
       - ResponsesSseClientProjectionState
     canonical_builders:
       - assertDirectPassthroughResponsesSseFrameForHttp
-      - buildClientSseKeepaliveFrameForHttp
-      - isDirectPassthroughTransportKeepaliveFrameForHttp
-      - shouldDropClientSseFrameForHttp
-      - normalizeResponsesClientPayloadForHttp
-      - normalizeResponsesSseFrameForClientForHttp
-      - updateResponsesContractProbeFromSseChunkForHttp
-      - inspectResponsesTerminalStateFromSseChunkForHttp
-      - summarizeResponsesSseFrameForLogForHttp
-      - resolveResponsesProviderProtocolHintFromSseFrameForHttp
-      - buildResponsesTerminalSseFramesFromProbeForHttp
-      - isToolCallContinuationResponseForHttp
-      - inspectResponsesContinuationProbeForHttp
-      - planResponsesContinuationCloseActionForHttp
-      - shouldRepairResponsesContinuationTerminalForHttp
-      - planResponsesStreamEndRepairForHttp
-      - captureResponsesRequestContextForHttpProjection
-      - rebindResponsesConversationRequestIdForHttp
-      - clearResponsesConversationByRequestIdForHttpProjection
-      - recordResponsesResponseForHttpProjection
-      - finalizeResponsesConversationRequestRetentionForHttp
-      - persistResponsesConversationLifecycleForHttp
-      - buildResponsesRequestLogContextForHttp
-      - normalizeChatUsagePayloadForHttp
-      - resolveResponsesRequestContextForHttp
       - assertDirectPassthroughResponsesSseMetadataIsolationForHttp
-      - createResponsesJsonToSseConverterForHttp
-      - prepareResponsesJsonBodyForSseBridgeForHttp
-      - buildResponsesSseErrorPayloadForHttp
-      - buildResponsesStructuredSseErrorPayloadForHttp
+      - buildClientSseKeepaliveFrameForHttp
       - buildResponsesMissingSseBridgeErrorPayloadForHttp
-      - buildResponsesStreamIncompleteErrorPayloadForHttp
-      - normalizeResponsesJsonBodyForHttp
       - buildResponsesPayloadFromChatForHttp
+      - buildResponsesRequestLogContextForHttp
+      - buildResponsesSseErrorPayloadForHttp
+      - buildResponsesStreamIncompleteErrorPayloadForHttp
+      - buildResponsesStructuredSseErrorPayloadForHttp
+      - buildResponsesTerminalSseFramesFromProbeForHttp
+      - createResponsesJsonToSseConverterForHttp
+      - hasResponsesSsePayloadForHttp
+      - importResponsesHandlerCoreDist
+      - inspectResponsesContinuationProbeForHttp
+      - inspectResponsesTerminalStateFromSseChunkForHttp
+      - isDirectPassthroughTransportKeepaliveFrameForHttp
+      - isToolCallContinuationResponseForHttp
+      - normalizeChatUsagePayloadForHttp
+      - normalizeResponsesJsonBodyForHttp
+      - normalizeResponsesSseFrameForClientForHttp
+      - planResponsesContinuationCloseActionForHttp
+      - planResponsesStreamEndRepairForHttp
+      - prepareResponsesJsonBodyForSseBridgeForHttp
+      - prepareResponsesJsonClientDispatchPlanForHttp
+      - prepareResponsesJsonSseDispatchPlanForHttp
       - projectResponsesClientPayloadForClientForHttp
       - projectResponsesSseFrameForClientForHttp
+      - requireResponsesHandlerCoreDist
+      - resolveResponsesClientPayloadFinishReasonForHttp
+      - resolveResponsesProviderProtocolHintFromSseFrameForHttp
+      - resolveResponsesRequestContextForHttp
+      - resolveResponsesTerminalProbeFinishReasonForHttp
+      - shouldDispatchResponsesSseToClientForHttp
+      - shouldDropClientSseFrameForHttp
+      - shouldPersistResponsesContinuationOnProbeUpdateForHttp
+      - shouldPersistResponsesConversationStateForHttp
+      - shouldRepairResponsesContinuationTerminalForHttp
+      - shouldRequireResponsesTerminalEventForHttp
+      - summarizeResponsesSseFrameForLogForHttp
+      - updateResponsesContractProbeFromSseChunkForHttp
     allowed_paths:
-      - src/modules/llmswitch/bridge/responses-response-bridge.ts
-      - src/server/handlers/handler-response-common.ts
+      - src/modules/llmswitch/bridge/responses-sse-bridge.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
       - src/modules/llmswitch/bridge.ts
@@ -1955,35 +2053,66 @@ owners:
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
       - scripts/architecture/verify-server-function-map-boundary.mjs
+      - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
     forbidden_paths:
       - src/server/handlers/responses-handler.ts
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/rust-core
     required_tests:
-      - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
+      - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
+      - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     required_gates:
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - "Response bridge may pass opaque SSE/body handoff state, request ids, and conversation-store IO only."
+      - "Response SSE bridge may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
-      - "Response-side `responsesRequestContext` resolution (`result.metadata.responsesRequestContext` vs handler fallback) must stay behind the single response bridge surface; server dispatcher/SSE files may only pass opaque metadata/fallback inputs."
-      - "Direct passthrough SSE metadata/internal-carrier guard must stay behind the single response bridge surface; server SSE file may only pass frame text + requestId into the bridge guard."
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
-      - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, or required_action frame parsing; those may only appear behind the single response bridge surface."
-      - "Server handler must not keep local SSE terminal-state parsing or `response.completed`/`response.done` state-machine updates; those must stay behind the single response bridge surface."
-      - "Server handler must not keep local client-close cleanup eligibility, terminal-event requirement gating, or probe finish_reason resolution; those must stay behind the single response bridge surface."
-      - "Server handler must not keep local probe wrappers for continuation-persist decisions; probe-triggered continuation persistence must stay behind the single response bridge surface."
-      - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, or finish_reason derivation; those must stay behind the single response bridge surface."
-      - "Server handler must not keep local failure-to-clear continuation policy (`sse_stream_error` / `sse_incomplete` / `json*`); those must stay behind the single response bridge surface."
-      - "Server handler must not keep local Responses SSE `event:error` payload builders (`sse_bridge_error`, `upstream_stream_incomplete`, structured upstream SSE error projection); those must stay behind the single response bridge surface."
-      - "Server handler must not keep local SSE frame summary parsing or protocol-hint detection for usage/logging; those parser helpers must stay behind the single response bridge surface."
-      - "Server handler must not keep local chat.completion -> response JSON normalization; that bridge shell must stay behind the single response bridge surface."
-      - "Server handler must not keep local force-SSE body classification (`response` vs `chat.completion`) or probe-level tool-continuation / required_action inspection; those must stay behind the single response bridge surface."
-      - "Server handler must not keep local SSE dispatch eligibility or `__sse_responses` payload-shape detection; those dispatch-entry decisions must stay behind the single response bridge surface."
-      - "Continuation lifecycle capture/record/finalize orchestration must stay behind the response bridge facade; handler TS may only pass request/body ids, metadata, and non-blocking log callbacks."
+      - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, required_action frame parsing, terminal-state parsing, client-close cleanup gating, probe finish_reason resolution, or stream-end repair decisions; those stay behind the dedicated SSE bridge surface."
+      - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE bridge surface."
+  - feature_id: server.responses_response_handler_bridge_surface
+    status: active
+    summary: "/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_kind: ts_bridge
+    owner_scope: "/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
+    canonical_types:
+      - ResponsesResponseLifecycleBridgeFacade
+    canonical_builders:
+      - captureResponsesRequestContextForHttpProjection
+      - rebindResponsesConversationRequestIdForHttp
+      - clearResponsesConversationByRequestIdForHttpProjection
+      - recordResponsesResponseForHttpProjection
+      - finalizeResponsesConversationRequestRetentionForHttp
+      - persistResponsesConversationLifecycleForHttp
+      - resolveResponsesConversationClearReasonForHttp
+      - shouldClearResponsesConversationOnClientCloseForHttp
+      - shouldClearResponsesConversationOnFailureForHttp
+    allowed_paths:
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/server/handlers/handler-response-sse.ts
+      - src/server/handlers/handler-response-utils.ts
+      - src/modules/llmswitch/bridge.ts
+      - src/modules/llmswitch/bridge/index.ts
+      - docs/architecture
+      - scripts/architecture/verify-server-function-map-boundary.mjs
+    forbidden_paths:
+      - src/server/handlers/responses-handler.ts
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/rust-core
+    required_tests:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+    required_gates:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "Response lifecycle bridge may pass opaque continuation/conversation-store IO only."
+      - "Server handler must not keep local response-id rebinding, continuation retention/finalization, or conversation clear-policy semantics."
   - feature_id: cli.command_surface
     status: active
     summary: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"
@@ -2289,8 +2418,12 @@ owners:
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure.ts
       - src/server/runtime/http-server/index.ts
+      - src/server/runtime/http-server/direct-decision.ts
+      - src/server/runtime/http-server/direct-client-disconnect.ts
       - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - docs
     forbidden_paths:
       - src/providers/profile
@@ -2330,6 +2463,8 @@ owners:
       - tests/server/utils/http-error-mapper-tool-validation.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
+      - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
+      - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
       - docs
     forbidden_paths:
       - src/providers/core/runtime

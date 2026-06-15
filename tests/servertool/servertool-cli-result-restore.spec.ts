@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'path';
 
 describe('servertool CLI result restoration removal', () => {
-  it('keeps real servertool CLI stdout as ordinary exec_command output', () => {
+  it('keeps real servertool CLI stdout as ordinary exec_command output with stopless guidance payload', () => {
     const stdout = execFileSync(
       path.join(
         process.cwd(),
@@ -32,12 +32,13 @@ describe('servertool CLI result restoration removal', () => {
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow'
     });
+    expect(parsedOutput.continuationPrompt).toContain('stop schema');
+    expect(parsedOutput.continuationPrompt).toContain('必须主动调用停止 hook');
+    expect(parsedOutput.schemaGuidance?.requiredFields).toContain('stopreason');
     expect((payload.tool_outputs[0] as any).tool_call_id).toBeUndefined();
     expect((payload.tool_outputs[0] as any).name).toBeUndefined();
     expect(payload.tool_outputs[0].output).not.toContain('"metadata"');
     expect(payload.tool_outputs[0].output).not.toContain('"__rt"');
-    expect(payload.tool_outputs[0].output).not.toContain('continuationPrompt');
-    expect(payload.tool_outputs[0].output).not.toContain('继续执行原任务');
     expect(payload.tool_outputs[0].output).not.toContain('"ticket"');
     expect(payload.tool_outputs[0].output).not.toContain('old_cli_');
     expect(payload.tool_outputs[0].output).not.toContain('old_cli_result_');

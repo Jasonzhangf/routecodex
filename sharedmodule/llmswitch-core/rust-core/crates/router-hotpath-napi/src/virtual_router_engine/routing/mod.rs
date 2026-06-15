@@ -3,6 +3,7 @@ mod config;
 mod direct_model;
 mod key_utils;
 mod metadata;
+mod primary_exhausted_to_default_pool;
 mod selection;
 mod source_normalizer;
 mod target_expander;
@@ -34,3 +35,10 @@ pub(crate) use selection::{
 };
 pub(crate) use source_normalizer::normalize_routing;
 pub(crate) use target_expander::expand_routing_table;
+
+#[allow(unused_imports)]
+pub(crate) use primary_exhausted_to_default_pool::{
+    plan_primary_exhausted_to_default_pool,
+    PrimaryExhaustedPlanInput, PrimaryExhaustedToDefaultPoolPlan, PrimaryExhaustedPlanStatus,
+    RoutePoolTierInput,
+};

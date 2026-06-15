@@ -25,6 +25,8 @@ export const ERROR_CLIENT_PROJECTION_FEATURE_ID = 'feature_id: error.client_proj
 export type ErrorErr05ExecutionDecision = unknown;
 export type ErrorErr06ClientProjected = HttpErrorPayload;
 
+const CLIENT_DISCONNECT_PUBLIC_CODE = 'CLIENT_DISCONNECTED';
+
 type RawErrorDetails = {
   status?: number;
   requestId?: string;
@@ -38,6 +40,8 @@ type RawErrorDetails = {
   validationReason?: string;
   validationMessage?: string;
   missingFields?: unknown;
+  policyExhausted?: boolean;
+  candidateExhausted?: boolean;
 };
 
 type RawErrorPayload = {
@@ -159,6 +163,21 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     });
   }
 
+  if (isClientDisconnectLikeForProjection({
+    status,
+    code: normalizedCode,
+    baseMessage,
+    upstreamMessage,
+    effectiveUpstreamMessage,
+  })) {
+    return formatPayload(204, {
+      message: 'Client disconnected before upstream response completed',
+      code: CLIENT_DISCONNECT_PUBLIC_CODE,
+      request_id: requestId,
+      ...validationFields,
+    });
+  }
+
   const timeoutHint = `${baseMessage} ${extractString(error.code) || ''} ${extractString(upstreamCode) || ''}`.toLowerCase();
   if (
     timeoutHint.includes('timeout') ||
@@ -224,10 +243,75 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   });
 }
 
+function isClientDisconnectLikeForProjection(args: {
+  status: number;
+  code: string;
+  baseMessage: string;
+  upstreamMessage?: string;
+  effectiveUpstreamMessage?: string;
+}): boolean {
+  const hints = [args.baseMessage, args.upstreamMessage, args.effectiveUpstreamMessage]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+  if (args.code === CLIENT_DISCONNECT_PUBLIC_CODE) {
+    return true;
+  }
+  if (hints.some((hint) => hint.includes('client_disconnected') || hint.includes('client disconnected'))) {
+    return true;
+  }
+  if (args.status === 499 || args.code === 'HTTP_499') {
+    return hints.some((hint) => hint.includes('client abort request') || hint.includes('client closed request'));
+  }
+  return hints.some((hint) => hint.includes('client abort request') || hint.includes('client closed request'));
+}
+
 export function project_error_err_06_client_from_error_err_05_execution_decision(
   decision: ErrorErr05ExecutionDecision
 ): ErrorErr06ClientProjected {
+  assertErr05DecisionIsProjectable(decision);
   return mapErrorToHttp(decision);
+}
+
+function assertErr05DecisionIsProjectable(decision: unknown): void {
+  const error = normalizeErrorPayload(decision);
+  const baseMessage = typeof error.message === 'string' ? error.message : String(decision ?? 'Unknown error');
+  const status = normalizeStatus(extractStatus(error), extractUpstreamError(error).status);
+  const normalizedCode = String(extractUpstreamError(error).code || extractString(error.code) || '').trim().toUpperCase();
+  if (normalizedCode === 'MALFORMED_REQUEST') {
+    return;
+  }
+  if (isClientDisconnectLikeForProjection({
+    status,
+    code: normalizedCode,
+    baseMessage,
+    upstreamMessage: extractUpstreamError(error).message,
+    effectiveUpstreamMessage: extractUpstreamError(error).message,
+  })) {
+    return;
+  }
+  if (!isProviderProjectionCandidate(error, status, normalizedCode)) {
+    return;
+  }
+  if (error.details?.policyExhausted === true || error.details?.candidateExhausted === true) {
+    return;
+  }
+  throw Object.assign(
+    new Error('ErrorErr06 projection requires policy/candidate exhaustion'),
+    {
+      code: 'ERROR_ERR06_POLICY_NOT_EXHAUSTED',
+      statusCode: 500,
+    }
+  );
+}
+
+function isProviderProjectionCandidate(error: RawErrorPayload, status: number, normalizedCode: string): boolean {
+  if (status >= 500 || (status >= 400 && status < 500)) {
+    return true;
+  }
+  if (normalizedCode.startsWith('HTTP_') || normalizedCode.startsWith('UPSTREAM_')) {
+    return true;
+  }
+  return Boolean(error.providerKey || error.details?.providerKey);
 }
 
 export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {

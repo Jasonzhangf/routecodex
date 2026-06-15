@@ -1,3 +1,4 @@
+// feature_id: hub.servertool_stopless_cli_continuation
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -165,11 +166,6 @@ fn resolve_stopless_goal_sticky_key(adapter_context: &Value) -> Option<String> {
         .or_else(|| read_trimmed_string(adapter_context.get("session_id")));
     if let Some(session_id) = session_id {
         return Some(format!("session:{session_id}"));
-    }
-    let conversation_id = read_trimmed_string(adapter_context.get("conversationId"))
-        .or_else(|| read_trimmed_string(adapter_context.get("conversation_id")));
-    if let Some(conversation_id) = conversation_id {
-        return Some(format!("conversation:{conversation_id}"));
     }
     None
 }
@@ -590,5 +586,19 @@ mod tests {
         assert!(!plan.had_directive);
         assert!(plan.rewritten_text.is_none());
         assert!(plan.next_state.is_none());
+    }
+
+    #[test]
+    fn goal_state_scope_requires_session_id_without_conversation_fallback() {
+        let plan = plan_stopless_goal_state_read(StoplessGoalStateReadPlanInput {
+            adapter_context: serde_json::json!({
+                "conversationId": "conv-only",
+                "conversation_id": "conv-snake"
+            }),
+            persisted_state: None,
+        })
+        .expect("read plan");
+
+        assert_eq!(plan.sticky_key, "");
     }
 }

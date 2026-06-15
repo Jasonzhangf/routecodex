@@ -37,7 +37,7 @@ export function hasAlternativeRouteCandidate(args: {
 }): boolean {
   const currentProviderKey = readString(args.providerKey);
   if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
-    return true;
+    return false;
   }
   return args.routePool.some((candidate) => {
     const normalized = readString(candidate);

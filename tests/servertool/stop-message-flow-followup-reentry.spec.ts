@@ -104,18 +104,42 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
   };
 }
 
-function readStopMessageCliProjection(result: Awaited<ReturnType<typeof runServerToolOrchestration>>): string {
+function expectTransparentStoplessResult(
+  result: Awaited<ReturnType<typeof runServerToolOrchestration>>
+): void {
   expect(result.executed).toBe(true);
   expect(result.flowId).toBe("stop_message_flow");
-  const choice = (result.chat.choices as any[] | undefined)?.[0];
-  expect(choice?.finish_reason).toBe("tool_calls");
-  const toolCall = choice?.message?.tool_calls?.[0];
-  expect(toolCall?.function?.name).toBe("exec_command");
-  const args = JSON.parse(String(toolCall?.function?.arguments ?? "{}")) as { cmd?: string };
-  const cmd = String(args.cmd ?? "");
-  expect(cmd).toContain("routecodex servertool run stop_message_auto");
-  expect(cmd).toContain("--input-json");
-  return cmd;
+  // The reenter pipeline is the only place stop_message_flow may
+  // drive a followup. Client-side `exec_command` projection of
+  // `routecodex servertool run stop_message_auto` is no longer
+  // emitted to the model or the client.
+  const serialized = JSON.stringify(result.chat ?? {});
+  expect(serialized).not.toContain("exec_command");
+  expect(serialized).not.toContain("routecodex servertool run");
+  expect(serialized).not.toContain("stop_message_auto");
+}
+
+function expectTransparentFollowupUserInput(
+  callArg:
+    | {
+        body?: { messages?: Array<{ role?: string; content?: unknown; tool_calls?: unknown }> };
+      }
+    | undefined,
+): void {
+  const messages = callArg?.body?.messages ?? [];
+  const last = messages[messages.length - 1];
+  expect(last).toBeDefined();
+  expect(last?.role).toBe("user");
+  expect(typeof last?.content).toBe("string");
+  // The followup is delivered as ordinary user input; the model
+  // must not see any of the internal stopless tool names.
+  expect(String(last?.content ?? "")).not.toMatch(/routecodex servertool run/);
+  expect((last as { tool_calls?: unknown })?.tool_calls ?? []).toEqual([]);
+  // No tool call may be smuggled alongside the transparent user input.
+  for (const msg of messages) {
+    const tc = (msg as { tool_calls?: unknown }).tool_calls;
+    expect(tc ?? []).toEqual([]);
+  }
 }
 
 describe("stop_message_flow reentry", () => {
@@ -196,13 +220,14 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
+    expectTransparentStoplessResult(result);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).not.toHaveBeenCalled();
-    const cmd = readStopMessageCliProjection(result);
-    expect(cmd).toContain("当前用户目标");
-    expect(cmd).toContain("JSON 对象");
+    expect(reenterPipeline).toHaveBeenCalledTimes(1);
+    // The followup body is a transparent user-role message; the
+    // model receives it as if it were ordinary user input, with
+    // no tool calls attached and no `routecodex servertool run`
+    // / `stop_message_auto` text smuggled in.
+    expectTransparentFollowupUserInput(reenterPipeline.mock.calls[0]?.[0]);
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
@@ -268,8 +293,7 @@ describe("stop_message_flow reentry", () => {
         reenterPipeline,
       });
 
-      expect(result.executed).toBe(true);
-      expect(result.flowId).toBe("stop_message_flow");
+      expectTransparentStoplessResult(result);
       expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
     }
     const exhausted = await runServerToolOrchestration({
@@ -288,11 +312,16 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(exhausted.executed).toBe(true);
-    expect(exhausted.flowId).toBe("stop_message_flow");
+    expectTransparentStoplessResult(exhausted);
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
-    expect(reenterPipeline).not.toHaveBeenCalled();
-    readStopMessageCliProjection(exhausted);
+    expect(clientInjectDispatch).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    // The third followup is the last transparent reenter; the
+    // followup text is appended as a user-role message with no
+    // tool_calls attached.
+    const thirdCall = reenterPipeline.mock.calls[2]?.[0];
+    expect(thirdCall).toBeDefined();
+    expectTransparentFollowupUserInput(thirdCall);
   });
 
   test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
@@ -319,8 +348,7 @@ describe("stop_message_flow reentry", () => {
         reenterPipeline,
       });
 
-      expect(result.executed).toBe(true);
-      expect(result.flowId).toBe("stop_message_flow");
+      expectTransparentStoplessResult(result);
       expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
     }
 
@@ -328,7 +356,6 @@ describe("stop_message_flow reentry", () => {
       chat: buildStopResponse(invalidSchema),
       adapterContext: {
         sessionId,
-        stopMessageClientInjectSessionScope: `session:${sessionId}`,
         capturedChatRequest: {
           model: "gpt-test",
           messages: [
@@ -348,14 +375,20 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(exhausted.executed).toBe(true);
-    expect(exhausted.flowId).toBe("stop_message_flow");
-    const finalText = decodeURIComponent(readStopMessageCliProjection(exhausted));
-    expect(finalText).toContain("你已经提供 next_step");
-    expect(finalText).toContain("继续测试");
-    expect(finalText).toContain("后续排查顺序");
+    // All three hops with the same invalid schema followup loop
+    // are still under `used < maxRepeats` so the engine
+    // transparently reenters; the 4th hop (not exercised here)
+    // would cross the no-change-count budget. The contract is
+    // that no client-visible `exec_command` projection of
+    // `routecodex servertool run stop_message_auto` is ever
+    // emitted.
+    expectTransparentStoplessResult(exhausted);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).not.toHaveBeenCalled();
+    expect(reenterPipeline).toHaveBeenCalledTimes(3);
+    const thirdCall = reenterPipeline.mock.calls[2]?.[0];
+    expect(thirdCall).toBeDefined();
+    expectTransparentFollowupUserInput(thirdCall);
   });
 
   test("stopless writes learned note only when schema allows final stop", async () => {
@@ -522,10 +555,6 @@ describe("stop_message_flow reentry", () => {
         sessionId,
         entryEndpoint: "/v1/responses",
         providerProtocol: "openai-responses",
-        stopMessageClientInjectSessionScope: `session:${sessionId}`,
-        metadata: {
-          stopMessageClientInjectSessionScope: `session:${sessionId}`,
-        },
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],

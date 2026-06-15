@@ -28,7 +28,7 @@ export function buildServertoolCliProjectionForToolCall(args: {
 }): ServertoolCliProjectionPlan {
   const toolName = args.toolCall.name;
   const input = parseArguments(args.toolCall.arguments);
-  const reasoningText = args.reasoningText || `RouteCodex will execute servertool ${toolName} through client CLI.`;
+  const reasoningText = args.reasoningText || `继续执行本地 hook ${toolName}。`;
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
     flowId: 'servertool_cli_projection',

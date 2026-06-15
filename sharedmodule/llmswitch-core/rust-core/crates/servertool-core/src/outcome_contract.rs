@@ -294,7 +294,7 @@ fn build_exec_command(tool_name: &str, input: &Value) -> Result<String, Serverto
     let input_json =
         serde_json::to_string(input).map_err(|_| ServertoolOutcomeError::InvalidField("input"))?;
     let command = format!(
-        "routecodex servertool run {tool_name} --input-json {}",
+        "routecodex hook run {tool_name} --input-json {}",
         quote_posix_single_argument(&input_json)
     );
     validate_no_denied_cli_marker(&command)?;
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(plan.input["flowId"], "stop_message_flow");
         assert!(plan
             .exec_command
-            .contains("routecodex servertool run stop_message_auto"));
+            .contains("routecodex hook run stop_message_auto"));
         assert!(!contains_denied_cli_marker(&plan.exec_command));
     }
 
@@ -554,7 +554,7 @@ mod tests {
         assert_eq!(plan.flow_id, "servertool_cli_projection");
         assert_eq!(
             plan.exec_command,
-            "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
+            "routecodex hook run servertool_fixture --input-json '{\"value\":1}'"
         );
     }
 
@@ -573,7 +573,7 @@ mod tests {
         .expect("fixture projection plan");
         assert_eq!(
             plan.exec_command,
-            "routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'"
+            "routecodex hook run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'"
         );
     }
 

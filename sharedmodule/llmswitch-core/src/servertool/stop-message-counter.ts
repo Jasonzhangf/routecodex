@@ -28,9 +28,7 @@ import {
 type StopMessageSnapshot = NonNullable<ReturnType<typeof resolveStopMessageSnapshot>>;
 
 function isPersistentStickyKey(value: unknown): value is string {
-  return typeof value === 'string' && (
-    value.startsWith('tmux:') || value.startsWith('session:') || value.startsWith('conversation:')
-  );
+  return typeof value === 'string' && value.startsWith('session:');
 }
 
 function readPersistedStopMessageSnapshot(candidateKeys: string[]): StopMessageSnapshot | null {

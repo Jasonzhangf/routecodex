@@ -34,8 +34,8 @@ describe('stop_message_auto continuation routing state key', () => {
     expect(key).toBe('req_chain_from_continuation');
   });
 
-  test('uses Rust-owned client exec CLI result state from adapter context', () => {
-    const command = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from command\",\"repeatCount\":1,\"maxRepeats\":3}'";
+  test('does not restore stopless state from client-visible exec_command output', () => {
+    const command = "routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
     const state = resolveRuntimeStopMessageStateFromAdapterContext({
       __raw_request_body: {
         input: [{
@@ -52,13 +52,7 @@ describe('stop_message_auto continuation routing state key', () => {
       }
     });
 
-    expect(state).toEqual({
-      text: 'continue from output',
-      maxRepeats: 4,
-      used: 2,
-      source: 'client_exec_result',
-      stageMode: 'on'
-    });
+    expect(state).toBeNull();
   });
 
   test('uses Rust-owned bd working directory resolver', () => {

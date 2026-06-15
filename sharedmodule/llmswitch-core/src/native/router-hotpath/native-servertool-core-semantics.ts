@@ -223,20 +223,6 @@ export interface ClientVisibleProjectionShellInput {
   additionalToolCalls?: unknown[];
 }
 
-export interface StopMessageCliProjectionSeedInput {
-  execution: unknown;
-  finalChatResponse: unknown;
-}
-
-export interface StopMessageCliProjectionSeed {
-  flowId: string;
-  reasoningText: string;
-  continuationPrompt: string;
-  repeatCount: number;
-  maxRepeats: number;
-  input: Record<string, unknown>;
-}
-
 export interface StoplessGoalStateSyncPlanInput {
   latestUserText: string;
   currentState?: unknown;
@@ -274,7 +260,7 @@ export interface StoplessOrchestrationActionInput {
 }
 
 export interface StoplessOrchestrationActionPlan {
-  action: 'terminal_final' | 'cli_projection' | 'followup_mainline';
+  action: 'terminal_final' | 'cli_projection';
   isStopMessageFlow: boolean;
   reason: string;
 }
@@ -1423,38 +1409,6 @@ export function buildClientExecCliProjectionOutputWithNative(
   return JSON.parse(resultJson);
 }
 
-export function planStopMessageCliProjectionSeedWithNative(
-  input: StopMessageCliProjectionSeedInput,
-): StopMessageCliProjectionSeed {
-  const capability = 'planStopMessageCliProjectionSeedJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessageCliProjectionSeedJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageCliProjectionSeedJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planStopMessageCliProjectionSeedJson native returned invalid seed');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.flowId !== 'string' ||
-    typeof record.reasoningText !== 'string' ||
-    typeof record.continuationPrompt !== 'string' ||
-    typeof record.repeatCount !== 'number' ||
-    typeof record.maxRepeats !== 'number' ||
-    !record.input ||
-    typeof record.input !== 'object' ||
-    Array.isArray(record.input)
-  ) {
-    throw new Error('planStopMessageCliProjectionSeedJson native returned invalid seed fields');
-  }
-  return record as unknown as StopMessageCliProjectionSeed;
-}
-
 export function planStoplessOrchestrationActionWithNative(
   input: StoplessOrchestrationActionInput,
 ): StoplessOrchestrationActionPlan {
@@ -1473,7 +1427,7 @@ export function planStoplessOrchestrationActionWithNative(
   }
   const record = parsed as Record<string, unknown>;
   const action = record.action;
-  if (action !== 'terminal_final' && action !== 'cli_projection' && action !== 'followup_mainline') {
+  if (action !== 'terminal_final' && action !== 'cli_projection') {
     throw new Error('planStoplessOrchestrationActionJson native returned invalid action');
   }
   const isStopMessageFlow = record.isStopMessageFlow ?? record.is_stop_message_flow;

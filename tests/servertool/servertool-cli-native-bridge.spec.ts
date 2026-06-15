@@ -21,7 +21,7 @@ describe('servertool CLI native bridge', () => {
       repeatCount: 1,
       maxRepeats: 3
     });
-    expect(nativeProjection.execCommand).toContain('routecodex servertool run stop_message_auto');
+    expect(nativeProjection.execCommand).toContain('routecodex hook run stop_message_auto');
     expect(nativeProjection.execCommand).not.toContain('continuationPrompt');
     expect(nativeProjection.execCommand).not.toContain('继续执行原任务');
     expect(nativeProjection.execCommand).not.toContain('stdoutPreview');

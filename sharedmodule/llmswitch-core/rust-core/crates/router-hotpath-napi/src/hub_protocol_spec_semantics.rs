@@ -420,6 +420,9 @@ fn normalize_provider_outbound_tool(protocol: &str, tool: &Value) -> Vec<Value> 
             .map(str::trim)
             .filter(|value| !value.is_empty());
         if matches!(name, Some("apply_patch")) {
+            if protocol == "openai-responses" {
+                return vec![tool.clone()];
+            }
             let description = row
                 .get("description")
                 .and_then(Value::as_str)
@@ -1082,6 +1085,49 @@ mod tests {
             serde_json::json!({ "type": "object", "properties": { "patch": { "type": "string" } } })
         );
         assert_eq!(tools[0]["strict"], serde_json::json!(false));
+        assert!(tools[0].get("function").is_none());
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_preserves_custom_apply_patch_for_openai_responses() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "Use the `apply_patch` tool to edit files.",
+                    "format": {
+                        "type": "grammar",
+                        "syntax": "lark",
+                        "definition": "start: begin_patch\\nbegin_patch: \\\"*** Begin Patch\\\""
+                    }
+                }],
+                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "patch" }] }]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], serde_json::json!("custom"));
+        assert_eq!(tools[0]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            tools[0]["description"],
+            serde_json::json!("Use the `apply_patch` tool to edit files.")
+        );
+        assert_eq!(tools[0]["format"]["type"], serde_json::json!("grammar"));
+        assert_eq!(tools[0]["format"]["syntax"], serde_json::json!("lark"));
+        assert_eq!(
+            tools[0]["format"]["definition"],
+            serde_json::json!("start: begin_patch\\nbegin_patch: \\\"*** Begin Patch\\\"")
+        );
+        assert!(tools[0].get("parameters").is_none());
+        assert!(tools[0].get("strict").is_none());
         assert!(tools[0].get("function").is_none());
     }
 

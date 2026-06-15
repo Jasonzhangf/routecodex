@@ -25,7 +25,24 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/index.js', () =>
   updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk, probe) => probe ?? {})
 }));
 
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+  deriveFinishReasonNative: jest.fn((body: unknown) => {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return undefined;
+    }
+    const output = Array.isArray((body as Record<string, unknown>).output)
+      ? ((body as Record<string, unknown>).output as Array<Record<string, unknown>>)
+      : [];
+    return output.some((item) => item?.type === 'function_call') ? 'tool_calls' : undefined;
+  }),
+  mapChatToolsToBridgeJson: jest.fn((value: unknown) => value),
+}));
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  captureReqInboundResponsesContextSnapshotJson: jest.fn((payload: string) => payload),
+  classifyEmptyResponseSignalNative: jest.fn(() => ({ empty: false })),
+  detectToolExecutionFailuresNative: jest.fn(() => []),
+  planResponsesHandlerEntry: jest.fn((payload: unknown) => payload),
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
   projectResponsesClientPayloadForClientNative: jest.fn(({ payload }: { payload: unknown }) => payload),
   projectResponsesSseFrameForClientNative: jest.fn((input: unknown) => input),
@@ -257,6 +274,47 @@ describe('responses-response-bridge conversation lifecycle', () => {
 
     expect(recordResponseMock.mock.calls.map(([arg]) => (arg as { requestId: string }).requestId)).toEqual([
       'resp_provider_streamed_tool_100318513'
+    ]);
+  });
+
+  it('RED: continuation persistence retries original request aliases when response-id capture lacks request context', async () => {
+    recordResponseMock.mockImplementation((args: unknown) => {
+      const requestId = (args as { requestId?: string }).requestId;
+      if (requestId === 'resp_retry_request_alias') {
+        throw new Error('Responses conversation request context missing for response capture');
+      }
+      return undefined;
+    });
+    const { persistResponsesConversationLifecycleForHttp } = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
+    await persistResponsesConversationLifecycleForHttp({
+      entryEndpoint: '/v1/responses',
+      requestLabel: 'openai-responses-router-retry-alias',
+      usageLogInfo: {
+        finishReason: 'tool_calls',
+        routeName: 'tools/gateway-priority-5555-priority-tools',
+        timingRequestIds: [
+          'openai-responses-provider-retry-alias',
+          'openai-responses-router-retry-alias'
+        ]
+      } as any,
+      body: {
+        id: 'resp_retry_request_alias',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            call_id: 'call_retry_alias_1'
+          }
+        ]
+      },
+    });
+
+    expect(recordResponseMock.mock.calls.map(([arg]) => (arg as { requestId: string }).requestId)).toEqual([
+      'resp_retry_request_alias',
+      'openai-responses-router-retry-alias',
     ]);
   });
 

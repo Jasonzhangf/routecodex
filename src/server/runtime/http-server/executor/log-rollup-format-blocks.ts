@@ -128,6 +128,18 @@ export function colorize(text: string, color: string): string {
   return `${color}${text}${ANSI_RESET}`;
 }
 
+export function highlightLogKeyValues(text: string, baseColor: string): string {
+  return text.replace(
+    /([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g,
+    (_match, key: string, value: string, suffix = '') => {
+      if (key !== 'finish_reason' && !/^[-+]?\d/.test(value)) {
+        return `${key}=${value}${suffix}`;
+      }
+      return `${key}=${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}${suffix}`;
+    }
+  );
+}
+
 export function formatRoutePool(routeName: string, poolId: string): string {
   return poolId !== '-' ? `${routeName}/${poolId}` : routeName;
 }

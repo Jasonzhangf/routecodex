@@ -384,6 +384,69 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     expect(text).not.toContain('{\\"patch\\"');
   });
 
+  it('normalizes direct passthrough apply_patch SSE frames instead of returning empty function_call arguments', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const patch = '*** Begin Patch\n*** Add File: tmp/routecodex-direct-apply-patch-sse.txt\n+hello\n*** End Patch';
+    const wrapped = JSON.stringify({ patch });
+    const upstream = new PassThrough();
+    const res = new MockResponse();
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        headers: {},
+        body: { __sse_responses: upstream },
+        metadata: {
+          outboundStream: true,
+          stream: true,
+          __routecodexDirectPassthrough: true,
+        },
+      } as any,
+      'req_apply_patch_direct_delta_sse',
+      {
+        entryEndpoint: '/v1/responses',
+        forceSSE: true,
+        responsesRequestContext: {
+          payload: {
+            model: 'gpt-5.4',
+            input: [],
+            tools: [{ type: 'custom', name: 'apply_patch', format: { type: 'grammar' } }],
+          },
+          context: {},
+        },
+      },
+    );
+
+    upstream.write('event: response.output_item.added\n');
+    upstream.write(`data: ${JSON.stringify({
+      type: 'response.output_item.added',
+      item: { type: 'function_call', name: 'apply_patch', call_id: 'call_patch_direct', arguments: '' },
+    })}\n\n`);
+    upstream.write('event: response.function_call_arguments.delta\n');
+    upstream.write(`data: ${JSON.stringify({ type: 'response.function_call_arguments.delta', call_id: 'call_patch_direct', delta: wrapped.slice(0, 12) })}\n\n`);
+    upstream.write('event: response.function_call_arguments.delta\n');
+    upstream.write(`data: ${JSON.stringify({ type: 'response.function_call_arguments.delta', call_id: 'call_patch_direct', delta: wrapped.slice(12) })}\n\n`);
+    upstream.write('event: response.output_item.done\n');
+    upstream.write(`data: ${JSON.stringify({
+      type: 'response.output_item.done',
+      item: { type: 'function_call', call_id: 'call_patch_direct', arguments: '' },
+    })}\n\n`);
+    upstream.end();
+    await waitForEnd(res);
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    expect(text).not.toContain('event: response.function_call_arguments.delta');
+    expect(text).toContain('event: response.output_item.done');
+    expect(text).toContain('"type":"custom_tool_call"');
+    expect(text).toContain('"input":');
+    expect(text).toContain(JSON.stringify(patch));
+    expect(text).not.toContain('{\\"patch\\"');
+    expect(text).not.toContain('"arguments":""');
+  });
+
   it('preserves live SSE frame order when normalized tool frames precede terminal frames', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const patch = '*** Begin Patch\n*** Add File: tmp/routecodex-online-apply-patch-smoke.txt\n+hello\n*** End Patch';

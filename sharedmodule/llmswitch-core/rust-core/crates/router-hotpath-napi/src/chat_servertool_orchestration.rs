@@ -2756,11 +2756,11 @@ mod tests {
 
         assert_eq!(
             parsed["strictSessionScope"].as_str(),
-            Some("tmux:tmux-runtime")
+            Some("session:sess-a")
         );
         assert_eq!(
             parsed["stickyKey"].as_str(),
-            Some("conversation:sticky-conv")
+            Some("session:sess-a")
         );
         assert_eq!(
             parsed["lookupPolicy"].as_str(),
@@ -2773,13 +2773,7 @@ mod tests {
                 .as_array()
                 .cloned()
                 .unwrap_or_default(),
-            vec![
-                json!("tmux:sess-a"),
-                json!("session:sess-a"),
-                json!("conversation:conv-a"),
-                json!("tmux:tmux-runtime"),
-                json!("conversation:sticky-conv")
-            ]
+            vec![json!("session:sess-a")]
         );
     }
 

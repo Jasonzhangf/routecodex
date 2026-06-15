@@ -26,10 +26,12 @@ function expectContains(source, needle, message) {
 
 const handlerFeature = sectionForFeature(functionMap, 'server.responses_handler_family');
 const requestBridgeFeature = sectionForFeature(functionMap, 'server.responses_request_handler_bridge_surface');
+const responseSseBridgeFeature = sectionForFeature(functionMap, 'server.responses_sse_bridge_surface');
 const responseBridgeFeature = sectionForFeature(functionMap, 'server.responses_response_handler_bridge_surface');
 
 const handlerVerification = sectionForFeature(verificationMap, 'server.responses_handler_family');
 const requestBridgeVerification = sectionForFeature(verificationMap, 'server.responses_request_handler_bridge_surface');
+const responseSseBridgeVerification = sectionForFeature(verificationMap, 'server.responses_sse_bridge_surface');
 const responseBridgeVerification = sectionForFeature(verificationMap, 'server.responses_response_handler_bridge_surface');
 
 expectContains(handlerFeature, 'HTTP transport adapters only', 'function-map: server.responses_handler_family must say HTTP transport adapters only');
@@ -39,11 +41,14 @@ expectContains(requestBridgeFeature, 'opaque request facade only', 'function-map
 expectContains(requestBridgeFeature, 'no protocol parsing, protocol conversion, tool-shape normalization, or submit/protocol branching in TS', 'function-map: request bridge notes must forbid TS protocol semantics');
 expectContains(requestBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: request bridge allowed_paths must include verify-server-function-map-boundary.mjs');
 
-expectContains(responseBridgeFeature, 'opaque SSE/body handoff facade only', 'function-map: server.responses_response_handler_bridge_surface must say opaque SSE/body handoff facade only');
-expectContains(responseBridgeFeature, 'no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS', 'function-map: response bridge notes must forbid TS response protocol semantics');
-expectContains(responseBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: response bridge allowed_paths must include verify-server-function-map-boundary.mjs');
+expectContains(responseSseBridgeFeature, 'opaque SSE/body handoff facade only', 'function-map: server.responses_sse_bridge_surface must say opaque SSE/body handoff facade only');
+expectContains(responseSseBridgeFeature, 'no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS', 'function-map: SSE bridge notes must forbid TS response protocol semantics');
+expectContains(responseSseBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: SSE bridge allowed_paths must include verify-server-function-map-boundary.mjs');
+expectContains(responseBridgeFeature, 'opaque continuation/conversation facade only', 'function-map: server.responses_response_handler_bridge_surface must say opaque continuation/conversation facade only');
+expectContains(responseBridgeFeature, 'response-id rebinding, continuation retention/finalization, or conversation clear-policy semantics', 'function-map: lifecycle bridge notes must forbid handler-owned lifecycle semantics');
+expectContains(responseBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: lifecycle bridge allowed_paths must include verify-server-function-map-boundary.mjs');
 
-for (const section of [handlerVerification, requestBridgeVerification, responseBridgeVerification]) {
+for (const section of [handlerVerification, requestBridgeVerification, responseSseBridgeVerification, responseBridgeVerification]) {
   expectContains(section, 'npm run verify:server-function-map-boundary', 'verification-map: server feature must require verify:server-function-map-boundary');
 }
 

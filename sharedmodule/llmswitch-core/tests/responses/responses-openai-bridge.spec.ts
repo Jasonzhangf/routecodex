@@ -9,6 +9,28 @@ import {
 } from '../../src/conversion/responses/responses-openai-bridge.js';
 import { normalizeChatRequest } from '../../src/conversion/shared/openai-message-normalize.js';
 
+function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
+  if (!Array.isArray(messages)) return null;
+  const pending = new Set<string>();
+  for (const message of messages) {
+    if (message?.role === 'assistant' && Array.isArray((message as any).tool_calls) && (message as any).tool_calls.length > 0) {
+      if (pending.size > 0) return 'assistant_tool_calls_before_previous_results';
+      for (const toolCall of (message as any).tool_calls) {
+        if (typeof toolCall?.id === 'string') pending.add(toolCall.id);
+      }
+      continue;
+    }
+    if (message?.role === 'tool') {
+      const id = (message as any).tool_call_id;
+      if (typeof id !== 'string' || !pending.has(id)) return 'orphan_tool_result';
+      pending.delete(id);
+      continue;
+    }
+    if (pending.size > 0) return 'non_tool_message_before_tool_results';
+  }
+  return pending.size > 0 ? 'dangling_tool_call' : null;
+}
+
 function createTempPng(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmswitch-local-image-jest-'));
   const file = path.join(dir, 'sample.png');
@@ -245,6 +267,40 @@ describe('responses-openai-bridge history seed normalization', () => {
         }
       ]
     } as any)).toThrow(/Tool history contract violated: orphan_tool_result/);
+  });
+
+  test('RED: reopened apply_patch and exec_command history stays tool-ordered after prior assistant text', () => {
+    const firstPatch = '*** Begin Patch\n*** Add File: apply_patch_test/01-add.txt\n+hello\n*** End Patch';
+    const secondPatch = '*** Begin Patch\n*** Update File: apply_patch_test/01-add.txt\n@@\n-hello\n+hello world\n*** End Patch';
+    const payload = {
+      model: 'gpt-5.5',
+      input: [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '先检查当前补丁状态。' }] },
+        { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch_1', input: firstPatch },
+        { type: 'custom_tool_call_output', call_id: 'call_patch_1', output: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA apply_patch_test/01-add.txt\n' },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '继续核对并追加修改。' }] },
+        { type: 'function_call', call_id: 'call_exec_1', name: 'exec_command', arguments: '{"cmd":"cat apply_patch_test/01-add.txt"}' },
+        { type: 'function_call_output', call_id: 'call_exec_1', output: 'hello\n' },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '准备第二次 apply_patch。' }] },
+        { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch_2', input: secondPatch },
+        { type: 'custom_tool_call_output', call_id: 'call_patch_2', output: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM apply_patch_test/01-add.txt\n' },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '完成，继续下一步。' }] }
+      ],
+      tools: [
+        { type: 'custom', name: 'apply_patch', description: 'Apply a patch.' },
+        { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
+      ]
+    } as any;
+
+    const ctx = captureResponsesContext(payload, { route: { requestId: 'bridge-reopened-apply-patch' } } as any);
+    const result = buildChatRequestFromResponses(payload, ctx);
+    const messages = result.request.messages;
+
+    expect(findOpenAiChatToolOrderingViolation(messages)).toBeNull();
+    expect(JSON.stringify(messages)).toContain('call_patch_1');
+    expect(JSON.stringify(messages)).toContain('call_exec_1');
+    expect(JSON.stringify(messages)).toContain('call_patch_2');
+    expect(JSON.stringify(messages)).toContain('hello world');
   });
 
   test('allows responses input when function_call_output appears before its matching function_call in the same batch', () => {

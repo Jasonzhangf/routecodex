@@ -59,13 +59,39 @@ function listFiles(relPath) {
   const stat = fs.statSync(abs);
   if (stat.isFile()) return [abs];
 
+  // Scan source files only. Generated output can disappear while cargo/npm
+  // jobs run, so including it makes this architecture gate nondeterministic.
+  const skipDirs = new Set([
+    'target',
+    'node_modules',
+    'dist',
+    'build',
+    '.git',
+    '.cache',
+    'coverage',
+    '.rcc',
+    'out',
+    'tmp',
+    'logs',
+    'release',
+  ]);
+  const skipErrnos = new Set(['ENOENT', 'EPERM', 'EACCES', 'EBUSY']);
+
   const out = [];
   const stack = [abs];
   while (stack.length) {
     const current = stack.pop();
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      if (err && skipErrnos.has(err.code)) continue;
+      throw err;
+    }
+    for (const entry of entries) {
       const next = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (skipDirs.has(entry.name)) continue;
         stack.push(next);
       } else if (/\.(rs|ts|tsx|js|mjs|cjs)$/.test(entry.name)) {
         out.push(next);

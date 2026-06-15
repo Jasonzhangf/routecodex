@@ -10,6 +10,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   captureResponsesRequestContextForRequest: jest.fn(),
   clearResponsesConversationByRequestId: jest.fn(),
   finalizeResponsesConversationRequestRetention: jest.fn(),
+  lookupResponsesContinuationByResponseId: jest.fn(),
   materializeLatestResponsesContinuationByScope: jest.fn(),
   recordResponsesResponseForRequest: jest.fn(),
   resumeResponsesConversation: jest.fn(),

@@ -37,30 +37,32 @@ import {
   buildResponsesStreamIncompleteErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
-  clearResponsesConversationRequestIdsForHttp,
   createResponsesJsonToSseConverterForHttp,
-  finalizeResponsesConversationRequestRetentionForHttp,
   hasResponsesSsePayloadForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
   inspectResponsesTerminalStateFromSseChunkForHttp,
   normalizeResponsesSseFrameForClientForHttp,
-  persistResponsesConversationLifecycleForHttp,
   planResponsesContinuationCloseActionForHttp,
   planResponsesStreamEndRepairForHttp,
   prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonSseDispatchPlanForHttp,
   resolveResponsesRequestContextForHttp,
-  resolveResponsesConversationClearReasonForHttp,
   resolveResponsesProviderProtocolHintFromSseFrameForHttp,
   resolveResponsesTerminalProbeFinishReasonForHttp,
-  shouldClearResponsesConversationOnClientCloseForHttp,
-  shouldClearResponsesConversationOnFailureForHttp,
   shouldDropClientSseFrameForHttp,
   shouldPersistResponsesContinuationOnProbeUpdateForHttp,
   shouldPersistResponsesConversationStateForHttp,
   shouldRequireResponsesTerminalEventForHttp,
   summarizeResponsesSseFrameForLogForHttp,
   updateResponsesContractProbeFromSseChunkForHttp
+} from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
+import {
+  clearResponsesConversationRequestIdsForHttp,
+  finalizeResponsesConversationRequestRetentionForHttp,
+  persistResponsesConversationLifecycleForHttp,
+  resolveResponsesConversationClearReasonForHttp,
+  shouldClearResponsesConversationOnClientCloseForHttp,
+  shouldClearResponsesConversationOnFailureForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 type FlushableResponse = Response & {
@@ -943,6 +945,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let nativeSseConversationPersisted = false;
 
   const persistNativeSseConversationState = async (): Promise<void> => {
+    if (isDirectPassthrough) {
+      logResponsesContinuationTrace('sse.persist.skip.direct_passthrough', requestLabel);
+      return;
+    }
     if (nativeSseConversationPersisted) {
       logResponsesContinuationTrace('sse.persist.skip.already_persisted', requestLabel);
       return;
@@ -1467,7 +1473,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       }
       enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
     }
-    if (!terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
+    if (isDirectPassthrough || !terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
       return;
     }
     terminalFlushTimer = setTimeout(() => {
@@ -1611,8 +1617,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     const streamEndRepairPlan = planResponsesStreamEndRepairForHttp({
       entryEndpoint,
       probe: contractProbe.probe,
-      sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-      sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+      sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
+      sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
       sawTerminalEvent: finishTracker.seenTerminalEvent === true,
     });
     const repairedTerminalFrames = streamEndRepairPlan.shouldRepairTerminalFrames
@@ -1651,8 +1657,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         const closedBeforeTerminalRepairPlan = planResponsesStreamEndRepairForHttp({
           entryEndpoint,
           probe: contractProbe.probe,
-          sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-          sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+          sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
+          sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
           sawTerminalEvent: finishTracker.seenTerminalEvent === true,
         });
         if (closedBeforeTerminalEvent && closedBeforeTerminalRepairPlan.shouldRepairContinuationTerminal) {
@@ -1697,8 +1703,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         const finalStreamEndRepairPlan = planResponsesStreamEndRepairForHttp({
           entryEndpoint,
           probe: contractProbe.probe,
-          sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-          sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+          sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
+          sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
           sawTerminalEvent: finishTracker.seenTerminalEvent === true,
         });
         if (repairedClosedBeforeTerminalEvent && finalStreamEndRepairPlan.shouldProjectIncompleteError) {
@@ -1739,14 +1745,18 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
               onNonBlockingError: logResponseNonBlockingError,
             });
           }
-          if (!res.writableEnded && !res.destroyed) {
-            try {
-              await clientWriteQueue;
-              writeClientSseFrame(`event: error\ndata: ${JSON.stringify(incompletePayload)}\n\n`, 'response.sse.stream.end.write_error_event');
-            } catch (writeError) {
-              logResponseNonBlockingError(`response.sse.stream.end.write_error_event:${requestLabel}`, writeError);
-            }
-          }
+          args.logResponseCompleted({
+            status: 502,
+            mode: 'sse',
+            reason: 'upstream_stream_incomplete',
+            bridgeStatus: 502,
+            finishReason: 'incomplete',
+          });
+          logPipelineStage('response.sse.stream.incomplete_internal_error', requestLabel, {
+            message: incompleteMessage,
+            code: incompleteCode,
+            clientErrorSuppressed: true
+          });
         } else {
           logStreamRequestCompleteOnce(
             completionLogState,

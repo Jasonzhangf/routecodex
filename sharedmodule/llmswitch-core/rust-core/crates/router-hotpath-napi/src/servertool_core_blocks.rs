@@ -1,3 +1,4 @@
+// feature_id: hub.servertool_stopless_cli_continuation
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use servertool_core::backend_route_contract::{
@@ -604,16 +605,6 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     let output =
         cli_contract::plan_client_exec_cli_projection_output(input).map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
-}
-
-pub fn plan_stop_message_cli_projection_seed_json(input_json: &str) -> Result<String, String> {
-    let input: cli_contract::StopMessageCliProjectionSeedInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message cli projection seed input: {e}"))?;
-    let output =
-        cli_contract::plan_stop_message_cli_projection_seed(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize stop-message cli projection seed: {e}"))
 }
 
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
@@ -1911,42 +1902,6 @@ mod tests {
     }
 
     #[test]
-    fn plans_stop_message_cli_projection_seed_via_servertool_core_bridge() {
-        let seed = plan_stop_message_cli_projection_seed_json(
-            &json!({
-                "execution": {
-                    "flowId": "stop_message_flow",
-                    "context": {
-                        "assistantStopText": "停止原因：remove me\nvisible",
-                        "decision": { "followup_text": "continue with tools" }
-                    },
-                    "followup": {
-                        "metadata": {
-                            "__rt": {
-                                "serverToolLoopState": {
-                                    "repeatCount": 1,
-                                    "maxRepeats": 3
-                                }
-                            }
-                        }
-                    }
-                },
-                "finalChatResponse": {}
-            })
-            .to_string(),
-        )
-        .expect("stop-message cli projection seed");
-        let plan: serde_json::Value =
-            serde_json::from_str(&seed).expect("stop-message cli projection seed json");
-        assert_eq!(plan["flowId"], "stop_message_flow");
-        assert_eq!(plan["continuationPrompt"], "continue with tools");
-        assert_eq!(plan["reasoningText"], "visible");
-        assert_eq!(plan["repeatCount"], 1);
-        assert_eq!(plan["maxRepeats"], 3);
-        assert_eq!(plan["input"]["continuationPrompt"], "continue with tools");
-    }
-
-    #[test]
     fn plans_stopless_orchestration_action_via_servertool_core_bridge() {
         let cli = plan_stopless_orchestration_action_json(
             &json!({
@@ -1958,7 +1913,6 @@ mod tests {
         .expect("stopless cli action");
         let cli_plan: serde_json::Value =
             serde_json::from_str(&cli).expect("stopless cli action json");
-        assert_eq!(cli_plan["action"], "cli_projection");
         assert_eq!(cli_plan["isStopMessageFlow"], true);
 
         let terminal = plan_stopless_orchestration_action_json(

@@ -120,7 +120,6 @@ async function main() {
 
   try {
     const upstreamHits = [];
-    let followupSeen = false;
 
     const upstreamApp = express();
     upstreamApp.use(express.json({ limit: '2mb' }));
@@ -129,11 +128,11 @@ async function main() {
       const isFollowup = String(req.body?.metadata?.__rt?.serverToolFollowup || '') === 'true'
         || String(req.body?.request_id || '').includes(':stop_followup')
         || (Array.isArray(req.body?.input) && JSON.stringify(req.body.input).includes('继续执行'));
-      if (isFollowup) followupSeen = true;
       const authHeader = req.get('authorization') || '';
       const providerFromAuth = authHeader.includes('crs1-') ? 'crs1' : authHeader.includes('crs2-') ? 'crs2' : 'unknown';
       upstreamHits[upstreamHits.length - 1].providerFromAuth = providerFromAuth;
-      // first response deliberately ends with stop to trigger stopless
+      upstreamHits[upstreamHits.length - 1].isFollowup = isFollowup;
+      // The first response deliberately ends with stop to trigger stopless CLI projection.
       if (upstreamHits.length === 1) {
         return res.json(upstreamResponse('阶段完成', 'stop'));
       }
@@ -189,15 +188,33 @@ async function main() {
 
     const text = await resp.text();
     assert.equal(resp.status, 200, `expected 200, got ${resp.status}, body=${text}`);
-    assert.ok(upstreamHits.length >= 2, `expected upstream >=2 hits (initial + followup), got ${upstreamHits.length}`);
-    assert.ok(followupSeen, 'expected stopless followup request to be seen by upstream');
+    const body = JSON.parse(text);
+    const toolCalls = body?.required_action?.submit_tool_outputs?.tool_calls;
+    assert.ok(Array.isArray(toolCalls) && toolCalls.length > 0, `expected required_action tool call projection, body=${text}`);
+    const execTool = toolCalls.find((item) => item?.name === 'exec_command' || item?.function?.name === 'exec_command');
+    assert.ok(execTool, `expected exec_command projection, body=${text}`);
+    const rawArgs = execTool?.function?.arguments ?? execTool?.arguments ?? '';
+    const args = JSON.parse(rawArgs);
+    assert.ok(
+      typeof args?.cmd === 'string'
+        && (
+          args.cmd.includes('routecodex hook run stop_message_auto')
+          || args.cmd.includes('routecodex servertool run stop_message_auto')
+        ),
+      `expected stop_message_auto CLI projection, args=${rawArgs}`
+    );
+    assert.ok(
+      !String(args.cmd).includes('continuationPrompt') && !String(args.cmd).includes('stopreason'),
+      `expected status-only CLI input without leaked guidance, args=${rawArgs}`
+    );
+    assert.equal(upstreamHits.length, 1, `expected exactly one upstream hit before client-side CLI execution, got ${upstreamHits.length}`);
+    assert.equal(upstreamHits[0]?.isFollowup, false, `unexpected server-side followup upstream hit: ${JSON.stringify(upstreamHits)}`);
     assert.equal(upstreamHits[0]?.providerFromAuth, 'crs1', `initial request should use first round-robin provider, hits=${JSON.stringify(upstreamHits)}`);
-    assert.equal(upstreamHits[1]?.providerFromAuth, 'crs2', `servertool followup must not pin/stick to initial provider, hits=${JSON.stringify(upstreamHits)}`);
 
     console.log('✅ stopless blackbox passed', JSON.stringify({
       upstreamHits: upstreamHits.length,
       providers: upstreamHits.map((hit) => hit.providerFromAuth),
-      followupSeen,
+      execCommand: args.cmd,
       status: resp.status
     }));
   } finally {

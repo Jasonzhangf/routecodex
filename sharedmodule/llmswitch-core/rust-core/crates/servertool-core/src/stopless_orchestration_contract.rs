@@ -1,3 +1,4 @@
+// feature_id: hub.servertool_stopless_cli_continuation
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,9 +12,8 @@ pub struct StoplessOrchestrationPlanInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum StoplessOrchestrationAction {
-    CliProjection,
     TerminalFinal,
-    FollowupMainline,
+    CliProjection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,7 +43,7 @@ pub fn plan_stopless_orchestration_action(
     let is_stop_message_flow = flow_id == Some("stop_message_flow");
     if !is_stop_message_flow {
         return StoplessOrchestrationPlan {
-            action: StoplessOrchestrationAction::FollowupMainline,
+            action: StoplessOrchestrationAction::CliProjection,
             is_stop_message_flow: false,
             reason: "non_stop_message_flow".to_string(),
         };
@@ -77,13 +77,14 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn stop_message_flow_projects_cli_by_default() {
+    fn stop_message_flow_uses_cli_projection_by_default() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_cli_projection");
     }
 
     #[test]
@@ -100,12 +101,12 @@ mod tests {
     }
 
     #[test]
-    fn non_stop_flow_uses_followup_mainline() {
+    fn non_stop_flow_uses_cli_projection() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("vision_flow".to_string()),
             execution: json!({ "flowId": "vision_flow" }),
         });
-        assert_eq!(plan.action, StoplessOrchestrationAction::FollowupMainline);
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(!plan.is_stop_message_flow);
     }
 }

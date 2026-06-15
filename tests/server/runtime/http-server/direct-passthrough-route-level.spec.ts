@@ -620,6 +620,73 @@ describe('direct passthrough route-level', () => {
     }));
   });
 
+  it('router same-protocol direct must not consume relay-owned responses scope materialize continuation', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: true,
+      response: { status: 200, body: { ok: true, mode: 'direct' } },
+      providerHandle: {} as any,
+      auditContext: {} as any,
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { object: 'response', id: 'resp_relay_scope_materialize' },
+      metadata: { relayed: true },
+    } as any);
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+
+    const result = await (server as any).executePortAwarePipeline(5555, {
+      requestId: 'req_router_direct_must_skip_relay_owned_scope_materialize',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-5.4',
+        input: [
+          { type: 'function_call_output', call_id: 'call_1', output: 'pong' },
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: '继续' }] },
+        ],
+      },
+      metadata: {
+        responsesResume: {
+          continuationOwner: 'relay',
+          materialized: true,
+          restored: true,
+          scopeKey: 'entry:responses|owner:relay|session:test',
+        },
+      },
+    });
+
+    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_scope_materialize' });
+  });
+
   it('router same-protocol client tools request stays on direct path', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

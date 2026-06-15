@@ -371,6 +371,73 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[request.usage_log.completed][req-stream-client-close]'));
   });
 
+  it('treats upstream_stream_incomplete as failed completion instead of unknown success', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = Readable.from([
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_incomplete_failed_completion","object":"response","status":"in_progress","output":[]}}\n\n',
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        body: {
+          __sse_responses: stream
+        },
+        usageLogInfo: {
+          providerKey: 'cc.key1.gpt-5.4-mini',
+          routeName: 'router-direct:search/-',
+          finishReason: 'unknown',
+          requestStartedAtMs: 1000,
+          timingRequestIds: ['openai-responses-cc.key1-gpt-5.4-mini-20260614T142222200-342975-553']
+        }
+      } as any,
+      'req-stream-incomplete-failed-completion',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(output).not.toContain('event: error');
+    expect(output).not.toContain('"code":"upstream_stream_incomplete"');
+    expect(logOutput).toContain('[response][req-stream-incomplete-failed-completion] completed');
+    expect(logOutput).toContain('upstream_stream_incomplete');
+    expect(logOutput).toContain('finish_reason=incomplete');
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('completed (status=200, finish_reason=unknown)'));
+  });
+
   it('destroys the original upstream SSE stream when client closes before terminal event', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

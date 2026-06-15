@@ -5,6 +5,46 @@ import {
   buildOpenAIChatFromAnthropic
 } from '../anthropic-openai-codec.js';
 
+function findAnthropicToolOrderingViolation(messages: unknown): string | null {
+  if (!Array.isArray(messages)) return null;
+  const pending = new Set<string>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index] as any;
+    const content = Array.isArray(message?.content) ? message.content : [];
+    if (message?.role === 'assistant') {
+      const toolUseIds = content
+        .filter((block: any) => block?.type === 'tool_use' && typeof block.id === 'string')
+        .map((block: any) => String(block.id));
+      if (toolUseIds.length > 0) {
+        if (pending.size > 0) return `assistant_tool_use_before_previous_results_at_${index}`;
+        for (const id of toolUseIds) pending.add(id);
+      } else if (pending.size > 0) {
+        return `assistant_text_before_tool_results_at_${index}`;
+      }
+      continue;
+    }
+    if (message?.role === 'user') {
+      const resultIds = content
+        .filter((block: any) => block?.type === 'tool_result' && typeof block.tool_use_id === 'string')
+        .map((block: any) => String(block.tool_use_id));
+      const hasNonResultContent = content.some((block: any) => block?.type !== 'tool_result');
+      if (pending.size > 0) {
+        if (resultIds.length === 0) return `non_tool_result_user_content_before_tool_results_at_${index}`;
+        for (const id of resultIds) {
+          if (!pending.has(id)) return `orphan_tool_result_at_${index}`;
+          pending.delete(id);
+        }
+        if (hasNonResultContent && pending.size > 0) {
+          return `mixed_user_content_before_all_tool_results_at_${index}`;
+        }
+      }
+      continue;
+    }
+    if (pending.size > 0) return `non_tool_message_before_tool_results_at_${index}`;
+  }
+  return pending.size > 0 ? 'dangling_tool_use_at_end' : null;
+}
+
 const profile = {
   id: 'anthropic-openai-test',
   incomingProtocol: 'anthropic-messages',
@@ -382,5 +422,84 @@ describe('anthropic-openai-codec native wrapper', () => {
         } as any
       )
     ).toThrow('malformed data URL image payload');
+  });
+
+  test('RED: preserves reopened apply_patch and exec_command history when mapping OpenAI chat to Anthropic messages', () => {
+    const firstPatch = '*** Begin Patch\n*** Add File: apply_patch_test/01-add.txt\n+hello\n*** End Patch';
+    const secondPatch = '*** Begin Patch\n*** Update File: apply_patch_test/01-add.txt\n@@\n-hello\n+hello world\n*** End Patch';
+
+    const result = buildAnthropicRequestFromOpenAIChat(
+      {
+        model: 'claude-3-7-sonnet',
+        messages: [
+          { role: 'assistant', content: '先检查当前补丁状态。' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_patch_1',
+                type: 'function',
+                function: { name: 'apply_patch', arguments: JSON.stringify({ input: firstPatch }) }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_patch_1',
+            name: 'apply_patch',
+            content: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA apply_patch_test/01-add.txt\n'
+          },
+          { role: 'assistant', content: '继续核对并追加修改。' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_exec_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: '{"cmd":"cat apply_patch_test/01-add.txt"}' }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_exec_1',
+            name: 'exec_command',
+            content: 'hello\n'
+          },
+          { role: 'assistant', content: '准备第二次 apply_patch。' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_patch_2',
+                type: 'function',
+                function: { name: 'apply_patch', arguments: JSON.stringify({ input: secondPatch }) }
+              }
+            ]
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_patch_2',
+            name: 'apply_patch',
+            content: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM apply_patch_test/01-add.txt\n'
+          },
+          { role: 'assistant', content: '完成，继续下一步。' }
+        ],
+        tools: [
+          { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object', properties: {} } } },
+          { type: 'function', function: { name: 'exec_command', parameters: { type: 'object', properties: {} } } }
+        ]
+      } as any
+    );
+
+    expect(findAnthropicToolOrderingViolation((result as any).messages)).toBeNull();
+    const serialized = JSON.stringify((result as any).messages);
+    expect(serialized).toContain('call_patch_1');
+    expect(serialized).toContain('call_exec_1');
+    expect(serialized).toContain('call_patch_2');
+    expect(serialized).toContain('hello world');
   });
 });

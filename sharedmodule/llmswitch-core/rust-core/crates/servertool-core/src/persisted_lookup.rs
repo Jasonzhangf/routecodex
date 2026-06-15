@@ -1,11 +1,10 @@
-use crate::cli_contract;
+// feature_id: hub.servertool_stopless_cli_continuation
 use crate::stop_gateway_context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 pub const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
-pub const STOP_MESSAGE_PERSISTED_LOOKUP_POLICY: &str = "strict_then_sticky_then_session_family";
+pub const STOP_MESSAGE_PERSISTED_LOOKUP_POLICY: &str = "strict_session_only";
 pub const STOP_MESSAGE_FOLLOWUP_FLOW_ID: &str = "stop_message_flow";
 pub const STOP_MESSAGE_FOLLOWUP_SOURCE: &str = "servertool.stop_message";
 pub const STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT: &str = "继续执行";
@@ -188,14 +187,6 @@ pub struct StopMessageImplicitGeminiSnapshotInput {
     pub record: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct StopMessageCliCommandSeed {
-    continuation_prompt: Option<String>,
-    repeat_count: Option<i64>,
-    max_repeats: Option<i64>,
-    stdout_preview: Option<String>,
-}
-
 pub fn plan_stop_message_persisted_lookup(
     input: &StopMessagePersistedLookupPlannerInput,
 ) -> StopMessagePersistedLookupPlanOutput {
@@ -339,12 +330,6 @@ pub fn resolve_runtime_stop_message_state_from_adapter_context(
 ) -> Option<RuntimeStopMessageStateSnapshot> {
     if let Some(runtime) = input.runtime_metadata.as_ref() {
         if let Some(snapshot) = resolve_runtime_stop_message_state(runtime) {
-            return Some(snapshot);
-        }
-    }
-
-    for record in collect_request_like_records(&input.adapter_context) {
-        if let Some(snapshot) = resolve_runtime_stop_message_state_from_request_record(record) {
             return Some(snapshot);
         }
     }
@@ -709,9 +694,7 @@ fn is_persistent_stop_message_scope(value: Option<&str>) -> bool {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return false;
     };
-    value.starts_with("tmux:")
-        || value.starts_with("session:")
-        || value.starts_with("conversation:")
+    value.starts_with("session:")
 }
 
 fn is_stop_eligible_for_servertool(base: &Value, adapter_context: Option<&Value>) -> bool {
@@ -1021,257 +1004,6 @@ fn read_provider_key_from_metadata(value: &Value) -> Option<String> {
         })
 }
 
-fn collect_request_like_records(adapter_context: &Value) -> Vec<&Value> {
-    let Some(record) = adapter_context.as_object() else {
-        return Vec::new();
-    };
-    [
-        "__raw_request_body",
-        "capturedEntryRequest",
-        "capturedChatRequest",
-    ]
-    .into_iter()
-    .filter_map(|key| record.get(key))
-    .filter(|value| value.as_object().is_some())
-    .collect()
-}
-
-fn resolve_runtime_stop_message_state_from_request_record(
-    record: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let command_seeds = read_stop_message_cli_command_seeds(record);
-    let mut command_map: HashMap<String, StopMessageCliCommandSeed> = HashMap::new();
-    for (call_id, seed) in &command_seeds {
-        command_map.insert(call_id.clone(), seed.clone());
-    }
-    let last_command_seed = find_last_stop_message_cli_command_seed(record)
-        .or_else(|| command_seeds.last().map(|(_, seed)| seed.clone()));
-
-    let mut outputs: Vec<&Value> = Vec::new();
-    if let Some(input) = record.get("input").and_then(Value::as_array) {
-        outputs.extend(input.iter());
-    }
-    if let Some(tool_outputs) = record.get("tool_outputs").and_then(Value::as_array) {
-        outputs.extend(tool_outputs.iter());
-    }
-
-    for row in outputs.into_iter().rev() {
-        let Some(row_obj) = row.as_object() else {
-            continue;
-        };
-        if let Some(kind) = read_trimmed_string(row_obj.get("type")) {
-            let normalized = kind.to_lowercase();
-            if normalized != "function_call_output"
-                && normalized != "tool_result"
-                && normalized != "tool_message"
-            {
-                continue;
-            }
-        }
-
-        let raw_output = read_trimmed_string(row_obj.get("output"))
-            .or_else(|| read_trimmed_string(row_obj.get("content")))
-            .or_else(|| read_trimmed_string(row_obj.get("text")));
-        let Some(raw_output) = raw_output else {
-            continue;
-        };
-
-        let parsed = cli_contract::validate_client_exec_command_result(&raw_output).ok();
-        let call_id = read_trimmed_string(row_obj.get("call_id"))
-            .or_else(|| read_trimmed_string(row_obj.get("tool_call_id")))
-            .or_else(|| read_trimmed_string(row_obj.get("id")));
-        let command_seed = call_id
-            .as_ref()
-            .and_then(|call_id| command_map.get(call_id))
-            .cloned()
-            .or_else(|| last_command_seed.clone());
-
-        let tool_name = parsed
-            .as_ref()
-            .and_then(|value| read_trimmed_string(value.get("toolName")))
-            .or_else(|| {
-                parsed
-                    .as_ref()
-                    .and_then(|value| read_trimmed_string(value.get("tool")))
-            })
-            .or_else(|| {
-                parsed
-                    .as_ref()
-                    .and_then(|value| read_trimmed_string(value.get("kind")))
-            });
-        let flow_id = parsed
-            .as_ref()
-            .and_then(|value| read_trimmed_string(value.get("flowId")))
-            .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_FLOW_ID.to_string());
-
-        let command_looks_like_stopless = command_seed.is_some();
-        let parsed_looks_like_stopless = matches!(
-            tool_name.as_deref(),
-            Some("stop_message_auto" | STOP_MESSAGE_FOLLOWUP_FLOW_ID)
-        ) && flow_id == STOP_MESSAGE_FOLLOWUP_FLOW_ID;
-        if !parsed_looks_like_stopless && !command_looks_like_stopless {
-            continue;
-        }
-
-        let continuation_prompt = parsed
-            .as_ref()
-            .and_then(|value| read_trimmed_string(value.get("continuationPrompt")))
-            .or_else(|| {
-                command_seed
-                    .as_ref()
-                    .and_then(|seed| seed.continuation_prompt.clone())
-            });
-        let text = continuation_prompt
-            .or_else(|| {
-                parsed
-                    .as_ref()
-                    .and_then(|value| read_trimmed_string(value.get("summary")))
-            })
-            .or_else(|| {
-                command_seed
-                    .as_ref()
-                    .and_then(|seed| seed.stdout_preview.clone())
-            })
-            .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
-        let max_repeats = parsed
-            .as_ref()
-            .and_then(|value| read_js_nonnegative_integer(value.get("maxRepeats")))
-            .or_else(|| command_seed.as_ref().and_then(|seed| seed.max_repeats))
-            .unwrap_or(1);
-        let used = parsed
-            .as_ref()
-            .and_then(|value| read_js_nonnegative_integer(value.get("repeatCount")))
-            .or_else(|| command_seed.as_ref().and_then(|seed| seed.repeat_count))
-            .unwrap_or(0);
-
-        return Some(RuntimeStopMessageStateSnapshot {
-            text,
-            provider_key: None,
-            max_repeats,
-            used,
-            source: Some("client_exec_result".to_string()),
-            updated_at: None,
-            last_used_at: None,
-            stage_mode: Some("on".to_string()),
-            ai_mode: None,
-        });
-    }
-    None
-}
-
-fn read_stop_message_cli_command_seeds(record: &Value) -> Vec<(String, StopMessageCliCommandSeed)> {
-    let mut out = Vec::new();
-    let Some(input) = record.get("input").and_then(Value::as_array) else {
-        return out;
-    };
-    for item in input {
-        let Some(row) = item.as_object() else {
-            continue;
-        };
-        let type_name = read_trimmed_string(row.get("type"))
-            .map(|value| value.to_lowercase())
-            .unwrap_or_default();
-        if type_name != "function_call" {
-            continue;
-        }
-        let name = read_trimmed_string(row.get("name")).or_else(|| {
-            row.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| read_trimmed_string(function.get("name")))
-        });
-        if name.as_deref() != Some("exec_command") {
-            continue;
-        }
-        let Some(call_id) = read_trimmed_string(row.get("call_id"))
-            .or_else(|| read_trimmed_string(row.get("tool_call_id")))
-            .or_else(|| read_trimmed_string(row.get("id")))
-        else {
-            continue;
-        };
-        let arguments_raw = read_trimmed_string(row.get("arguments")).or_else(|| {
-            row.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| read_trimmed_string(function.get("arguments")))
-        });
-        let Some(arguments_raw) = arguments_raw else {
-            continue;
-        };
-        let Ok(parsed_args) = serde_json::from_str::<Value>(&arguments_raw) else {
-            continue;
-        };
-        let Some(command) = read_trimmed_string(parsed_args.get("cmd")) else {
-            continue;
-        };
-        if let Some(seed) = parse_stop_message_cli_input_from_command(&command) {
-            out.push((call_id, seed));
-        }
-    }
-    out
-}
-
-fn find_last_stop_message_cli_command_seed(record: &Value) -> Option<StopMessageCliCommandSeed> {
-    let input = record.get("input").and_then(Value::as_array)?;
-    for item in input.iter().rev() {
-        let Some(row) = item.as_object() else {
-            continue;
-        };
-        let type_name = read_trimmed_string(row.get("type"))
-            .map(|value| value.to_lowercase())
-            .unwrap_or_default();
-        if type_name != "function_call" {
-            continue;
-        }
-        let name = read_trimmed_string(row.get("name")).or_else(|| {
-            row.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| read_trimmed_string(function.get("name")))
-        });
-        if name.as_deref() != Some("exec_command") {
-            continue;
-        }
-        let arguments_raw = read_trimmed_string(row.get("arguments")).or_else(|| {
-            row.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| read_trimmed_string(function.get("arguments")))
-        });
-        let Some(arguments_raw) = arguments_raw else {
-            continue;
-        };
-        let Ok(parsed_args) = serde_json::from_str::<Value>(&arguments_raw) else {
-            continue;
-        };
-        let Some(command) = read_trimmed_string(parsed_args.get("cmd")) else {
-            continue;
-        };
-        if let Some(seed) = parse_stop_message_cli_input_from_command(&command) {
-            return Some(seed);
-        }
-    }
-    None
-}
-
-fn parse_stop_message_cli_input_from_command(command: &str) -> Option<StopMessageCliCommandSeed> {
-    let text = command.trim();
-    if !text.contains("routecodex servertool run stop_message_auto") {
-        return None;
-    }
-    const INPUT_JSON_MARKER: &str = "--input-json '";
-    if !text.ends_with('\'') {
-        return None;
-    }
-    let marker_index = text.rfind(INPUT_JSON_MARKER)?;
-    let json_start = marker_index + INPUT_JSON_MARKER.len();
-    let encoded = &text[json_start..text.len() - 1];
-    let decoded = encoded.replace("'\\''", "'");
-    let parsed: Value = serde_json::from_str(&decoded).ok()?;
-    Some(StopMessageCliCommandSeed {
-        continuation_prompt: read_trimmed_string(parsed.get("continuationPrompt")),
-        repeat_count: read_js_nonnegative_integer(parsed.get("repeatCount")),
-        max_repeats: read_js_nonnegative_integer(parsed.get("maxRepeats")),
-        stdout_preview: read_trimmed_string(parsed.get("stdoutPreview")),
-    })
-}
-
 fn resolve_stop_message_max_repeats(value: Option<&Value>, stage_mode: Option<&str>) -> i64 {
     let parsed = read_finite_number(value)
         .map(|value| value.floor() as i64)
@@ -1306,33 +1038,12 @@ pub fn collect_stop_message_persisted_candidate_keys(
     resolver_metadata: &Value,
 ) -> (Option<String>, Option<String>, Vec<String>) {
     let strict_session_scope = resolve_stop_message_session_scope(resolver_metadata);
-    let sticky_key = Some(resolve_servertool_sticky_key(resolver_metadata))
-        .filter(|value| !value.trim().is_empty());
+    let sticky_key = strict_session_scope.clone();
     let row = direct_record.as_object();
     let mut candidate_keys: Vec<String> = Vec::new();
 
-    let direct_tmux_keys = [
-        row.and_then(|obj| read_trimmed_string(obj.get("tmuxSessionId"))),
-        row.and_then(|obj| read_trimmed_string(obj.get("clientTmuxSessionId"))),
-        row.and_then(|obj| read_trimmed_string(obj.get("tmux_session_id"))),
-        row.and_then(|obj| read_trimmed_string(obj.get("client_tmux_session_id"))),
-    ];
-    for value in direct_tmux_keys.into_iter().flatten() {
-        push_unique_scope_key(&mut candidate_keys, Some(format!("tmux:{}", value)));
-    }
-
     if let Some(session_id) = row.and_then(|obj| read_trimmed_string(obj.get("sessionId"))) {
-        push_unique_scope_key(&mut candidate_keys, Some(format!("tmux:{}", session_id)));
         push_unique_scope_key(&mut candidate_keys, Some(format!("session:{}", session_id)));
-    }
-
-    if let Some(conversation_id) =
-        row.and_then(|obj| read_trimmed_string(obj.get("conversationId")))
-    {
-        push_unique_scope_key(
-            &mut candidate_keys,
-            Some(format!("conversation:{}", conversation_id)),
-        );
     }
 
     if !candidate_keys.is_empty() {
@@ -1345,29 +1056,10 @@ pub fn collect_stop_message_persisted_candidate_keys(
 
 pub fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
     let row = metadata.as_object()?;
-    if let Some(tmux_session_id) = read_trimmed_string(row.get("clientTmuxSessionId")) {
-        return Some(format!("tmux:{tmux_session_id}"));
-    }
-    if let Some(tmux_session_id) = read_trimmed_string(row.get("client_tmux_session_id")) {
-        return Some(format!("tmux:{tmux_session_id}"));
-    }
-    if let Some(tmux_session_id) = read_trimmed_string(row.get("tmuxSessionId")) {
-        return Some(format!("tmux:{tmux_session_id}"));
-    }
-    if let Some(tmux_session_id) = read_trimmed_string(row.get("tmux_session_id")) {
-        return Some(format!("tmux:{tmux_session_id}"));
-    }
-    if let Some(session_id) = read_trimmed_string(row.get("sessionId")) {
-        return Some(format!("session:{session_id}"));
-    }
-    read_trimmed_string(row.get("conversationId"))
-        .map(|conversation_id| format!("conversation:{conversation_id}"))
+    read_trimmed_string(row.get("sessionId")).map(|session_id| format!("session:{session_id}"))
 }
 
 pub fn resolve_servertool_sticky_key(metadata: &Value) -> String {
-    if let Some(scope) = resolve_stop_message_scope(metadata) {
-        return scope;
-    }
     if let Some(session_scope) = resolve_session_scope(metadata) {
         return session_scope;
     }
@@ -1397,32 +1089,8 @@ fn merge_runtime_metadata_with_record(record: &Value, runtime_metadata: Option<&
     }
 }
 
-fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
-    let explicit = read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope"))
-        .or_else(|| read_trimmed_string(metadata.get("stopMessageClientInjectScope")));
-    if let Some(explicit) = explicit {
-        if explicit.starts_with("tmux:")
-            || explicit.starts_with("session:")
-            || explicit.starts_with("conversation:")
-        {
-            return Some(explicit);
-        }
-    }
-
-    read_trimmed_string(metadata.get("clientTmuxSessionId"))
-        .or_else(|| read_trimmed_string(metadata.get("client_tmux_session_id")))
-        .or_else(|| read_trimmed_string(metadata.get("tmuxSessionId")))
-        .or_else(|| read_trimmed_string(metadata.get("tmux_session_id")))
-        .map(|tmux_session_id| format!("tmux:{tmux_session_id}"))
-}
-
 fn resolve_session_scope(metadata: &Value) -> Option<String> {
-    read_trimmed_string(metadata.get("sessionId"))
-        .map(|session_id| format!("session:{session_id}"))
-        .or_else(|| {
-            read_trimmed_string(metadata.get("conversationId"))
-                .map(|conversation_id| format!("conversation:{conversation_id}"))
-        })
+    read_trimmed_string(metadata.get("sessionId")).map(|session_id| format!("session:{session_id}"))
 }
 
 fn resolve_routing_state_key(metadata: &Value) -> String {
@@ -1588,17 +1256,9 @@ mod tests {
 
         let plan = plan_stop_message_persisted_lookup(&input);
 
-        assert_eq!(plan.strict_session_scope.as_deref(), Some("tmux:tmux-a"));
-        assert_eq!(plan.sticky_key.as_deref(), Some("tmux:tmux-a"));
-        assert_eq!(
-            plan.candidate_keys,
-            vec![
-                "tmux:tmux-a",
-                "tmux:sess-a",
-                "session:sess-a",
-                "conversation:conv-a"
-            ]
-        );
+        assert_eq!(plan.strict_session_scope.as_deref(), Some("session:sess-a"));
+        assert_eq!(plan.sticky_key.as_deref(), Some("session:sess-a"));
+        assert_eq!(plan.candidate_keys, vec!["session:sess-a"]);
         assert_eq!(plan.lookup_policy, STOP_MESSAGE_PERSISTED_LOOKUP_POLICY);
         assert!(plan.read_stop_message_snapshot);
         assert!(plan.read_stop_message_tombstone);
@@ -1686,17 +1346,17 @@ mod tests {
         assert_eq!(snapshot.text, "persisted continue");
         assert_eq!(snapshot.max_repeats, 4);
         assert_eq!(snapshot.used, 2);
-        assert_eq!(selection.stage_mode.as_deref(), Some("auto"));
-        assert!(selection.tombstone.exhausted_default);
+        assert_eq!(selection.stage_mode.as_deref(), Some("on"));
+        assert!(!selection.tombstone.exhausted_default);
         assert!(!selection.tombstone.cleared);
     }
 
     #[test]
-    fn persisted_state_selection_reports_cleared_tombstone_without_stage_mode() {
+    fn persisted_state_selection_reports_session_cleared_tombstone_without_stage_mode() {
         let selection =
             plan_stop_message_persisted_state_selection(&StopMessagePersistedStateSelectionInput {
                 states: vec![StopMessagePersistedStateCandidate {
-                    key: Some("conversation:cleared".to_string()),
+                    key: Some("session:cleared".to_string()),
                     state: json!({
                         "stopMessageLastUsedAt": 1234,
                         "stopMessageStageMode": "on"
@@ -1708,6 +1368,36 @@ mod tests {
         assert!(selection.stage_mode.is_none());
         assert!(!selection.tombstone.exhausted_default);
         assert!(selection.tombstone.cleared);
+    }
+
+    #[test]
+    fn persisted_state_selection_ignores_non_session_scopes() {
+        let selection =
+            plan_stop_message_persisted_state_selection(&StopMessagePersistedStateSelectionInput {
+                states: vec![
+                    StopMessagePersistedStateCandidate {
+                        key: Some("tmux:legacy".to_string()),
+                        state: json!({
+                            "stopMessageText": "tmux should not match",
+                            "stopMessageMaxRepeats": 4,
+                            "stopMessageUsed": 1,
+                            "stopMessageStageMode": "on"
+                        }),
+                    },
+                    StopMessagePersistedStateCandidate {
+                        key: Some("conversation:legacy".to_string()),
+                        state: json!({
+                            "stopMessageLastUsedAt": 1234,
+                            "stopMessageStageMode": "on"
+                        }),
+                    },
+                ],
+            });
+
+        assert!(selection.snapshot.is_none());
+        assert!(selection.stage_mode.is_none());
+        assert!(!selection.tombstone.exhausted_default);
+        assert!(!selection.tombstone.cleared);
     }
 
     #[test]
@@ -1766,18 +1456,10 @@ mod tests {
 
         assert_eq!(
             plan.strict_session_scope.as_deref(),
-            Some("tmux:runtime-tmux")
+            Some("session:record-session")
         );
-        assert_eq!(plan.sticky_key.as_deref(), Some("conversation:sticky-conv"));
-        assert_eq!(
-            plan.candidate_keys,
-            vec![
-                "tmux:record-session",
-                "session:record-session",
-                "tmux:runtime-tmux",
-                "conversation:sticky-conv"
-            ]
-        );
+        assert_eq!(plan.sticky_key.as_deref(), Some("session:record-session"));
+        assert_eq!(plan.candidate_keys, vec!["session:record-session"]);
     }
 
     #[test]
@@ -1795,10 +1477,7 @@ mod tests {
 
         let plan = plan_stop_message_persisted_lookup(&input);
 
-        assert_eq!(
-            plan.candidate_keys,
-            vec!["tmux:record-session", "session:record-session"]
-        );
+        assert_eq!(plan.candidate_keys, vec!["session:record-session"]);
         assert_eq!(
             plan.strict_session_scope.as_deref(),
             Some("session:record-session")
@@ -1821,7 +1500,9 @@ mod tests {
 
         let plan = plan_stop_message_persisted_lookup(&input);
 
-        assert_eq!(plan.candidate_keys, vec!["conversation:conv-a"]);
+        assert!(plan.candidate_keys.is_empty());
+        assert!(plan.strict_session_scope.is_none());
+        assert!(plan.sticky_key.is_none());
         assert!(!plan.read_stop_message_snapshot);
         assert!(!plan.read_stop_message_tombstone);
     }
@@ -1883,7 +1564,7 @@ mod tests {
                 "clientTmuxSessionId": "tmux-a",
                 "requestId": "req-a"
             })),
-            "tmux:tmux-a"
+            "req-a"
         );
         assert_eq!(
             resolve_servertool_state_key(&json!({
@@ -2204,7 +1885,7 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_direct_runtime_stop_state_wins_over_cli_result_record() {
+    fn adapter_context_direct_runtime_stop_state_wins_over_request_records() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: Some(json!({
                 "stopMessageState": {
@@ -2215,7 +1896,9 @@ mod tests {
                 }
             })),
             adapter_context: json!({
-                "capturedEntryRequest": request_record_with_stopless_cli_result()
+                "capturedEntryRequest": {
+                    "input": "normal user input"
+                }
             }),
         };
 
@@ -2229,36 +1912,33 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_resolves_stopless_cli_result_from_request_record() {
+    fn adapter_context_ignores_stopless_cli_result_from_request_record() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
             adapter_context: json!({
-                "capturedEntryRequest": request_record_with_stopless_cli_result()
+                "capturedEntryRequest": {
+                    "input": [{
+                        "type": "function_call",
+                        "call_id": "call_servertool_cli",
+                        "name": "exec_command",
+                        "arguments": json!({
+                            "cmd": "routecodex servertool run stop_message_auto --input-json '{}'"
+                        }).to_string()
+                    }],
+                    "tool_outputs": [{
+                        "type": "function_call_output",
+                        "call_id": "call_servertool_cli",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from result\",\"repeatCount\":3,\"maxRepeats\":5}"
+                    }]
+                }
             }),
         };
 
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("client exec snapshot");
-
-        assert_eq!(
-            snapshot,
-            RuntimeStopMessageStateSnapshot {
-                text: "continue from result".to_string(),
-                provider_key: None,
-                max_repeats: 5,
-                used: 3,
-                source: Some("client_exec_result".to_string()),
-                updated_at: None,
-                last_used_at: None,
-                stage_mode: Some("on".to_string()),
-                ai_mode: None,
-            }
-        );
+        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
     }
 
     #[test]
-    fn adapter_context_uses_command_seed_when_output_is_plain_exec_text() {
-        let command = stopless_cli_command("seed text", 2, 7, Some("preview text"));
+    fn adapter_context_ignores_stopless_command_seed_with_plain_exec_text() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
             adapter_context: json!({
@@ -2267,7 +1947,9 @@ mod tests {
                         "type": "function_call",
                         "call_id": "call_cli_seed",
                         "name": "exec_command",
-                        "arguments": json!({ "cmd": command }).to_string()
+                        "arguments": json!({
+                            "cmd": "routecodex servertool run stop_message_auto --input-json '{}'"
+                        }).to_string()
                     }],
                     "tool_outputs": [{
                         "call_id": "call_cli_seed",
@@ -2277,13 +1959,7 @@ mod tests {
             }),
         };
 
-        let snapshot =
-            resolve_runtime_stop_message_state_from_adapter_context(&input).expect("seed snapshot");
-
-        assert_eq!(snapshot.text, "seed text");
-        assert_eq!(snapshot.max_repeats, 7);
-        assert_eq!(snapshot.used, 2);
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
     }
 
     #[test]
@@ -2552,40 +2228,4 @@ mod tests {
         assert!(resolve_implicit_gemini_stop_message_snapshot(&tool_like).is_none());
     }
 
-    fn request_record_with_stopless_cli_result() -> Value {
-        json!({
-            "input": [{
-                "type": "function_call",
-                "call_id": "call_servertool_cli",
-                "name": "exec_command",
-                "arguments": json!({ "cmd": stopless_cli_command("continue from command", 2, 3, Some("preview")) }).to_string()
-            }],
-            "tool_outputs": [{
-                "type": "function_call_output",
-                "call_id": "call_servertool_cli",
-                "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from result\",\"repeatCount\":3,\"maxRepeats\":5}"
-            }]
-        })
-    }
-
-    fn stopless_cli_command(
-        continuation_prompt: &str,
-        repeat_count: i64,
-        max_repeats: i64,
-        stdout_preview: Option<&str>,
-    ) -> String {
-        let mut input = json!({
-            "flowId": STOP_MESSAGE_FOLLOWUP_FLOW_ID,
-            "continuationPrompt": continuation_prompt,
-            "repeatCount": repeat_count,
-            "maxRepeats": max_repeats
-        });
-        if let Some(stdout_preview) = stdout_preview {
-            input["stdoutPreview"] = json!(stdout_preview);
-        }
-        format!(
-            "routecodex servertool run stop_message_auto --input-json '{}'",
-            input.to_string().replace('\'', "'\\''")
-        )
-    }
 }

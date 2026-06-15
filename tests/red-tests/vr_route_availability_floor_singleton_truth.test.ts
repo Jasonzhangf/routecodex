@@ -21,6 +21,8 @@ const RUST_ROUTING_CONFIG =
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs';
 const RUST_LIB =
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs';
+const RUST_PRIMARY_EXHAUSTED_BLOCKS =
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs';
 const REQUIRED_EXPORTS =
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts';
 const NATIVE_EXPORTS = 'src/modules/llmswitch/bridge/native-exports.ts';
@@ -49,6 +51,13 @@ describe('VR route availability floor singleton truth', () => {
     expect(src).not.toMatch(/function\s+resolvePoolCooldownCandidateProviderCount/);
     expect(src).not.toMatch(/candidateProviderCount === 1/);
     expect(src).not.toMatch(/recoverableCooldownHints/);
+  });
+
+  it('Rust primary_exhausted_to_default_pool contract is reachable through the native export', () => {
+    expect(readSrc(RUST_PRIMARY_EXHAUSTED_BLOCKS)).toMatch(/plan_primary_exhausted_to_default_pool_json/);
+    expect(readSrc(RUST_LIB)).toMatch(/mod\s+primary_exhausted_to_default_pool_blocks/);
+    expect(readSrc(REQUIRED_EXPORTS)).toMatch(/planPrimaryExhaustedToDefaultPoolJson/);
+    expect(readSrc(NATIVE_EXPORTS)).toMatch(/planPrimaryExhaustedToDefaultPoolNative/);
   });
 
   it('Rust route-order tests lock search -> tools -> default ordering', () => {

@@ -1575,6 +1575,19 @@ pub(crate) fn project_responses_sse_frame_for_client(
         }
     }
 
+    if event_name == "response.output_item.added"
+        && has_responses_freeform_apply_patch_tool(tools_raw)
+    {
+        if let Some(item) = data.get("item").and_then(Value::as_object) {
+            if item.get("type").and_then(Value::as_str) == Some("function_call")
+                && item.get("name").and_then(Value::as_str) == Some("apply_patch")
+            {
+                emit = false;
+                output_frame.clear();
+            }
+        }
+    }
+
     let data_record = data.as_object();
     if event_name == "response.required_action" {
         if let Some(projected_frame) =
@@ -1606,10 +1619,31 @@ pub(crate) fn project_responses_sse_frame_for_client(
         }
     } else if let Some(record) = data_record {
         let call_name = read_data_call_name(record);
-        let call_arguments = read_data_call_arguments(record);
-        if call_name.as_deref() == Some("apply_patch") {
+        let call_id = read_data_call_id(record);
+        let is_apply_patch_call =
+            call_name.as_deref() == Some("apply_patch")
+                || state.apply_patch_call_ids.contains(call_id.as_str());
+        let call_arguments = read_data_call_arguments(record).and_then(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        }).or_else(|| {
+            state
+                .pending_apply_patch_argument_deltas
+                .get(call_id.as_str())
+                .cloned()
+        });
+        if is_apply_patch_call {
             if let Some(call_arguments) = call_arguments {
                 if call_arguments.is_empty() {
+                    if event_name == "response.function_call_arguments.done"
+                        || event_name == "response.output_item.done"
+                    {
+                        emit = false;
+                        output_frame.clear();
+                    }
                     return serde_json::json!({
                         "emit": emit,
                         "frame": output_frame,
@@ -1643,7 +1677,6 @@ pub(crate) fn project_responses_sse_frame_for_client(
                 output_frame = replace_frame_data(frame, &client_data);
 
                 if event_name == "response.function_call_arguments.done" {
-                    let call_id = read_data_call_id(record);
                     state
                         .pending_apply_patch_argument_deltas
                         .remove(call_id.as_str());
@@ -1660,14 +1693,18 @@ pub(crate) fn project_responses_sse_frame_for_client(
                         output_frame = project_apply_patch_done_frame(record, normalized_arguments);
                     }
                 } else if event_name == "response.output_item.done" {
-                    let call_id = read_data_call_id(record);
+                    state
+                        .pending_apply_patch_argument_deltas
+                        .remove(call_id.as_str());
+                    state.apply_patch_call_ids.remove(call_id.as_str());
                     if state
                         .emitted_apply_patch_done_call_ids
                         .contains(call_id.as_str())
                     {
                         emit = false;
                     } else {
-                        state.emitted_apply_patch_done_call_ids.insert(call_id);
+                        state.emitted_apply_patch_done_call_ids.insert(call_id.clone());
+                        output_frame = project_apply_patch_done_frame(record, normalized_arguments);
                     }
                 }
             }

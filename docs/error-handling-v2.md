@@ -77,6 +77,94 @@
 3. **RequestExecutor** 消费该 decision 并执行实际 reroute / fail；禁止同请求内等待冷却或重打同 provider。
 4. **servertool followup** 的 provider 类错误也走同一套 Router policy；只有 payload 缺失、reenter 不可用、client inject dispatcher 缺失等编排前/internal error 保留在 servertool 自身边界。
 
+## 1.0 2026-06-14 设计校正：按 Jason 中心思想统一 direct/provider/provider-pool 错误语义
+
+本节覆盖一个此前未完全收口的 gap：
+
+- relay / request-executor 主路径已经基本满足“provider 错误进入统一策略中心 → 计数/冷却/切 provider → 候选耗尽才返客户端”；
+- 但 `router-direct` / `provider-direct` 仍保留“passthrough + hooks only + fail-fast rethrow”语义，导致 provider send error 在仍有候选 provider 时也会过早投影给客户端；
+- 这与 Jason 的中心原则冲突：**只要当前 route pool 或合法下一阶段 pool 里还有 provider，就不应该因单个 provider 错误中断对话。**
+
+### 1.0.1 正确设计（唯一真源版本）
+
+1. **唯一策略中心不变**：仍是 `Virtual Router policy + ProviderFailurePolicy + request-executor error action queue`，不是恢复旧 `ErrorHandlingCenter` 第二中心。
+2. **direct 只允许 payload/response passthrough，不允许 error-policy passthrough**：
+   - `router-direct` / `provider-direct` 可以保持同协议 request/response 不改写；
+   - 但 provider `send/processIncomingDirect` 错误必须回到统一策略中心消费 decision，不能直接 rethrow 给 `ErrorErr06`。
+3. **候选优先原则**：
+   - 只要当前 route pool 还有未排除候选 provider，provider 执行期错误不得直接 client-visible；
+   - 必须先进入统一错误动作队列等待，再由策略决定 same-provider retry 一次或 exclude-and-reroute；
+   - 只有候选全部耗尽，才允许进入 `ErrorErr06ClientProjected`。
+4. **default pool / secondary pool 不是 host fallback**：
+   - 如果产品语义要求“主池空但 default 仍可接”，这必须成为 Virtual Router 的显式二阶段选路 contract；
+   - Host / `http-server` / `RequestExecutor` 禁止在池空后本地偷切 default，这会制造第二路由中心。
+5. **client_disconnect 永不算 provider failure**：
+   - `CLIENT_DISCONNECTED`、`client_request_aborted`、`client_response_closed`、以及 upstream/nginx 风格 `HTTP_499` + `client abort request` / `client closed request` 都属于 transport cancel；
+   - 它们必须 `affectsHealth=false`、不计 cooldown、不断言 provider 持续异常、也不投影成 provider-visible 4xx 给客户端。
+
+### 1.0.2 provider 执行期错误的正确 contract
+
+统一先分类，再执行动作：
+
+1. `client_disconnect`
+   - 不计 provider health / cooldown
+   - 不参与 provider 切换计数
+   - 不投影为 provider-visible upstream error
+2. `special_400`
+   - 请求/协议/contract 本身错误
+   - 直接客户端可见
+   - 不切 provider
+3. `recoverable`
+   - 进入统一错误动作队列阻塞等待（`1s -> 2s -> 3s -> repeat`）
+   - 若当前 pool 仍有候选，优先 `exclude_and_reroute`
+   - 仅在明确允许时才 `retry_same_provider_once`
+4. `unrecoverable / periodic_recovery`
+   - 由策略决定是否排除/冷却当前 provider
+   - 若还有候选继续切；无候选后才返客户端
+
+### 1.0.3 direct path 的正确职责
+
+`router-direct` / `provider-direct` 的正确边界应为：
+
+- 保留：
+  - request body 直通
+  - response body 直通
+  - snapshot / telemetry / provider-wire trace
+- 删除：
+  - provider send error 直接 rethrow 给客户端
+  - “只 report 不消费 decision” 的半接入错误链行为
+
+换言之：
+
+- **可以直通 payload；不能直通错误策略。**
+
+### 1.0.4 client projection 的正确边界
+
+`ErrorErr06ClientProjected` 只能在以下条件成立后投影 provider 错误：
+
+1. 统一策略中心已经完成 classification；
+2. request-executor / direct consumer 已经完成当前 pool 的 candidate 消耗；
+3. 若产品允许 secondary/default pool，则也已由 VR 真源完成合法扩池/二阶段选路尝试；
+4. 最终确认为“无候选可继续”。
+
+禁止 `http-error-mapper` 仅凭 `status in 4xx` 就把 provider error 立即投影给客户端。
+
+### 1.0.5 当前 gap（2026-06-14 审计结论）
+
+1. relay path 基本对齐；
+2. `router-direct` 当前仍是 `passthrough + hooks only + fail-fast rethrow`，未完整消费 reroute decision；
+3. `provider-direct` 当前也只 report/classify，不 reroute；
+4. `http-error-mapper` 对 `400 <= status < 500` 过早投影；
+5. `HTTP_499` / `client abort request` 仍可能误入普通 provider 4xx 主链；
+6. “primary pool exhausted -> default pool” 还不是 VR 显式 contract。
+
+### 1.0.6 后续实现要求
+
+1. direct path 必须改成 unified decision consumer，而不是 report-only caller；
+2. 若要支持 default pool 扩池，只能改 VR 真源与其 contract/tests，不得在 host 层补 fallback；
+3. `client_disconnect` 识别必须前移到 `error.provider_failure_policy`；
+4. `ErrorErr06ClientProjected` 只能处理 exhausted/no-candidate 后的最终错误。
+
 ## 1.1 三分类硬约束（2026-05-28）
 
 Provider 执行期错误只允许归一到以下三类，禁止新增第四类语义分支：

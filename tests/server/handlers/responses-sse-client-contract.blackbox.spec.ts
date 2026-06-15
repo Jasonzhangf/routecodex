@@ -468,6 +468,112 @@ describe('Responses SSE client contract blackbox', () => {
     });
   });
 
+  it('direct passthrough must not synthesize duplicate tool terminal frames from required_action probe', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
+          body: {
+            __sse_responses: upstream
+          },
+        } as any,
+        'req_direct_no_synthetic_terminal_dup',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+        }
+      );
+      upstream.write('event: response.output_item.added\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: {
+          id: 'fc_direct_no_synth',
+          type: 'function_call',
+          call_id: 'call_direct_no_synth',
+          name: 'exec_command',
+          arguments: '',
+          status: 'in_progress'
+        }
+      })}\n\n`);
+      upstream.write('event: response.function_call_arguments.done\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.function_call_arguments.done',
+        output_index: 0,
+        item_id: 'fc_direct_no_synth',
+        call_id: 'call_direct_no_synth',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      })}\n\n`);
+      upstream.write('event: response.output_item.done\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: {
+          id: 'fc_direct_no_synth',
+          type: 'function_call',
+          call_id: 'call_direct_no_synth',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}',
+          status: 'completed'
+        }
+      })}\n\n`);
+      upstream.write('event: response.completed\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.completed',
+        response: {
+          id: 'resp_direct_no_synth',
+          object: 'response',
+          status: 'requires_action',
+          output: [{
+            id: 'fc_direct_no_synth',
+            type: 'function_call',
+            call_id: 'call_direct_no_synth',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            status: 'completed'
+          }],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [{
+                id: 'call_direct_no_synth',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }]
+            }
+          }
+        }
+      })}\n\n`);
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+      });
+
+      expect(response.status).toBe(200);
+      expect((rawText.match(/event: response\.output_item\.added/g) || []).length).toBe(1);
+      expect((rawText.match(/event: response\.function_call_arguments\.done/g) || []).length).toBe(1);
+      expect((rawText.match(/event: response\.output_item\.done/g) || []).length).toBe(1);
+      expect((rawText.match(/event: response\.completed/g) || []).length).toBe(1);
+      expect(rawText).not.toContain('event: response.done');
+      expect(rawText).not.toContain('event: error');
+    });
+  });
+
   it('accepts direct passthrough standard Responses image partial events', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const app = express();

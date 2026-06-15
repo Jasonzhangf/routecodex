@@ -108,9 +108,9 @@ describe('request log color registry', () => {
     );
 
     expect(expectedColor).toBeDefined();
-    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
-    expect(line).toContain(`req=${requestId} ${expectedColor}tools/pool -> provider.model`);
-    expect(line).not.toContain(`req=${requestId} \x1b[36mtools/pool -> provider.model`);
+    expect(line.startsWith(String(expectedColor))).toBe(true);
+    expect(line).toContain(`req=${requestId} tools/pool -> provider.model`);
+    expect(line.includes('\x1b[97m')).toBe(false);
   });
 
   it('does not recolor virtual-router-hit lines without an explicit session key', () => {
@@ -180,8 +180,8 @@ describe('request log color registry', () => {
     );
 
     expect(expectedColor).toBeDefined();
-    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
-    expect(line).toContain(`sid=${sessionId} ${expectedColor}search/pool -> provider.model`);
+    expect(line.startsWith(String(expectedColor))).toBe(true);
+    expect(line).toContain(`sid=${sessionId} search/pool -> provider.model`);
   });
 
   it('colors virtual-router-hit lines from bracket session without request context', () => {
@@ -192,8 +192,8 @@ describe('request log color registry', () => {
     );
 
     expect(expectedColor).toBeDefined();
-    expect(line).toContain(`${expectedColor}[virtual-router-hit]\x1b[0m`);
-    expect(line).toContain(`[${sessionId}] ${expectedColor}tools/pool -> provider.model`);
+    expect(line.startsWith(String(expectedColor))).toBe(true);
+    expect(line).toContain(`[${sessionId}] tools/pool -> provider.model`);
   });
 
   it('uses different virtual-router-hit colors for different session ids', () => {
@@ -211,8 +211,8 @@ describe('request log color registry', () => {
     expect(firstColor).toBeDefined();
     expect(secondColor).toBeDefined();
     expect(firstColor).not.toBe(secondColor);
-    expect(firstLine).toContain(`${firstColor}[virtual-router-hit]\x1b[0m`);
-    expect(secondLine).toContain(`${secondColor}[virtual-router-hit]\x1b[0m`);
+    expect(firstLine.startsWith(String(firstColor))).toBe(true);
+    expect(secondLine.startsWith(String(secondColor))).toBe(true);
   });
 
   it('separates current uuid-like session ids into different colors more reliably', () => {
@@ -256,7 +256,7 @@ describe('request log color registry', () => {
     expect(line.startsWith(String(resolveSessionAnsiColor('session-response-colored')))).toBe(true);
   });
 
-  it('keeps outer request color when the line already contains embedded ansi highlight', () => {
+  it('keeps one outer request color without white numeric highlight', () => {
     const sessionId = 'session-highlighted-finish';
     const outerColor = resolveSessionAnsiColor(sessionId);
     const line = colorizeRequestLog(
@@ -267,7 +267,8 @@ describe('request log color registry', () => {
 
     expect(line.startsWith(String(outerColor))).toBe(true);
     expect(line).toContain('finish_reason=tool_calls');
-    expect(line).toContain('status=\x1b[97m200\x1b[0m');
+    expect(line).toContain('status=200');
+    expect(line.includes('\x1b[97m')).toBe(false);
   });
 
   it('colors error request logs red', () => {

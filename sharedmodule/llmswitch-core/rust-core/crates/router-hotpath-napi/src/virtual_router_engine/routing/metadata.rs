@@ -78,47 +78,7 @@ pub(crate) fn resolve_session_scope(metadata: &Value) -> Option<String> {
 }
 
 pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
-    let explicit = read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope"))
-        .unwrap_or_default();
-    let explicit = if !explicit.is_empty() {
-        explicit
-    } else {
-        read_trimmed_string(metadata.get("stopMessageClientInjectScope")).unwrap_or_default()
-    };
-    if !explicit.is_empty() {
-        if explicit.starts_with("tmux:")
-            || explicit.starts_with("session:")
-            || explicit.starts_with("conversation:")
-        {
-            return Some(explicit);
-        }
-    }
-    let tmux_session = read_trimmed_string(metadata.get("clientTmuxSessionId")).unwrap_or_default();
-    let tmux_session = if !tmux_session.is_empty() {
-        tmux_session
-    } else {
-        read_trimmed_string(metadata.get("client_tmux_session_id")).unwrap_or_default()
-    };
-    let tmux_session = if !tmux_session.is_empty() {
-        tmux_session
-    } else {
-        read_trimmed_string(metadata.get("tmuxSessionId")).unwrap_or_default()
-    };
-    let tmux_session = if !tmux_session.is_empty() {
-        tmux_session
-    } else {
-        read_trimmed_string(metadata.get("tmux_session_id")).unwrap_or_default()
-    };
-    if !tmux_session.is_empty() {
-        return Some(format!("tmux:{}", tmux_session));
-    }
-    if let Some(session) = read_trimmed_string(metadata.get("sessionId")) {
-        return Some(format!("session:{}", session));
-    }
-    if let Some(conversation) = read_trimmed_string(metadata.get("conversationId")) {
-        return Some(format!("conversation:{}", conversation));
-    }
-    None
+    read_trimmed_string(metadata.get("sessionId")).map(|session| format!("session:{}", session))
 }
 
 pub(crate) fn is_server_tool_followup_request(metadata: &Value) -> bool {
@@ -304,17 +264,32 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_scope_uses_tmux_scope_when_present() {
+    fn stop_message_scope_ignores_tmux_and_inject_fallbacks() {
         let metadata = json!({
             "providerProtocol": "openai-chat",
             "requestId": "req_chat_tmux_scope_1",
             "sessionId": "session_should_lose",
-            "tmuxSessionId": "tmux-session-1"
+            "tmuxSessionId": "tmux-session-1",
+            "stopMessageClientInjectScope": "conversation:legacy",
+            "stopMessageClientInjectSessionScope": "tmux:legacy"
         });
 
         assert_eq!(
             resolve_stop_message_scope(&metadata),
-            Some("tmux:tmux-session-1".to_string())
+            Some("session:session_should_lose".to_string())
         );
+    }
+
+    #[test]
+    fn stop_message_scope_requires_session_id() {
+        let metadata = json!({
+            "providerProtocol": "openai-chat",
+            "requestId": "req_chat_tmux_scope_2",
+            "tmuxSessionId": "tmux-session-2",
+            "conversationId": "conversation-2",
+            "stopMessageClientInjectScope": "conversation:legacy"
+        });
+
+        assert_eq!(resolve_stop_message_scope(&metadata), None);
     }
 }

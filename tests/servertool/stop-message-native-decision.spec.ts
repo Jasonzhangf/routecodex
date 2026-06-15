@@ -203,6 +203,25 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.followup_text).toContain('diagnostic_order');
   });
 
+  test('malformed schema returns parse feedback and explicit field guidance', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"oops","reason":"想停","has_evidence":1,"evidence":"log"}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_stopreason_missing_or_non_numeric');
+    expect(gate.count_budget).toBe(true);
+    expect(gate.missing_fields).toContain('stopreason');
+    expect(gate.parsed).toMatchObject({
+      reason: '想停',
+      has_evidence: 1,
+      evidence: 'log',
+    });
+    expect(gate.followup_text).toContain('stopreason');
+    expect(gate.followup_text).toContain('0/1/2');
+  });
+
   test('stop schema gate exhausts repeated missing schema loop', () => {
     const beforeLimit = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
@@ -240,6 +259,23 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.action).toBe('allow_stop');
     expect(gate.reason_code).toBe('stop_schema_blocked');
     expect(gate.count_budget).toBe(false);
+  });
+
+  test('valid terminal schema allows stop without requiring prior explicit hook call', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('allow_stop');
+    expect(gate.reason_code).toBe('stop_schema_finished');
+    expect(gate.count_budget).toBe(false);
+    expect(gate.followup_text ?? undefined).toBeUndefined();
+    expect(gate.parsed).toMatchObject({
+      stopreason: 0,
+      reason: '任务完成',
+      learned: 'summary ready',
+    });
   });
 
   test('default stopless followup prompt starts with goal and evidence check', () => {

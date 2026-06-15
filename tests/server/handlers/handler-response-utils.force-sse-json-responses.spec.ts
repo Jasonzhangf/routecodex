@@ -485,6 +485,8 @@ const mockBridgeModule = async () => ({
   }),
 });
 
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
@@ -525,7 +527,7 @@ async function loadSendPipelineResponse() {
 }
 
 async function loadNormalizeResponsesJsonBodyForHttp() {
-  const mod = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
+  const mod = await import('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js');
   return mod.normalizeResponsesJsonBodyForHttp;
 }
 
@@ -715,6 +717,128 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       expect(text).toContain('"name":"stop_message_auto"');
       expect(text).not.toContain('routecodex servertool run');
       expect(text).not.toContain('"name":"exec_command"');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('keeps direct raw SSE terminal required_action and reasoning truth unchanged', async () => {
+    const sendPipelineResponse = await loadSendPipelineResponse();
+    const app = express();
+    app.get('/direct-sse-required-action-reasoning', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            __sse_responses: Readable.from([
+              'event: response.reasoning_summary_text.done\n',
+              'data: {"type":"response.reasoning_summary_text.done","item_id":"rs_direct_sse_tool","text":"need cwd before patch"}\n\n',
+              'event: response.completed\n',
+              `data: ${JSON.stringify({
+                type: 'response.completed',
+                response: {
+                  id: 'resp_direct_sse_reasoning_tool',
+                  object: 'response',
+                  status: 'requires_action',
+                  output: [
+                    {
+                      id: 'rs_direct_sse_tool',
+                      type: 'reasoning',
+                      summary: [{ type: 'summary_text', text: 'need cwd before patch' }],
+                    },
+                    {
+                      id: 'fc_direct_sse_tool',
+                      type: 'function_call',
+                      call_id: 'call_direct_sse_tool',
+                      name: 'exec_command',
+                      arguments: '{"cmd":"pwd"}',
+                      status: 'in_progress',
+                    }
+                  ],
+                  required_action: {
+                    type: 'submit_tool_outputs',
+                    submit_tool_outputs: {
+                      tool_calls: [
+                        {
+                          id: 'call_direct_sse_tool',
+                          type: 'function_call',
+                          name: 'exec_command',
+                          arguments: '{"cmd":"pwd"}',
+                        }
+                      ]
+                    }
+                  }
+                }
+              })}\n\n`,
+              `event: response.done\n`,
+              `data: ${JSON.stringify({
+                type: 'response.done',
+                response: {
+                  id: 'resp_direct_sse_reasoning_tool',
+                  object: 'response',
+                  status: 'requires_action',
+                  output: [
+                    {
+                      id: 'rs_direct_sse_tool',
+                      type: 'reasoning',
+                      summary: [{ type: 'summary_text', text: 'need cwd before patch' }],
+                    },
+                    {
+                      id: 'fc_direct_sse_tool',
+                      type: 'function_call',
+                      call_id: 'call_direct_sse_tool',
+                      name: 'exec_command',
+                      arguments: '{"cmd":"pwd"}',
+                      status: 'in_progress',
+                    }
+                  ],
+                  required_action: {
+                    type: 'submit_tool_outputs',
+                    submit_tool_outputs: {
+                      tool_calls: [
+                        {
+                          id: 'call_direct_sse_tool',
+                          type: 'function_call',
+                          name: 'exec_command',
+                          arguments: '{"cmd":"pwd"}',
+                        }
+                      ]
+                    }
+                  }
+                }
+              })}\n\n`,
+            ]),
+          },
+          metadata: {
+            outboundStream: true,
+            __routecodexDirectPassthrough: true,
+          },
+          usageLogInfo: {
+            routeName: 'router-direct:tools',
+            requestStartedAtMs: Date.now(),
+          },
+        } as any,
+        'req_direct_sse_required_action_reasoning',
+        { entryEndpoint: '/v1/responses' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-sse-required-action-reasoning`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('response.reasoning_summary_text.done');
+      expect(text).toContain('"need cwd before patch"');
+      expect(text).toContain('"status":"requires_action"');
+      expect(text).toContain('"required_action":{"type":"submit_tool_outputs"');
+      expect(text).toContain('"call_direct_sse_tool"');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

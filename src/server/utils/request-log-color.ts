@@ -2,7 +2,6 @@ import { resolveEffectiveRequestId } from './request-id-manager.js';
 import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
-const ANSI_WHITE = '\x1b[97m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
 const ANSI_FALLBACK_LOG_COLOR = '\x1b[90m';
 const ANSI_DEFAULT_NORMAL_LOG_COLOR = '\x1b[36m';
@@ -105,6 +104,15 @@ export function resolveSessionLogColor(sessionId?: string): string {
   return resolveSessionAnsiColor(sessionId) || '\x1b[36m';
 }
 
+export function stripAnsiCodes(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+export function extractLeadingAnsiColor(text: string): string | undefined {
+  const match = /^(\x1b\[[0-9;]*m)/.exec(text);
+  return match?.[1];
+}
+
 export function registerRequestLogContext(
   requestId: string | undefined,
   context?: RequestLogColorContext | null
@@ -144,16 +152,6 @@ export function resolveRequestLogColorToken(
   return ANSI_DEFAULT_NORMAL_LOG_COLOR;
 }
 
-function highlightLogNumbers(text: string, baseColor: string): string {
-  if (!text) {
-    return text;
-  }
-  const whiteNumber = (_match: string, value: string) => `${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}`;
-  return text
-    .replace(/=(\d+(?:\.\d+)?(?:ms|MB|%|t\/s)?)/g, (_match, value: string) => `=${whiteNumber('', value)}`)
-    .replace(/status=(\d{3})/g, (_match, value: string) => `status=${whiteNumber('', value)}`);
-}
-
 export function colorizeRequestLog(
   text: string,
   requestId?: string,
@@ -170,7 +168,7 @@ export function colorizeRequestLog(
   if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
     return text;
   }
-  return `${color}${highlightLogNumbers(text, color)}${ANSI_RESET}`;
+  return `${color}${stripAnsiCodes(text)}${ANSI_RESET}`;
 }
 
 export function colorizeVirtualRouterHitLogLine(text: string): string {
@@ -182,15 +180,7 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   if (!color) {
     return text;
   }
-  let line = text.replace(/\x1b\[[0-9;]*m\[virtual-router-hit\]\x1b\[0m/, `${color}[virtual-router-hit]${ANSI_RESET}`);
-  if (line === text) {
-    line = line.replace('[virtual-router-hit]', `${color}[virtual-router-hit]${ANSI_RESET}`);
-  }
-  line = line.replace(/(\breq=[^ \x1b]+(?: sid=[^ \x1b]+)? )\x1b\[[0-9;]*m/, `$1${color}`);
-  line = line.replace(/(\[virtual-router-hit\]\x1b\[0m\s+\[[^\]\x1b]+\]\s*)\x1b\[[0-9;]*m/, `$1${color}`);
-  line = line.replace(/(\breq=[^ \x1b]+ sid=[^ \x1b]+ )([^ \x1b])/, `$1${color}$2`);
-  line = line.replace(/(\[virtual-router-hit\]\x1b\[0m\s+\[[^\]\x1b]+\]\s*)([^ \x1b])/, `$1${color}$2`);
-  return line;
+  return `${color}${stripAnsiCodes(text)}${ANSI_RESET}`;
 }
 
 export function formatHighlightedFinishReasonLabel(finishReason?: string): string {
@@ -198,5 +188,5 @@ export function formatHighlightedFinishReasonLabel(finishReason?: string): strin
   if (!normalized) {
     return '';
   }
-  return `, ${ANSI_WHITE}finish_reason=${normalized}${ANSI_RESET}`;
+  return `, finish_reason=${normalized}`;
 }

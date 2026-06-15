@@ -82,6 +82,47 @@ describe('router direct protocol boundary', () => {
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.relay')).toHaveLength(1);
   });
 
+  it('reuses preselected route on router-direct relayable skip so Hub does not route twice', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const server = new RouteCodexHttpServer(createRouterServer());
+    attachRouterPort(server as any);
+    const preselectedRoute = {
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M3',
+        providerType: 'anthropic',
+        runtimeKey: 'minimax.key1.MiniMax-M3',
+        modelId: 'MiniMax-M3',
+      },
+      decision: {
+        routeName: 'search',
+        pool: ['minimax.key1.MiniMax-M3'],
+        poolId: 'gateway-priority-5555-priority-search',
+        reasoning: 'search:last-tool-search',
+      },
+      diagnostics: { reused: true },
+    };
+    jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'protocol mismatch: inbound=openai-responses, provider=anthropic-messages',
+      preselectedRoute,
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { id: 'relay_after_protocol_mismatch_preselected', object: 'response' },
+      metadata: { relayed: true },
+    } as any);
+
+    await (server as any).executePortAwarePipeline(
+      5555,
+      buildResponsesInput('req_router_direct_mismatch_preselected_route'),
+    );
+
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy.mock.calls[0]?.[0]?.metadata).toEqual(expect.objectContaining({
+      __routecodexPreselectedRoute: preselectedRoute,
+    }));
+  });
+
   it('does not record router-direct storm backoff when protocol mismatch is relayed', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));

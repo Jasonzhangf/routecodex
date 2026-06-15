@@ -92,6 +92,18 @@ type ResponsesConversationStoreLike = {
       routingPolicyGroup?: string;
     },
   ) => { payload: AnyRecord; meta: AnyRecord };
+  lookupContinuationByResponseId?: (responseId: string, options?: {
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  }) => {
+    responseId: string;
+    providerKey?: string;
+    continuationOwner?: 'direct' | 'relay';
+    entryKind?: 'responses' | 'chat' | 'messages';
+    requestId?: string;
+  } | null;
   resumeLatestContinuationByScope?: (args: {
     payload: AnyRecord;
     sessionId?: string;
@@ -147,6 +159,18 @@ type ResponsesConversationModule = {
     submitPayload: AnyRecord,
     options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
   ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
+  lookupResponsesContinuationByResponseId?: (responseId: string, options?: {
+    entryKind?: 'responses' | 'chat' | 'messages';
+    continuationOwner?: 'direct' | 'relay';
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+  }) => {
+    responseId: string;
+    providerKey?: string;
+    continuationOwner?: 'direct' | 'relay';
+    entryKind?: 'responses' | 'chat' | 'messages';
+    requestId?: string;
+  } | null;
   resumeLatestResponsesContinuationByScope?: (args: {
     payload: AnyRecord;
     sessionId?: string;
@@ -279,6 +303,28 @@ export async function resumeResponsesConversation(
     );
   }
   return await fn(responseId, submitPayload, options);
+}
+
+export async function lookupResponsesContinuationByResponseId(
+  responseId: string,
+  options?: { entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
+): Promise<{
+  responseId: string;
+  providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
+  entryKind?: 'responses' | 'chat' | 'messages';
+  requestId?: string;
+} | null> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.lookupContinuationByResponseId === 'function') {
+    return globalStore.lookupContinuationByResponseId(responseId, options);
+  }
+  const mod = await getResponsesConversationModule();
+  const fn = mod.lookupResponsesContinuationByResponseId;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] lookupResponsesContinuationByResponseId not available');
+  }
+  return fn(responseId, options);
 }
 
 export async function rebindResponsesConversationRequestId(

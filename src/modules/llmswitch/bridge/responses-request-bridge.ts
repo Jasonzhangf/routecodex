@@ -14,12 +14,13 @@ import {
   captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
+  lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest,
   resumeResponsesConversation,
 } from './runtime-integrations.js';
 import {
-  captureReqInboundResponsesContextSnapshotJson,
+  captureReqInboundResponsesContextSnapshot,
   planResponsesHandlerEntry,
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
@@ -361,18 +362,18 @@ export function shouldProjectResponsesResumeClientErrorForHttp(args: {
   return typeof args.origin === 'string' && args.origin.trim() === 'client';
 }
 
-export function buildResponsesRequestContextForHttp(args: {
+export async function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
   metadata?: Record<string, unknown>;
   matchedPort?: number;
   routingPolicyGroup?: string;
-}): ResponsesRequestContextForHttp {
+}): Promise<ResponsesRequestContextForHttp> {
   const payloadMetadata =
     args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
-  const captured = captureReqInboundResponsesContextSnapshotJson({
+  const captured = await captureReqInboundResponsesContextSnapshot({
     rawRequest: args.payload,
     requestId: args.requestId,
     toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
@@ -420,6 +421,28 @@ export async function prepareResponsesHandlerEntryForHttp(
           origin: 'client',
         }
       );
+    }
+    const continuation = await lookupResponsesContinuationByResponseId(responseId, {
+      entryKind: 'responses',
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
+    if (continuation?.continuationOwner === 'direct') {
+      resumeMeta = {
+        responseId,
+        restored: false,
+        continuationOwner: 'direct',
+        ...(continuation.providerKey ? { providerKey: continuation.providerKey } : {}),
+      };
+      pipelineEntryEndpoint = args.entryEndpoint;
+      return {
+        kind: 'ok',
+        payload,
+        pipelineEntryEndpoint,
+        plannedEntryMode: plannedEntry.mode,
+        isSubmitToolOutputs,
+        resumeMeta,
+      };
     }
     const resumeResult = await resumeResponsesConversation(responseId, payload, {
       requestId: args.requestId,
@@ -512,7 +535,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
     return {
       kind: 'ok',
       payload,
-      requestContext: buildResponsesRequestContextForHttp({
+      requestContext: await buildResponsesRequestContextForHttp({
         payload,
         requestId: args.requestId,
         metadata: requestBodyMetadata,

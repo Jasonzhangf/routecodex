@@ -138,6 +138,9 @@ type NativeRouterHotpathJsonBinding = {
   evaluateSingletonRoutePoolExhaustionJson?: (
     inputJson: string
   ) => string;
+  planPrimaryExhaustedToDefaultPoolJson?: (
+    inputJson: string
+  ) => string;
   evaluateResponsesDirectRouteDecisionJson?: (
     payloadJson: string,
     metadataJson: string,
@@ -530,6 +533,20 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   return fn(input) as AnyRecord;
 }
 
+export async function captureReqInboundResponsesContextSnapshot(input: {
+  rawRequest: Record<string, unknown>;
+  requestId?: string;
+  toolCallIdStyle?: unknown;
+}): Promise<AnyRecord> {
+  await assertSharedBindings();
+  const mod = await getSharedConversionSemantics();
+  const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
+  }
+  return fn(input) as AnyRecord;
+}
+
 export async function planResponsesHandlerEntry(
   payload: unknown,
   entryEndpoint?: string,
@@ -610,6 +627,38 @@ export function evaluateSingletonRoutePoolExhaustionNative(input: {
     shouldBlock: boolean;
     waitMs?: number;
     candidateProviderCount?: number;
+  };
+}
+
+export function planPrimaryExhaustedToDefaultPoolNative(input: {
+  route: string;
+  tiers: Array<{
+    id: string;
+    targets: string[];
+    priority: number;
+    backup?: boolean;
+  }>;
+  exhaustedTargets: string[];
+  knownTargets: string[];
+}): {
+  status: 'no_default_pool_needed' | 'default_pool' | 'unknown_target' | 'route_not_configured';
+  defaultPoolTargets: string[];
+  fromTierId?: string | null;
+  fromTierPriority?: number | null;
+} {
+  const parsed = invokeRouterHotpathJsonCapability('planPrimaryExhaustedToDefaultPoolJson', [
+    {
+      route: String(input.route || ''),
+      tiers: Array.isArray(input.tiers) ? input.tiers : [],
+      exhaustedTargets: Array.isArray(input.exhaustedTargets) ? input.exhaustedTargets : [],
+      knownTargets: Array.isArray(input.knownTargets) ? input.knownTargets : [],
+    }
+  ]);
+  return assertNativeObject('planPrimaryExhaustedToDefaultPoolJson', parsed) as {
+    status: 'no_default_pool_needed' | 'default_pool' | 'unknown_target' | 'route_not_configured';
+    defaultPoolTargets: string[];
+    fromTierId?: string | null;
+    fromTierPriority?: number | null;
   };
 }
 

@@ -88,7 +88,7 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody).toBe(inbound);
   });
 
-  test('does not sanitize reasoning content on direct provider path', async () => {
+  test('sanitizes reasoning content on direct provider path before sending upstream', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-reasoning-filter',
       type: 'responses-http-provider',
@@ -132,10 +132,11 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).toBe(inbound);
+    expect(capturedBody).not.toBe(inbound);
     expect(capturedBody.input[1].type).toBe('reasoning');
-    expect(capturedBody.input[1].content).toEqual([{ type: 'reasoning_text', text: 'must not reach provider runtime' }]);
-    expect(capturedBody.input[1].encrypted_content).toBeNull();
+    expect(capturedBody.input[1].content).toBeUndefined();
+    expect(capturedBody.input[1].encrypted_content).toBeUndefined();
+    expect(capturedBody.input[1].summary).toEqual([{ type: 'summary_text', text: 'summary stays' }]);
   });
 
   test('preserves inbound responses payload without rebuilding input/history/model', async () => {
@@ -194,6 +195,58 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.tool_choice).toBe('auto');
     expect(capturedBody.instructions).toBe('keep-original-instructions');
     expect(capturedBody.metadata).toBeUndefined();
+  });
+
+  test('direct submit_tool_outputs hits native upstream submit endpoint instead of plain /responses', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-submit-tool-outputs-endpoint',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    let capturedUrl: string | undefined;
+    let capturedBody: any;
+    let capturedHeaders: Record<string, string> | undefined;
+    provider.httpClient = {
+      postStream: async (url: string, body: any, headers: Record<string, string>) => {
+        capturedUrl = url;
+        capturedBody = body;
+        capturedHeaders = headers;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      response_id: 'resp_submit_direct_1',
+      tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        __responsesDirectPassthrough: true
+      }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedUrl).toBe('https://example.invalid/v1/responses/resp_submit_direct_1/submit_tool_outputs');
+    expect(capturedHeaders?.Accept).toBe('text/event-stream');
+    expect(capturedBody).toEqual({
+      tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
+      stream: true
+    });
+    expect(capturedBody.response_id).toBeUndefined();
   });
 
   test('passes Responses no-content timeout into provider SSE transport idle timeout', async () => {

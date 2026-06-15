@@ -7,8 +7,7 @@ import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-load
 import {
   awaitNestedExecutionWithFailFast,
   getNestedFollowupAbortSignal,
-  throwIfNestedFollowupAborted,
-  resolveServerToolNestedFollowupTimeoutMs
+  throwIfNestedFollowupAborted
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
 import {
@@ -691,9 +690,7 @@ export async function executeServerToolReenterPipeline(args: {
         abortSignal: getNestedFollowupAbortSignal(
           nestedInputAttempt.metadata as Record<string, unknown> | undefined
         ),
-        abortCarrier: nestedInputAttempt.metadata,
-        timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
-        requestId: args.requestId
+        abortCarrier: nestedInputAttempt.metadata
       });
       throwIfNestedFollowupAborted(nestedInputAttempt.metadata);
       throwIfNestedPipelineReturnedError(attemptResult);
@@ -728,9 +725,7 @@ export async function executeServerToolReenterPipeline(args: {
           ms: backoffMs
         }),
         abortSignal: getNestedFollowupAbortSignal(nestedInput.metadata),
-        abortCarrier: nestedInput.metadata,
-        timeoutMs: resolveServerToolNestedFollowupTimeoutMs(),
-        requestId: args.requestId
+        abortCarrier: nestedInput.metadata
       });
     }
   }

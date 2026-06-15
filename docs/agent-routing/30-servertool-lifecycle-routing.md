@@ -10,11 +10,11 @@
 ## 覆盖范围
 适用于：servertool stopless 自动续轮、stop followup 重建、CLI projection 迁移、tmux 注入边界。
 
-## 当前迁移方向（2026-06-06）
+## 当前迁移方向（2026-06-15）
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
-2. Phase 1 暂不取消工具注入和拦截，但被拦截的 servertool 不再走私有 server-side execution + followup；改为投影成客户端可见的 `exec_command` CLI 调用。
-3. 客户端执行 `routecodex servertool run <toolName> --input-json <json>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按普通 exec_command 工具结果进入正常请求链，不恢复内部 tool identity。
-4. stop summary / servertool explanation 必须映射到 reasoning；CLI stdout 只承载短工具结果。
+2. 被迁移的 servertool 一律投影成客户端可见的 `exec_command` CLI 调用，不再走私有 server-side followup/reenter。
+3. 客户端执行 `routecodex servertool run <toolName> --input-json <json>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按普通 exec_command 工具结果进入正常请求链。
+4. stop summary / hook explanation 必须映射到 reasoning；stopless CLI command 只承载 status-only 输入，schema guidance 只允许出现在 CLI stdout。
 5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 
 ## stopless 生命周期
@@ -26,11 +26,13 @@
 6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
 7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。
 8. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 provided schema 与 missing schema 都按连续 3 次 stop 收敛；非 stop 响应、工具调用或正常进展必须 reset budget。旧的“missing schema 不计数 / 10 次 missing”文档视为过期。
-9. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
-10. 注入失败必须清理状态，防止循环。
+9. stopless 不得走 `reenterPipeline` 普通 user 注入。非 terminal stop_message_flow 只能投影 CLI，并由 CLI stdout 提供 continuation prompt + schema guidance 闭环。
+10. stopless 的前置注入和拦截补打一律是同一个停止 hook 语义：模型若要停止，必须主动调用该 hook 并附 stop schema；若模型直接 stop 未调用，系统只能补打一轮同一 hook，并在结果中再次要求模型下一轮自己调用。
+11. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
+12. 注入失败必须清理状态，防止循环。
 
 ## followup 边界
-0. CLI projection 已迁移的 servertool 不得再进入 followup；旧 followup 规则只适用于尚未迁移的 legacy servertool flow。
+0. CLI projection 已迁移的 servertool 不得再进入 followup；stopless 也属于 CLI projection，旧 followup 规则只适用于尚未迁移的 legacy servertool flow。
 1. followup 只能基于 origin snapshot 重建。
 2. 不得从当前污染 payload 猜测补偿。
 3. 不得绕过 Hub Pipeline req/resp process 的 Rust 工具治理。

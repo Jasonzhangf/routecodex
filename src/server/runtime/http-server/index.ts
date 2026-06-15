@@ -65,6 +65,8 @@ import {
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
+import { decideDirectProviderRetry, decideDirectRouterRetry } from './direct-decision.js';
+import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { createRequestLocalTransientRetryTracker } from './executor/request-executor-transient-retry-tracker.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
@@ -238,6 +240,7 @@ function asMetadataRecord(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown>
     : {};
 }
+
 
 function buildRouterDirectFailureError(reason: unknown): Error {
   const message = typeof reason === 'string' && reason.trim() ? reason.trim() : String(reason ?? 'unknown');
@@ -1223,9 +1226,13 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
+      const mustRelayLocalResponsesContinuation =
+        portConfig?.mode === 'router'
+        && resumeContinuationOwner === 'relay';
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
+        && !mustRelayLocalResponsesContinuation
       ) {
         const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         this.logStage('router-direct.entry', input.requestId, {
@@ -1278,7 +1285,25 @@ export class RouteCodexHttpServer {
         this.logStage('router-direct.relay', input.requestId, {
           reason: directResult.reason,
         });
-        return await this.executePipeline(nextInput);
+        return await this.executePipeline(
+          directResult.preselectedRoute
+            ? {
+                ...nextInput,
+                metadata: {
+                  ...(nextInput.metadata ?? {}),
+                  __routecodexPreselectedRoute: directResult.preselectedRoute,
+                },
+              }
+            : nextInput
+        );
+      }
+      if (mustRelayLocalResponsesContinuation) {
+        this.logStage('router-direct.skipped', input.requestId, {
+          reason: 'relay_owned_responses_continuation',
+          routingPolicyGroup: portConfig?.routingPolicyGroup,
+          sameProtocolBehavior: portConfig?.sameProtocolBehavior,
+          continuationOwner: resumeContinuationOwner,
+        });
       }
       return await this.executePipeline(nextInput);
     }
@@ -1603,6 +1628,11 @@ export class RouteCodexHttpServer {
         });
       },
       onProviderError: async (error, ctx) => {
+        // feature_id: error.execution_decision_consumer
+        // 2026-06-14 D2: in-line `suppressRouterDirectRetry` and
+        // `exclude_and_reroute + isClientDisconnectLikeError` early-returns
+        // physically removed. Decision is delegated to
+        // `decideDirectRouterRetry` in ./direct-decision.ts.
         await captureRouterDirectFailureSnapshots({
           requestId: input.requestId,
           payload: ctx.payload,
@@ -1676,12 +1706,18 @@ export class RouteCodexHttpServer {
           },
         });
         const retryPlan = directFailurePlan.retryExecutionPlan;
-        if (
-          !retryPlan.shouldRetry
-          || !retryPlan.retrySwitchPlan
-          || (!retryPlan.requestLocalTransient && !retryPlan.blockingRecoverable)
-          || directAttempt >= retryState.maxAttempts
-        ) {
+        const retryDecision = decideDirectRouterRetry({
+          retryExecutionPlan: retryPlan,
+          excludedProviderKeys: retryState.excludedProviderKeys,
+          directAttempt,
+          maxAttempts: retryState.maxAttempts,
+          providerKey: ctx.providerKey,
+          pool: Array.isArray((ctx.routingDecision as { routePool?: unknown } | undefined)?.routePool)
+            ? ((ctx.routingDecision as { routePool?: string[] }).routePool ?? [ctx.providerKey])
+            : [ctx.providerKey],
+          error,
+        });
+        if (retryDecision.action === 'rethrow') {
           return;
         }
         if (directFailurePlan.retryTelemetryPlan) {
@@ -1697,14 +1733,23 @@ export class RouteCodexHttpServer {
           });
         }
         retryState.lastError = error;
-        directRetryRequested = true;
-        const switchAction = retryPlan.retrySwitchPlan.switchAction;
+        retryState.excludedProviderKeys = new Set(retryDecision.mutatedExcluded);
+        directRetryRequested = retryDecision.shouldRecurse;
+        const switchAction = retryPlan.retrySwitchPlan?.switchAction ?? 'exclude_and_reroute';
         if (switchAction === 'retry_same_provider_once') {
           retryState.retryProviderKey = ctx.providerKey;
           retryState.excludedProviderKeys.delete(ctx.providerKey);
         } else {
           retryState.retryProviderKey = undefined;
         }
+        this.logStage('router-direct.unified_decision.applied', input.requestId, {
+          providerKey: ctx.providerKey,
+          switchAction,
+          excludedCurrentProvider: retryPlan.excludedCurrentProvider,
+          requestLocalTransient: retryPlan.requestLocalTransient,
+          blockingRecoverable: retryPlan.blockingRecoverable,
+          directAttempt,
+        });
         this.logStage('router-direct.retry.requested', input.requestId, {
           providerKey: ctx.providerKey,
           routeName: ctx.routingDecision?.routeName,
@@ -2054,6 +2099,9 @@ export class RouteCodexHttpServer {
           }
         },
         onProviderError: async (error, context) => {
+          // feature_id: error.execution_decision_consumer
+          // 2026-06-14 D1: provider-direct onProviderError consumes the unified
+          // ErrorErr05 plan via `decideDirectProviderRetry`; no synthetic reroute.
           const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
           const directRuntimeKey = this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata);
           const retryError = extractRetryErrorSnapshot(error);
@@ -2072,7 +2120,7 @@ export class RouteCodexHttpServer {
             message: publicErrorMessage,
           });
           const runtimeScope = readRuntimeScopeFromMetadata(metadata ?? {});
-          await resolveRequestExecutorProviderFailurePlan({
+          const directFailurePlan = await resolveRequestExecutorProviderFailurePlan({
             error,
             retryError,
             requestId: input.requestId,
@@ -2105,7 +2153,7 @@ export class RouteCodexHttpServer {
               ...(metadata ?? {}),
               __rt: {
                 ...(metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-                  ? (metadata.__rt as Record<string, unknown>)
+                  ? (metadata?.__rt as Record<string, unknown>)
                   : {}),
                 ...runtimeScope,
               },
@@ -2114,6 +2162,11 @@ export class RouteCodexHttpServer {
               source: 'provider-direct',
               ...(typeof statusCode === 'number' ? { statusCode } : {}),
             },
+          });
+          void decideDirectProviderRetry({
+            retryExecutionPlan: directFailurePlan.retryExecutionPlan,
+            error,
+            providerKey: context.providerKey,
           });
         },
       },

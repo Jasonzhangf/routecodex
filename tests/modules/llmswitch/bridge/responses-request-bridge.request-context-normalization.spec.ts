@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const mockCaptureReqInboundResponsesContextSnapshotJson = jest.fn();
+const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -10,13 +10,14 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   captureResponsesRequestContextForRequest: jest.fn(),
   clearResponsesConversationByRequestId: jest.fn(),
   finalizeResponsesConversationRequestRetention: jest.fn(),
+  lookupResponsesContinuationByResponseId: jest.fn(),
   materializeLatestResponsesContinuationByScope: jest.fn(),
   recordResponsesResponseForRequest: jest.fn(),
   resumeResponsesConversation: jest.fn(),
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  captureReqInboundResponsesContextSnapshotJson: mockCaptureReqInboundResponsesContextSnapshotJson,
+  captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
   planResponsesHandlerEntry: jest.fn(),
 }));
 
@@ -34,11 +35,11 @@ const { buildResponsesRequestContextForHttp } = await import(
 
 describe('responses-request-bridge relay request-context normalization', () => {
   beforeEach(() => {
-    mockCaptureReqInboundResponsesContextSnapshotJson.mockReset();
+    mockCaptureReqInboundResponsesContextSnapshot.mockReset();
   });
 
-  it('RED: relay request context uses normalized native input instead of raw duplicate tool history', () => {
-    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
+  it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [
         {
           type: 'function_call',
@@ -55,7 +56,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }],
     });
 
-    const context = buildResponsesRequestContextForHttp({
+    const context = await buildResponsesRequestContextForHttp({
       payload: {
         model: 'gpt-5.4',
         input: [
@@ -90,7 +91,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
-    expect(mockCaptureReqInboundResponsesContextSnapshotJson).toHaveBeenCalledWith(
+    expect(mockCaptureReqInboundResponsesContextSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'req_relay_context_normalized_1',
       }),
@@ -102,14 +103,78 @@ describe('responses-request-bridge relay request-context normalization', () => {
     expect(context.context.input).toHaveLength(2);
   });
 
-  it('RED: relay request context does not fall back to raw input when native capture rejects orphan tool_result', () => {
-    mockCaptureReqInboundResponsesContextSnapshotJson.mockImplementation(() => {
-      throw new Error(
-        'orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_JyD0R31sWoSfsvEtKsqHJkRh'
-      );
+  it('RED: relay request context keeps only the latest output when an identical tool-call batch repeats', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_dup',
+          name: 'exec_command',
+          arguments: '{"cmd":"cat skill.md"}',
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_dup',
+          output: 'write_stdin failed: Unknown process id 1',
+        },
+      ],
+      toolsRaw: [{ type: 'function', function: { name: 'exec_command' } }],
     });
 
-    expect(() =>
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call',
+            call_id: 'call_dup',
+            name: 'exec_command',
+            arguments: '{"cmd":"cat skill.md"}',
+          },
+          {
+            type: 'function_call',
+            call_id: 'call_dup',
+            name: 'exec_command',
+            arguments: '{"cmd":"cat skill.md"}',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup',
+            output: 'Chunk ID: once',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup',
+            output: 'write_stdin failed: Unknown process id 1',
+          },
+        ],
+        tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      },
+      requestId: 'req_relay_context_normalized_2',
+      metadata: { session_id: 'sess_2', conversation_id: 'conv_2' },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+
+    expect(context.context.input).toEqual([
+      expect.objectContaining({ type: 'function_call', call_id: 'call_dup' }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_dup',
+        output: 'write_stdin failed: Unknown process id 1',
+      }),
+    ]);
+    expect(context.context.input).toHaveLength(2);
+  });
+
+  it('RED: relay request context does not fall back to raw input when native capture rejects orphan tool_result', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockRejectedValue(
+      new Error(
+        'orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_JyD0R31sWoSfsvEtKsqHJkRh'
+      )
+    );
+
+    await expect(
       buildResponsesRequestContextForHttp({
         payload: {
           model: 'gpt-5.4',
@@ -123,7 +188,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
         },
         requestId: 'req_relay_context_orphan_1',
       })
-    ).toThrow(
+    ).rejects.toThrow(
       'orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_JyD0R31sWoSfsvEtKsqHJkRh'
     );
   });

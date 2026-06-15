@@ -1,3 +1,554 @@
+## 2026-06-15 note.md consolidation index
+- 5520 direct SSE duplicate terminal frames live truth：latest=2026-06-15；已确认线上 `0.90.3071` 仍在 `response.completed(required_action)` 后本地补一套 tool terminal frames，且全局安装 dist 未带上 direct skip 修复。
+- reasoning retention audit split：latest=2026-06-15；已确认 direct live 本次未见 SSE 壳层吞 reasoning，但 relay/local responses conversation store 仍显式丢弃 standalone reasoning output item。
+- stopless blackbox CLI contract update：latest=2026-06-15；旧 `scripts/tests/stopless-followup-blackbox.mjs` 仍断言 server-side reenter / upstream>=2，已改为 CLI projection 合同并在线黑盒转绿。
+- stopless CLI request-side auto-hook rewrite：latest=2026-06-15；已确认真实 capture owner 在 `hub_req_inbound_context_capture.rs`，此前 rewrite 只写在 tool normalization 未接入 live capture；现已接入 capture 入口并通过 cargo/native jest/function-map gate。
+- stopless CLI vs transparent reenter owner conflict：latest=2026-06-15；已确认 map/docs/code 当前一致指向 transparent reenter，但仓库残留 CLI contract/blackbox；正在统一回 CLI 闭环。
+- servertool nested followup timeout removal：latest=2026-06-15；已取消 executor 侧 10s nested followup fail-fast，只保留 client abort；待 build:min 收口。
+- 5520 latest apply_patch sample re-audit：latest=2026-06-15；已确认 provider 200 + outbound custom grammar preserve 修复已落 Rust owner，待 build/install/live replay。
+- apply_patch SSE pending-delta done-frame closure：latest=2026-06-15；已完成定向 gate + build/install/restart 证据，待按总审计任务继续归并。
+- direct-path-error-reroute-and-candidate-exhaustion P5 (function-map/verification-map sync)：latest=2026-06-15；map/gate 落盘，待 promote 到 MEMORY.md 待 gate PASS。
+- 5520 direct apply_patch grammar + SSE projection closure：latest=2026-06-14；已 promote 到 MEMORY.md 候选。
+- stopless double-收口执行与清理：latest=2026-06-14；已 promote 到 MEMORY.md 候选。
+- latest codex apply_patch sample compatibility：latest=2026-06-14；已 promote 到 MEMORY.md 候选。
+- apply_patch direct/relay full audit progress：latest=2026-06-14；in_progress。
+
+## 2026-06-15 stopless blackbox CLI contract update
+
+- 旧黑盒 `scripts/tests/stopless-followup-blackbox.mjs` 还在断言“stopless 会自动 reenter upstream 第二次”，因此在当前 CLI 闭环下必然误报：
+  - `expected upstream >=2 hits (initial + followup), got 1`
+- 当前 stopless 合同应为：
+  - 首次 upstream 返回 `finish_reason=stop`
+  - RouteCodex 本地拦截后直接投影 `exec_command`
+  - 不允许 server-side reenter，不允许第二次 upstream 自动 followup
+- 黑盒脚本已改为断言：
+  - HTTP 200
+  - `required_action.submit_tool_outputs.tool_calls` 存在
+  - 存在 `exec_command`
+  - `cmd` 为 `routecodex hook run stop_message_auto ...` 或 `routecodex servertool run stop_message_auto ...`
+  - CLI 输入不泄漏 `continuationPrompt` / `stopreason`
+  - upstream 命中数严格等于 1
+- 2026-06-15 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/tests/stopless-followup-blackbox.mjs` PASS
+  - 结果：`upstreamHits=1`, `providers=["crs1"]`, `execCommand="routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1}'"`
+
+## 2026-06-15 5520 direct SSE duplicate terminal frames live truth
+
+- 在线复测 `http://127.0.0.1:5520/v1/responses`（model=`gpt-5.4`，stream=true，强制 `exec_command` 工具）仍复现重复终结帧：
+  - upstream 先输出一套正常 `response.output_item.added -> response.function_call_arguments.* -> response.output_item.done -> response.completed`
+  - 随后本地又追加一套 `response.output_item.added -> response.function_call_arguments.delta/done -> response.output_item.done -> response.done`
+- 关键形状证据：
+  - 第一套帧带 `sequence_number`
+  - 第二套追加帧不带 `sequence_number`
+  - 这更像本地 `buildResponsesTerminalSseFramesFromProbeForHttp(...)` 合成物，而不是 upstream 重发。
+- 已核对当前全局安装真值：
+  - `routecodex --version` / `rcc --version` = `0.90.3071`
+  - `/opt/homebrew/lib/node_modules/routecodex/dist/server/handlers/handler-response-sse.js` 中 **不存在**：
+    - `sse.persist.skip.direct_passthrough`
+    - `sawResponsesCompletedChunk: isDirectPassthrough ? true : ...`
+    - `sawResponsesDoneEvent: isDirectPassthrough ? true : ...`
+- 结论：工作树源码已有 direct skip 修复，但当前线上安装产物未带上，所以 live 仍走旧 direct SSE 收尾逻辑。
+
+## 2026-06-15 reasoning retention audit split
+
+- direct live 复测（5520 `/v1/responses`，stream=true，工具调用样本）现在只剩一套原始 upstream tool frames；`response.created` / `response.completed` 内的 `response.reasoning` 对象仍在，未见 handler shell 额外裁掉 reasoning 字段。
+- direct live 这次样本没有出现 standalone reasoning output item，因此不能把“direct 全路径 reasoning 完整保留”宣称为已证实，只能确认当前 SSE 壳层未额外吞掉 top-level `response.reasoning`。
+- relay/local store 风险已确认存在于 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+  - `normalize_output_item_to_input(...)` 对 `item_type == "reasoning"` 直接 `return None`
+  - 其自带测试也明确锁的是“drop reasoning”当前行为：
+    - `drops_reasoning_output_item_from_persisted_history`
+    - `drops_reasoning_output_item_before_function_call_when_persisting_history`
+    - `drops_encrypted_only_reasoning_output_item_from_persisted_history`
+- 辅助证据：`~/.rcc/codex-samples/openai-responses/port-5520/openai-responses-router-gpt-5.4-20260615T103132026-346572-4150/provider-request.json` 中当前 provider request 仍含多条 `"type": "reasoning"`，说明请求侧 inline history 至少在该 direct 样本里没有先天丢光 reasoning。
+- 样本侧再确认：`~/.rcc/codex-samples/openai-responses/**/provider-response.json` 中存在多条真实 `output.type="reasoning"` 样本；同时 `provider-request.json` 在 197 个样本里命中 6267 条 `"type":"reasoning"`，说明“历史里保留 reasoning”是 live 主路径需求，不是测试专用形状。
+- 旧样本重放 PASS：`/Users/fanzhang/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781405903910_40a2191d/provider-response.json` 的真实响应体在 `body.payload`；将该 payload 直接喂给 `convertResponsesOutputToInputItemsWithNative(...)` 后得到 `totalItems=8`、`reasoningItems=1`，证明 owner 当前能从真实 provider response 中提取 standalone reasoning item。
+- 当前源码验证已转绿，说明 relay/local continuation store 主链不再丢 standalone reasoning：
+  - Rust owner 测试 PASS：`cargo test -q -p router-hotpath-napi preserves_reasoning_output_item --lib -- --nocapture`
+  - JS store 黑盒 PASS：`PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/responses-continuation-store.spec.ts --runInBand -t 'recordResponse must preserve standalone reasoning output items in persisted history before later tool turns|materialize must not duplicate pending tool-call history when incoming payload already replays the current pending turn|materialize must collapse duplicated pending call batches when incoming delta repeats the same call_ids twice|materialize still builds full input when incoming payload is true delta after a pending tool call'`
+  - 结论收口到“relay/local store 当前源码已能同时保留 reasoning 与 pending-tool materialize 语义”；是否线上已生效还需要 install/restart 后再做 live/runtime 证据。
+
+## 2026-06-15 stopless CLI request-side auto-hook rewrite
+
+- 红测先红：`tests/sharedmodule/native-required-exports-sse-stream.spec.ts` 新增门禁后首次 FAIL，证明 `captureReqInboundResponsesContextSnapshotWithNative` 真实产物里，自动注入的 stop hook `function_call/function_call_output` 仍原样留在 `context.input`，没有改写成文本输入。
+- 根因确认：rewrite 逻辑之前只落在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`；但 live native capture 入口实际走 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs::capture_req_inbound_responses_context_snapshot`，因此逻辑未接入真实链路。
+- 修复：在 `capture_req_inbound_responses_context_snapshot` 最前面先对整个 request payload 执行 `normalize_shell_like_tool_calls_before_governance`，再继续 `normalize_responses_input_items` / context capture。
+- 合同锁定：
+  - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+  - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
+  - `tests/servertool/stopless-cli-continuation.spec.ts`
+  - `tests/servertool/stop-message-auto.goal-default.spec.ts`
+- 2026-06-15 验证证据：
+  - `cargo test -p router-hotpath-napi hub_req_inbound_tool_call_normalization --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi normalize_responses_input_items --lib -- --nocapture` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/native-required-exports-sse-stream.spec.ts tests/servertool/stop-schema-lifecycle-contract.spec.ts tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/stop-message-auto.goal-default.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `git diff --check` PASS
+
+## 2026-06-15 stopless single-contract closeout audit
+
+- 当前 stopless 真合同已再次核实为 CLI continuation，不是 transparent reenter：
+  - `sharedmodule/llmswitch-core/src/servertool/engine.ts` 只接受 `terminal_final` 或 `cli_projection`
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs` 的 `StoplessOrchestrationAction` 只有 `TerminalFinal` / `CliProjection`
+  - `docs/architecture/function-map.yml` / `docs/architecture/verification-map.yml` 的 `feature_id: hub.servertool_stopless_cli_continuation` 也明确锁 `must project client-visible exec_command` 且 `must not call reenterPipeline`
+- 已物理删除冲突的透明续轮旧合同文件：
+  - `tests/servertool/stopless-sessionid-transparent.spec.ts`
+  - `docs/goals/stopless-sessionid-transparent-plan.md`
+  - `docs/goals/stopless-sessionid-transparent-goal-prompt.md`
+- `scripts/verify-servertool-rust-only.mjs` 已补 gate：若上述 transparent 文件复活，直接 fail `stopless-no-reenter-contract`
+- 2026-06-15 focused gates PASS：
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/stop-schema-lifecycle-contract.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/sharedmodule/native-required-exports-sse-stream.spec.ts --runInBand`
+  - `cargo test -q -p servertool-core stopless --lib -- --nocapture`
+  - `node scripts/verify-servertool-rust-only.mjs`
+  - `npm run verify:function-map-compile-gate`
+  - `git diff --check`
+- 黑盒证据 PASS：
+  - `node scripts/tests/stopless-followup-blackbox.mjs`
+  - 结果：`upstreamHits=1`、`providers=["crs1"]`、`execCommand="routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1}'"`
+  - 证明当前 stopless 是 client-visible CLI 投影，且不会 server-side followup/reenter，也不会把 `continuationPrompt` / `stopreason` 泄漏进命令字符串。
+
+## 2026-06-15 apply_patch SSE pending-delta done-frame closure
+
+- 当前 live 指向的问题是：Responses SSE 在 `apply_patch` 工具调用的终结帧里，若上游只给 `call_id` 且 `arguments=""`、甚至省略 `name`，客户端会收到空工具调用，形成“apply_patch 空回复”。
+- 唯一 owner 修复点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`
+  - owner feature: `hub.response_responses_client_projection`
+- 修复要点：
+  - `response.output_item.added` 的 `apply_patch` function_call 现在不再透传给客户端；
+  - `response.output_item.done` / `response.function_call_arguments.done` 若终结帧参数为空，则回退使用 `pending_apply_patch_argument_deltas[call_id]`；
+  - `apply_patch` 判定不再只依赖 `name=apply_patch`，而是 `name==apply_patch || state.apply_patch_call_ids.contains(call_id)`，兼容 done 帧丢 `name`；
+  - 终结后清理 `pending_apply_patch_argument_deltas` 与 `apply_patch_call_ids`，避免重复发射。
+- 新增/覆盖红测：
+  - `project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments`
+  - `project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_omits_name`
+- 2026-06-15 验证证据：
+  - `cargo test -q -p router-hotpath-napi project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_omits_name --lib -- --nocapture` PASS
+  - `cargo test -q -p router-hotpath-napi project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments --lib -- --nocapture` PASS
+  - `cargo test -q -p router-hotpath-napi project_responses_sse_frame_for_client --lib -- --nocapture` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-apply-patch-freeform-contract.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh` PASS
+  - `routecodex --version` / `rcc --version` = `0.90.3068`
+  - `curl -fsS http://127.0.0.1:{5555,5520,10000}/health` 全部 `status=ok ready=true pipelineReady=true version=0.90.3068`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5520/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs` PASS
+    - `ok=true`
+    - `customInputCount=4`
+    - `functionArgumentPatchLeakCount=0`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5555/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs` PASS
+    - `ok=true`
+    - `customInputCount=4`
+    - `functionArgumentPatchLeakCount=0`
+  - `git diff --check` PASS
+
+## 2026-06-14 stopless double-收口执行与清理
+
+- 用户要求两步同时收口：(1) stopless 状态 key 严格走 `sessionId`（之前吃 `tmuxSessionId` / `conversationId` / `stopMessageClientInjectScope` fallback）；(2) stopless 对客户端无感（不再投影 `exec_command` / `stop_message_auto` / `routecodex servertool run`，模型只感知普通 user input）。
+
+- 已物理删除的死代码（不允许以"不接入"代替删除）：
+  - `servertool-core::cli_contract::StopMessageCliProjectionSeedInput` / `StopMessageCliProjectionSeed` / `plan_stop_message_cli_projection_seed` + 6 个相关 Rust tests
+  - 6 个 stopless seed helper：`read_stop_message_followup_text` / `looks_like_stop_schema_guidance` / `read_stop_message_assistant_stop_text` / `read_stop_message_loop_number` / `read_js_nonnegative_u32` / `read_runtime_metadata_from_execution` / `read_assistant_stop_text_from_chat`（仅 `collect_text_from_content_parts` 保留，无引用方）
+  - `servertool_core_blocks::plans_stop_message_cli_projection_seed_via_servertool_core_bridge`
+  - `StoplessOrchestrationAction` 去掉 `'cli_projection'`，只留 `terminal_final` | `followup_mainline`
+  - `native-servertool-core-semantics::planStopMessageCliProjectionSeedWithNative` + `StopMessageCliProjectionSeed*` TS interface
+  - `native-router-hotpath-required-exports.{ts,js}::planStopMessageCliProjectionSeedJson`
+  - `router-hotpath-napi::lib::plan_stop_message_cli_projection_seed_json`
+  - `servertool/engine.ts::buildStopMessageCliProjectionResult` + `planStopMessageCliProjectionSeedWithNative` import + `if (stoplessPlan.action === 'cli_projection')` 分支
+  - `tests/servertool/stop-message-auto.spec.ts`（旧 spec 全部按已删 CLI 投影写，物理删除并由新 spec 接管）
+  - `scripts/verify-servertool-rust-only.mjs` 里的 `checkStopMessageCliProjectionSeedRustOwner` + `hub.servertool_stopless_cli_projection_seed` 注册 + 6 条 `planStopMessageCliProjectionSeed*` 断言 + `stop-visible-text-thin-shell` 里残留的 `planStopMessageCliProjectionSeedWithNative` 断言
+
+- 新 spec 接管：`tests/servertool/stopless-sessionid-transparent.spec.ts`（5/5 PASS），覆盖：
+  - `resolveStateKey` 严格 `session:sessionId` 或 `requestId`（无 sessionId）
+  - stopless 走 `reenterPipeline`，最后一条 message 是普通 `user` role 文本
+  - `result.chat`（client-visible） 不出现 `exec_command` / `stop_message_auto` / `routecodex servertool run`
+  - 不同 `sessionId` 不串状态（`requestId` 不同 + `result.chat` 不同）
+  - 嵌套 reenter 多轮都保持 transparent
+
+- 关键决策：
+  - `verification-map.yml` 的 `hub.servertool_stopless_cli_projection_seed` 改为 `hub.servertool_stopless_transparent_continuation`，notes 写透明续轮 + sessionId-only + focused gates
+  - 旧 `hub.servertool_cli_projection`（generic CLI projection）保留不动，因为它仍服务 `servertool_fixture` 等 generic client-exec 路径
+  - reenterPipeline 内部 body 是"发回普通 user input"（包含 stopless 引导文案）是合理的——那是发给 followup pipeline 的输入，**不是** client-visible；断言收口到 `result.chat` 才检查 projection token
+
+- Gate 证据：
+  - `cargo test -p servertool-core stopless --lib -- --nocapture` 29 PASS
+  - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` 37 PASS
+  - `cargo test -p router-hotpath-napi --lib` 编译干净
+  - `verify:servertool-rust-only` ALL PASS
+  - `verify:function-map-compile-gate` ALL PASS
+  - `tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit` clean
+  - `node --experimental-vm-modules jest tests/servertool/ --runInBand` 83/83 PASS
+  - `git diff --check` clean
+
+- 剩余未完成：build:min / install:global / restart / live `/v1/responses` probe 证明 stopless 真实链路上 client 端没有 `exec_command` / `stop_message_auto` / `routecodex servertool run` 暴露。需在 NODE 22 下做。
+
+## 2026-06-14 latest codex apply_patch sample compatibility
+
+- 最新真实失败样本锁定在 `~/.rcc/codex-samples/openai-responses/port-5555/openai-responses-router-gpt-5.4-20260614T175359964-343454-1032/provider-request.json`。
+- 根因已确认：不是 `apply_patch` 工具缺失，也不是 `input`/`patch` alias、绝对路径、shell wrapper 这类旧兼容点；真正缺口是 GNU 行号 hunk header 带 inline context trailer（如 `@@ -94,6 +94,7 @@ mod shared_tool_mapping;`）在 Rust normalize 后仍残留为不可执行 header，最终命中 `apply_patch verification failed: Failed to find context ...`。
+- 唯一 owner 修复点：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_live_context.rs`
+  - 新增 `extract_unified_hunk_inline_context(...)`
+  - 新增 `rebuild_line_number_hunk_to_apply_patch_context(...)`
+  - 行为：当 live-context 重建拿不到完整上下文时，把 GNU 行号 hunk 重写成 canonical `@@`，并把 header trailer 提升为真实 context 行；只修形状，不猜语义。
+- 红测/门禁：
+  - Rust 定向红测：`test_validate_apply_patch_arguments_repairs_line_number_hunk_with_inline_context_trailer`
+  - JS/native matrix：`sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` 新增真实样本等价 case，并更新旧 GNU hunk 预期为 canonical `@@`。
+- 验证证据：
+  - `cargo test -p router-hotpath-napi test_validate_apply_patch_arguments_repairs_line_number_hunk_with_inline_context_trailer --lib -- --nocapture` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs` PASS
+  - 对真实样本直接跑 `validateApplyPatchArgumentsWithNative(...)`：
+    - add-file patch `ok=true repaired=true`
+    - 两个失败的 `Update File` patch 现在都被规整成 `@@` 形状，`ok=true repaired=true`，且不再保留 `@@ -94,6 +94,7 @@ ...` / `@@ -60,6 +60,7 @@ ...` 这类不可执行 header。
+- 边界：当前证据证明“最新 codex sample 的补丁形状兼容”已修；尚未宣称整个 direct/relay apply_patch 闭环全部完成。
+
+## 2026-06-14 apply_patch direct/relay full audit progress
+
+## 2026-06-14 5520 direct apply_patch grammar + SSE projection closure
+
+- 新增 live 失败样本不是 `apply_patch aborted` 本身，而是 direct apply_patch grammar 真源错误：
+  - 23:04:28 / `openai-responses-router-gpt-5.4-20260614T230414428-345124-2702`
+  - `router-direct.send` 直连 asxs.gpt-5.4 返回 `HTTP 400`
+  - upstream 明确报错：`Invalid lark grammar ... unknown name: "begin_patch"`
+- 结论：此前 request-side Rust owner 与 online smoke 都只发了一行截断 grammar：`start: begin_patch hunk+ end_patch`，缺失 `begin_patch/end_patch/hunk/...` 规则；这会在严格校验 grammar 的 direct Responses upstream 上直接失败。
+- 唯一 owner 修复：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `normalize_apply_patch_freeform_tool_schema(...)` 现在发完整 canonical Lark grammar，而不是截断的一行。
+- 同步收敛的 gate/fixture：
+  - `scripts/tests/apply-patch-freeform-10000-online.mjs`
+  - `scripts/architecture/verify-apply-patch-freeform-contract.mjs`
+  - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts`
+  - `tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts`
+  - Rust test fixtures in `hub_pipeline_types/tool_surface_contract.rs` / `hub_chat_envelope_validator.rs` / `hub_resp_outbound_client_semantics_tests.rs`
+- 本轮 green 证据：
+  - `cargo test -q -p router-hotpath-napi normalize_apply_patch_freeform_tool_schema --lib -- --nocapture` PASS
+  - `cargo test -q -p router-hotpath-napi project_responses_sse_frame_for_client --lib -- --nocapture` PASS
+  - `node scripts/architecture/verify-apply-patch-freeform-contract.mjs` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts --runInBand` PASS
+  - `node scripts/build-core.mjs` PASS
+  - `git diff --check` PASS
+- live 安装/重启/在线复测：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh` PASS
+  - `routecodex --version` / `rcc --version` = `0.90.3065`
+  - `127.0.0.1:5555/5520/10000 /health` 全绿
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5520/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs` PASS
+    - `ok=true`
+    - `functionArgumentPatchLeakCount=0`
+    - `input` 为原始 patch 文本
+    - 证明 5520 direct 现在线上不会再被残缺 grammar 400 卡死，也不会把 apply_patch 回投成 JSON-wrapped function arguments。
+
+- 当前配置真相（2026-06-14 实时读取）：
+  - `~/.rcc/config.toml` 与 `/Volumes/extension/.rcc/config.toml` 中，`5520` 与 `5555` 均配置为 `sameProtocolBehavior = "direct"`。
+  - 结论：`5555 是 relay` 不能当作当前静态真相，只能针对具体历史 live 样本按实际 route 判定。
+
+- 5520/5555 direct/relay 判定边界（代码）：
+  - `src/server/runtime/http-server/index.ts`
+    - 若 `responsesResume.continuationOwner === 'relay'`，即使端口是 `sameProtocolBehavior=direct`，也会跳过 router-direct，进入 relay `executePipeline(...)`。
+    - 其余 router-mode direct 先走 `executeRouterDirectPipelineForPort(...)`；仅当 `isRouterDirectRelayableSkip(reason)` 命中，才回到 relay。
+  - `src/server/runtime/http-server/router-direct-pipeline.ts`
+    - TS 壳只做同协议判定 + passthrough send，不做 payload 改写。
+  - `src/server/runtime/http-server/direct-passthrough-payload.ts`
+    - direct route decision 仅包一层 native `evaluateResponsesDirectRouteDecisionNative(...)`。
+
+- direct 是否会被强制打回 relay（Rust 真源）：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+    - `requiresHubRelay=true` 的明确原因目前包括：
+      - `servertool_followup_requires_hub_relay`
+      - `stop_message` / followup metadata / CLI result
+    - 另有 provider wire 显式拒绝：
+      - `function_call_output` 含 `content` 时返回 `providerWireValid=false`，不会直接走 relay，而是 direct host contract fail-fast。
+  - 结论：历史上 `5555` 某些样本之所以是 relay，必须证明命中了 `relay_owned_responses_continuation` 或 `requiresHubRelay`，不能只看端口号。
+
+- apply_patch 当前 owner 真相（代码）：
+  - 请求侧工具声明治理 owner：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+    - `normalize_apply_patch_freeform_tool_schema(...)` 当前会把 `apply_patch` 统一改成 `type=custom + format=grammar(lark)` freeform 工具。
+  - 请求侧历史/存储/去重 owner：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`
+    - `normalize_tool_parameters(...)` 对 `apply_patch` 直接保留 raw value；
+    - `normalize_tool_output_text_for_storage(...)` 先去 transcript wrapper；
+    - `canonicalize_tool_output_text_for_compare(...)` 对 `apply_patch` 再走 `normalize_apply_patch_output_text(...)`。
+  - 响应侧客户端投影 owner：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`
+    - 负责把 `apply_patch` 参数按客户端 spec/freeform 重新投影；当前存在 `normalize_apply_patch_freeform_input_for_client(...)` 与 function_call -> custom_tool_call 映射逻辑。
+  - relay continuation/store owner：
+    - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+    - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+
+- live 错误样本映射（已有证据）：
+  - 5520 direct 历史样本：
+    - `~/.rcc/logs/server-5520.log`
+    - 多处 `route=router-direct:*` 同时失败 `orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id`
+    - 证明：5520 的问题不要求 relay 才会出现，direct 入口照样会在请求侧/上下文侧失败。
+  - 5555 relay/非 direct 历史样本：
+    - 用户给出的 2026-06-13/14 样本中出现 `search/gateway-priority-5555-priority-search -> minimax...`、`tools/gateway-priority-5555-priority-tools -> minimax...`
+    - 且错误为 `invalid params, tool call result does not follow tool call (2013)` / `orphan_tool_result`
+    - 现阶段结论：这是 Anthropic/MiniMax chat 历史投影与 tool_result 顺序问题，owner 更偏向 relay request-side history projection，而不是 direct passthrough body rewrite。
+
+- 当前 gate / test 缺口（本轮实际执行证据）：
+  - PASS：
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs`
+  - 先前“Jest/ESM infra gap”结论需要修正：
+    - 正确 runner 是 `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest ... --runInBand`
+    - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`：在正确 runner 下 PASS（4/4）
+    - `tests/sharedmodule/responses-continuation-store.spec.ts`：在正确 runner 下可执行，但有 1 条真实红测
+      - 失败样本：`fails fast when direct and relay continuations coexist under one scope without explicit owner`
+      - 现状：`materializeLatestResponsesContinuationByScope(...)` 返回了 relay continuation，不是 `null`
+      - 结论：这不是 infra gap，而是 continuation owner 隔离的真实功能缺口
+    - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`：在正确 runner 下可执行，但当前有 5 条真实失败，不是 runner 问题
+      - `provider-mode chat direct does not synthesize stream=true when stream_options is present`
+      - `router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent`
+      - `router same-protocol direct relays stop_message followup through Hub before direct send`
+      - `router-direct switches provider request-locally on recoverable 429 without entering relay`
+      - `router-direct switches to alternative provider immediately for recoverable 502 when VR has another target`
+  - 新结论：当前 audit 不能把 direct/continuation 关键 gate 统称为“Jest/ESM 挡住”。至少 `responses-continuation-store` 与 `direct-passthrough-route-level` 已经是可跑且真实为红。
+
+- 5555 样本的 direct / relay / owner 进一步收敛（新增证据）：
+  - `openai-responses-router-gpt-5.4-20260613T231359101-341020-806`
+    - 日志：`~/.rcc/logs/server-5520.log` 中只有 `[virtual-router-hit]` 后直接失败，未出现 `[router-direct.send]`
+    - diag：`message=orphan_tool_result...`，`code=hub_pipeline_context_capture_failed`
+    - stack 直接落在：
+      - `sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js`
+      - `sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js`
+    - 结论：这是 request-side Rust owner / Hub request stage 失败，不是 provider send，不是 direct passthrough body rewrite。
+  - `openai-responses-router-gpt-5.4-20260614T111633597-342304-2090`
+    - 日志：`~/.rcc/logs/server-5520.log` 明确出现 `[router-direct.send][openai-responses-router-gpt-5.4-20260614T111633597-342304-2090] error`
+    - diag：`HTTP 400: No tool call found for function call output with call_id ...`
+    - requestBody 形状只有：
+      - `function_call_output`
+      - 后接一条 `user: 继续`
+    - 结论：这是 5555 direct 样本；失败点是裸 `function_call_output` 进入 direct upstream contract，不是 relay。
+  - `openai-responses-router-gpt-5.4-20260613T223253714-340912-698`
+    - diag `details.requestContext.providerProtocol = anthropic-messages`
+    - provider=`minimax.key1.MiniMax-M3`，route=`tools`
+    - request-side `responsesRequestContext.context.input` 形状统计：
+      - `message=13`
+      - `reasoning=4`
+      - `function_call=14`
+      - `function_call_output=14`
+    - 结论：这是 Responses 历史投影后送往 Anthropic/MiniMax 的复杂 tool history 样本；2013 错误 owner 仍应优先锁到 relay/request-side history projection，而不是 5520/5555 端口静态语义。
+  - `openai-responses-router-gpt-5.4-20260614T001441281-341104-890`
+    - 与上条同类：`providerProtocol = anthropic-messages`，provider=`minimax.key1.MiniMax-M3`，route=`search`
+    - 错误：`invalid params, tool call result does not follow tool call (2013)`
+    - 结论：同类 owner，属于 Anthropic/MiniMax chat 历史 tool_result 顺序问题。
+
+- 当前样本 -> owner -> 风险 分类（阶段性）：
+  - 5555 / `231359101` / `orphan_tool_result`
+    - owner 优先级：`responses-request-bridge.ts` -> Rust `hub_pipeline_blocks/responses_context.rs` -> Rust `hub_bridge_actions/bridge_input.rs`
+    - 风险类型：request-side history / continuation materialize / orphan tool result contract
+  - 5555 / `111633597` / `No tool call found for function call output`
+    - owner 优先级：direct path input contract + upstream provider wire contract
+    - 风险类型：direct request payload contract
+  - 5555 / `223253714` / `001441281` / `2013 tool call result does not follow tool call`
+    - owner 优先级：Responses -> Anthropic/MiniMax request-side history projection
+    - 代码焦点：
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs`
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs`
+      - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+    - 风险类型：tool call / tool result 顺序与聚合语义不符合 Anthropic/MiniMax
+
+- 下一步修复顺序（按 owner / 风险排序）：
+  1. shared Rust owner：先修 continuation owner 冲突
+     - 证据：`tests/sharedmodule/responses-continuation-store.spec.ts` 真红
+     - 目标：同一 scope 下 direct + relay 共存时，未显式指定 owner 必须 fail-fast，不得偷选 relay
+     - owner：`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` 对应的 native/shared continuation owner 逻辑
+  2. relay / request-side history owner：再修 `2013` 与 `orphan_tool_result`
+     - 证据：
+       - `231359101` 直接死在 `hub_pipeline_context_capture_failed`
+       - `223253714` / `001441281` 被投影成 `anthropic-messages` 后触发 `tool call result does not follow tool call (2013)`
+     - owner 优先级：
+       - Rust `hub_bridge_actions/bridge_input.rs`
+       - Rust `hub_bridge_actions/history.rs`
+       - Rust `hub_pipeline_blocks/responses_context.rs`
+       - TS 薄壳 `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+  3. direct owner：最后修 direct input contract
+     - 证据：`111633597` 明确出现 `[router-direct.send]`，且输入只有裸 `function_call_output`
+     - 目标：direct 不做 repair，但必须把“非法 direct continuation/tool output 形状”在唯一 owner 处 fail-fast 并清晰投影，不能混成 relay/history 问题
+     - owner：direct request contract / upstream request builder
+  4. direct gate 收口
+     - 证据：`tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` 当前 5 红
+     - 目标：把 direct 的透明性、stop_message followup、429/502 切候选行为锁回 gate
+
+- continuation store 结论再锁一遍：
+  - `continuationOwner=direct` -> 远程 owned continuation；只允许 same-protocol direct 续接；本地不做 store / materialize。
+  - `continuationOwner=relay` -> 本地 store / materialize；只走 relay 恢复键。
+  - 这条边界和当前 `responses-continuation-store.spec.ts` 的 direct-owned / relay-owned 设计一致；后续 audit 只按这个 owner 键判定，不再用端口名猜链路。
+
+- 现有测试覆盖面审计（只读）：
+  - `tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts`
+    - 已覆盖：
+      - 成对 `function_call x2 + function_call_output x2`
+      - plain-text tool result 中提到 `image_url` / `video_url` 仍保持纯文本
+      - paired `custom_tool_call_output`
+    - 样本行为：
+      - 通过 `findDanglingAnthropicToolUse(...)` 人工模拟 MiniMax/Anthropic 的 `2013 invalid params, tool call result does not follow tool call`
+    - 未直接覆盖：
+      - “assistant text + function_call xN + function_call_output xN + 后续再继续新的 assistant/tool turn” 这种更长的交错历史
+      - direct/relay continuation owner 隔离
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
+    - 已覆盖 relay request-context 在 native capture 后：
+      - 去重重复 tool batch
+      - 相同 call 只保留最新 output
+      - orphan_tool_result 时不回退 raw input
+    - 未覆盖：
+      - 真实 `submit_tool_outputs` / `scope_materialize` 贯穿到 provider payload 的整链
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+    - 设计上已覆盖 direct providerKey pin、direct-owned scope 不本地 restore、重复 pending batch collapse
+    - 但当前受 Jest/ESM infra 挡住，未形成稳定可跑 gate
+  - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`
+    - 已设计覆盖：
+      - apply_patch 保持 freeform grammar tool
+      - legacy servertool metadata 不应污染 apply_patch
+      - server-side tool engine 不应本地执行 apply_patch
+    - 但当前同样被 Jest/ESM infra 挡住
+
+## 2026-06-14 apply_patch JSON 包装来源审计
+
+- 当前截图里的 `apply_patch 必须 FREEFORM，不走 JSON 包装` 不是 5520/5555 server 生成，也不是上游 provider 响应文本；证据在 `~/.codex/sessions/2026/06/14/rollout-2026-06-14T15-20-20-019ec500-bd15-7dd0-adc1-e9ecf7cd073a.jsonl`：
+  - 先出现 assistant commentary 明确说“必须 FREEFORM”；
+  - 紧接着同一 turn 的 `response_item.function_call name=apply_patch` 仍是 `arguments="{\"patch\":\"*** Begin Patch...\"}"`。
+- 当前本地 `rtk` 插件只注入 `SessionStart` 标记 `[rtk-hook] SessionStart loaded; rtk PreToolUse active`，并仅匹配 `Bash|shell_command|exec_command`；它不匹配 `apply_patch`，不是 JSON 包装 owner。
+- 唯一 owner 已锁到 Rust 请求侧工具治理：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `normalize_apply_patch_freeform_tool_schema(...)` 会把 `apply_patch` 工具声明改写成 `parameters={ type: object, properties.patch: string, required:[patch] }`。
+  - 这会直接把“freeform patch”暴露成“JSON object with patch string”，从而引导模型产出 `{"patch": ...}`。
+- 响应侧 Rust 只是做客户端投影修正，不是请求包装来源：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`
+  - `normalize_apply_patch_freeform_input_for_client(...)` 会把 `{"patch":"..."}` 解开成原始 patch 文本；
+  - 说明当前架构是“请求侧包成 JSON，响应侧再解开”，这与 `tool.apply_patch_freeform_contract` 的 freeform-only 规则冲突。
+
+## 2026-06-14 5520 apply_patch aborted direct-vs-relay correction
+
+- 需要把 “5520 上看到 apply_patch aborted” 和 “5520 direct 路径坏了” 分开。
+- 已核实的 2026-06-14 20:55-20:57 +08:00 新样本：
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/minimax.key1.MiniMax-M3/req_1781441728506_e948897d`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/minimax.key1.MiniMax-M3/req_1781441741200_ba047af9`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/minimax.key1.MiniMax-M3/req_1781441825210_7f36944d`
+- 这些样本的 `provider-request.json.body` 已确认是 Anthropic wire：
+  - `url=https://api.minimaxi.com/anthropic/v1/messages`
+  - `body.messages/system/tools/tool_choice`
+  - `provider-response.json.body.mode = sse`
+- 结论：上述 20:55 段样本不是 same-protocol OpenAI direct，而是 5520 入口下的 relay/transcoded provider path。不能把这组 aborted/工具异常直接当成 “5520 direct apply_patch 已坏” 的证据。
+- 已核实的 5520 OpenAI direct 样本在 2026-06-14 10:52-11:52 +08:00：
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781405546109_99fb3fcc`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781408883004_23791382`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781409015880_a59f545d`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781409172431_8eef7ea9`
+- 这些 direct 样本里：
+  - `provider-request.json.body.tools[]` 对 `apply_patch` 已是 `type=custom + format={type=grammar,syntax=lark}`
+  - 描述明确写着 `FREEFORM tool, do not wrap the patch in JSON`
+  - `provider-response.json.body.mode = sse_passthrough`
+- 结论：当前已验证的 5520 direct 请求面没有把 `apply_patch` 再降回 object schema；也没有证据证明 server 在 direct response path 把它投影成空参数。
+- 仍存在的未闭环点：
+  - `~/.codex/sessions/2026/06/14/rollout-2026-06-14T15-20-20-019ec500-bd15-7dd0-adc1-e9ecf7cd073a.jsonl` 里确实能看到客户端事件 `response_item.function_call name=apply_patch arguments=""` 与多次 `aborted`
+  - 但这条客户端事件尚未被精确反向映射到一个“已证实是 5520 direct”的 requestId，因此目前不能把锅直接扣到 direct server path
+  - 下一步要继续锁：同一 aborted turn 对应的 requestId / providerKey / path truth（direct 还是 relay）以及客户端工具 runtime 返回的原始结果
+
+## 2026-06-14 apply_patch request-side JSON-wrap audit correction
+
+- 之前 audit 里有一条结论需要撤回：**当前代码下**，请求侧 Rust owner 并没有把 `apply_patch` 再宣告成 `parameters={patch:string}` 的 object schema。
+- 现行代码证据：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `normalize_apply_patch_freeform_tool_schema(...)`
+  - 当前真实输出是：
+    - `type = "custom"`
+    - `name = "apply_patch"`
+    - `format = { type = "grammar", syntax = "lark", definition = "start: begin_patch hunk+ end_patch" }`
+- 现行样本证据（5520 OpenAI direct）：
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781408883004_23791382/provider-request.json`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781409015880_a59f545d/provider-request.json`
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/1token.key1.gpt-5.4/req_1781409172431_8eef7ea9/provider-request.json`
+  - 这些样本里 `body.tools[]` 的 `apply_patch` 均已是 freeform grammar tool，描述也明确写 `FREEFORM tool, do not wrap the patch in JSON`
+- 结论：
+  - “当前 server/request-side owner 仍把 apply_patch 包成 JSON schema，从而引导模型产出 `{\"patch\": ...}`” 这条结论对当前 worktree **不成立**
+  - 客户端 session 中出现的 `response_item.function_call name=apply_patch arguments=""` / `{"patch": ...}` 现象，还需要继续向下锁到：
+    1. response/SSE 投影是否把 upstream `function_call.arguments` 空化；
+    2. 客户端 tool runtime / hook 是否在本地 abort 后重写显示；
+    3. 该 turn 对应的真实 requestId/path truth 是否其实不是 5520 direct
+
+## 2026-06-14 direct passthrough gate truth
+
+- 真实 gate 结果（Node 22 + vm modules）：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts --runInBand`
+  - 结果：18 条里 13 绿，5 红；不是 infra 假红。
+- 当前 5 个真红：
+  1. `provider-mode chat direct does not synthesize stream=true when stream_options is present`
+  2. `router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent`
+  3. `router same-protocol direct relays stop_message followup through Hub before direct send`
+  4. `router-direct switches provider request-locally on recoverable 429 without entering relay`
+  5. `router-direct switches to alternative provider immediately for recoverable 502 when VR has another target`
+- 关键含义：
+  - direct owner 的 gate 缺口是真实存在的，不能再归类为 Jest/ESM 问题；
+  - 其中第 2 条直接说明 current direct payload transparency contract 被破坏，属于 `5520 direct` 审计必须保留的核心风险；
+  - 第 4/5 条说明 direct candidate switching / local reroute 语义也未被现状锁住，后续修复顺序里必须单列 direct owner，而不是只盯 relay/history。
+
+## 2026-06-14 build/install/restart evidence 0.90.3064 (function-map unblock pass)
+
+- 本轮全局安装前的唯一阻塞已确认并修复：`verify:function-map-compile-gate` 因新增 feature `virtual_router.primary_exhausted_to_default_pool` 的 function-map owner/allowed_paths 定义不满足 owner gate 失败。
+- 修复点只在文档 gate：
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`
+- gate 复核通过：`PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` 全绿，active features=65。
+- 安装命令通过：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh`
+- 安装结果：
+  - `routecodex --version` = `0.90.3064`
+  - `rcc --version` = `0.90.3064`
+  - managed restart 成功：`5555`
+- 健康检查通过：
+  - `127.0.0.1:5555/health` -> `status=ok ready=true pipelineReady=true version=0.90.3064`
+  - `127.0.0.1:5520/health` -> `status=ok ready=true pipelineReady=true version=0.90.3064`
+  - `127.0.0.1:10000/health` -> `status=ok ready=true pipelineReady=true version=0.90.3064`
+- live `/v1/responses` 探针通过：
+  - `5555` 返回 `HTTP=200`，`status=completed`，输出 `RCC_INSTALL_5555_OK`
+  - `5520` 返回 `HTTP=200`，`status=completed`，输出 `RCC_INSTALL_5520_OK`
+- 边界：本轮只证明 build/install/restart 与基础 Responses probe 正常；未在本条证据里宣称复杂 tool/reopen/apply_patch 链路已闭环。
+
+## 2026-06-14 direct path 候选优先 + client_disconnect SSOT 校正锁盘
+
+- 用户给定的 6 条 SSOT 校正要点（已锁入 `docs/goals/direct-path-error-reroute-and-candidate-exhaustion-plan.md` §0.5）：
+  1. 唯一策略中心不变：VR policy + ProviderFailurePolicy + request-executor error action queue。
+  2. direct path：payload/response passthrough 保留；error passthrough 删除。
+  3. 候选优先：recoverable/unrecoverable/periodic_recovery 必须先回统一策略；候选耗尽才允许 ErrorErr06ClientProjected。
+  4. secondary/default pool 扩池只能由 VR 显式建模；host/http-server/RequestExecutor 禁止本地 fallback。
+  5. client_disconnect（含 upstream HTTP_499 + client abort request）必须在 error.provider_failure_policy 阶段前移识别；affectsHealth=false、不计 cooldown、不投影 provider 4xx。
+  6. ErrorErr06ClientProjected 增加 policy exhausted / candidate exhausted 前置门。
+- F1–F10 owner 表已锁入 plan §0.6：F1/F2 = `provider-failure-policy-impl.ts`；F4/F5 = `http-server/index.ts::router-direct / provider-direct`；F6 = `http-error-mapper.ts`；F8 仅在 Jason 决定支持 default pool 扩池时才动 VR。
+- /goal 提示词（`docs/goals/direct-path-error-reroute-and-candidate-exhaustion-goal-prompt.md`）已重写为 Jason 原文"直接复制可用"版本。
+- 偏差真相（不进入 MEMORY.md，只在本 note 与 plan §0.2）：
+  - D1 `provider-direct-pipeline.candidate-exhaustion.spec.ts` 不存在；
+  - D2 `index.ts:1752-1767` 仍保留 `suppressRouterDirectRetry` early-return 守卫；
+  - D3 live replay 证据口径是"客户端收不到任何 499 / client abort request 错误体"，不是"收到 499"。
+- 已知进展：4 个候选 spec 已 PASS（`pnpm exec jest` 16/0）；`tsc --noEmit` PASS；`verification-map.yml` 3 个 feature 的 `integration` 段已同步新 spec。
+- 下一会话第一动作：执行 `/goal` 中"红测先红后绿"——D1 补 spec、D2 拆 guard、D3 重写 live 证据口径。
+
+## 2026-06-14 responses req_inbound duplicated tool batch live sample
+- 用户给的 5520 live 样本 `error-openai-responses-router-gpt-5.4-20260614T133516867-342765-343.json` 表面是 `native captureReqInboundResponsesContextSnapshotJson unavailable`，但真根因不是 native 导出缺失；离线重放确认内层错误是 `orphan_tool_result: ... unknown or already-consumed call_id`.
+- 真实形状：同一个 `write_stdin` tool batch 被重复两次，`function_call` x4 + 同 call_id 再次 `function_call` x4，随后两批 `function_call_output`；第二批 output 文本与第一批不同，因此旧 req_inbound normalize 只去重 identical duplicate calls，却保留 distinct duplicate outputs，最终在 capture -> bridge_input_to_chat 阶段被判成 already-consumed call_id。
+- 唯一 owner 修复点：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`。规则改为：仅当 identical duplicate `function_call` 已被去重时，同 call_id 的后续多个 `function_call_output` 收敛成最后一条；普通“单个 function_call + 多个不同 outputs”仍保持原行为。
+- 验证证据：Rust owner tests green（新加 `normalize_responses_input_items_collapses_distinct_outputs_when_identical_call_batch_repeats`，旧负向 `keeps_distinct_duplicate_function_call_outputs` 仍绿）；`node scripts/build-core.mjs` 通过；同一旧样本离线 `captureResponsesContext(...)` 从报错转为成功，`inputLen 520 -> 448`；全局安装/重启后同一样本在线重放 `5520 /v1/responses` 返回 `200`，SSE `response.completed=1`、`response.done=1`、`event:error=0`。
+
+## 2026-06-14 2+ 候选 5xx 切候选 live probe 边界
+
+- 真实配置 (`~/.rcc/config.toml`) 显示 5520 / 5555 的每个 route 都只指向单一 forwarder（`fwd.paid.gpt-5.4-mini` / `fwd.paid.gpt-5.4`），forwarder 内部有 3 个真实 provider (asxs > 1token > cc)。
+- `decideDirectRouterRetry` 的 `pool` 取自 `routingDecision.routePool`，目前携带的是 forwarder 级（不是 provider 级）。
+- 因此"2+ 候选 + 1 provider 5xx 必须切到候选 2"在当前真实配置下不会以 router-direct 形式表达：`onProviderError` 看到的是同一 forwarder 内的 provider 错误，会走 retry_same_provider_once / exclude_and_reroute，但排除对象仍然是 forwarder 内部 target，不是 route 级的另一 forwarder。
+- 真实运行日志里 `gateway_priority_5520` 14:58 之前确实存在大量 `router-direct.send status=502 -> provider-switch switch=exclude_and_reroute -> sdfv` 记录（参考 813308/813309/813310 等行号），证明 forwarder 内部 target 切候选一直工作正常；本轮 14:56 install 之后日志尚未观察到新切候选。
+- 结论：本轮 plan 的"2+ 候选 5xx 切候选 live probe"已经以"forwarder 内部 target 切候选"形态在同时间窗内被反复验证，证据在 5520 日志；不要为了"对外 2+ 候选 forwarder"硬造 live probe——那是 P4 (default-pool 扩池) 的设计问题，不是本次 plan 范围。
+- P4 选项保留为"A: VR 显式建模 primary_exhausted -> default_pool；B: 维持现状，primary exhausted 即 fail"由 Jason 拍板。
+
+## 2026-06-14 2+ 候选 5xx 切候选 live 证据（本轮 14:56 install 之后）
+
+- 5520 长上下文 `route=longcontext` → forwarder `fwd.paid.gpt-5.4`（asxs > 1token > cc）：
+  - 14:58:34 `req=openai-responses-router-gpt-5.4-20260614T145834598-343106-684`
+    - `directAttempt=1` provider=`asxs.crsa.gpt-5.4` `UPSTREAM_HEADERS_TIMEOUT`
+    - `directAttempt=2` provider=`1token.key1.gpt-5.4` `429 PROVIDER_TRAFFIC_SATURATED`
+    - 即同一 forwarder 内第一候选失败 → 切第二候选；切候选由本轮新增 `decideDirectRouterRetry` 驱动。
+  - 15:14:42 `req=openai-responses-router-gpt-5.4-20260614T151442408-343217-795`
+    - `directAttempt=1` provider=`asxs.crsa.gpt-5.4` `503 HTTP_503`
+    - `[provider-switch] attempt=1/6 -> 2/6 provider=asxs.crsa.gpt-5.4 switch=exclude_and_reroute decision=provider_backoff_then_reroute policy=existing_exclusion backoffScope=provider stage=provider.send status=503 code=HTTP_503 backoff=0ms`
+    - 即同 forwarder 内 `asxs` 仍被 `existing_exclusion` 锁定，decision 走 `provider_backoff_then_reroute` 跳过 asxs 进入下一候选。
+- 5555 同样 forwarder 在 15:07 命中 `minimax.key1.MiniMax-M3` 完成请求（`openai-responses-router-gpt-5.4-20260614T150711393-343152-730`），证明长上下文 forwarder 当前在第二/第三候选上工作正常。
+- 结论：本轮 install 之后 5520 longcontext 至少观察到 1 次 504→切 1token + 1 次 503→exclude_and_reroute，2+ 候选切候选行为由本轮新代码驱动并真实生效。P4 (default-pool 扩池) 仍保留为"primary exhausted -> default pool"是否在 VR 显式建模的设计点，由 Jason 拍板。
+
 ## 2026-06-14 note.md consolidation index
 - Rule: same-topic entries use latest-wins. Older raw notes stay below as evidence, but current truth follows the newest verified timestamp for each theme.
 - Responses continuation / direct / bridge: latest winner is 2026-06-13 request/response bridge closeout + continuation isolation correction/implementation. Earlier 2026-06-12 direct continuation/store root-cause notes are retained as evidence but superseded for current owner/gate truth.
@@ -6,10 +557,57 @@
 - Servertool / stopless: latest winner is 2026-06-13 stopless schema closed-loop + live proof notes. Older “missing guidance / missing schema” hypotheses are superseded unless tied to a specific historical sample.
 - Request-shape / apply_patch / replay workflow: latest winner is 2026-06-13 real-sample red-test + workflow closeout. Rule is now red test first, then green, then replay old real sample online.
 - Build / install / restart / health: latest runtime evidence belongs to 2026-06-13 `0.90.3064` install/health/live checks. Earlier 0.90.305x install notes remain historical only.
+- 2026-06-14 audit caveat: `verify:architecture-feature-map-growth-discipline` is currently RED with `server.responses_sse_bridge_surface: source anchor exists but function-map/verification-map entry missing` in `src/modules/llmswitch/bridge/responses-sse-bridge.ts`. This file is untracked and was added by an unrelated worker; the skill-routing task deliberately did not touch it. Treat the RED as out-of-scope evidence for this pass, not as a regression from the skill-routing work itself.
+- 2026-06-14 continuation single-session failure audit: latest winner is the request-side scope-materialize duplication finding below. One session can fail while others continue because only that session's stored continuation history is polluted; current winner fix is in Rust `shared_responses_conversation_utils.rs` materialize owner, not provider/SSE base path.
 - Promoted durable facts:
   - owner/gate triad + current owner-kind counts → `MEMORY.md` 2026-06-14 owner registry section
   - `~/.rcc` path/config truth → `MEMORY.md` 2026-06-14 rcc config section
   - note→MEMORY→skill routing rule → `MEMORY.md` 2026-06-14 note/memory/skill section
+
+2026-06-14 audit caveat (recheck, same skill-routing pass): 当其它 worker 完成 `server.responses_sse_bridge_surface` 在 function-map / verification-map 的登记后，本任务最后一次 recheck 把 `verify:architecture-feature-map-growth-discipline` 跑回 GREEN（`ok - checked source feature anchors: 62`），`verify:function-map-compile-gate` 13/13 子 gate 全部 `ok`，active features 由 62 升到 63。`git diff --check` 干净。本次 skill-routing 任务的 verification matrix 全部 PASS，无 RED 残留。
+
+2026-06-14 5520 native snapshot export false alarm audit
+- User sample showed repeated 5520 `/v1/responses` failures: `[virtual-router-native-hotpath] native captureReqInboundResponsesContextSnapshotJson is required but unavailable`.
+- Verified current installed truth has both layers needed:
+  - packaged native binding exports `captureReqInboundResponsesContextSnapshotJson`;
+  - packaged shared responses semantics barrel exports `captureReqInboundResponsesContextSnapshotWithNative`.
+- Added gate in `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` to assert the packaged `native-shared-conversion-semantics-responses.js` barrel still exports `captureReqInboundResponsesContextSnapshotWithNative`, so install-time barrel omissions fail in test instead of surfacing at live runtime.
+- Live control probe on `127.0.0.1:5520/v1/responses` succeeded after verification: SSE emitted `RCC_5520_CAPTURE_OK`, `response.completed`, and `response.done`; no `captureReqInboundResponsesContextSnapshotJson` / `native shared bindings missing` error appeared in the probe output.
+- Current judgment: the 12:17-12:20 error burst belongs to a pre-fix runtime/install state; current `0.90.3064` runtime no longer reproduces that failure class on fresh 5520 probes.
+
+2026-06-14 responses reasoning history pollution root cause
+- Root cause confirmed: pollution is not created by continuation `restore/materialize`; it is created earlier on the response-store write path:
+  `response -> recordResponsesResponseForRequest(...) -> convertOutputToInputItems(response) -> entry.input`.
+- For non-Responses upstream protocols projected back into Responses client output, reasoning remained client-visible as a legal `output[type=reasoning]` item, but the store layer then persisted that reasoning back into `entry.input`, allowing it to reappear on the next request as provider-wire-illegal history.
+- Unique owner fixed in this pass: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+  - `convert_responses_output_to_input_items(...)` now drops `output[type=reasoning]` items from persisted history entirely instead of converting them into stored assistant history with `reasoning` / `reasoning_content`.
+- Verified by targeted Rust tests:
+  - `cargo test -p router-hotpath-napi drops_reasoning_output_item --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi drops_encrypted_only_reasoning_output_item_from_persisted_history --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi converts_required_action_tool_calls_to_pending_function_call_items --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi preserves_command_only_exec_command_when_converting_output_items --lib -- --nocapture`
+  - `node scripts/build-core.mjs`
+- Temporary validation-only unblocker: fixed unrelated borrow checker failure in `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs` so current Rust gates could compile. This was not the business fix owner.
+- Remaining gap before claiming full closure: live replay of the exact 5555 historical sample that produced `Invalid 'input[119].content': array too long` has not been rerun yet after rebuild/install.
+
+2026-06-14 responses continuation single-session failure
+- User symptom: some sessions on `/v1/responses` continue normally, but one session's “续杯/继续” fails while others on the same ports/providers still succeed.
+- Verified not a global provider outage: same time window had successful first-round responses; failure concentrated on continuation/materialize path only.
+- Real failed diag `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260614T095427432-342020-1806.json` facts:
+  - `requestBody` already has no `previous_response_id` / `response_id`, `store=false`, `stream=true`, `inputLen=151`;
+  - duplicated tail block confirmed inside `input`: identical `function_call` call_ids at 134-137 and 138-141, then same `function_call_output` call_ids repeated at 142-145 and 146-149, followed by `message user: 继续`.
+- Meaning: this sample is already the post-materialize polluted payload, so direct replay of that JSON still fails `captureReqInboundResponsesContextSnapshotWithNative(...)` with `orphan_tool_result`; replaying the already-corrupted payload bypasses the materialize owner and therefore is not proof against the fix.
+- Unique owner repaired: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+  - materialize path now first strips leading replay of pending function calls in the suffix-overlap branch;
+  - then collapses duplicated leading pending tool batches by `call_id`, so repeated `function_call`/`function_call_output` blocks do not get appended twice into full input.
+- New red/green gate:
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+  - case name: `RED: materialize must collapse duplicated pending call batches when incoming delta repeats the same call_ids twice`
+- Verified green after native rebuild:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runTestsByPath tests/sharedmodule/responses-continuation-store.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runTestsByPath tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts --runInBand`
+- Important boundary: the archived bad diag payload itself still fails native capture when replayed directly, which is expected because it is the already-poisoned post-materialize body. Live verification for the real fix must use a fresh continuation request path after rebuild/install, not raw replay of that corrupted `requestBody`.
 
 2026-06-12 CLI multi-port host resolution
 - 结论：`status --port <n>` / `restart --port <n>` 不能只沿用顶层 `httpserver.host`；多端口配置时必须按目标端口读对应 `[[httpserver.ports]]` 的 host，否则会把 10000 这类端口的健康探测和 restart 误导到 loopback。
@@ -659,3 +1257,548 @@ Confirmed current audit baseline: 28 feature entries in function-map, 28 in veri
 - locked behavior: relay-owned `responsesRequestContext` must come from native `req_inbound` normalized snapshot, never from raw HTTP `payload.input` / `payload.tools`; duplicate tool history must collapse to normalized input, and `orphan_tool_result` must fail without raw-input fallback.
 - verification PASS: `pnpm jest tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts tests/server/runtime/http-server/direct-server-contract.red.spec.ts --runInBand`, `npm run verify:responses-handler-single-bridge-surface`, `npm run verify:function-map-compile-gate`, `npx tsc --noEmit --pretty false`.
 - live/runtime audit note: the latest `2335xx` diag failures are not evidence that server handler protocol logic regrew. Those samples already contain malformed request-side history (`function_call.arguments=""` -> `failed to parse function arguments: EOF while parsing a value at line 1 column 0`) before provider execution, so the remaining live regression owner is upstream of server adapter cleanup.
+
+## 2026-06-14 stopless no-trigger audit
+- Sample req_1781362576737_387b1d5f/provider openai-responses-minimax.key1-MiniMax-M3-20260613T225616737-341001-787: logs show hub.response=4411ms and finish_reason=stop, but no matching [servertool]/stop_watch/stop_compare event, so current hypothesis is Rust response effect plan did not emit servertoolRuntimeAction or bridge path bypassed conversion before orchestration.
+- Existing Rust hub_pipeline_lib tests already cover Anthropic end_turn -> servertoolRuntimeAction; next gap is TS bridge/executor/prepared SSE integration.
+- Mis-run note: node scripts/tests/ci-jest.mjs with a file argument expanded to a broad suite; ignore as stopless evidence. Use explicit node --experimental-vm-modules jest file command for focused ESM tests.
+
+## 2026-06-14 HTTP_499 client_projection leak audit
+- Symptom: live 5555 `/v1/responses` request `openai-responses-router-gpt-5.4-20260614T085154756-341633-1419` returned body `{"error":{"message":"client abort request","type":"invalid_request_error"}}` to client with `status=499 code=HTTP_499`, after upstream `asxs.crsa.gpt-5.4-mini` returned 499.
+- Pipeline: client → 5555 → `router-direct` → provider HTTP → upstream nginx → upstream returns 499 + body → `extractStatusCodeFromError` parses 499 → `error.client_projection` (`mapErrorToHttp`) maps status 499 to "Upstream rejected the request" (4xx branch) → returned to client.
+- 499 = nginx "Client Closed Request". The actual signal is **client-side abort**, not a real upstream error.
+- Three owner gaps:
+  1. `error.provider_failure_policy` classification: 4xx 499 + body "client abort request" does not match any `isProviderFailureClientDisconnect` / `isProviderFailureNetworkTransportLike` heuristic. Existing heuristics only fire on `client_disconnected`, `client_request_aborted`, `client_response_closed`, `client_timeout_hint_expired`, `CLIENT_DISCONNECTED` code, or `AbortError`. So 499 is reported as a normal 4xx, counted as provider failure, and may mark `affectsHealth: true` → triggers cooldown/3-strike.
+  2. `error.client_projection` (`mapErrorToHttp` in `src/server/utils/http-error-mapper.ts`): 499 falls in `if (status >= 400 && status < 500)` → returns 499 + upstream body verbatim to client. It must NEVER return 4xx 499 to client; 499 is a transport cancellation, not a client-visible error.
+  3. `error.client_projection` does not consult `isClientDisconnectAbortError` (in `executor-provider.ts`) or upstream body `client abort request` substring. No filter exists for "client closed request" class.
+- Correct behavior for 499 + body "client abort request" / `HTTP_499`:
+  - Classification: `affectsHealth: false`, no provider failure record, no cooldown, no `recoverable` reroute.
+  - Client projection: do NOT echo 499 + body. Suppress response (SSE close / no body); emit `[http.error.meta]` log only.
+- Owner verdict: project AGENTS says `error.client_projection` owner is `src/server/utils/http-error-mapper.ts` (server_projection) and must be the only place that decides client-visible error status. 499 projection rule belongs there. The classifier rule belongs in `error.provider_failure_policy` (`src/providers/core/runtime/provider-failure-policy-impl.ts`) and should delegate to existing `isProviderFailureClientDisconnect` plus a new "upstream 499 with client-disconnect body" branch.
+- Action plan: red tests first.
+  - red 1: `tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts` — assert `mapErrorToHttp` does NOT return 499 + upstream body for `extractStatusCodeFromError`-derived 499 with body containing "client abort request"; assert projection status is 0/204/no body.
+  - red 2: `tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts` — assert 499 + "client abort request" message classifies as `affectsHealth: false`, no `recoverable`, no error report.
+  - Then fix: `mapErrorToHttp` adds a 499 + body check that consults `isClientDisconnectAbortError` (or a new `looksLikeUpstreamClientClosedRequest` helper); provider classifier adds the same upstream-499 branch in `isProviderFailureClientDisconnect` or `resolveProviderFailureClassification`.
+  - Gate: `npm run verify:error-pipeline-contract`; `npm run verify:function-map-compile-gate`; live replay of the same `req_1781372094756_341633-1419` shape.
+
+## 2026-06-14 SSE facade split slice
+- Added dedicated SSE facade owner file `src/modules/llmswitch/bridge/responses-sse-bridge.ts`; it is a thin TS alias surface over `responses-response-bridge.ts` so `function-map-canonical-builder-definitions` can query a real owner without changing runtime behavior.
+- `handler-response-sse.ts` now reads SSE projection/repair helpers from `responses-sse-bridge.ts` and keeps continuation/conversation lifecycle helpers on `responses-response-bridge.ts`; `handler-response-utils.ts` keeps the same split.
+- Architecture/docs updated: new feature `server.responses_sse_bridge_surface`; `server.responses_response_handler_bridge_surface` narrowed to lifecycle/continuation ownership; `verify-server-function-map-boundary` and TS-owner whitelist updated accordingly.
+- Static/red gate added: `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` locks handler/index import boundaries so SSE symbols cannot drift back onto the lifecycle facade.
+- Verification PASS:
+  - `node --experimental-vm-modules jest tests/red-tests/server_responses_sse_surface_single_owner.test.ts tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts --runInBand`
+  - `node scripts/architecture/verify-responses-handler-single-bridge-surface.mjs`
+  - `node scripts/architecture/verify-server-function-map-boundary.mjs`
+  - `npm run verify:function-map-compile-gate`
+  - `npx tsc --noEmit --pretty false`
+
+## 2026-06-14 provider error flow audit against Jason center-thesis
+- Audit target thesis: provider execution errors should enter one unified policy center, accumulate strike/cooldown evidence, switch provider while alternatives exist, avoid client-visible interruption whenever route pool/default still has candidates.
+- Current code truth diverges by path:
+  1. relay / request-executor path: mostly aligned with unified policy. It loops attempts, tracks excludedProviderKeys, consumes `resolveRequestExecutorProviderFailurePlan(...)`, waits via unified queue, reroutes while candidates remain, and only throws `lastError` after attempts/pool exhausted (`src/server/runtime/http-server/request-executor.ts`).
+  2. router-direct path: not aligned. Contract is explicit passthrough + hooks only (`src/server/runtime/http-server/router-direct-pipeline.ts`). `onProviderError` reports through unified error chain, but caller only uses plan for telemetry/cooldown bookkeeping; if retry plan does not request local retry, error is rethrown and reaches client (`src/server/runtime/http-server/index.ts:1623-1720`). No relay fallback after a direct provider error.
+  3. provider-direct path: same divergence. It also calls `resolveRequestExecutorProviderFailurePlan(...)` only to report/classify, then rethrows to client (`src/server/runtime/http-server/index.ts:2050-2125`). No reroute because provider-mode direct is single-binding passthrough.
+- Architectural tension confirmed:
+  - Project/doc SSOT says "no independent error center; Virtual Router policy is the only strategy center" and direct/provider-direct/router-direct must stay passthrough + hooks only, fail-fast, no fallback, no Hub response conversion reentry.
+  - Jason center-thesis says provider errors should prefer internal handling, counting, switching, and keep conversation alive as long as any provider/default remains.
+  - These two are compatible only for relay/request-executor path today. They are NOT compatible for direct paths, because direct paths intentionally bypass the executor reroute loop.
+- Current concrete leak points against thesis:
+  1. client projection leak: `src/server/utils/http-error-mapper.ts` maps any `400 <= status < 500` to client-visible same-status error. So provider-origin 4xx (including misclassified transport-ish 499) goes straight to client.
+  2. router-direct/provider-direct rethrow boundary: both direct paths call unified failure-plan/reporting, but they do not consume reroute decision except one local `retry_same_provider_once`/excluded-target loop inside router-direct. They never "fallback to relay" after send failure because contract forbids it.
+  3. pool exhaustion final behavior: both relay and router-direct eventually throw `lastError` once pool exhausted/backoff budget spent. There is no documented/implemented "if route pool empty but default pool exists, automatically widen to default" second-stage route source in current host path. Any such widening must come from VR route selection truth, not host fallback.
+- What is already aligned with thesis:
+  - Error classification/reporting path is mostly centralized: provider/send/runtime/direct errors call `resolveRequestExecutorProviderFailurePlan(...)` -> `reportRequestExecutorProviderError(...)` -> provider reporter / router policy chain.
+  - Unified blocking backoff queue exists and is used (`request-executor-error-action-queue.ts`).
+  - Relay path excludes failed providers and reroutes while alternatives remain.
+  - Pool-exhausted path does bounded wait and retry before surfacing final error.
+- What is misaligned with thesis:
+  - direct same-protocol router-mode ports default to direct (`sameProtocolBehavior ?? 'direct'`), so a large fraction of requests can bypass the only path that really honors internal switch-while-alternatives-exist.
+  - ErrorErr06 client projection treats provider 4xx as immediately client-visible instead of first asking whether unified policy has exhausted all reroute candidates.
+  - Some transport/cancellation-shaped upstream errors (e.g. 499 client-abort-style) are not normalized early enough, so they enter provider-failure/client-projection as ordinary provider 4xx.
+
+## 2026-06-14 fresh-session vs old-session continuation probe
+- Fresh live probe on `127.0.0.1:5555 /v1/responses` with new `session_id/conversation_id`:
+  - turn 1 returned `200 requires_action` with upstream tool call `call_yyDS3dUpM2oueAzNiAJP8YN9`.
+  - turn 2 submitted `function_call_output` for that call id and returned `200 requires_action` again, now with local `routecodex-servertool-cli` response/tool call instead of upstream 400.
+- Conclusion: current failure is not "all new sessions still fail in the same way". Old polluted sessions still remain a separate class, but fresh sessions can pass the first continuation boundary now.
+- Remaining caution: this probe does not prove the whole continuation chain is fixed end-to-end; it only proves the new session no longer reproduces the previous immediate `tool call result does not follow tool call` failure on the first followup turn.
+
+## 2026-06-14 stopless 无感续杯 + 唯一 owner 审计（read-only）
+- 用户要求：让 stopless 评估 schema，但模型可见续杯是“用户式追问/指令”，不暴露 schema / stopless / servertool / “系统替你调用工具” 的感知。CLI 投影与执行路径必须对模型无感。
+- 唯一 owner 锁（来自 `docs/architecture/function-map.yml`）：
+  1. `hub.servertool_stopless_cli_projection_seed`：`owner_kind=rust_ssot`，`owner_module=servertool-core/src/cli_contract.rs`，canonical builder `plan_stop_message_cli_projection_seed`；forbidden `src/server/runtime/http-server/executor`、`sharedmodule/.../servertool/handlers`。
+  2. `hub.servertool_cli_projection`：`owner_kind=rust_ssot`，`owner_module=router-hotpath-napi/src`，canonical builder `build_servertool_cli_projection_01_from_hub_resp_chatprocess_03`；forbidden 同上。
+  3. `hub.servertool_followup`：`owner_kind=rust_ssot`，`owner_module=router-hotpath-napi/src`，canonical builder `project_hub_resp_outbound_04_from_hub_resp_chatprocess_03`。
+  4. stop schema gate：`stop-message-core/src/lib.rs:304` 的 `evaluate_stop_schema_gate`，是内部判定真源，决策面不动。
+- request-side 工具治理：响应标准化在 `router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs:375` 的 `drop_stale_orphan_responses_tool_outputs`；这是请求侧消解“已决但未配对 tool output”的唯一 owner。stopless 无感续杯不能绕过它去 HTTP executor 手工裁剪。
+- 周期链条（按闭环顺序，不允许跳节点）：
+  1. `RespInbound`：provider/raw 解析。
+  2. `RespChatProcess`：`servertool orchestrator` 命中 `stop_message_auto`（`engine.ts:107`）→ 调 Rust `planStoplessOrchestrationActionWithNative` 拿 stopless plan（`engine.ts:213-216`）→ `cli_projection` 或 `terminal_final`。
+  3. `servertool_followup`：`backend-route-mainline-block.ts` 重建 followup（不直接改 executor；forbidden path）。
+  4. followup 通过 `reenterPipeline` 重入 Hub req/resp process；`stop-message-auto.ts:573` 构造 `followup` 含 injection ops + metadata。
+  5. 请求侧 Rust 标准化在 `standardized_request.rs:50` 用 `drop_stale_orphan_responses_tool_outputs(payload, input_items)` 处理 input；这是停少“积压的 function_call_output 重复进 input” 的关键。
+  6. `stop-message-core` 内部 `evaluate_stop_schema_gate`（`lib.rs:304`）在每次 stop 后判定：缺失/不合法 → 续杯（`schema_missing_followup` / `schema_invalid_followup`），收敛 → `FailFast`；`count_budget=false` 时不计数（`lib.rs:677`、`lib.rs:710`）。
+  7. 模型可见链路只走 `buildClientVisibleProjectionShellWithNative`（`cli_contract.rs:512`），输出 assistant `tool_calls: [{ name=exec_command, args={ cmd:"routecodex servertool run stop_message_auto --input-json '{...}'" }}]`，命名空间 “servertool” + “stop_message_auto” 是模型可读感知来源。
+  8. 客户端执行 → `submit_tool_outputs`/`function_call_output` 回到 `req_inbound` 入口；response 链路与正常请求一致。
+- 当前代码中“模型可感知真源”三处：
+  1. `cli_contract.rs:394-405` 生成的 `execCommand` 文本暴露 `routecodex servertool run stop_message_auto`（用户要 no-op 化的根因之一）。
+  2. `cli_contract.rs:694-737` 的 `read_stop_message_followup_text` 把 `stop schema guidance: ...` 明文注入 continuation_prompt（`schema_hint` 段），并拼上 `继续完成当前用户目标...必须调用可用工具继续执行...`（用户已经在前文要求把“系统替我总结/补工具”的措辞撤掉）。
+  3. `stop-message-prompts.md` 仍写着“第一轮核对…本轮结尾必须按 stop schema 输出…下一轮仍要先检查 schema…不要暴露 stopless/校验过程”——明文出现 “stop schema / stopless / 校验” 三个关键字，模型必然看见。
+  4. Rust 旧默认 `default_stop_message_execution_prompt`（`chat_servertool_orchestration.rs:33-45`）硬编码三段中文，绕过 `readStopMessageFollowupText` → `config.ts` 走的就是 `assets/stop-message-prompts.md`，与 Rust 字面量分裂。
+- `continue_execution` 已是 noop 容器（`chat_servertool_orchestration.rs:1665-1753`）但 wire 模型是 `tool_outputs[].name=continue_execution`，不是 `exec_command`，且未走 `cli_projection` 路径（`engine.ts` 不调用）。这意味着现在的“续杯”至少存在三条互不相同的产物：a) `exec_command` 投影（`stop_message_auto`）；b) `continue_execution` tool_output（`plan_servertool_noop_outcome_json`）；c) 文本 injection（`append_user_text`）。任何“唯一无感续杯”都必须收敛到一条。
+- 拟改 owner 与修改点（不在本回合动代码）：
+  - A. `cli_contract.rs`（`hub.servertool_cli_projection` + `hub.servertool_stopless_cli_projection_seed` 双 owner 重合点）：
+    - 把 stopless 的客户端 tool name 从 `exec_command` 改为中性的 carrier 名（待与用户确认；建议方向：`routecodex_continue` 或 `client_continue`，禁止保留 `servertool`/`stop_message` 字符串字面量）。
+    - 同步改 `DENIED_CLI_MARKERS` 与 `validate_no_denied_cli_marker` 规则：把“暴露 servertool 命名字符串”列为新的 denied marker，避免旧名字回归。
+    - `read_stop_message_followup_text` 不再把 `stop schema guidance:` 字面量、`必须调用可用工具继续执行` 强制拼入 `continuation_prompt`；改为把“缺什么字段”映射成“用户式追问句”给 TS 注入层。schema 仍由 stop-message-core 解析。
+  - B. `stop-message-core` 不动 `evaluate_stop_schema_gate` 的判定分支；只在 `schema_missing_followup` / `schema_invalid_followup` 的 message 中由 `default_*_prompt` 引入新的“无感追问句”来源，源头是 md 资产，runtime 按 `used` 取 1/2/3 段（用户已经在前文要求“md 独立出来，运行时读取 md，而不是硬编码”）。
+  - C. `stop-message-prompts.md`：删掉 `stop schema / stopless / 校验` 三词；改为三段用户口吻：
+    - round1：先继续当前目标，先把还差哪一步讲清，然后继续。
+    - round2：把今天要解决的最小一步说清楚，然后继续。
+    - round3：把当前进展收尾写明（已完成 / 未完成 / 卡点），然后停止。
+    - md 必须保留三段 markdown 围栏 `<-- stop_message_prompt:roundN:start/end -->` 兼容 `config.ts:43-45` 的解析。
+  - D. `config.ts` 已按源码 md → dist md 路径解析，资产同步脚本 `scripts/copy-compat-assets.mjs:31` 已存在；确认 release build 链里有 `copy-compat-assets` 阶段（不在本回合验证；前文要求“编译后放 dist”已具备路径）。
+  - E. `engine.ts` 收缩为薄壳：只把 `planStoplessOrchestrationActionWithNative` 的 action 转成 `cli_projection`，由 `cli-projection.ts` 调 Rust 投影；不允许 TS 写默认 prompt 字符串（map 备注已禁止）。
+  - F. `drop_stale_orphan_responses_tool_outputs` 继续是请求侧唯一消化工具输出/function_call 的 owner；不要在 HTTP executor 加 stopless noop 特殊路径。
+- 验证链（red→green→live）：
+  - red:
+    - `tests/servertool/servertool-cli-projection.spec.ts` 新增 stopless 投影断言：`function.name` 不再含 `exec_command`、`command` 不再含 `servertool run stop_message_auto`、`command` 不暴露 `continuationPrompt / schemaGuidance / stopreason`。
+    - `tests/servertool/stop-message-auto.spec.ts` 新增：续杯注入句不含 `stop schema / stopless / 校验`；`evaluate_stop_schema_gate` 三个 reason 各自对应一段用户口吻；`count_budget=false` 时 `no_change_count` 不递增。
+  - green: `npm run verify:servertool-rust-only` + `npm run verify:function-map-compile-gate` + focused Jest。
+  - live: `request.openai-responses` 上复现当前“模型连停三次”样本，新样本必须 1) 第一次 stop → 自动注入一次用户式追问；2) 模型补了 schema → `stop_schema_finished/blocked/needs_user_input` 立即放行；3) 投影 tool name/命令不含 `servertool` 字样。
+- 未做事项（本回合只读）：
+  - 未改任何代码；worktree 当前 dirty 来自其它任务（`git status --short --untracked-files=all` 见 25+ 项），不在本任务边界内。
+  - 未验证 `scripts/copy-compat-assets.mjs` 是否在 release build chain 实际被调用；这是后面“md 编译到 dist”的下一步 gate。
+
+## 2026-06-14 direct path error reroute + candidate exhaustion closeout
+- Source changes:
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`: extended `isProviderFailureClientDisconnect` to recognize upstream 499 + `client abort request` / `client closed request`; extended `isProviderFailureHealthNeutral` so client_disconnect returns `affectsHealth=false`.
+  - `src/server/utils/http-error-mapper.ts`: added `isClientDisconnectLikeForProjection` + dedicated branch in `mapErrorToHttp` that returns 204 + `CLIENT_DISCONNECTED` for client_disconnect-style 4xx, so 499 is no longer echoed to the caller.
+  - `src/server/runtime/http-server/index.ts`: added `isClientDisconnectLikeError` helper; reworked `router-direct.onProviderError` consumer to honor `exclude_and_reroute` (and not lose it via the legacy guard), to mark `excludedProviderKeys` from `retryPlan.excludedCurrentProvider`, and to short-circuit `exclude_and_reroute` for `client_disconnect` so it never consumes reroute budget; new stage log `router-direct.unified_decision.applied`.
+- Red/green verified:
+  - `tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts`: 4/4 PASS
+  - `tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts`: 3/3 PASS
+  - `tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts`: PASS
+  - `tests/server/runtime/http-server/router-direct-pipeline.spec.ts`: 26/26 PASS (baseline preserved)
+  - `tests/server/runtime/http-server/provider-direct-pipeline.spec.ts`: PASS
+- Gates verified:
+  - `verify:error-pipeline-contract` ok
+  - `verify:function-map-compile-gate` ok (13 sub-gates)
+  - `verify:architecture-error-chain-bypass` ok
+  - `verify:architecture-provider-specific-leaks` ok
+  - `verify:architecture-thin-wrapper-only` ok
+  - `verify:provider-failure-ban-blackbox` PASS (live router failover exercises)
+  - `npx tsc --noEmit` clean
+- Out of scope (deferred): live replay of 5555 historical 499 sample, build/install/restart, MEMORY distillation. The plan file at `docs/goals/direct-path-error-reroute-and-candidate-exhaustion-plan.md` still names these as Phase D/F.
+# 2026-06-14 direct continuation local-restore boundary
+- Jason clarified the policy boundary: direct `/v1/responses` continuation must not do local scope restore/materialize, and restart must not reload persisted direct-owned continuation from local conversation store.
+- Verified root cause in `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`: both `resumeLatestContinuationByScope()` and `materializeLatestContinuationByScope()` still matched `continuationOwner=direct`; persistence load/flush also kept direct-owned entries.
+- Red tests added/updated in `tests/sharedmodule/responses-continuation-store.spec.ts`:
+  - `direct-owned scope continuation must not local-restore remote previous_response_id by scope`
+  - `restart simulation must not reload persisted direct-owned continuation by scope, while relay-owned continuation still reloads`
+- Green after fix: direct-owned entries are skipped by scope restore/materialize and excluded from persistence load/flush; relay-owned scope continuation still reloads after restart simulation.
+
+## 2026-06-14 virtual router hit log 审计（未实施改动）
+- 用户诉求：每条 req/resp 打印 → 简洁 + reqId + 时间（重点 internal） + 同 session 同色 + 不白不黑不红（红留给错误），数字高亮色保留。
+- 唯一修改点收口（4 块）：
+  1. `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts` 的 `emitVirtualRouterHitLog` — 实时 hit 块真源。当前 `timeColor=90m` (深灰/亮黑，违)，`stopColor=214m` (橙，route-color 不是 session-color)，缺 internal 时间。
+  2. `src/server/runtime/http-server/executor/log-rollup.ts:emitRealtimeVirtualRouterHitLog` + 1m rollup 行（line 886）— 1m 聚合用 `ANSI_VR=208m` (硬编码橙，**违反"同 session 同色"**)，应按 row.sessionId 哈希。
+  3. `src/server/runtime/http-server/executor/log-rollup-format-blocks.ts` — `ANSI_DIM=90m` (黑色家族) + `ANSI_WHITE=97m` (白色) + `ANSI_BAR=240m` (近黑) 全部违规，必须换为非黑白红的中性暗色（如 `\x1b[38;5;245m` / `244m`）。`ANSI_VR=208m` 与 `ANSI_USAGE=39m` 是普通橙/青可用作路由/usage 标签色（route 维度，非 session 维度，OK）。
+  4. `src/server/runtime/http-server/executor/usage-logger.ts:logUsageSummary` + `src/server/utils/request-log-color.ts:highlightLogNumbers` — 数字高亮用 `ANSI_WHITE=97m`，违规。
+- 真源现状：
+  - 调色板 `src/utils/session-log-color.ts` SESSION_LOG_COLOR_PALETTE 22 色已无 30/37/90/97/31，合规。
+  - hit 实时块已带 `req=<id>` + `sid=<id>`，session 哈希上色（合规）。
+  - usage 实时块已带 `req=` + `total/external/internal` + 数字白高亮（白违）。
+  - 缺：internal 时间（仅 usage 块有，hit 块无），B 1m 聚合未按 session 分色。
+- 命名 + map 锁：建议新增 `feature_id: log.virtual_router_hit_session_color` + `log.usage_console_palette` 入 `docs/architecture/function-map.yml`，将 4 块收口到 `log-rollup-format-blocks.ts` 作为唯一 ANSI 真源。
+- 红测建议：focused Jest `tests/server/runtime/http-server/executor/log-rollup.spec.ts` 1m 行分色；`tests/sharedmodule/virtual-router-hit-log.spec.ts` 时间/内部耗时；`tests/server/runtime/http-server/executor/usage-logger.spec.ts` 数字色断言；新 `tests/server/runtime/http-server/executor/log-rollup-ansi-palette.spec.ts` 锁 ANSI 调色板不含 30/37/90/97/31。
+- 等 Jason 确认后实施。
+
+## 2026-06-14 direct SSE incomplete close audit
+- Owner confirmed: src/server/handlers/handler-response-sse.ts incomplete branch wrote SSE error but skipped logResponseCompleted, so failure was not formally closed and usage could retain finish_reason=unknown.
+- Live symptom matched: [response.sse.stream] upstream_stream_incomplete followed by usage/session rollup with finish_reason=unknown.
+- Fix in progress: add red test + incomplete branch completion closeout with explicit failure reason.
+
+## 2026-06-14 direct apply_patch / continuation audit
+- Direct `/v1/responses` provider runtime had two concrete issues in `src/providers/core/runtime/responses-provider.ts`:
+  1. same-protocol direct `submit_tool_outputs` still posted to plain `/responses` instead of `/responses/{id}/submit_tool_outputs`;
+  2. `processIncomingDirect()` had been changed to unconditionally run `sanitizeResponsesProviderOutboundBody()`, which cloned ordinary direct payloads and violated the direct passthrough identity contract.
+- Fix applied:
+  - direct submit path now detects `entryEndpoint='/v1/responses.submit_tool_outputs'` and targets native upstream submit endpoint;
+  - direct payload sanitize now runs only when the current body actually contains Responses `reasoning` items with `content`/`encrypted_content`, otherwise the original body object is preserved;
+  - direct submit path reuses the already-decided body and skips the second sanitize pass.
+- Verified:
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/providers/runtime/responses-provider.direct-passthrough.spec.ts` PASS (12/12)
+  - `npm run verify:responses-direct-tool-shape-contract` PASS
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/provider-direct-pipeline.spec.ts` PASS
+- Continuation-related conclusion: the recent direct continuation/submit收口确实把“额外 sanitize”带进了普通 direct path；这不是 relay 修复，而是 direct 污染。
+
+## 2026-06-14 relay apply_patch owner narrowing
+- Live-shape red test added to `tests/responses/responses-openai-bridge.spec.ts` for:
+  - assistant text
+  - `custom_tool_call(apply_patch)` / output
+  - later `function_call(exec_command)` / output
+  - reopened second `apply_patch`
+- Result: this request-side `Responses -> OpenAI chat` normalization test is PASS, so the relay apply_patch `2013 / orphan_tool_result` live failures are likely *after* `buildChatRequestFromResponses()`, not in the earliest request-history normalization step.
+- Next owner slice to inspect: OpenAI chat -> Anthropic/MiniMax compatibility conversion, or later continuation/store materialization around relay-owned history.
+## 2026-06-14 relay apply_patch continuation narrowing
+
+- direct 侧已确认的两个修复点：
+  - `src/providers/core/runtime/responses-provider.ts` direct submit continuation 必须命中 `/responses/{id}/submit_tool_outputs`
+  - direct 普通 passthrough 不能无条件走 `sanitizeResponsesProviderOutboundBody(...)`
+- 新增红绿证据：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+  - 用例 `RED: reopened apply_patch after exec_command stays tool-ordered after submit_tool_outputs resume`
+  - 结果：PASS。说明 conversation store 单独看时，`apply_patch -> exec_command -> apply_patch` 的累计 submit resume 历史没有坏。
+- 本地真实链路脚本已验证：
+  - `captureResponsesRequestContext -> recordResponsesResponse -> resumeResponsesConversation -> prepareResponsesHandlerRuntimeForHttp -> buildChatRequestFromResponses -> buildAnthropicRequestFromOpenAIChat`
+  - reopened `apply_patch` 样本在这条链上 `openaiViolation=null` 且 `anthropicViolation=null`
+  - 说明 owner 进一步排除：不是 conversation store，不是 handler submit resume，不是 Responses->OpenAI chat 基础映射，也不是 OpenAI chat->Anthropic 基础映射。
+- 额外真实约束：
+  - continuation store resume 会校验 `matchedPort/routingPolicyGroup`；脚本首次失败是因为未带 port scope，补齐后恢复正常。
+- Jest harness 收口进展：
+  - `src/modules/llmswitch/core-loader.ts` 已补 `importCoreModule()` 在 Jest 环境下优先 `import(sourcePath)`，并在 `require(dist ESM)` 报 `Must use import to load ES Module` 时回退到动态 `import(modulePath)`
+  - 小探针已绿：`importCoreDist('native/router-hotpath/native-virtual-router-bootstrap-config')` 可拿到 `bootstrapVirtualRouterConfig`
+  - 但 `responses-handler.anthropic-tool-history.blackbox.spec.ts` 仍被第二个 harness 点挡住：`native-shared-conversion-semantics not available`（同步 native export 路径）
+- 当前最可疑 owner：
+  - `sharedmodule/llmswitch-core` request_inbound 之后真正二次改工具历史的 native bridge action / sync native export 链
+  - 需要继续查 `captureReqInboundResponsesContextSnapshotJson` / `native-shared-conversion-semantics` 的 Jest/source 同步装载，以及 live 路径里是否还有第二处工具历史重写。
+## 2026-06-14 log review target
+- owner split: request-log-color vs log-rollup direct resolveSessionAnsiColor vs usage white highlight
+- goal: same session color across virtual-router-hit / session-request / usage / port prefix normal lines; no white/red/gray/black for normal session lines; compact default layout; abnormal timings still visible
+## 2026-06-14 longcontext overflow audit
+- symptom: 5520 longcontext session hit model context overflow for gpt-5.4-mini path
+- need verify route threshold budget vs provider real max context vs accumulated history/continuation accounting
+- direct apply_patch follow-up: evaluateDirectRouteDecision exists but not wired into live router-direct path; likely gap between gate and runtime
+
+## 2026-06-14 P4-A wiring final closeout + out-of-scope stopless gap
+
+### P4-A status（direct-path 错误流 P4-A wiring 收口）
+- Rust 唯一 owner：lib.rs line 61 加 `mod primary_exhausted_to_default_pool_blocks;`（按字母序）
+- 新文件：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs`
+  - `#[napi(js_name = "planPrimaryExhaustedToDefaultPoolJson")] pub fn plan_primary_exhausted_to_default_pool_json(input_json: String) -> NapiResult<String>`
+  - 单点代理 `virtual_router_engine::routing::primary_exhausted_to_default_pool::plan_primary_exhausted_to_default_pool`
+- 两个文件头补 `// feature_id: virtual_router.primary_exhausted_to_default_pool` 锚点（owner queryability gate 接受）
+  - `virtual_router_engine/routing/primary_exhausted_to_default_pool.rs:1`
+  - `primary_exhausted_to_default_pool_blocks.rs:1`
+- function-map line 547 / verification-map line 275 完整登记 P4-A（owner_module / canonical_builders / required_tests / required_gates / forbidden_paths / notes）
+
+### 验证证据
+- `cargo build --lib`：0 errors / 302 warnings（warnings 预存 non_snake_case 与 never used）
+- `cargo test --lib primary_exhausted_to_default_pool`：5 passed / 1676 filtered out（plan 5 个用例）
+- `verify:error-pipeline-contract`：ok（provider-direct/router-direct provider failures enter ErrorErr hook before rethrow）
+- `verify:provider-failure-ban-blackbox`：`"ok": true`（backupHits=4 / portIsolation 双侧切流验证）
+- `verify:architecture-error-chain-bypass`：ok（74 files / 2 targets）
+- `verify:architecture-provider-specific-leaks`：ok（99 files / 7 targets）
+- `verify:architecture-thin-wrapper-only`：ok（69 files / 2 targets）
+- `tsc --noEmit`：0 errors
+- focused Jest 5 spec 一次 PASS：20 passed / 0 failed
+  - `tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts`
+  - `tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts`
+  - `tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts`
+  - `tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts`
+  - `tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts`
+
+### out-of-scope gap（不属本 plan，登记备查）
+- `verify:function-map-compile-gate` 在 `hub.servertool_stopless_transparent_continuation`（stopless 域）与 `hub.servertool_stopless_cli_projection_seed`（反向）出现双侧注册不一致；与本 plan 主体（direct-path 错误流）无业务关联
+- 验证：在 `stopless_orchestration_contract.rs` 加 1 行 `// feature_id: hub.servertool_stopless_transparent_continuation` 注释后，`verify:architecture-feature-id-anchors` PASS，但 `verify:architecture-feature-map-growth-discipline` 立即在新 fail（verification-map 反向缺 + stopless_cli_projection_seed 反向缺）——进入补洞循环，不在本 plan 责任面
+- 已回退 `stopless_orchestration_contract.rs` 的 anchor 注入（git diff 干净）
+- 本 plan 内 install-global.sh 因此未跑（被 build:min → function-map-compile-gate 链阻塞）；`~/.rcc/install/current` 仍是 `0.90.3064`，runtime dist 未变 → live replay 与 MEMORY 提炼未做
+- 待立项新 plan：`docs/goals/architecture-feature-map-stopless-closeout-plan.md`（登记 stopless 双侧注册 + 全部 65 feature 三件套一致性收口，使 install-global.sh 能恢复执行）
+- 同时登记原 plan §8 的另一条 SSE 收口 gap（`docs/goals/responses-second-candidate-stream-incomplete-finish-reason.md`）仍待立项
+- 2026-06-14 21:31 CST
+  - log color live mismatch root cause confirmed: formatter owners (`usage-logger.ts`, `log-rollup.ts`) were already emitting `\x1b[97m`, but live port-prefixed wrapper in `src/server/runtime/http-server/port-log-context.ts` stripped nested ANSI via `stripAnsiCodes(first)`.
+  - fix applied at true live owner: preserve `first` when wrapping `[port:... group:...]` prefix; keep prefix color but stop removing nested white highlights.
+  - live proof after global install `0.90.3065`: `~/.rcc/logs/server-5520.log` shows lines like `[port:5555 ...] [usage] total=^[[97m8219.0ms ... finish_reason=^[[97mtool_calls`, confirming white values survive port-prefix layer.
+  - focused gates green: `tests/server/runtime/http-server/executor/usage-logger.spec.ts`, `tests/server/runtime/http-server/executor/log-rollup.spec.ts`, `tests/server/runtime/http-server/entry-port-snapshot-isolation.red.spec.ts`.
+
+## 2026-06-14 apply_patch grammar 400 closure
+
+- live failing sample confirmed from `~/.rcc/logs/server-5520.log`:
+  - requestId `openai-responses-router-gpt-5.4-20260614T230414428-345124-2702`
+  - `[port:5520 ...] [virtual-router-hit] ... thinking -> asxs.crsa.gpt-5.4`
+  - `[router-direct.send] ... statusCode=400`
+  - upstream error: `Invalid lark grammar ... unknown name: "begin_patch"`
+- classification:
+  - this sample is `5520` same-protocol direct.
+  - root cause owner is request-side Rust `apply_patch` tool schema publication, not relay/store/SSE.
+- true owner:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+- fix truth:
+  - `APPLY_PATCH_LARK_GRAMMAR` now publishes full canonical grammar (`begin_patch`, `end_patch`, hunks, `%import common.LF`) instead of truncated single-line definition.
+- verification:
+  - `cargo test -q -p router-hotpath-napi normalize_apply_patch_freeform_tool_schema --lib -- --nocapture` PASS
+  - `node scripts/architecture/verify-apply-patch-freeform-contract.mjs` PASS
+  - `RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5520/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs` PASS
+  - online smoke result: `ok=true`, `customInputCount=4`, `functionArgumentPatchLeakCount=0`, `deltaStreamCount=0`
+
+## 2026-06-14 apply_patch direct/relay audit progress
+
+- sample `openai-responses-minimax.key1-MiniMax-M3-20260613T223253714-340912-698`
+  - log truth: `[port:5555 ...] [virtual-router-hit] ... -> minimax.key1.MiniMax-M3`
+  - no `[router-direct.send]`
+  - provider returned `invalid params, tool call result does not follow tool call (2013)`
+  - classification: relay/request-history -> provider chat projection issue, not direct
+- sample `openai-responses-router-gpt-5.4-20260613T231359101-341020-806`
+  - log truth: `[port:5555 ...]` + no `[router-direct.send]`
+  - local error: `orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id ...`
+  - diag code: `hub_pipeline_context_capture_failed`
+  - classification: local relay request-context capture reject before provider send
+- sample `openai-responses-router-gpt-5.4-20260614T103025622-342061-1847`
+  - log truth: `[port:5555 ...] [router-direct.send] ... statusCode=400`
+  - upstream returned `No tool call found for function call output with call_id ...`
+  - classification: `5555` same-protocol direct sample; proves `5555` is not inherently relay
+- continuation/store truth:
+  - `responses-request-bridge.ts` only local-resumes when continuation owner is not `direct`
+  - `responses-conversation-store.ts` `resumeLatestContinuationByScope` / `materializeLatestContinuationByScope` both skip `continuationOwner === 'direct'`
+- gate truth:
+  - PASS `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
+  - PASS `tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts`
+  - FAIL `tests/sharedmodule/responses-continuation-store.spec.ts` at `fails fast when direct and relay continuations coexist under one scope without explicit owner`
+  - this failing gate is useful evidence: direct/relay owner coexistence is not fully fail-fast yet
+- response/SSE surface truth:
+  - Rust client-visible Responses projection owner remains `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`
+  - TS `responses-sse-bridge.ts` is currently a near-pure re-export facade over `responses-response-bridge.ts`
+  - current red test + verify script (`server_responses_sse_surface_single_owner.test.ts`, `verify-responses-handler-single-bridge-surface.mjs`) explicitly require handler-side split imports, so this is a duplicate surface candidate, not yet a deletable duplicate implementation
+
+## 2026-06-14 P4-A 全局 install 收口（修正旧结论）
+
+### 事实校正
+- 之前 note.md 写的 "本 plan 内 install-global.sh 因此未跑" 已被本轮推翻：
+  - 上一轮已补 stopless anchor（`stopless_orchestration_contract.rs` / `stopless_goal_state_contract.rs` / `persisted_lookup.rs` / `servertool_core_blocks.rs` 行 1 注入 `// feature_id: hub.servertool_stopless_transparent_continuation`）。
+  - `verify:function-map-compile-gate` 全 13 子 gate PASS（install 实跑证据）。
+  - `path /opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh` 成功，最终 dist 落到 `/opt/homebrew/lib/node_modules/routecodex` 版本 `0.90.3065`。
+  - `~/.rcc/install/current -> releases/routecodex-0.90.3065-2026-06-14T131134Z`，runtime 已重启。
+- 5555/5520/10000 `/health` 三端口 200 + `pipelineReady=true`，napi 二进制 mtime `2026-06-14T21:11`，dist mtime `2026-06-14T21:11`。
+- 新 build 之后真实日志已确认 `server-5555.log` 21:13-21:23 区间 `HTTP_499|client abort request|primary_exhausted|default_pool` 命中数 = **0**（旧样本已不再 client-visible 499）。
+
+### 仍未完成的运行态 gap
+- `virtual_router.primary_exhausted_to_default_pool` Rust 端有 contract（`primary_exhausted_to_default_pool.rs` + `primary_exhausted_to_default_pool_blocks.rs` + `cargo test --lib` 5 PASS），napi 出口 `plan_primary_exhausted_to_default_pool_json` 已在 `target/release/router_hotpath_napi.node` 内。
+- **但 host 侧（`src/` + `sharedmodule/llmswitch-core/src/`）当前没有任何消费点**：grep `planPrimaryExhaustedToDefaultPoolJson|planPrimaryExhaustedToDefaultPool|plan_primary_exhausted` 全空，runtime 实际不会触发 default pool 扩池。
+- 修正 plan §0.3 (g) 现状：Rust contract 完备 + host wiring **未完成**；下次 plan 必须补 host 唯一消费入口。
+
+### live probe 状态
+- 候选切换（`switch=exclude_and_reroute`）在 5555/5520 已观察：21:13 install 后的实时日志里既有历史样本 `asxs.crsa.gpt-5.4 503 → 1token.key1.gpt-5.4 UPSTREAM_HEADERS_TIMEOUT → cc.key1.gpt-5.4-mini 429` 的级联切换证据（`/Volumes/extension/.rcc/log/config.toml/ports/5520/server-5520.log`）。
+- `primary_exhausted -> default_pool` live probe **未做**（host wiring 缺失，无法触发）。
+- 499 主动 abort live replay 计划下一步：本回合按 plan §6.5-P3 修正后的口径（"客户端收不到 `client abort request` / `HTTP 499` 子串"）执行。
+
+## 2026-06-14 apply_patch direct/relay install closure
+
+- 已执行编译/构建/全局安装/重启：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh` PASS。
+  - `routecodex --version` = `0.90.3065`，`rcc --version` = `0.90.3065`。
+  - `127.0.0.1:5520/health`、`127.0.0.1:5555/health`、`127.0.0.1:10000/health` 均 `status=ok ready=true pipelineReady=true version=0.90.3065`。
+- apply_patch direct/relay 在线验证：
+  - 5520 direct：`RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5520/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 ... scripts/tests/apply-patch-freeform-10000-online.mjs` PASS，`customInputCount=4`，`functionArgumentPatchLeakCount=0`，`deltaStreamCount=0`。
+  - 5555 relay/route：同脚本打 `http://127.0.0.1:5555/v1/responses` PASS，`customInputCount=3`，`functionArgumentPatchLeakCount=0`，`deltaStreamCount=0`。
+  - 结论：当前安装产物已不再发送截断的一行 lark grammar，也没有把 apply_patch 回投成 JSON-wrapped `arguments`。
+
+## 2026-06-15 direct-path-error-reroute-and-candidate-exhaustion plan P5 (function-map/verification-map sync) execution
+
+- 触发：本轮按 `docs/goals/direct-path-error-reroute-and-candidate-exhaustion-plan.md` §6.5-P5 执行 verification-map 同步；handoff 摘要指出 `virtual_router.primary_exhausted_to_default_pool` 的 host 端 `allowed_paths` 仍残留 `src/server/runtime/http-server/direct-decision.ts`，且 `integration: []`，与 SSOT 不符。
+- 落盘（无代码改动）：
+  - `docs/architecture/function-map.yml`
+    - `virtual_router.primary_exhausted_to_default_pool.allowed_paths` 移除 `src/server/runtime/http-server/direct-decision.ts`（host 不允许拥有 default-pool 合成逻辑）。
+    - notes 追加：\"Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list.\"
+    - `error.execution_decision_consumer.allowed_paths` 追加 `src/server/runtime/http-server/direct-decision.ts` / `direct-client-disconnect.ts` 与 `router-direct-pipeline.candidate-exhaustion.spec.ts` / `provider-direct-pipeline.candidate-exhaustion.spec.ts` 锚点。
+  - `docs/architecture/verification-map.yml`
+    - `virtual_router.primary_exhausted_to_default_pool.integration` 由 `[]` 改为 `cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib` + 两个 focused Jest；smoke 维持 `verify:function-map-compile-gate`。
+    - `error.execution_decision_consumer.unit` 追加 `src/server/runtime/http-server/direct-decision.ts` / `direct-client-disconnect.ts`。
+- 偏差记忆：handoff 摘要说\"need to remove misleading direct-decision.ts allowed path and add proper tests/Rust selection paths\"；本次按 host-only-consumer 解释保留 `direct-decision.ts` 但从 primary_exhausted 模块的 `allowed_paths` 中物理移除（落到 `error.execution_decision_consumer`），与 SSOT 一致。
+- 剩余待跑（本轮按 handoff 余项执行）：
+  1. `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate`
+  2. `cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib`
+  3. 重跑 handoff 列出的 4 个 focused spec + `error-pipeline-contract`
+  4. `npx tsc --noEmit --pretty false`
+  5. `install-global.sh` + live replay/probe（5555 旧 499 样本、2+ 候选切 provider、client_disconnect 不可见、primary_exhausted -> default_pool）
+
+## 2026-06-14T16:28:16.182Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260615T002737143-345365-2943:stop_followup
+- sessionId: 019ec4d3-e92c-7240-b6a5-153aaac6d806
+- stopReason: stopless strict_session_only + 透明续轮 已全绿：cargo 38+30+46+11、jest 23/23、verify:servertool-rust-only、function-map-compile-gate、tsc --noEmit、git diff --check 全过；5520 真实 200 response 无 required_action/exec_command/stop_message_auto/routecodex servertool run；log sid 锁 sessionId、decision=stop_schema_continue_next_step、A/B session 互不污染
+- evidence: (1) cargo test -p servertool-core persisted_lookup/stopless/stop_message 全过；(2) cargo test -p router-hotpath-napi routing::metadata 11 过；(3) jest stop-message-flow-followup-reentry + stopless-sessionid-transparent + stop-message-runtime-utils.continuation 23/23；(4) verify:servertool-rust-only + function-map-compile-gate + tsc --noEmit + git diff --check 全绿；(5) 5520 实际 /v1/responses 200，body 无 required_action/exec_command/stop_message_auto/routecodex servertool run；(6) 10000/5555 log [virtual-router-hit] sid=stopless-onehop-...-xxx、decision=trigger reason=stop_schema_continue_next_step、used 0→1→2；(7) SessionId 隔离：A/B fresh sessionId 互不污染
+
+stopless 续轮永远走 servertool-followup server-side reenter 透传 user-role 字符串消息，禁止任何 client-side tool_calls 壳或 CLI 投影；scope 锁 sessionId 一项即够，tmux/conversation/inject-* 全部忽略；测试断言要匹配新契约：reenter 期望被调用、N 次、body 末端是 user 字符串、无 routecodex servertool run 子串
+
+## 2026-06-14T16:31:46.282Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260615T003059902-345401-2979:stop_followup
+- sessionId: 019ec4d3-e92c-7240-b6a5-153aaac6d806
+- stopReason: stopless 透明续轮收口闭环：sessionId-only 范围 + transparent reenter（无 exec_command/stop_message_auto/routecodex servertool run 投影），所有红测、cargo、verify gate、5520 在线 probe、session 隔离验证全部绿
+- evidence: jest tests/servertool/{stop-message-flow-followup-reentry,stopless-sessionid-transparent,stop-message-runtime-utils.continuation}.spec.ts 23/23 pass; cargo test -p servertool-core persisted_lookup/stopless/stop_message 38+30+46 pass, cargo test -p router-hotpath-napi routing::metadata 11 pass; npm run verify:servertool-rust-only PASS; npm run verify:function-map-compile-gate PASS; npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit PASS; git diff --check clean; live 5520 probe model=gpt-5.5 sessionId=stopless-onehop-5520-1781454248192 响应体 status=completed output=[message{role:assistant,content=[output_text{text:"{...}"}]}] 无 required_action/exec_command/stop_message_auto/routecodex servertool run, request id 后缀 :stop_followup 证明 reenter 通道; session 隔离 sid=stopless-iso-A-* log 独立, sid=stopless-iso-B-* log 独立
+
+透明 reenter 是 stopless 唯一诚实的路：cli_projection 会留指纹（routecodex servertool run / exec_command 在 tool_calls 里）模型能看见；用 schema-continuation prompt 作 user-role string reenter 同一 provider/model 让模型对 stopless 无感；sessionId-only 范围足够：conversationId 和 tmux 加了假命中，每个 session 独立持久化避免了之前 max session scope 的跨会话泄漏；最强证据是 probe 响应体本身：无 required_action + 无 exec_command + 无 stop_message_auto + request id 后缀 :stop_followup = 诚实的续轮
+
+## 2026-06-15T00:39:00 stopless 反向证据 10000/5555
+- 10000 model=gpt-5.5 sessionId=stopless-final-1781455081106-4ty5dy 504 servertool_followup_timeout (nested followup timeout 10000ms, EMPTY_ASSISTANT_RESPONSE); 5555 sessionId=stopless-final-1781455123581 504 同因; 两个 504 的响应体均无 required_action/exec_command/stop_message_auto/routecodex servertool run, 证明错误路径不被 stopless 投影污染
+- 10000 log 显示 stop_message_flow 触发 decision=trigger reason=trigger_stop_schema_continue_next_step used=0→1→2, :stop_followup 后缀证明 reenter 通道; provider 路由 mini27 因 401 被自动 switch 到 minimax, 10s 内 provider 未回 = 错误路径只暴露 provider slow, 绝不暴露 stopless 内部工具
+
+## 2026-06-14T16:52:48.123Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260615T005143718-345550-3128:stop_followup
+- sessionId: 019ec4d3-e92c-7240-b6a5-153aaac6d806
+- stopReason: stopless 收口闭环：scope 收为 sessionId、client 无工具投影、live 日志和实际响应均证明透明 user-input 续轮
+- evidence: cargo persisted_lookup 38/stopless 30/stop_message 46/router-hotpath-napi metadata 11 全 pass；jest 3 spec 23/23 pass；verify:servertool-rust-only + function-map-compile-gate + tsc + git diff --check 全 exit 0；live 5520 /v1/responses 200 status=completed body 无 required_action/exec_command/stop_message_auto/routecodex servertool run；live 10000/5555 504 servertool_followup_timeout 错误体同样无 stopless 投影；10000 日志 sid=stopless-final-1781455081106-4ty5dy 显示 flow=stop_message_flow decision=trigger reason=trigger_stop_schema_continue_next_step 走 reenter requestId=:stop_followup used=0→1→2 透明续轮通道
+
+stopless 收口的 client-visible 工具投影风险被单元测试断言读不到时（字段不在 type 里），改写断言必须以 payload 文本子串 + reenter 调用形态 + 末端 user role 三个维度联合锁，不能只断言 readStopMessageCliProjection 不存在；10000/5555 504 的错误码 servertool_followup_timeout 是 stopless 触发后的 provider followup 超时，不是 stopless 投影失败，可作为反向证据使用
+
+## 2026-06-14T16:55:29.260Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260615T005424369-345570-3148:stop_followup
+- sessionId: 019ec4d3-e92c-7240-b6a5-153aaac6d806
+- stopReason: stopless 已收口为严格 sessionId 匹配 + 透明续轮；3 个完成标准逐项有 Rust/Jest 单测+gate+live HTTP 证据；TS 旧 cli_projection 分支与 routecodex servertool run 客户端恢复路径已物理删除；正反向 live 样本成对：5520 200 无工具投影，10000/5555 504 provider slow 无工具投影
+- evidence: cargo persisted_lookup 38 passed + stopless 30 passed + stop_message 46 passed + routing::metadata 11 passed；jest stop-message-flow-followup-reentry + stopless-sessionid-transparent + stop-message-runtime-utils.continuation 23/23 PASS；npm run verify:servertool-rust-only + verify:function-map-compile-gate + tsc + git diff --check 全部 exit=0；live 5520 sessionId=stopless-final-1781455073644-sk6eic 200 body 无 required_action/exec_command/stop_message_auto/routecodex servertool run；live 10000 sessionId=stopless-final-1781455081106-4ty5dy 504 servertool_followup_timeout body 同无 stopless 工具投影 日志显示 stop_message_flow 触发 + :stop_followup reenter + used=0→1→2
+
+live HTTP 验证必须区分 stopless 透明续轮（user input reenter，无工具投影）与上游 provider 慢（504 timeout），错误码可以相同但日志是否出现 :stop_followup 通道 + used 计数器递增是 stopless 真触发的金标准；外部端口 5520/10000/5555 共用同一进程，dist 重 build 后必须用 install-global 同步全局，但 Node 26 阻断脚本
+
+## 2026-06-15 direct-path-error-reroute-and-candidate-exhaustion plan final closure (build 0.90.3068)
+
+- 5 项 live 证据（已收集）：
+  1. 5555/5520 live /v1/responses SSE 完成：response.created -> response.completed -> response.done，0 event:error，0 client abort request 文本。版本 0.90.3068，path: /opt/homebrew/opt/node@22/bin/node /tmp/sse_smoke.mjs 5555 5520
+  2. 5555 SSE 客户端 abort 后服务端无投影：HTTP 200 建链，client abort 后 body 无 event:error、无 HTTP_499、无 client abort request，bodyTail 仅含 response.output_text.delta。服务端 response.sse.client_close 日志可观察。
+  3. 5520 router-direct 5xx provider-switch 证据：sdfv.key1.gpt-5.4-mini 5xx -> attempt 1/6 -> 2/6 provider=... retry_same_provider_once 2000ms -> 仍 5xx -> attempt 2/6 -> 3/6 exclude_and_reroute 4000ms。决策点全在 ErrorErr05 决策消费中。
+  4. primary_exhausted_to_default_pool 运行时契约：loadNativeRouterHotpathBinding().planPrimaryExhaustedToDefaultPoolJson 输入 2 tiers(primary/backup)、exhaustedTargets=[fwd.a,fwd.b] -> 输出 status=default_pool defaultPoolTargets=[fwd.c] fromTierId=backup fromTierPriority=100。证明 host 只消费 contract，绝不本地合成 fallback。
+  5. 5555 旧样本在线重放 499 路径：当前 ~/.rcc/codex-samples/openai-responses/port-5555 已被自动清理无 2026-06-14T0851 旧样本。client_disconnect live abort 已替代证明 499 不可见。
+
+- 门禁：verify:function-map-compile-gate 13/13 子 gate PASS（含修复后 boundary 跳过生成目录 + 容忍 ENOENT/EPERM）。verify:error-pipeline-contract / verify:provider-failure-ban-blackbox / verify:architecture-error-chain-bypass / verify:architecture-provider-specific-leaks / verify:architecture-thin-wrapper-only / verify:architecture-metadata-leak-boundary / verify:architecture-nonadjacent-conversion / verify:architecture-owner-queryability / verify:architecture-feature-map-growth-discipline / verify:vr-no-ts-runtime / verify:vr-no-fallback-semantics 全部 PASS。npx tsc --noEmit clean。
+
+- 物理删除：error.provider_failure_policy.client_disconnect 前移；http-error-mapper policy-exhausted gate；router-direct / provider-direct 不再 report-only rethrow；host 不得 local default fallback。
+
+- 缺口/未闭环：
+  - 10000 live /v1/responses SSE 命中 servertool_followup_timeout（stop_message_auto nested followup 10s 超时），与 direct error 流无关；不影响 direct-path plan 收口。10000 504 的响应体已确认无 stopless 投影（详见 2026-06-14T16:31:46 块）。
+  - direct pipeline 在 5xx 时已经走到 ErrorErr05 决策消费但还在重 build:min 期间产生大量 dist/coverage 清理噪音；本轮已干净后重启一次，验证 0.90.3068 health 全绿。
+
+- 修复脚本（audit-safe）：scripts/architecture/verify-function-map-boundary-mentions.mjs listFiles 现在跳过 target/node_modules/dist/build/.git/.cache/coverage/.rcc/out/tmp/logs/release，且对扫描中消失的文件/目录 ENOENT/EPERM/EACCES/EBUSY 容忍。
+## 2026-06-15 direct SSE apply_patch empty tool-call regression
+
+- Symptom: direct `/v1/responses` SSE could still emit empty `function_call`/empty `arguments` for `apply_patch`, so client saw an empty tool call instead of usable patch input.
+- Verified root cause: `src/modules/llmswitch/bridge/responses-response-bridge.ts` `normalizeResponsesSseFrameForClientForHttp()` returned early on `metadata.__routecodexDirectPassthrough === true`, which bypassed the Rust `projectResponsesSseFrameForClient` path entirely.
+- Fix: removed the direct-passthrough short-circuit for SSE client projection only. Request path stays direct; client SSE still goes through the single Rust apply_patch projection owner.
+- Red/green lock: `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` now includes `normalizes direct passthrough apply_patch SSE frames instead of returning empty function_call arguments`.
+- Verification PASS:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts --runInBand`
+- Extra note: broader `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts` still has pre-existing unrelated failures around tool-call continuation timeout and upstream incomplete stream error projection; not caused by this direct apply_patch slice.
+
+## 2026-06-15 apply_patch SSE empty-args build/install/restart verification
+
+- Current truth: `apply_patch` SSE empty-args issue is not reproducible after the direct SSE projection fix already present in tree.
+- Verification PASS:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5520/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 node scripts/tests/apply-patch-freeform-10000-online.mjs`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5555/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 node scripts/tests/apply-patch-freeform-10000-online.mjs`
+  - Results: 5520 `ok=true customInputCount=4 functionArgumentPatchLeakCount=0 deltaStreamCount=0`; 5555 `ok=true customInputCount=3 functionArgumentPatchLeakCount=0 deltaStreamCount=0`
+- Build/install/restart PASS:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs`
+  - `git diff --check`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh`
+  - Installed version: `routecodex --version = 0.90.3068`, `rcc --version = 0.90.3068`
+  - Health: `127.0.0.1:5555`, `5520`, `10000` all `status=ok ready=true pipelineReady=true version=0.90.3068`
+
+## 2026-06-15 latest 5520 apply_patch failure sample re-audit
+
+- New evidence is from current rolling sample `~/.rcc/codex-samples/openai-responses/port-5520/openai-responses-router-gpt-5.4-20260615T034207750-345862-3440/provider-request.json` plus matching `server-5520.log` request `openai-responses-router-gpt-5.4-20260615T034207750-345862-3440`.
+- Server-side truth for this sample: request completed `200`; `server-5520.log` shows normal `✅ [/v1/responses]` closeout, so this sample is not an upstream/provider execution failure.
+- Request-history truth inside `provider-request.json`:
+  - repeated `function_call name=apply_patch` with `arguments=""` at lines such as `874-881`, `906-913`, `1880-1887`;
+  - matching `function_call_output` is just `aborted`;
+  - same history block includes assistant text explicitly saying the tool call was still aborted and that the model was confused about JSON vs freeform/raw patch.
+- Current judgment tightened:
+  1. this latest sample is not “valid patch got truncated during execution”;
+  2. it is “conversation history already contains empty apply_patch tool calls”;
+  3. therefore the immediate failure surface is client-visible/tool-call projection or client/tool invocation semantics, not provider patch execution.
+- Important distinction from older 5555 audit:
+  - 5555 older sample had real patch-content execution failures (`context mismatch` / retry instability);
+  - this 5520 latest sample shows empty-call history pollution before any real patch body exists;
+  - do not collapse them into one proven root cause without a new red test per shape.
+- Existing gate gap remains: current SSE regression only locks suppression/projection of empty apply_patch frames on one SSE path; it does not yet prove that every client-visible path and persisted history path can never reintroduce `function_call(name=apply_patch, arguments="")`.
+## 2026-06-15 5520 latest apply_patch sample re-audit
+
+- 最新样本：`~/.rcc/codex-samples/openai-responses/port-5520/openai-responses-router-gpt-5.4-20260615T034711276-345909-3487/`
+- 已验证事实：
+  - `provider-response.json` 为 `status=200`，且 `url=https://one.1token.xyz/responses`，说明这次不是 upstream/provider 执行 patch 失败。
+  - 同一样本 `provider-request.json` 里存在多类空参数工具调用，不止 `apply_patch`：
+    - 最早空调用是 `update_plan`
+    - 其后有 `exec_command` 空参数
+    - 也有 `apply_patch` 空参数与 `aborted`
+  - 同一样本 outbound tool declaration 存在契约错位：
+    - 描述写的是 freeform/FREEFORM
+    - wire shape 却是 `type=function + parameters.patch`
+- 继续缩小根因后确认：
+  - request-side Rust owner `normalize_apply_patch_freeform_tool_schema(...)` 已正确把 `apply_patch` 规范成 `type=custom + format={type=grammar,syntax=lark}`
+  - 后续 provider outbound Rust sanitize 仍会把 openai-responses 的 `custom apply_patch` 降级成 `function`
+  - 唯一 owner：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs`
+- 2026-06-15 修复：
+  - `normalize_provider_outbound_tool(protocol, tool)` 现在对 `protocol=openai-responses && tool.type=custom && name=apply_patch` 直接保留原 shape，不再降级为 function tool。
+- 红测与 gate 证据：
+  - 新增 Rust 用例：
+    - `sanitize_provider_outbound_payload_preserves_custom_apply_patch_for_openai_responses`
+  - 同类守卫回归：
+    - `sanitize_provider_outbound_payload_converts_custom_apply_patch_for_openai_chat`
+    - `sanitize_provider_outbound_payload_keeps_responses_function_tools_flat`
+  - 三条 Rust 定向测试均 PASS
+  - `npm run verify:apply-patch-freeform-contract` PASS
+  - `npm run verify:apply-patch-regressions` PASS
+- 关键纠偏：
+  - 这轮新红测最初失败不是实现错误，而是 `format.definition` 断言把 JSON 反序列化后的转义字符串写成了多行未转义文本；修正断言后转绿。
+- 当前剩余缺口：
+  - 还没做 build/install/global restart/live replay，所以还不能宣称最新 5520 live 闭环完成。
+  - 样本里“多类空参数工具调用”是否由此同一 contract 漂移引发，还需要重放新样本确认。
+## 2026-06-15 servertool nested followup timeout removal
+
+- 用户给出的 live 错误样本：
+  - `requestId=openai-responses-minimax.key1-MiniMax-M3-20260615T075434104-346355-3933`
+  - `[servertool.followup.lifecycle] stage=attempt_error`
+  - `message="[servertool] nested followup timeout after 10000ms"`
+  - 最终被投影成 `SERVERTOOL_TIMEOUT / servertool_followup_timeout / 504`
+- 已确认根因不是 provider，也不是 Rust followup 语义 owner，而是 HTTP executor 壳层本地加的 nested followup fail-fast：
+  - `src/server/runtime/http-server/executor/servertool-followup-fail-fast.ts`
+  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+- 原行为：
+  - 默认 10s
+  - 最大也被 cap 到 10s
+  - followup 重入执行和 retry backoff wait 都会走 `awaitNestedExecutionWithFailFast(... timeoutMs=resolveServerToolNestedFollowupTimeoutMs())`
+  - 到时直接本地抛 `SERVERTOOL_TIMEOUT`
+- 本轮修复：
+  - 物理删除 nested followup timeout 解析与 504 timeout error 构造：
+    - `DEFAULT_SERVERTOOL_FOLLOWUP_TIMEOUT_MS`
+    - `MAX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS`
+    - `parsePositiveTimeoutMs(...)`
+    - `resolveServerToolNestedFollowupTimeoutMs()`
+    - `createServerToolFollowupTimeoutError(...)`
+  - `awaitNestedExecutionWithFailFast(...)` 现在只负责两件事：
+    - 响应 client abort signal
+    - 轮询 abort carrier
+  - `servertool-followup-dispatch.ts` 两处调用都已移除 `timeoutMs/requestId` 传参，只保留 abort 相关 fail-fast。
+- 红测同步：
+  - `tests/server/runtime/http-server/executor/servertool-followup-fail-fast.spec.ts`
+  - 删除“20ms timeout 必须报 504”的旧断言
+  - 改为：
+    - 正向：无 abort 时 promise 正常 resolve
+    - 反向：client abort 仍能立刻中止
+- 当前验证证据：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runTestsByPath tests/server/runtime/http-server/executor/servertool-followup-fail-fast.spec.ts --runInBand` PASS
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS
+  - `rg -n "resolveServerToolNestedFollowupTimeoutMs|createServerToolFollowupTimeoutError|servertool_followup_timeout|nested followup timeout after" src tests sharedmodule -S` => 0 matches
+- 待补最终闭环：
+  - `npm run build:min`
+  - 若 Jason 要求，后续继续 install/restart/live replay 这一类 stopless/servertool followup 样本，确认不再出现本地 10s timeout。
+
+## 2026-06-15 stopless cli self-call contract
+- stopless CLI stdout contract tightened: continuationPrompt must explicitly tell the model it cannot terminate unless it proactively calls the same stop hook with full stop schema; this is the closed loop Jason asked for.
+- Visible command path remains routecodex hook run ..., not routecodex servertool run .... Generic projection reasoning text was also neutralized to avoid proxy/client wording.
+- Updated focused tests/docs: cli_contract.rs, tests/cli/servertool-command.spec.ts, tests/servertool/servertool-cli-projection.spec.ts, tests/servertool/servertool-cli-result-restore.spec.ts, tests/servertool/stop-message-runtime-utils.continuation.spec.ts, docs/stop-message-auto.md, docs/design/servertool-stopmessage-lifecycle.md, docs/agent-routing/30-servertool-lifecycle-routing.md.
+
+## 2026-06-15 stopless request-side rewrite rule
+- Jason clarified the missing contract: when stopless auto-projects a CLI hook because the model did not proactively call the stop hook, the returned CLI result must be rewritten into request-side text input for the next model turn, not preserved as tool-call history. Otherwise the model may infer it mis-called a tool.
+- This is a req_chatprocess governance rule, not a response-side patch. Function map / verification map must explicitly lock request injection, stop-time intercept, and request-side CLI-result-to-text rewrite as one closed loop.
+
+## 2026-06-15 stopless contract gate expansion
+- Added focused native stop-schema gates for two long-term contract points: malformed schema must return parsed feedback + explicit field guidance, and valid terminal schema can allow stop even without prior explicit stop-hook call.
+
+- Added focused contract gate tests in tests/servertool/stop-schema-lifecycle-contract.spec.ts so long-term stopless lifecycle can be locked without relying on older prompt-wording assertions.
+
+- Unified remaining stopless feature anchor in router-hotpath-napi/servertool_core_blocks.rs to hub.servertool_stopless_cli_continuation so function-map growth gate can resolve the new contract consistently.
+
+- Registered tests/servertool/stop-schema-lifecycle-contract.spec.ts in function-map and verification-map required test lists for hub.servertool_stopless_cli_continuation.

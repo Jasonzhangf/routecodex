@@ -12,7 +12,7 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
       return {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}'",
+        execCommand: "routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}'",
         repeatCount: 2,
         maxRepeats: 3,
       };
@@ -21,14 +21,14 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
       return {
         toolName: 'servertool_fixture',
         flowId: input.flowId,
-        execCommand: "routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'",
+        execCommand: "routecodex hook run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'",
       };
     }
-    return {
-      toolName: input.toolName,
-      flowId: input.flowId,
-      execCommand: "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'",
-    };
+      return {
+        toolName: input.toolName,
+        flowId: input.flowId,
+        execCommand: "routecodex hook run servertool_fixture --input-json '{\"value\":1}'",
+      };
   },
   buildClientVisibleProjectionShellWithNative: (input: any) => ({
     id: `chatcmpl_${input.clientCallId}`,
@@ -115,7 +115,7 @@ describe('servertool CLI projection', () => {
     expect(message.reasoning.summary[0].text).toBe('full stop summary');
     expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toMatch(/^routecodex servertool run stop_message_auto --input-json '/);
+    expect(command).toMatch(/^routecodex hook run stop_message_auto --input-json '/);
     const inputJson = command.match(/--input-json '(.+)'$/)?.[1];
     expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
       flowId: 'stop_message_flow',
@@ -152,7 +152,7 @@ describe('servertool CLI projection', () => {
     const command = JSON.parse(toolCall.function.arguments).cmd;
 
     expect(toolCall.function.name).toBe('exec_command');
-    expect(command).toBe("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'");
+    expect(command).toBe("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
     expect(projection.toolName).toBe('servertool_fixture');
     expect((projection.chatResponse as any).__servertool_cli_projection).toMatchObject({
       toolName: 'servertool_fixture',
@@ -168,7 +168,7 @@ describe('servertool CLI projection', () => {
       nativeProjection: {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\"}'"
+        execCommand: "routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\"}'"
       },
       reasoningText: 'parsed shell',
       additionalToolCalls: []
@@ -197,6 +197,6 @@ describe('servertool CLI projection', () => {
     const toolCall = (projection.chatResponse as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
 
-    expect(command).toBe("routecodex servertool run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'");
+    expect(command).toBe("routecodex hook run servertool_fixture --input-json '{\"value\":\"can'\\''t stop\"}'");
   });
 });

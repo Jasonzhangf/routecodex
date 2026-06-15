@@ -792,6 +792,127 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     }
   });
 
+  it('RED: preserves reopened apply_patch tool history after prior assistant text and multiple tool turns', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'anthropic',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'anthropic:claude-code',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let capturedProviderPayload: unknown;
+    const app = express();
+    app.use(express.json({ limit: '1mb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_anthropic_reopened_apply_patch_history',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'thinking',
+              stream: false,
+              inboundStream: false,
+              outboundStream: false,
+            }
+          });
+          capturedProviderPayload = result.providerPayload;
+          const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
+          if (danglingId) {
+            return {
+              status: 400,
+              headers: {},
+              body: {
+                error: {
+                  message: 'invalid params, tool call result does not follow tool call (2013)',
+                  type: 'invalid_request_error',
+                  code: 'HTTP_400',
+                  danglingId
+                }
+              }
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              id: 'resp_http_anthropic_reopened_apply_patch_history',
+              object: 'response',
+              status: 'completed',
+              model: 'MiniMax-M3',
+              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+            }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const firstPatch = '*** Begin Patch\n*** Add File: apply_patch_test/01-add.txt\n+hello\n*** End Patch';
+      const secondPatch = '*** Begin Patch\n*** Update File: apply_patch_test/01-add.txt\n@@\n-hello\n+hello world\n*** End Patch';
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: false,
+          input: [
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '先检查当前补丁状态。' }] },
+            { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch_1', input: firstPatch },
+            { type: 'custom_tool_call_output', call_id: 'call_patch_1', output: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA apply_patch_test/01-add.txt\n' },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '继续核对并追加修改。' }] },
+            { type: 'function_call', call_id: 'call_exec_1', name: 'exec_command', arguments: '{"cmd":"cat apply_patch_test/01-add.txt"}' },
+            { type: 'function_call_output', call_id: 'call_exec_1', output: 'hello\n' },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '准备第二次 apply_patch。' }] },
+            { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch_2', input: secondPatch },
+            { type: 'custom_tool_call_output', call_id: 'call_patch_2', output: 'Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM apply_patch_test/01-add.txt\n' },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '完成，继续下一步。' }] }
+          ],
+          tools: [
+            { type: 'custom', name: 'apply_patch', description: 'Apply a patch.' },
+            { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
+          ]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_http_anthropic_reopened_apply_patch_history');
+      expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      expect(findAnthropicToolOrderingViolation(capturedProviderPayload)).toBeNull();
+      const serializedProviderPayload = JSON.stringify(capturedProviderPayload);
+      expect(serializedProviderPayload).toContain('call_patch_1');
+      expect(serializedProviderPayload).toContain('call_exec_1');
+      expect(serializedProviderPayload).toContain('call_patch_2');
+      expect(serializedProviderPayload).toContain('apply_patch_test/01-add.txt');
+      expect(serializedProviderPayload).toContain('hello world');
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+    }
+  });
+
   it('does not replace pending Anthropic tool_result turns with plain user placeholder text', async () => {
     const artifacts = await bootstrapVirtualRouterConfig({
       providers: {

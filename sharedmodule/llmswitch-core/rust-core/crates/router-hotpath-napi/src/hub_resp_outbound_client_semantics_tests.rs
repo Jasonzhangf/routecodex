@@ -874,7 +874,7 @@ fn normalize_responses_tool_call_arguments_for_client_projects_freeform_apply_pa
         "format": {
             "type": "grammar",
             "syntax": "lark",
-            "definition": "start: begin_patch hunk+ end_patch"
+                    "definition": "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n%import common.LF"
         }
     }]);
 
@@ -901,7 +901,7 @@ fn freeform_apply_patch_tool_fixture() -> Value {
         "format": {
             "type": "grammar",
             "syntax": "lark",
-            "definition": "start: begin_patch hunk+ end_patch"
+                    "definition": "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n%import common.LF"
         }
     }])
 }
@@ -1144,7 +1144,8 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
         &json!({}),
         &state,
     );
-    assert_eq!(added["emit"], true);
+    assert_eq!(added["emit"], false);
+    assert_eq!(added["frame"], "");
     state = added["state"].clone();
     assert_eq!(state["applyPatchCallIds"][0], "call_patch");
 
@@ -1197,6 +1198,133 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
         &done["state"],
     );
     assert_eq!(duplicate_done["emit"], false);
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-sse-empty-done.txt\n+hello from pending delta\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let mut state = json!({});
+
+    let added = project_responses_sse_frame_for_client(
+        "event: response.output_item.added\ndata: {}\n\n",
+        Some("response.output_item.added"),
+        &json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "apply_patch",
+                "call_id": "call_patch_pending",
+                "arguments": ""
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(added["emit"], false);
+    state = added["state"].clone();
+
+    let delta = project_responses_sse_frame_for_client(
+        "event: response.function_call_arguments.delta\ndata: {}\n\n",
+        Some("response.function_call_arguments.delta"),
+        &json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_patch_pending",
+            "delta": raw_args
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(delta["emit"], false);
+    state = delta["state"].clone();
+
+    let done = project_responses_sse_frame_for_client(
+        "event: response.output_item.done\ndata: {}\n\n",
+        Some("response.output_item.done"),
+        &json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "name": "apply_patch",
+                "call_id": "call_patch_pending",
+                "arguments": ""
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(done["emit"], true);
+    let frame = done["frame"].as_str().unwrap();
+    assert!(frame.contains("event: response.output_item.done"));
+    assert!(frame.contains("\"type\":\"custom_tool_call\""));
+    assert!(frame.contains("tmp/apft/01-sse-empty-done.txt"));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_omits_name() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-sse-missing-name.txt\n+hello from pending delta without name\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let mut state = json!({});
+
+    let added = project_responses_sse_frame_for_client(
+        "event: response.output_item.added\ndata: {}\n\n",
+        Some("response.output_item.added"),
+        &json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "apply_patch",
+                "call_id": "call_patch_missing_name",
+                "arguments": ""
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(added["emit"], false);
+    state = added["state"].clone();
+
+    let delta = project_responses_sse_frame_for_client(
+        "event: response.function_call_arguments.delta\ndata: {}\n\n",
+        Some("response.function_call_arguments.delta"),
+        &json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_patch_missing_name",
+            "delta": raw_args
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(delta["emit"], false);
+    state = delta["state"].clone();
+
+    let done = project_responses_sse_frame_for_client(
+        "event: response.output_item.done\ndata: {}\n\n",
+        Some("response.output_item.done"),
+        &json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "call_patch_missing_name",
+                "arguments": ""
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &state,
+    );
+    assert_eq!(done["emit"], true);
+    let frame = done["frame"].as_str().unwrap();
+    assert!(frame.contains("event: response.output_item.done"));
+    assert!(frame.contains("\"type\":\"custom_tool_call\""));
+    assert!(frame.contains("tmp/apft/01-sse-missing-name.txt"));
 }
 
 #[test]

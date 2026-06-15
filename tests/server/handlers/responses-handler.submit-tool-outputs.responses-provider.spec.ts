@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 const mockResumeResponsesConversation = jest.fn();
+const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockCaptureResponsesRequestContextForRequest = jest.fn();
 const mockClearResponsesConversationByRequestId = jest.fn(async () => undefined);
 const mockFinalizeResponsesConversationRequestRetention = jest.fn(async () => undefined);
@@ -12,12 +13,17 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId: mockClearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention: mockFinalizeResponsesConversationRequestRetention,
+  lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
   resumeResponsesConversation: mockResumeResponsesConversation,
 }));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
   planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
     mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
     payload: {
@@ -29,6 +35,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
 }));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', () => ({
+  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
   planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
     mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
     payload: {
@@ -66,9 +76,10 @@ jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   }),
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => ({
+const createResponsesBridgeMock = () => ({
   ...createBridgeHttpServerMock(),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(() => undefined),
+  assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(() => undefined),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => 'event: ping\ndata: {}\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn(() => ({
     type: 'error',
@@ -114,6 +125,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-respon
   })),
   prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async () => null),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
+  resolveResponsesRequestContextForHttp: jest.fn((args: { fallback?: unknown }) => args.fallback),
   resolveResponsesConversationClearReasonForHttp: jest.fn((reason: string) => reason),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => undefined),
   resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
@@ -127,12 +139,16 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-respon
   shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => ({ kind: 'sse_frame' })),
   updateResponsesContractProbeFromSseChunkForHttp: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-}));
+});
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', createResponsesBridgeMock);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', createResponsesBridgeMock);
 
 describe('responses-handler submit_tool_outputs same-protocol responses routing', () => {
   beforeEach(() => {
     jest.resetModules();
     mockResumeResponsesConversation.mockReset();
+    mockLookupResponsesContinuationByResponseId.mockReset();
     mockCaptureResponsesRequestContextForRequest.mockReset();
     mockClearResponsesConversationByRequestId.mockReset();
     mockFinalizeResponsesConversationRequestRetention.mockReset();
@@ -143,11 +159,99 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     mockFinalizeResponsesConversationRequestRetention.mockResolvedValue(undefined);
     mockMaterializeLatestResponsesContinuationByScope.mockResolvedValue(null);
     mockRecordResponsesResponseForRequest.mockResolvedValue(undefined);
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue(null);
   });
 
-  it('RED: keeps submit_tool_outputs entryEndpoint for responses providers so upstream can use native submit path', async () => {
+  it('RED: direct submit_tool_outputs must not local-resume and must forward native submit payload with provider pin only', async () => {
     const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      responseId: 'resp_submit_direct_1',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      continuationOwner: 'direct',
+      entryKind: 'responses',
+    });
+
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_after_submit_direct_1',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }],
+      },
+    }));
+
+    const req = {
+      method: 'POST',
+      body: {
+        tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
+      },
+      headers: {},
+      query: {},
+      path: '/v1/responses/resp_submit_direct_1/submit_tool_outputs',
+      originalUrl: '/v1/responses/resp_submit_direct_1/submit_tool_outputs',
+      params: { id: 'resp_submit_direct_1' },
+      socket: { localPort: 5555 },
+      on: jest.fn(),
+      once: jest.fn(),
+      off: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
+
+    const res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+      setHeader: jest.fn(),
+      writeHead: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+      headersSent: false,
+      on: jest.fn(),
+      once: jest.fn(),
+    } as any;
+
+    await handleResponses(
+      req,
+      res,
+      {
+        executePipeline,
+        errorHandling: null,
+      },
+      {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        responseIdFromPath: 'resp_submit_direct_1',
+      },
+    );
+
+    expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+      'resp_submit_direct_1',
+      expect.objectContaining({ entryKind: 'responses' }),
+    );
+    expect(mockResumeResponsesConversation).not.toHaveBeenCalled();
+    const pipelineInput = executePipeline.mock.calls[0]?.[0];
+    expect(pipelineInput.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
+    expect(pipelineInput.body).toEqual({
+      response_id: 'resp_submit_direct_1',
+      tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
+    });
+    expect(pipelineInput.metadata?.responsesResume).toMatchObject({
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      continuationOwner: 'direct',
+      responseId: 'resp_submit_direct_1',
+      restored: false,
+    });
+  });
+
+  it('keeps relay submit_tool_outputs entryEndpoint for responses providers so upstream can use native submit path', async () => {
+    const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
+
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      responseId: 'resp_submit_same_protocol_1',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'gpt-5.4',
@@ -163,6 +267,7 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       meta: {
         restoredFromResponseId: 'resp_submit_same_protocol_1',
         routeHint: 'thinking',
+        continuationOwner: 'relay',
       },
     });
 
@@ -250,6 +355,12 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
   it('RED: submit_tool_outputs capture must preserve providerKey pin so direct continuation can stay on the same provider', async () => {
     const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      responseId: 'resp_submit_same_provider_pin_1',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'gpt-5.4',

@@ -140,6 +140,82 @@ describe('virtual-router hit log', () => {
     expect(line).not.toContain(' sid=');
   });
 
+  it('emits internal latency label when startedAtMs is provided', () => {
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'glm.key1.kimi-k2.5',
+      modelId: 'kimi-k2.5',
+      hitReason: 'thinking:user-input',
+      sessionId: 'tmux-internal-1',
+      startedAtMs: Date.now() - 250
+    }));
+
+    expect(line).toMatch(/internal=\d+ms/);
+  });
+
+  it('never uses white / black / red for digit highlight or labels', () => {
+    const samples = [
+      formatVirtualRouterHit(createVirtualRouterHitRecord({
+        routeName: 'tools',
+        poolId: 'tools-primary',
+        providerKey: 'tabglm.key1.glm-5',
+        modelId: 'glm-5',
+        hitReason: 'tools:last-tool-other',
+        sessionId: 'tmux-color-1',
+        startedAtMs: Date.now() - 123
+      })),
+      formatVirtualRouterHit(createVirtualRouterHitRecord({
+        routeName: 'thinking',
+        poolId: 'thinking-primary',
+        providerKey: 'glm.key1.kimi-k2.5',
+        modelId: 'kimi-k2.5',
+        hitReason: 'thinking:user-input'
+      }))
+    ];
+    for (const sample of samples) {
+      expect(sample).not.toMatch(/\x1b\[(30|37|90|97|31)m/);
+    }
+  });
+
+  it('emits internal latency label when startedAtMs is provided', () => {
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'glm.key1.kimi-k2.5',
+      modelId: 'kimi-k2.5',
+      hitReason: 'thinking:user-input',
+      sessionId: 'tmux-internal-1',
+      startedAtMs: Date.now() - 250
+    }));
+
+    expect(line).toMatch(/internal=\d+ms/);
+  });
+
+  it('never uses white / black / red for digit highlight or labels', () => {
+    const samples = [
+      formatVirtualRouterHit(createVirtualRouterHitRecord({
+        routeName: 'tools',
+        poolId: 'tools-primary',
+        providerKey: 'tabglm.key1.glm-5',
+        modelId: 'glm-5',
+        hitReason: 'tools:last-tool-other',
+        sessionId: 'tmux-color-1',
+        startedAtMs: Date.now() - 123
+      })),
+      formatVirtualRouterHit(createVirtualRouterHitRecord({
+        routeName: 'thinking',
+        poolId: 'thinking-primary',
+        providerKey: 'glm.key1.kimi-k2.5',
+        modelId: 'kimi-k2.5',
+        hitReason: 'thinking:user-input'
+      }))
+    ];
+    for (const sample of samples) {
+      expect(sample).not.toMatch(/\x1b\[(30|37|90|97|31)m/);
+    }
+  });
+
   it('prefers stable tmux scope over per-request session id for log color key', () => {
     expect(resolveSessionLogColorKey({
       sessionId: 'request-session-a',

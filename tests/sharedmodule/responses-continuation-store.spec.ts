@@ -10,10 +10,38 @@ import {
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   releaseResponsesConversationRequestPayload,
+  resetResponsesConversationStateForRestartSimulation,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   responsesConversationStore
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
+import { buildChatRequestFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+
+function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
+  if (!Array.isArray(messages)) return null;
+  const pending = new Set<string>();
+  for (const message of messages) {
+    if (
+      message?.role === 'assistant'
+      && Array.isArray((message as any).tool_calls)
+      && (message as any).tool_calls.length > 0
+    ) {
+      if (pending.size > 0) return 'assistant_tool_calls_before_previous_results';
+      for (const toolCall of (message as any).tool_calls) {
+        if (typeof toolCall?.id === 'string') pending.add(toolCall.id);
+      }
+      continue;
+    }
+    if (message?.role === 'tool') {
+      const id = (message as any).tool_call_id;
+      if (typeof id !== 'string' || !pending.has(id)) return 'orphan_tool_result';
+      pending.delete(id);
+      continue;
+    }
+    if (pending.size > 0) return 'non_tool_message_before_tool_results';
+  }
+  return pending.size > 0 ? 'dangling_tool_call' : null;
+}
 
 describe('responses conversation store plain continuation restore', () => {
   const requestIds = new Set<string>();
@@ -177,7 +205,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
-  it('RED: direct-owned scope continuation must restore remote previous_response_id, not local materialize or re-inject tools', () => {
+  it('RED: direct-owned scope continuation must not local-restore remote previous_response_id by scope', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-direct-scope-1'),
       sessionId: 'sess-direct-scope',
@@ -248,22 +276,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(materialized).not.toBeNull();
-    expect(materialized?.meta).toMatchObject({
-      restoredFromResponseId: 'resp-direct-scope-1',
-      providerKey: 'asxs.crsa.gpt-5.4',
-      continuationOwner: 'direct',
-      restored: true
-    });
-    expect(materialized?.payload.previous_response_id).toBe('resp-direct-scope-1');
-    expect(materialized?.payload.input).toEqual([
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'second turn' }]
-      }
-    ]);
-    expect(materialized?.payload.tools).toBeUndefined();
+    expect(materialized).toBeNull();
   });
 
   it('returns null when no exact prefix match exists', () => {
@@ -796,13 +809,127 @@ describe('responses conversation store plain continuation restore', () => {
         ]
       }
     });
-    expect(directOnly?.meta).toMatchObject({
-      restoredFromResponseId: 'resp-owner-direct-1',
-      continuationOwner: 'direct',
-      restored: true,
-      providerKey: 'provider.direct.gpt-5.4'
+    expect(directOnly).toBeNull();
+  });
+
+  it('RED: restart simulation must not reload persisted direct-owned continuation by scope, while relay-owned continuation still reloads', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-restart-relay-1'),
+      sessionId: 'sess-restart-owner',
+      conversationId: 'conv-restart-owner',
+      providerKey: 'provider.relay.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'relay turn' }]
+          }
+        ]
+      }
     });
-    expect(directOnly?.payload.previous_response_id).toBe('resp-owner-direct-1');
+    recordResponsesResponse({
+      requestId: track('req-resp-store-restart-relay-1'),
+      providerKey: 'provider.relay.gpt-5.4',
+      continuationOwner: 'relay',
+      response: {
+        id: 'resp-restart-relay-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'relay response' }]
+          }
+        ]
+      }
+    });
+    releaseResponsesConversationRequestPayload('req-resp-store-restart-relay-1');
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-restart-direct-1'),
+      sessionId: 'sess-restart-owner',
+      conversationId: 'conv-restart-owner-direct',
+      providerKey: 'provider.direct.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'direct turn' }]
+          }
+        ]
+      }
+    });
+    recordResponsesResponse({
+      requestId: track('req-resp-store-restart-direct-1'),
+      providerKey: 'provider.direct.gpt-5.4',
+      continuationOwner: 'direct',
+      response: {
+        id: 'resp-restart-direct-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'direct response' }]
+          }
+        ]
+      }
+    });
+    releaseResponsesConversationRequestPayload('req-resp-store-restart-direct-1');
+
+    expect(fs.existsSync(persistFile)).toBe(true);
+
+    resetResponsesConversationStateForRestartSimulation();
+
+    const relayReloaded = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-restart-relay-next'),
+      sessionId: 'sess-restart-owner',
+      conversationId: 'conv-restart-owner',
+      entryKind: 'responses',
+      continuationOwner: 'relay',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'relay next' }]
+          }
+        ]
+      }
+    });
+    expect(relayReloaded).not.toBeNull();
+    expect(relayReloaded?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-restart-relay-1',
+      continuationOwner: 'relay'
+    });
+
+    const directReloaded = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-restart-direct-next'),
+      sessionId: 'sess-restart-owner',
+      conversationId: 'conv-restart-owner-direct',
+      entryKind: 'responses',
+      continuationOwner: 'direct',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'direct next' }]
+          }
+        ]
+      }
+    });
+    expect(directReloaded).toBeNull();
   });
 
   it('materializes full input by session scope even after request payload was released', () => {
@@ -998,6 +1125,616 @@ describe('responses conversation store plain continuation restore', () => {
         type: 'function_call_output',
         call_id: 'call_pending_1',
         output: 'ok'
+      }
+    ]);
+  });
+
+  it('RED: materialize must not duplicate a replayed pending tool batch when incoming payload restarts from the persisted tail block', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-tail-batch-1'),
+      sessionId: 'sess-tail-batch',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'start' }]
+          },
+          {
+            type: 'reasoning',
+            id: 'rs_tail_1',
+            summary: [{ type: 'summary_text', text: 'plan tools' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'I will inspect the relevant files.' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-tail-batch-1'),
+      response: {
+        id: 'resp-tail-batch-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_tail_1',
+            call_id: 'call_tail_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p note.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_2',
+            call_id: 'call_tail_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_3',
+            call_id: 'call_tail_3',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_4',
+            call_id: 'call_tail_4',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              { id: 'call_tail_1', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p note.md"}' },
+              { id: 'call_tail_2', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p CACHE.md"}' },
+              { id: 'call_tail_3', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}' },
+              { id: 'call_tail_4', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}' }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-tail-batch-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-tail-batch-2'),
+      sessionId: 'sess-tail-batch',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'reasoning',
+            id: 'rs_tail_1',
+            summary: [{ type: 'summary_text', text: 'plan tools' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'I will inspect the relevant files.' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_1',
+            call_id: 'call_tail_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p note.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_2',
+            call_id: 'call_tail_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_3',
+            call_id: 'call_tail_3',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_tail_4',
+            call_id: 'call_tail_4',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_tail_1',
+            output: 'note'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_tail_2',
+            output: 'cache'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_tail_3',
+            output: 'agents'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_tail_4',
+            output: 'memory'
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'start' }]
+      },
+      {
+        type: 'reasoning',
+        id: 'rs_tail_1',
+        summary: [{ type: 'summary_text', text: 'plan tools' }]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'I will inspect the relevant files.' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_tail_1',
+        call_id: 'call_tail_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p note.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_tail_2',
+        call_id: 'call_tail_2',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_tail_3',
+        call_id: 'call_tail_3',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_tail_4',
+        call_id: 'call_tail_4',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_tail_1',
+        output: 'note'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_tail_2',
+        output: 'cache'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_tail_3',
+        output: 'agents'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_tail_4',
+        output: 'memory'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'continue' }]
+      }
+    ]);
+  });
+
+  it('RED: materialize must collapse duplicated pending call batches when incoming delta repeats the same call_ids twice', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-dup-call-batch-1'),
+      sessionId: 'sess-dup-call-batch',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'start' }]
+          },
+          {
+            type: 'reasoning',
+            id: 'rs_dup_1',
+            summary: [{ type: 'summary_text', text: 'plan tools' }]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'I will inspect the relevant files.' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-dup-call-batch-1'),
+      response: {
+        id: 'resp-dup-call-batch-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_dup_1',
+            call_id: 'call_dup_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p note.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_2',
+            call_id: 'call_dup_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_3',
+            call_id: 'call_dup_3',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_4',
+            call_id: 'call_dup_4',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              { id: 'call_dup_1', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p note.md"}' },
+              { id: 'call_dup_2', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p CACHE.md"}' },
+              { id: 'call_dup_3', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}' },
+              { id: 'call_dup_4', type: 'function', name: 'exec_command', arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}' }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-dup-call-batch-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-dup-call-batch-2'),
+      sessionId: 'sess-dup-call-batch',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call',
+            id: 'fc_dup_1',
+            call_id: 'call_dup_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p note.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_2',
+            call_id: 'call_dup_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_3',
+            call_id: 'call_dup_3',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_4',
+            call_id: 'call_dup_4',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_1',
+            call_id: 'call_dup_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p note.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_2',
+            call_id: 'call_dup_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_3',
+            call_id: 'call_dup_3',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+          },
+          {
+            type: 'function_call',
+            id: 'fc_dup_4',
+            call_id: 'call_dup_4',
+            name: 'exec_command',
+            arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_1',
+            output: 'note:first'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_2',
+            output: 'cache:first'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_3',
+            output: 'agents:first'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_4',
+            output: 'memory:first'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_1',
+            output: 'note:second'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_2',
+            output: 'cache:second'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_3',
+            output: 'agents:second'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup_4',
+            output: 'memory:second'
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'start' }]
+      },
+      {
+        type: 'reasoning',
+        id: 'rs_dup_1',
+        summary: [{ type: 'summary_text', text: 'plan tools' }]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'I will inspect the relevant files.' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_dup_1',
+        call_id: 'call_dup_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p note.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_dup_2',
+        call_id: 'call_dup_2',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p CACHE.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_dup_3',
+        call_id: 'call_dup_3',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p AGENTS.md"}'
+      },
+      {
+        type: 'function_call',
+        id: 'fc_dup_4',
+        call_id: 'call_dup_4',
+        name: 'exec_command',
+        arguments: '{"cmd":"sed -n 1,10p MEMORY.md"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_dup_1',
+        output: 'note:first'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_dup_2',
+        output: 'cache:first'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_dup_3',
+        output: 'agents:first'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_dup_4',
+        output: 'memory:first'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'continue' }]
+      }
+    ]);
+  });
+
+  it('RED: recordResponse must preserve standalone reasoning output items in persisted history before later tool turns', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-reasoning-keep-1'),
+      sessionId: 'sess-reasoning-keep',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'inspect repo and continue' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-reasoning-keep-1'),
+      response: {
+        id: 'resp-reasoning-keep-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'reasoning',
+            id: 'rs_reasoning_keep_1',
+            status: 'completed',
+            summary: [{ type: 'summary_text', text: 'plan tools' }],
+            content: [{ type: 'reasoning_text', text: 'Need to inspect cwd before editing.' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_reasoning_keep_1',
+            call_id: 'call_reasoning_keep_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              { id: 'call_reasoning_keep_1', type: 'function', name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-reasoning-keep-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-reasoning-keep-2'),
+      sessionId: 'sess-reasoning-keep',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'function_call',
+            id: 'fc_reasoning_keep_1',
+            call_id: 'call_reasoning_keep_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_reasoning_keep_1',
+            output: '/tmp'
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'inspect repo and continue' }]
+      },
+      {
+        type: 'reasoning',
+        id: 'rs_reasoning_keep_1',
+        status: 'completed',
+        summary: [{ type: 'summary_text', text: 'plan tools' }],
+        content: [{ type: 'reasoning_text', text: 'Need to inspect cwd before editing.' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_reasoning_keep_1',
+        call_id: 'call_reasoning_keep_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_reasoning_keep_1',
+        output: '/tmp'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'continue' }]
       }
     ]);
   });
@@ -1841,6 +2578,266 @@ describe('responses conversation store plain continuation restore', () => {
         output: '{"repeatCount":2}'
       })
     ]);
+  });
+
+  it('RED: reopened apply_patch after exec_command stays tool-ordered after submit_tool_outputs resume', () => {
+    const patch1 = [
+      '*** Begin Patch',
+      '*** Update File: docs/a.txt',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch'
+    ].join('\n');
+    const patch2 = [
+      '*** Begin Patch',
+      '*** Update File: docs/b.txt',
+      '@@',
+      '-before',
+      '+after',
+      '*** End Patch'
+    ].join('\n');
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-reopen-1'),
+      sessionId: 'sess-reopen-apply-patch',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          { type: 'function', function: { name: 'apply_patch' } },
+          { type: 'function', function: { name: 'exec_command' } }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '开始修复' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-reopen-1'),
+      response: {
+        id: 'resp-reopen-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '先打补丁' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_patch_1',
+            call_id: 'call_patch_1',
+            name: 'apply_patch',
+            arguments: JSON.stringify({ patch: patch1 }),
+            status: 'completed'
+          }
+        ]
+      }
+    });
+
+    const resumed1 = resumeResponsesConversation(
+      'resp-reopen-1',
+      {
+        tool_outputs: [{ tool_call_id: 'call_patch_1', output: 'Patch applied successfully.' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-reopen-2') }
+    );
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-reopen-2'),
+      sessionId: 'sess-reopen-apply-patch',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          { type: 'function', function: { name: 'apply_patch' } },
+          { type: 'function', function: { name: 'exec_command' } }
+        ]
+      },
+      context: {
+        input: resumed1.payload.input
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-reopen-2'),
+      response: {
+        id: 'resp-reopen-2',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '再跑命令确认' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_exec_1',
+            call_id: 'call_exec_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            status: 'completed'
+          }
+        ]
+      }
+    });
+
+    const resumed2 = resumeResponsesConversation(
+      'resp-reopen-2',
+      {
+        tool_outputs: [{ tool_call_id: 'call_exec_1', output: '/Users/fanzhang/Documents/github/routecodex' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-reopen-3') }
+    );
+
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-reopen-3'),
+      sessionId: 'sess-reopen-apply-patch',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          { type: 'function', function: { name: 'apply_patch' } },
+          { type: 'function', function: { name: 'exec_command' } }
+        ]
+      },
+      context: {
+        input: resumed2.payload.input
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-reopen-3'),
+      response: {
+        id: 'resp-reopen-3',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '继续第二个补丁' }]
+          },
+          {
+            type: 'function_call',
+            id: 'fc_patch_2',
+            call_id: 'call_patch_2',
+            name: 'apply_patch',
+            arguments: JSON.stringify({ patch: patch2 }),
+            status: 'in_progress'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_patch_2',
+                type: 'function',
+                name: 'apply_patch',
+                arguments: JSON.stringify({ patch: patch2 })
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed3 = resumeResponsesConversation(
+      'resp-reopen-3',
+      {
+        tool_outputs: [{ tool_call_id: 'call_patch_2', output: 'Patch applied successfully.' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-reopen-4') }
+    );
+
+    expect(resumed3.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '开始修复' }]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: '先打补丁' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_patch_1',
+        name: 'apply_patch'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_patch_1',
+        output: 'Patch applied successfully.'
+      }),
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: '再跑命令确认' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_exec_1',
+        name: 'exec_command'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_exec_1',
+        output: '/Users/fanzhang/Documents/github/routecodex'
+      }),
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: '继续第二个补丁' }]
+      },
+      expect.objectContaining({
+        type: 'function_call',
+        call_id: 'call_patch_2',
+        name: 'apply_patch'
+      }),
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_patch_2',
+        output: 'Patch applied successfully.'
+      })
+    ]);
+
+    const chatRequest = buildChatRequestFromResponses(
+      {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp-reopen-3',
+        input: resumed3.payload.input,
+        tools: [
+          { type: 'function', name: 'apply_patch', parameters: { type: 'object', properties: {} } },
+          { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
+        ]
+      },
+      {
+        requestId: 'req-resp-store-reopen-4',
+        input: resumed3.payload.input as any,
+        toolsNormalized: [
+          { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object', properties: {} } } },
+          { type: 'function', function: { name: 'exec_command', parameters: { type: 'object', properties: {} } } }
+        ] as any
+      } as any
+    );
+    const messages = (chatRequest as any)?.request?.messages;
+    expect(findOpenAiChatToolOrderingViolation(messages)).toBeNull();
   });
 
   it('clears all retained entries on global clear (shutdown cleanup path)', () => {

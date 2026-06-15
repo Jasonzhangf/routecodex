@@ -17,6 +17,8 @@ import type {
   AnyRecord,
   CaptureContextArgs,
   ConversationEntry,
+  ContinuationLookupOptions,
+  ContinuationLookupResult,
   RecordResponseArgs,
   ResponsesContinuationEntryKind,
   RestoreByScopeArgs,
@@ -150,6 +152,10 @@ function normalizeEntryKind(value: unknown): ResponsesContinuationEntryKind {
 
 function normalizeContinuationOwner(value: unknown): 'direct' | 'relay' | undefined {
   return value === 'direct' || value === 'relay' ? value : undefined;
+}
+
+function shouldPersistLocally(entry: ConversationEntry): boolean {
+  return normalizeContinuationOwner(entry.continuationOwner) !== 'direct';
 }
 
 function entryMatchesIsolation(
@@ -361,7 +367,12 @@ class ResponsesConversationStore {
     const now = Date.now();
     for (const row of parsed.entries) {
       const entry = deserializeEntry(row);
-      if (!entry || !entry.lastResponseId || now - entry.updatedAt > TTL_MS) continue;
+      if (
+        !entry
+        || !entry.lastResponseId
+        || now - entry.updatedAt > TTL_MS
+        || !shouldPersistLocally(entry)
+      ) continue;
       this.requestMap.set(entry.requestId, entry);
       this.responseIndex.set(entry.lastResponseId, entry);
       this.attachEntryScopes(entry);
@@ -374,7 +385,12 @@ class ResponsesConversationStore {
     const persistFilePath = resolvePersistFilePath();
     const seen = new Set<ConversationEntry>();
     for (const entry of this.responseIndex.values()) {
-      if (seen.has(entry) || entry.allowContinuation !== true || !entry.lastResponseId) continue;
+      if (
+        seen.has(entry)
+        || entry.allowContinuation !== true
+        || !entry.lastResponseId
+        || !shouldPersistLocally(entry)
+      ) continue;
       seen.add(entry);
       const serialized = serializeEntry(entry);
       if (serialized) entries.push(serialized);
@@ -674,6 +690,34 @@ class ResponsesConversationStore {
     };
   }
 
+  lookupContinuationByResponseId(
+    responseId: string,
+    options?: ContinuationLookupOptions,
+  ): ContinuationLookupResult | null {
+    this.ensurePersistenceLoaded();
+    if (typeof responseId !== 'string' || !responseId.trim()) {
+      return null;
+    }
+    this.prune();
+    const requestedPortScopeKey = readPortScopeKey(options);
+    const entry = this.responseIndex.get(responseId.trim());
+    if (
+      !entry
+      || !entry.lastResponseId
+      || !entryMatchesPortScope(entry, requestedPortScopeKey)
+      || !entryMatchesIsolation(entry, options)
+    ) {
+      return null;
+    }
+    return {
+      responseId: entry.lastResponseId,
+      providerKey: readScopeToken(entry.providerKey),
+      continuationOwner: normalizeContinuationOwner(entry.continuationOwner),
+      entryKind: normalizeEntryKind(entry.entryKind),
+      requestId: entry.requestId,
+    };
+  }
+
   clearRequest(requestId?: string): void {
     this.ensurePersistenceLoaded();
     if (!requestId) return;
@@ -773,7 +817,12 @@ class ResponsesConversationStore {
     const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
-      if (!entry || entry.allowContinuation !== true || !entry.lastResponseId) {
+      if (
+        !entry
+        || entry.allowContinuation !== true
+        || !entry.lastResponseId
+        || normalizeContinuationOwner(entry.continuationOwner) === 'direct'
+      ) {
         continue;
       }
       const dedupeKey = `${entry.requestId}:${entry.lastResponseId}`;
@@ -806,7 +855,11 @@ class ResponsesConversationStore {
     const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
-      if (!entry || entry.allowContinuation !== true) {
+      if (
+        !entry
+        || entry.allowContinuation !== true
+        || normalizeContinuationOwner(entry.continuationOwner) === 'direct'
+      ) {
         continue;
       }
       const dedupeKey = `${entry.requestId}:${entry.lastResponseId ?? ''}`;
@@ -819,16 +872,6 @@ class ResponsesConversationStore {
     }
     const match = [...matches.values()][0];
     assertResponsesConversationStoreNativeAvailable();
-    if (match.entry.continuationOwner === 'direct') {
-      const restored = restoreContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
-      if (!restored) {
-        return null;
-      }
-      return {
-        payload: restored.payload,
-        meta: ensureMetaProviderKey(restored.meta, match.entry)
-      };
-    }
     const materialized = materializeContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
     if (!materialized) {
       return null;
@@ -994,6 +1037,13 @@ export function resumeResponsesConversation(
     console.log('[responses-store] resume', responseId);
   }
   return store.resumeConversation(responseId, submitPayload, options);
+}
+
+export function lookupResponsesContinuationByResponseId(
+  responseId: string,
+  options?: ContinuationLookupOptions,
+): ContinuationLookupResult | null {
+  return store.lookupContinuationByResponseId(responseId, options);
 }
 
 export function clearResponsesConversationByRequestId(requestId?: string): void {

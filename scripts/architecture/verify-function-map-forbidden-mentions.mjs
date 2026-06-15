@@ -54,13 +54,30 @@ function parseOwners(text) {
 function listFiles(relPath) {
   const abs = path.join(root, relPath);
   if (!fs.existsSync(abs)) return [];
-  const stat = fs.statSync(abs);
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
   if (stat.isFile()) return [abs];
   const out = [];
   const stack = [abs];
   while (stack.length) {
     const current = stack.pop();
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
+    for (const entry of entries) {
       const next = path.join(current, entry.name);
       if (entry.isDirectory()) stack.push(next);
       else if (/\.(rs|ts|tsx|js|mjs|cjs)$/.test(entry.name)) out.push(next);
@@ -78,7 +95,16 @@ for (const owner of owners) {
     if (allowset.has(builder)) continue;
     for (const relPath of owner.forbiddenPaths) {
       for (const file of listFiles(relPath)) {
-        if (fs.readFileSync(file, 'utf8').includes(builder)) {
+        let text;
+        try {
+          text = fs.readFileSync(file, 'utf8');
+        } catch (error) {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+            continue;
+          }
+          throw error;
+        }
+        if (text.includes(builder)) {
           failures.push(
             `${owner.featureId}: canonical builder "${builder}" found in forbidden path ${path.relative(root, file)}`
           );

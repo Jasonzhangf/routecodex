@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { colorizeVirtualRouterHitLogLine } from '../../utils/request-log-color.js';
+import {
+  colorizeVirtualRouterHitLogLine,
+  extractLeadingAnsiColor,
+  stripAnsiCodes
+} from '../../utils/request-log-color.js';
 
 export interface PortRequestContext {
   localPort?: number;
@@ -74,6 +78,11 @@ function prefixArgsWithPort(args: unknown[], prefix: string): unknown[] {
   }
   const first = args[0];
   if (typeof first === 'string') {
+    const lineColor = extractLeadingAnsiColor(first);
+    if (lineColor) {
+      const plainPrefix = stripAnsiCodes(prefix);
+      return [`${lineColor}${plainPrefix} ${first}\x1b[0m`, ...args.slice(1)];
+    }
     return [`${prefix} ${first}`, ...args.slice(1)];
   }
   return [prefix, ...args];

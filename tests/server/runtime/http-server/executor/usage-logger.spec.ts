@@ -78,8 +78,11 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('tokens.all=25');
-    expect(rendered).toContain('tokens.day=25');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('tokens.all=25');
+    expect(plain).toContain('tokens.day=25');
+    expect(rendered).toContain('tokens.all=\x1b[97m25');
+    expect(rendered).toContain('tokens.day=\x1b[97m25');
     expect(writeFileSyncSpy).not.toHaveBeenCalled();
 
     flushTokenStats();
@@ -152,6 +155,10 @@ describe('usage logger timing summary', () => {
       expect(line.startsWith(String(expectedColor))).toBe(true);
       expect(line.startsWith(String(requestSessionColor))).toBe(false);
     }
+    expect(renderedLines).toHaveLength(2);
+    expect(rendered).toContain('finish_reason=\x1b[97mstop');
+    expect(rendered).toContain('day.calls=\x1b[97m1');
+    expect(rendered).toContain('\x1b[97m');
   });
 
   it('does not repeat finish_reason inside usage detail block', async () => {
@@ -205,7 +212,7 @@ describe('usage logger timing summary', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-metrics'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.hit=80.0%'))).toBe(true);
+    expect(lines.some((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes('cache.hit=80.0%'))).toBe(true);
   });
 
 
@@ -242,7 +249,9 @@ describe('usage logger timing summary', () => {
     expect(plain).toContain('provider.send=800ms');
     expect(plain).not.toContain('hub.response=40ms');
     expect(plain).not.toContain('response=20ms');
-    expect(rendered).toContain(`request.internal=\x1b[97m100ms\x1b[0m`);
+    expect(rendered).toContain('request.internal=\x1b[97m100ms');
+    expect(rendered).toContain('provider.send=\x1b[97m800ms');
+    expect(rendered).toContain('\x1b[97m');
   });
 
   it('does not print timing/hub.top in release by default', async () => {

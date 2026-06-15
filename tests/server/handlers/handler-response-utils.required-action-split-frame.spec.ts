@@ -443,6 +443,8 @@ const mockBridgeModule = async () => ({
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.ts', mockBridgeModule);
 

@@ -99,6 +99,20 @@ function applyRequestRuntimeMetadataToProviderContext(
   context.pipelineId = context.pipelineId ?? runtimeMetadata.pipelineId;
 }
 
+function shouldSanitizeDirectResponsesBody(body: Record<string, unknown>): boolean {
+  const input = Array.isArray(body.input) ? body.input : null;
+  if (!input) {
+    return false;
+  }
+  return input.some((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return false;
+    }
+    const row = item as Record<string, unknown>;
+    return row.type === 'reasoning' && ('content' in row || 'encrypted_content' in row);
+  });
+}
+
 function buildDirectResponsesSemanticTimeoutError(code: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'): Error & { code: string } {
   return Object.assign(new Error(code), { code });
 }
@@ -397,7 +411,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     const entryEndpoint = extractEntryEndpoint(directRequest) ?? '/v1/responses';
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
-    const finalBody = builtBody;
     const runtimeMetadata = extractProviderRuntimeMetadata(directRequest);
     applyRequestRuntimeMetadataToProviderContext(context, runtimeMetadata);
     const metadata = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
@@ -413,9 +426,49 @@ export class ResponsesProvider extends HttpTransportProvider {
       : '';
     const model = routeModel || defaultModel;
     if (model) {
-      finalBody.model = model;
+      builtBody.model = model;
     }
-    const overriddenBody = finalBody;
+    const overriddenBody = shouldSanitizeDirectResponsesBody(builtBody)
+      ? await this.sanitizeResponsesProviderOutboundBody(builtBody, context)
+      : builtBody;
+    const submitPayload =
+      typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
+        ? extractSubmitToolOutputsPayload(overriddenBody)
+        : null;
+    if (submitPayload) {
+      const submitEndpoint = buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
+      const submitTargetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), submitEndpoint);
+      const providerStream = extractStreamFlagFromBody(submitPayload.body);
+
+      try {
+        return await this.sendSubmitToolOutputsRequest({
+          endpoint: submitEndpoint,
+          body: submitPayload.body,
+          headers,
+          context,
+          targetUrl: submitTargetUrl,
+          entryEndpoint,
+          providerStream,
+          httpClient: this.httpClient,
+          skipSanitize: true,
+        }) as UnknownObject;
+      } catch (error) {
+        const normalizedError = normalizeUpstreamError(error);
+        await this.snapshotPhase(
+          'provider-error',
+          context,
+          {
+            status: normalizedError.statusCode ?? normalizedError.status ?? null,
+            code: normalizedError.code ?? null,
+            error: normalizedError.message
+          },
+          headers,
+          submitTargetUrl,
+          entryEndpoint
+        );
+        throw normalizedError;
+      }
+    }
     const explicitStream = extractStreamFlagFromBody(overriddenBody);
 
     await this.snapshotPhase('provider-request', context, overriddenBody, headers, targetUrl, entryEndpoint);
@@ -637,9 +690,12 @@ export class ResponsesProvider extends HttpTransportProvider {
     entryEndpoint?: string;
     providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
+    skipSanitize?: boolean;
   }): Promise<unknown> {
     const { context, headers, targetUrl, entryEndpoint } = options;
-    const body = await this.sanitizeResponsesProviderOutboundBody(options.body, context);
+    const body = options.skipSanitize === true
+      ? options.body
+      : await this.sanitizeResponsesProviderOutboundBody(options.body, context);
     await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
     try {
       return await this.executeSseStream({ ...options, body });

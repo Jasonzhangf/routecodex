@@ -234,11 +234,25 @@ export async function importCoreModule<T = unknown>(subpath: string, impl: LlmsI
         // fall through to dist-path fallback below
       }
     }
+    if (sourcePath) {
+      try {
+        return (await import(pathToFileURL(sourcePath).href)) as T;
+      } catch {
+        // fall through to dist-path fallback below
+      }
+    }
     const modulePath = resolveCoreDistPath(subpath, impl);
     if (jestRequire) {
-      return jestRequire(modulePath) as T;
+      try {
+        return jestRequire(modulePath) as T;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        if (!/Must use import to load ES Module/i.test(message)) {
+          throw error;
+        }
+      }
     }
-    return nodeRequire(modulePath) as T;
+    return (await import(pathToFileURL(modulePath).href)) as T;
   }
   const moduleUrl = resolveCoreModuleUrl(subpath, impl);
   try {

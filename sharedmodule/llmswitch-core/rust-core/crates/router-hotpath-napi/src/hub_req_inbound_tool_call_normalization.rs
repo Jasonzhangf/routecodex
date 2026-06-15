@@ -11,6 +11,12 @@ fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
 }
 
+const AUTO_STOP_HOOK_CALL_ID_PREFIX: &str = "call_servertool_cli_";
+const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
+    "routecodex hook run stop_message_auto",
+    "routecodex servertool run stop_message_auto",
+];
+
 pub(crate) fn normalize_apply_patch_output_text(raw: &str) -> String {
     const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
     const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers. Keep using apply_patch for line edits instead of switching tools.";
@@ -288,6 +294,108 @@ fn parse_json_record(value: Option<&Value>) -> Option<Map<String, Value>> {
         }
         _ => None,
     }
+}
+
+fn read_function_call_id(row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))
+}
+
+fn read_exec_command_cmd(arguments: Option<&Value>) -> Option<String> {
+    let args = parse_json_record(arguments)?;
+    read_command_from_args(&args)
+}
+
+fn is_auto_injected_stop_hook_function_call(row: &Map<String, Value>) -> bool {
+    let item_type = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if item_type != "function_call" && item_type != "tool_call" {
+        return false;
+    }
+    let call_id = read_function_call_id(row).unwrap_or_default();
+    if !call_id.starts_with(AUTO_STOP_HOOK_CALL_ID_PREFIX) {
+        return false;
+    }
+    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
+    if !is_shell_like_tool_name(name.as_str()) {
+        return false;
+    }
+    let Some(cmd) = read_exec_command_cmd(row.get("arguments")) else {
+        return false;
+    };
+    STOP_HOOK_COMMAND_MARKERS.iter().any(|marker| cmd.contains(marker))
+}
+
+fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) {
+        let tool_name = read_trimmed_string(row.get("toolName"))
+            .or_else(|| read_trimmed_string(row.get("tool_name")))
+            .unwrap_or_default();
+        if tool_name == "stop_message_auto" {
+            let mut parts = Vec::<String>::new();
+            if let Some(prompt) = read_trimmed_string(row.get("continuationPrompt"))
+                .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
+            {
+                parts.push(prompt);
+            }
+            if let Some(guidance) = row.get("schemaGuidance").and_then(Value::as_object) {
+                if let Some(fields) = guidance.get("requiredFields").and_then(Value::as_array) {
+                    let names: Vec<String> = fields
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    if !names.is_empty() {
+                        parts.push(format!("必须补齐 stop schema 字段：{}。", names.join(", ")));
+                    }
+                }
+                if let Some(values) = guidance.get("stopreasonValues").and_then(Value::as_object)
+                {
+                    let finished = values
+                        .get("finished")
+                        .and_then(Value::as_i64)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "0".to_string());
+                    let blocked = values
+                        .get("blocked")
+                        .and_then(Value::as_i64)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "1".to_string());
+                    let continue_needed = values
+                        .get("continueNeeded")
+                        .or_else(|| values.get("continue_needed"))
+                        .and_then(Value::as_i64)
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "2".to_string());
+                    parts.push(format!(
+                        "stopreason 取值：finished={}, blocked={}, continue_needed={}.",
+                        finished, blocked, continue_needed
+                    ));
+                }
+            }
+            if !parts.is_empty() {
+                return parts.join("\n");
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn build_responses_text_guidance_input_item(text: String) -> Value {
+    serde_json::json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": text
+            }
+        ]
+    })
 }
 
 fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
@@ -648,6 +756,7 @@ fn normalize_responses_input_function_calls(
     let mut dropped_call_ids: HashSet<String> = HashSet::new();
     let mut shell_like_call_ids: HashSet<String> = HashSet::new();
     let mut apply_patch_call_ids: HashSet<String> = HashSet::new();
+    let mut auto_stop_hook_call_ids: HashSet<String> = HashSet::new();
     let mut normalized_items = Vec::<Value>::with_capacity(input_items.len());
 
     for mut item in std::mem::take(input_items) {
@@ -656,6 +765,12 @@ fn normalize_responses_input_function_calls(
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             if item_type == "function_call" {
+                if is_auto_injected_stop_hook_function_call(item_row) {
+                    if let Some(call_id) = read_function_call_id(item_row) {
+                        auto_stop_hook_call_ids.insert(call_id);
+                    }
+                    continue;
+                }
                 if let Some(raw_name) = read_trimmed_string(item_row.get("name")) {
                     if is_apply_patch_tool_name(raw_name.as_str()) {
                         let call_id = read_trimmed_string(item_row.get("call_id"))
@@ -711,6 +826,14 @@ fn normalize_responses_input_function_calls(
                 let call_id = read_trimmed_string(item_row.get("call_id"))
                     .or_else(|| read_trimmed_string(item_row.get("tool_call_id")));
                 if let Some(call_id) = call_id {
+                    if auto_stop_hook_call_ids.contains(call_id.as_str()) {
+                        if let Some(raw_output) = item_row.get("output").and_then(Value::as_str) {
+                            normalized_items.push(build_responses_text_guidance_input_item(
+                                build_stop_hook_guidance_text_from_output(raw_output),
+                            ));
+                        }
+                        continue;
+                    }
                     if dropped_call_ids.contains(call_id.as_str()) {
                         // Keep request chain coherent: remove orphan output for a dropped malformed call.
                         continue;
@@ -1282,6 +1405,63 @@ mod tests {
                 very_long
             )
         );
+    }
+
+    #[test]
+    fn rewrites_auto_injected_stop_hook_pair_into_text_input_for_next_turn() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_servertool_cli_stop_1",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_servertool_cli_stop_1",
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"你必须补齐 stop schema 后再判断停止。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"evidence\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let input = payload["input"].as_array().expect("input");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        let text = input[0]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("你必须补齐 stop schema"));
+        assert!(text.contains("stopreason, reason, evidence"));
+        assert!(text.contains("continue_needed=2"));
+        assert!(!payload.to_string().contains("call_servertool_cli_stop_1"));
+        assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
+    }
+
+    #[test]
+    fn preserves_user_initiated_stop_hook_history_when_call_id_is_not_auto_injected() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_model_stop_1",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_model_stop_1",
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\"}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let input = payload["input"].as_array().expect("input");
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[1]["type"], "function_call_output");
     }
 
     #[test]

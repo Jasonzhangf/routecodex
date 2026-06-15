@@ -17,6 +17,7 @@ const TS_OWNER_WHITELIST = new Set([
   'server.responses_handler_family', // handler family projection shell
   'server.models_capability_contract', // server projection shell for /v1/models capability metadata
   'server.responses_request_handler_bridge_surface', // request-side opaque bridge shell
+  'server.responses_sse_bridge_surface', // SSE-side opaque bridge shell
   'server.responses_response_handler_bridge_surface', // response-side opaque bridge shell
   'cli.command_surface', // CLI dispatch shell
   'manager.token_runtime', // token-daemon is the unique owner; no Rust twin

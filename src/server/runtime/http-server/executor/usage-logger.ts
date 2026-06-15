@@ -15,8 +15,8 @@ type DailyProviderStat = {
 
 const dailyProviderStats = new Map<string, DailyProviderStat>();
 let dailyProviderStatsDate = new Date().toISOString().slice(0, 10);
-const ANSI_WHITE = '\x1b[97m';
 const ANSI_RESET = '\x1b[0m';
+const ANSI_WHITE = '\x1b[97m';
 
 type HubStageTopEntry = {
   stage: string;
@@ -42,12 +42,8 @@ function formatMs(value: number): string {
   return `${Math.max(0, Math.round(value))}ms`;
 }
 
-function hiValue(value: string | number, baseColor: string): string {
-  return `${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}`;
-}
-
-function hiPair(key: string, value: string | number, baseColor: string): string {
-  return `${key}=${hiValue(value, baseColor)}`;
+function hiPair(key: string, value: string | number, _baseColor: string): string {
+  return `${key}=${ANSI_WHITE}${value}${ANSI_RESET}${_baseColor}`;
 }
 
 function hiMsPairIfSlow(key: string, valueMs: number, baseColor: string): string {
@@ -57,11 +53,19 @@ function hiMsPairIfSlow(key: string, valueMs: number, baseColor: string): string
   return hiPair(key, formatMs(valueMs), baseColor);
 }
 
-function colorizeNumericValues(text: string, baseColor: string): string {
+function colorizeNumericValues(text: string, _baseColor: string): string {
   if (!text) {
     return '';
   }
-  return text.replace(/=([-+]?\d+(?:\.\d+)?(?:ms|MB|%|t\/s)?)/g, (_match, value: string) => `=${hiValue(value, baseColor)}`);
+  return text.replace(
+    /([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g,
+    (_match, key: string, value: string, suffix = '') => {
+      if (key !== 'finish_reason' && !/^[-+]?\d/.test(value)) {
+        return `${key}=${value}${suffix}`;
+      }
+      return `${key}=${ANSI_WHITE}${value}${ANSI_RESET}${_baseColor}${suffix}`;
+    }
+  );
 }
 
 function formatTimingSuffix(raw: string, baseColor: string): string {
@@ -83,10 +87,6 @@ function formatTimingSuffix(raw: string, baseColor: string): string {
     return '';
   }
   return ` timing ${colorizeNumericValues(slowParts.join(', '), baseColor)}`;
-}
-
-function pad(value: string, width: number): string {
-  return value.length >= width ? value : `${value}${' '.repeat(width - value.length)}`;
 }
 
 function formatMemoryHealth(): string {
@@ -212,6 +212,10 @@ export function logUsageSummary(
     conversationId: info.conversationId,
     conversation_id: info.conversation_id
   };
+  const logSessionColorKey =
+    typeof info.logSessionColorKey === 'string' && info.logSessionColorKey.trim()
+      ? info.logSessionColorKey.trim()
+      : undefined;
   registerRequestLogContext(requestId, requestLogContext);
   const timingSuffix = formatRequestTimingSummary(requestId, {
     latencyMs: info.latencyMs,
@@ -273,7 +277,8 @@ export function logUsageSummary(
     totalTokens: info.usage?.total_tokens,
     firstContentAtMs: info.firstContentAtMs,
     lastContentAtMs: info.lastContentAtMs,
-    requestStartedAtMs: info.requestStartedAtMs
+    requestStartedAtMs: info.requestStartedAtMs,
+    logSessionColorKey
   });
   // Record token consumption for persistent cumulative tracking
   {
@@ -305,7 +310,7 @@ export function logUsageSummary(
         ? info.inputRequestId.trim()
         : requestId;
   const tokenSuffix = cumulativeTotals.alltimeTokens > 0
-    ? ` ${ANSI_WHITE}tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}${ANSI_RESET}`
+    ? ` tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}`
     : '';
   const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
@@ -322,11 +327,22 @@ export function logUsageSummary(
     hiMsPairIfSlow('decode.sse', sseDecodeMs, requestColor),
     hiMsPairIfSlow('decode.codec', codecDecodeMs, requestColor)
   ].filter(Boolean).join(' ');
+  const diagParts = [
+    diagTimings,
+    typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? info.providerDecodeTag.trim() : '',
+    formattedTimingSuffix.trim(),
+    hubStageTopSuffix.trim()
+  ].filter(Boolean);
+  const shouldPrintDiag = diagParts.length > 0;
   const lines = [
-    `${requestColor}[usage] ${pad(`req=${requestId}`, 56)} route=${route}/${pool} -> provider=${providerLabel} finish_reason=${finishReason}${ANSI_RESET}`,
-    `${requestColor}        time ${hiPair('total', `${latency}ms`, requestColor)} ${hiPair('external', formatMs(externalLatencyMs), requestColor)} ${hiPair('internal', formatMs(internalLatencyMs), requestColor)} ${hiPair('attempts', providerAttemptCount, requestColor)} ${hiPair('retries', retryCount, requestColor)}${ANSI_RESET}`,
-    `${requestColor}        tok  ${hiPair('in', inputTokens, requestColor)} ${hiPair('out', outputTokens, requestColor)} ${hiPair('total', totalTokens, requestColor)} ${hiPair('cache', cacheValue, requestColor)} ${hiPair('day.calls', dailyProviderStat.calls, requestColor)} ${hiPair('day.fail', dailyProviderStat.failures, requestColor)} ${hiPair('day.avg', formatMs(dailyProviderStat.avgMs), requestColor)}${tokenSuffix}${ANSI_RESET}`,
-    `${requestColor}        diag mem=${formatMemoryHealth()} sample=${sampleId}${diagTimings ? ` ${diagTimings}` : ''}${typeof info.providerDecodeTag === 'string' && info.providerDecodeTag.trim() ? ` ${info.providerDecodeTag.trim()}` : ''}${formattedTimingSuffix}${hubStageTopSuffix}${ANSI_RESET}`
+    `${requestColor}${colorizeNumericValues(
+      `[usage] req=${requestId} route=${route}/${pool} -> provider=${providerLabel} total=${latency}ms internal=${formatMs(internalLatencyMs)} external=${formatMs(externalLatencyMs)} finish_reason=${finishReason}`,
+      requestColor
+    )}${ANSI_RESET}`,
+    `${requestColor}${colorizeNumericValues(
+      `        attempts=${providerAttemptCount} retries=${retryCount} in=${inputTokens} out=${outputTokens} total=${totalTokens} cache=${cacheValue} day.calls=${dailyProviderStat.calls} day.fail=${dailyProviderStat.failures} day.avg=${formatMs(dailyProviderStat.avgMs)}${tokenSuffix}${shouldPrintDiag ? ` diag mem=${formatMemoryHealth()} sample=${sampleId}${diagParts.length > 0 ? ` ${diagParts.join(' ')}` : ''}` : ''}`,
+      requestColor
+    )}${ANSI_RESET}`
   ];
   console.log(lines.join('\n'));
 }

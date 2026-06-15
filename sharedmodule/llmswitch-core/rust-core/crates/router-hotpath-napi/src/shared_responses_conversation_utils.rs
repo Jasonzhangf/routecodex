@@ -1,11 +1,8 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
-use crate::hub_reasoning_tool_normalizer::{
-    build_message_reasoning_value, collect_reasoning_content_segments,
-    collect_reasoning_summary_segments, project_message_reasoning_text,
-};
 use crate::shared_json_utils::{read_string_array_command, read_workdir_from_args};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 fn is_shell_like_function_name(name: &str) -> bool {
     matches!(
@@ -293,59 +290,27 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
     }
 
     if item_type == "reasoning" {
-        // P1 fix: write reasoning at TOP LEVEL so collect_message_reasoning_state reads it
-        let role = row
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or("assistant")
-            .to_string();
-        let content = row
-            .get("content")
-            .and_then(Value::as_array)
-            .cloned()
-            .map(Value::Array)
-            .unwrap_or_else(|| Value::Array(Vec::new()));
-        // collect_reasoning_summary_segments / content_segments expect a reasoning object with
-        // {summary, content} fields, not raw arrays — wrap the raw fields
-        let reasoning_wrapper = serde_json::json!({
-            "summary": row.get("summary"),
-            "content": row.get("content"),
-            "encrypted_content": row.get("encrypted_content"),
-        });
-        let summary_segments = collect_reasoning_summary_segments(Some(&reasoning_wrapper));
-        let content_segments = collect_reasoning_content_segments(Some(&reasoning_wrapper));
-        let encrypted = reasoning_wrapper
-            .get("encrypted_content")
-            .and_then(Value::as_str)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let reasoning_obj = build_message_reasoning_value(
-            &summary_segments,
-            &content_segments,
-            encrypted.as_deref(),
-        );
-        let reasoning_text =
-            project_message_reasoning_text(reasoning_obj.as_ref().unwrap_or(&Value::Null));
         let mut out = Map::new();
-        out.insert("type".to_string(), Value::String("message".to_string()));
-        out.insert("role".to_string(), Value::String(role.clone()));
-        out.insert("content".to_string(), content);
-        if let Some(reasoning) = reasoning_obj {
-            out.insert("reasoning".to_string(), reasoning);
+        out.insert(
+            "type".to_string(),
+            Value::String("reasoning".to_string()),
+        );
+        if let Some(id) = read_trimmed_string(row.get("id")) {
+            out.insert("id".to_string(), Value::String(id));
         }
-        if let Some(text) = reasoning_text {
-            out.insert("reasoning_content".to_string(), Value::String(text));
+        if let Some(status) = row.get("status").cloned() {
+            out.insert("status".to_string(), status);
+        }
+        if let Some(summary) = row.get("summary").cloned() {
+            out.insert("summary".to_string(), summary);
+        }
+        if let Some(content) = row.get("content").cloned() {
+            out.insert("content".to_string(), content);
+        }
+        if let Some(encrypted_content) = row.get("encrypted_content").cloned() {
+            out.insert("encrypted_content".to_string(), encrypted_content);
         }
         return Some(Value::Object(out));
-    }
-
-    // Fallback: unrecognized or edge-case reasoning shape → emit plain message
-    if item_type == "reasoning" {
-        return Some(serde_json::json!({
-            "type": "message",
-            "role": row.get("role").and_then(Value::as_str).unwrap_or("assistant"),
-            "content": row.get("content"),
-        }));
     }
 
     if item_type == "function_call" {
@@ -460,15 +425,7 @@ fn convert_responses_output_to_input_items(response: &Value) -> Value {
         .cloned()
         .unwrap_or_default();
     let mut items: Vec<Value> = Vec::new();
-    let mut pending_reasoning: Option<Map<String, Value>> = None;
     for entry in output {
-        let source_item_type = entry
-            .as_object()
-            .and_then(|row| row.get("type"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
         if let Some(mapped) = normalize_output_item_to_input(&entry) {
             let item_type = mapped
                 .as_object()
@@ -477,48 +434,12 @@ fn convert_responses_output_to_input_items(response: &Value) -> Value {
                 .unwrap_or("")
                 .trim()
                 .to_ascii_lowercase();
-            let is_reasoning_only_message = source_item_type == "reasoning"
-                && item_type == "message"
-                && mapped
-                    .as_object()
-                    .and_then(|row| row.get("role"))
-                    .and_then(Value::as_str)
-                    .map(|role| role.trim().eq_ignore_ascii_case("assistant"))
-                    .unwrap_or(false)
-                && mapped
-                    .as_object()
-                    .and_then(|row| row.get("reasoning_content"))
-                    .and_then(Value::as_str)
-                    .map(|text| !text.trim().is_empty())
-                    .unwrap_or(false);
-            if is_reasoning_only_message {
-                if let Some(previous) = pending_reasoning.take() {
-                    items.push(Value::Object(previous));
-                }
-                pending_reasoning = mapped.as_object().cloned();
-                continue;
-            }
             if item_type == "function_call" {
-                let mut mapped_obj = mapped.as_object().cloned().unwrap_or_default();
-                if let Some(reasoning) = pending_reasoning.take() {
-                    if let Some(value) = reasoning.get("reasoning").cloned() {
-                        mapped_obj.insert("reasoning".to_string(), value);
-                    }
-                    if let Some(value) = reasoning.get("reasoning_content").cloned() {
-                        mapped_obj.insert("reasoning_content".to_string(), value);
-                    }
-                }
-                items.push(Value::Object(mapped_obj));
+                items.push(mapped);
                 continue;
-            }
-            if let Some(previous) = pending_reasoning.take() {
-                items.push(Value::Object(previous));
             }
             items.push(mapped);
         }
-    }
-    if let Some(previous) = pending_reasoning.take() {
-        items.push(Value::Object(previous));
     }
     if items.iter().all(|item| {
         item.as_object()
@@ -1049,6 +970,45 @@ fn find_prefix_delta_allowing_pending_tool_call_replay(
     Some(incoming[incoming_index..].to_vec())
 }
 
+fn overlap_slice_contains_bridge_tool_history(items: &[Value]) -> bool {
+    items.iter().any(|entry| {
+        let Some(row) = entry.as_object() else {
+            return false;
+        };
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        item_type == "function_call" || is_bridge_tool_output_item_type(item_type.as_str())
+    })
+}
+
+fn find_suffix_overlap_delta_with_bridge_tool_history(
+    prefix: &[Value],
+    incoming: &[Value],
+) -> Option<Vec<Value>> {
+    if prefix.is_empty() || incoming.is_empty() {
+        return None;
+    }
+    let max_overlap = prefix.len().min(incoming.len());
+    for overlap_len in (1..=max_overlap).rev() {
+        let prefix_slice = &prefix[prefix.len() - overlap_len..];
+        if !overlap_slice_contains_bridge_tool_history(prefix_slice) {
+            continue;
+        }
+        if prefix_slice
+            .iter()
+            .zip(incoming.iter().take(overlap_len))
+            .all(|(left, right)| values_equal(left, right))
+        {
+            return Some(incoming[overlap_len..].to_vec());
+        }
+    }
+    None
+}
+
 fn strip_leading_pending_function_call_replay(
     delta_items: &[Value],
     pending_call_ids: &[String],
@@ -1079,6 +1039,80 @@ fn strip_leading_pending_function_call_replay(
         start_index += 1;
     }
     delta_items[start_index..].to_vec()
+}
+
+fn collapse_duplicate_pending_tool_batch_replay(
+    delta_items: &[Value],
+    pending_call_ids: &[String],
+) -> Vec<Value> {
+    if pending_call_ids.is_empty() || delta_items.is_empty() {
+        return delta_items.to_vec();
+    }
+
+    let pending: HashSet<&str> = pending_call_ids.iter().map(|id| id.as_str()).collect();
+    let mut leading_tool_batch_len = 0usize;
+    while let Some(entry) = delta_items.get(leading_tool_batch_len) {
+        let Some(row) = entry.as_object() else {
+            break;
+        };
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if item_type != "function_call" && !is_bridge_tool_output_item_type(item_type.as_str()) {
+            break;
+        }
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            break;
+        };
+        if !pending.contains(call_id.as_str()) {
+            break;
+        }
+        leading_tool_batch_len += 1;
+    }
+
+    if leading_tool_batch_len == 0 {
+        return delta_items.to_vec();
+    }
+
+    let mut seen_calls = HashSet::new();
+    let mut seen_outputs = HashSet::new();
+    let mut collapsed = Vec::with_capacity(delta_items.len());
+    for entry in delta_items.iter().take(leading_tool_batch_len) {
+        let Some(row) = entry.as_object() else {
+            collapsed.push(entry.clone());
+            continue;
+        };
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let Some(call_id) = read_bridge_function_call_id(row) else {
+            collapsed.push(entry.clone());
+            continue;
+        };
+        if item_type == "function_call" {
+            if !seen_calls.insert(call_id) {
+                continue;
+            }
+            collapsed.push(entry.clone());
+            continue;
+        }
+        if is_bridge_tool_output_item_type(item_type.as_str()) {
+            if !seen_outputs.insert(call_id) {
+                continue;
+            }
+            collapsed.push(entry.clone());
+            continue;
+        }
+        collapsed.push(entry.clone());
+    }
+    collapsed.extend(delta_items.iter().skip(leading_tool_batch_len).cloned());
+    collapsed
 }
 
 fn count_common_leading_items(left: &[Value], right: &[Value]) -> usize {
@@ -1429,6 +1463,66 @@ fn materialize_responses_continuation_payload(
         return Value::Null;
     }
 
+    if let Some(suffix_delta) =
+        find_suffix_overlap_delta_with_bridge_tool_history(&prefix, &input_items)
+    {
+        if suffix_delta.is_empty() {
+            return Value::Null;
+        }
+
+        let suffix_delta =
+            strip_leading_pending_function_call_replay(&suffix_delta, &pending_call_ids);
+        let suffix_delta =
+            collapse_duplicate_pending_tool_batch_replay(&suffix_delta, &pending_call_ids);
+        if suffix_delta.is_empty() {
+            return Value::Null;
+        }
+
+        let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
+        let submitted_details = collect_submitted_tool_output_details(&suffix_delta);
+        let mut full_input = prefix.clone();
+        full_input.extend(suffix_delta.clone());
+        let full_input = normalize_responses_history_items(full_input);
+
+        let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+
+        for (key, value) in incoming_obj {
+            if key == "input" || key == "response_id" || key == "tool_outputs" {
+                continue;
+            }
+            if key == "previous_response_id" {
+                continue;
+            }
+            payload.insert(key, value);
+        }
+
+        let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+
+        payload.insert("input".to_string(), Value::Array(full_input.clone()));
+        payload.remove("previous_response_id");
+
+        return serde_json::json!({
+            "payload": Value::Object(payload),
+            "meta": {
+                "restoredFromResponseId": last_response_id.map(Value::String).unwrap_or(Value::Null),
+                "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
+                "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
+                "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+                "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+                "materialized": true,
+                "materializedMode": "local_full_input",
+                "incomingInputItems": input_items.len(),
+                "continuationDeltaItems": suffix_delta.len(),
+                "fullInputItems": full_input.len(),
+                "fullInput": full_input,
+                "toolOutputsDetailed": submitted_details,
+            }
+        });
+    }
+
     let common_prefix_len = count_common_leading_items(&prefix, &input_items);
     if common_prefix_len > 0 {
         return Value::Null;
@@ -1451,6 +1545,8 @@ fn materialize_responses_continuation_payload(
     };
     let continuation_delta =
         strip_leading_pending_function_call_replay(&continuation_delta, &pending_call_ids);
+    let continuation_delta =
+        collapse_duplicate_pending_tool_batch_replay(&continuation_delta, &pending_call_ids);
 
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
     let submitted_details = collect_submitted_tool_output_details(&continuation_delta);
@@ -2335,9 +2431,8 @@ mod tests {
         assert_eq!(args["workdir"], "/tmp");
     }
 
-    // P1: reasoning output item writes reasoning object at top level (SSOT restore)
     #[test]
-    fn converts_reasoning_item_writes_top_level_reasoning_object() {
+    fn preserves_reasoning_output_item_in_persisted_history() {
         let response = serde_json::json!({
             "output": [{
                 "type": "reasoning",
@@ -2353,34 +2448,18 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(items.len(), 1);
-        let item = &items[0];
-        // P1 fix: reasoning at top level for collect_message_reasoning_state to read
-        assert!(
-            item.get("reasoning").is_some(),
-            "reasoning object must be at top level"
-        );
-        let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
-        assert!(
-            reasoning.get("summary").is_some(),
-            "summary must be in reasoning object"
-        );
-        assert!(
-            reasoning.get("content").is_some(),
-            "content must be in reasoning object"
-        );
-        assert_eq!(
-            reasoning.get("encrypted_content").and_then(|v| v.as_str()),
-            Some("opaque-sig-abc")
-        );
-        // reasoning_content top-level also present for downstream consumers
-        assert!(
-            item.get("reasoning_content").is_some(),
-            "reasoning_content text must be at top level"
-        );
+        assert_eq!(items[0]["type"], "reasoning");
+        assert_eq!(items[0]["id"], "reasoning-1");
+        assert_eq!(items[0]["status"], "completed");
+        assert_eq!(items[0]["summary"][0]["type"], "summary_text");
+        assert_eq!(items[0]["summary"][0]["text"], "thinking step 1");
+        assert_eq!(items[0]["content"][0]["type"], "reasoning_text");
+        assert_eq!(items[0]["content"][0]["text"], "detailed reasoning here");
+        assert_eq!(items[0]["encrypted_content"], "opaque-sig-abc");
     }
 
     #[test]
-    fn converts_reasoning_item_before_function_call_attaches_reasoning_to_call() {
+    fn preserves_reasoning_output_item_before_function_call_when_persisting_history() {
         let response = serde_json::json!({
             "output": [
                 {
@@ -2402,18 +2481,16 @@ mod tests {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["type"], "function_call");
-        assert_eq!(
-            items[0]["reasoning_content"],
-            "Need to inspect cwd before editing."
-        );
-        assert!(items[0].get("reasoning").is_some());
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["type"], "reasoning");
+        assert_eq!(items[0]["id"], "reasoning-1");
+        assert_eq!(items[0]["content"][0]["type"], "reasoning_text");
+        assert_eq!(items[0]["content"][0]["text"], "Need to inspect cwd before editing.");
+        assert_eq!(items[1]["type"], "function_call");
     }
 
-    // P1: encrypted_content in reasoning item is preserved in top-level reasoning object
     #[test]
-    fn converts_reasoning_item_preserves_encrypted_content_in_reasoning_object() {
+    fn preserves_encrypted_only_reasoning_output_item_in_persisted_history() {
         let response = serde_json::json!({
             "output": [{
                 "type": "reasoning",
@@ -2427,16 +2504,9 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(items.len(), 1);
-        let item = &items[0];
-        // encrypted_content must survive through the conversion
-        assert!(
-            item.get("reasoning").is_some(),
-            "reasoning object must exist"
-        );
-        let reasoning = item.get("reasoning").unwrap().as_object().unwrap();
-        assert_eq!(
-            reasoning.get("encrypted_content").and_then(|v| v.as_str()),
-            Some("encrypted-opaque-value")
-        );
+        assert_eq!(items[0]["type"], "reasoning");
+        assert_eq!(items[0]["id"], "reasoning-enc-1");
+        assert_eq!(items[0]["status"], "completed");
+        assert_eq!(items[0]["encrypted_content"], "encrypted-opaque-value");
     }
 }

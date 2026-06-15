@@ -3,7 +3,7 @@
 use crate::cli_contract;
 use serde_json::{Map, Value};
 
-const ROUTECODEX_STOP_MESSAGE_AUTO_CLI: &str = "routecodex servertool run stop_message_auto";
+const ROUTECODEX_STOP_MESSAGE_AUTO_CLI: &str = "routecodex hook run stop_message_auto";
 const MAX_SCAN_DEPTH: usize = 10;
 const MAX_SCAN_NODES: usize = 2000;
 

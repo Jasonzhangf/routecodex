@@ -94,7 +94,7 @@ const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set
   'response.mcp_list_tools.failed',
 ]);
 
-type ResponsesRequestContextForHttp = {
+export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
   context: AnyRecord;
   sessionId?: string;
@@ -998,6 +998,26 @@ function resolveResponsesConversationRecordRequestIdsForHttp(args: {
   return responseIds.length > 0 ? responseIds : requestIds;
 }
 
+function resolveResponsesConversationRecordAttemptIdsForHttp(args: {
+  requestLabel: string;
+  timingRequestIds?: string[];
+  responseId?: unknown;
+}): string[] {
+  const preferred = resolveResponsesConversationRecordRequestIdsForHttp(args);
+  const combined = [...preferred];
+  const add = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || combined.includes(trimmed)) return;
+    combined.push(trimmed);
+  };
+  add(args.requestLabel);
+  if (Array.isArray(args.timingRequestIds)) {
+    for (const id of args.timingRequestIds) add(id);
+  }
+  return combined;
+}
+
 function shouldPersistResponsesToolCallContinuationRecordForHttp(
   entryEndpoint: string | undefined,
   requestContext?: ResponsesRequestContextForHttp,
@@ -1005,7 +1025,7 @@ function shouldPersistResponsesToolCallContinuationRecordForHttp(
   if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
     return true;
   }
-  return entryEndpoint === '/v1/responses' && Boolean(requestContext);
+  return entryEndpoint === '/v1/responses';
 }
 
 type PersistResponsesConversationLifecycleForHttpArgs = {
@@ -1086,9 +1106,10 @@ export async function persistResponsesConversationLifecycleForHttp(
   const finishReason = deriveFinishReason(args.body);
   const isContinuation = isToolCallContinuationResponseForHttp(args.body);
   const persisted = resolveResponsesConversationPersistInputsForHttp(args);
+  const isToolCallFinish = finishReason === 'tool_calls';
 
   if (
-    isContinuation
+    (isContinuation || isToolCallFinish)
     && shouldPersistResponsesToolCallContinuationRecordForHttp(args.entryEndpoint, args.requestContext)
     && args.body
     && typeof args.body === 'object'
@@ -1104,13 +1125,13 @@ export async function persistResponsesConversationLifecycleForHttp(
       responseId,
       providerKey: args.providerKey,
     });
-    const requestIds = resolveResponsesConversationRecordRequestIdsForHttp({
+    const captureRequestIds = resolveResponsesConversationRecordRequestIdsForHttp({
       requestLabel: args.requestLabel,
       timingRequestIds: persisted.timingRequestIds,
       responseId,
     });
     if (args.requestContext) {
-      for (const requestId of requestIds) {
+      for (const requestId of captureRequestIds) {
         await captureResponsesRequestContextForHttpProjection({
           requestId,
           payload: args.requestContext.payload,
@@ -1131,44 +1152,60 @@ export async function persistResponsesConversationLifecycleForHttp(
       }
     }
 
-    for (const requestId of requestIds) {
-      await recordResponsesResponseForHttpProjection({
-        requestId,
-        response: args.body as AnyRecord,
-        sessionId: persisted.sessionId ?? args.requestContext?.sessionId,
-        conversationId: persisted.conversationId ?? args.requestContext?.conversationId,
-        providerKey: persisted.providerKey,
-        continuationOwner: persisted.continuationOwner,
-        matchedPort: args.requestContext?.matchedPort,
-        routingPolicyGroup: args.requestContext?.routingPolicyGroup,
-      }).catch((error) => {
+    const recordAttemptIds = resolveResponsesConversationRecordAttemptIdsForHttp({
+      requestLabel: args.requestLabel,
+      timingRequestIds: persisted.timingRequestIds,
+      responseId,
+    });
+    let recordedRequestId: string | undefined;
+    for (const requestId of recordAttemptIds) {
+      try {
+        await recordResponsesResponseForHttpProjection({
+          requestId,
+          response: args.body as AnyRecord,
+          sessionId: persisted.sessionId ?? args.requestContext?.sessionId,
+          conversationId: persisted.conversationId ?? args.requestContext?.conversationId,
+          providerKey: persisted.providerKey,
+          continuationOwner: persisted.continuationOwner,
+          matchedPort: args.requestContext?.matchedPort,
+          routingPolicyGroup: args.requestContext?.routingPolicyGroup,
+        });
+        recordedRequestId = requestId;
+        break;
+      } catch (error) {
         args.onTrace?.('record.error', {
           recordRequestId: requestId,
           responseId,
           message: error instanceof Error ? error.message : String(error ?? 'unknown'),
         });
         args.onNonBlockingError?.(`responses-conversation-record:${requestId}`, error);
-      });
+      }
     }
 
-    for (const requestId of requestIds) {
-      await finalizeResponsesConversationRequestRetentionForHttp(requestId, {
-        keepForSubmitToolOutputs: true,
-      }).catch((error) => {
-        args.onTrace?.('record.finalize_error', {
-          retainRequestId: requestId,
-          responseId,
-          message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-        });
-        args.onNonBlockingError?.(`responses-conversation-finalize:${requestId}`, error);
+    if (!recordedRequestId) {
+      args.onTrace?.('record.skipped_no_context', {
+        responseId,
+        attemptedRequestIds: recordAttemptIds,
       });
+      return;
     }
 
-    args.onTrace?.('record.done', { responseId, retainedRequestIds: requestIds });
+    await finalizeResponsesConversationRequestRetentionForHttp(recordedRequestId, {
+      keepForSubmitToolOutputs: true,
+    }).catch((error) => {
+      args.onTrace?.('record.finalize_error', {
+        retainRequestId: recordedRequestId,
+        responseId,
+        message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+      });
+      args.onNonBlockingError?.(`responses-conversation-finalize:${recordedRequestId}`, error);
+    });
+
+    args.onTrace?.('record.done', { responseId, retainedRequestIds: [recordedRequestId] });
     return;
   }
 
-  if (isContinuation || finishReason === 'tool_calls') {
+  if (isContinuation || isToolCallFinish) {
     return;
   }
 
@@ -1794,9 +1831,6 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
   };
   requestLabel?: string;
 }): Promise<string> {
-  if (args.metadata?.__routecodexDirectPassthrough === true) {
-    return args.frame;
-  }
   if (
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'

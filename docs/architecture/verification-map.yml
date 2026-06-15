@@ -106,26 +106,42 @@ verification:
       - "stop_message_auto lifecycle must prove CLI input/output carries flowId, repeatCount, and maxRepeats only; continuationPrompt/schema guidance/prompt preview/full input must not be client-visible."
       - "`servertool_fixture` must be dispatched by Rust CLI projection without restoring the deleted TS fixture handler."
 
-  - feature_id: hub.servertool_stopless_cli_projection_seed
+  - feature_id: hub.servertool_stopless_cli_continuation
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
       - sharedmodule/llmswitch-core/src/servertool/engine.ts
     contract:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    integration:
-      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/stop-schema-lifecycle-contract.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    integration:
+      - tests/servertool/stop-message-auto.goal-default.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:min
     notes:
-      - "servertool-core owns stopless CLI projection seed planning; TS engine may only pass execution/finalChatResponse into native and consume the planned seed."
-      - "Focused Rust gates: `cargo test -p servertool-core stop_message_cli_projection_seed --lib -- --nocapture` and `cargo test -p router-hotpath-napi plans_stop_message_cli_projection_seed_via_servertool_core_bridge --lib -- --nocapture`."
+      - "stopless is a Rust-owned CLI continuation: state key is strictly sessionId (no tmux/conversation/inject fallback), and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
+      - "Validation must prove stop hook injection is unconditional for stopless-managed turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
+      - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
+      - "Command input must not contain continuationPrompt/schemaGuidance/raw prompt text; CLI stdout must carry continuationPrompt/schemaGuidance for the next model turn."
+      - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
+      - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
+      - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
+      - "For malformed/invalid schema, validation must prove the hook result includes parse/interpretation feedback plus explicit field/value/shape errors, not only a generic deny-stop message."
+      - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
+      - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
+      - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
+      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts --runInBand`."
 
   - feature_id: hub.servertool_flow_presentation
     change_risk: medium
@@ -155,7 +171,7 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/stop-message-auto.spec.ts
+      - tests/servertool/stop-message-auto.goal-default.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -217,11 +233,14 @@ verification:
       - src/providers/core/runtime/provider-error-catalog.ts
     contract:
       - tests/red-tests/error_chain_singleton_truth.test.ts
+      - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
     integration:
       - tests/server/runtime/executor-provider.retryable.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
+      - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
     smoke:
       - npm run verify:provider-failure-ban-blackbox
+      - pnpm exec jest tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
     build:
       - npm run build:min
     notes:
@@ -268,6 +287,26 @@ verification:
       - npm run build:min
     notes:
       - "If route instruction parsing changes, include routing instruction regression set."
+
+  - feature_id: virtual_router.primary_exhausted_to_default_pool
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/primary_exhausted_to_default_pool.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs
+    contract:
+      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+    integration:
+      - cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib
+      - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Primary exhausted -> default pool contract must stay Rust-owned; host only consumes plan."
+      - "Forward and reverse candidate-exhaustion cases both required; no local fallback chain synthesis."
 
   - feature_id: quota.unified_control_surface
     change_risk: medium
@@ -520,6 +559,7 @@ verification:
       - src/server/handlers/handler-response-utils.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
@@ -571,24 +611,47 @@ verification:
     notes:
       - "Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names."
 
+  - feature_id: hub.req_inbound_responses_context_capture
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+    contract:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    integration:
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi normalize_responses_input_items_dedupes_identical_duplicate_function_calls --lib -- --nocapture
+      - cargo test -p router-hotpath-napi normalize_responses_input_items_keeps_distinct_duplicate_function_call_outputs --lib -- --nocapture
+      - cargo test -p router-hotpath-napi normalize_responses_input_items_collapses_distinct_outputs_when_identical_call_batch_repeats --lib -- --nocapture
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
+    notes:
+      - "Malformed relay tool history must be rejected or normalized in Rust before the request bridge can store/reuse it."
+      - "Coverage must lock both directions: repeated identical tool-call batches collapse to the latest output, while ordinary distinct duplicate outputs remain preserved."
+
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_guard.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/apply_patch_live_context.rs
     contract:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs
     integration:
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
     smoke:
+      - cargo test -p router-hotpath-napi test_validate_apply_patch_arguments_repairs_line_number_hunk_with_inline_context_trailer --lib -- --nocapture
       - npm run verify:apply-patch-freeform-contract
       - npm run verify:apply-patch-regressions
+      - npm run verify:function-map-compile-gate
     build:
       - npm run build:min
     notes:
       - "If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together."
       - "apply_patch must not have a servertool handler; it remains native/freeform client tooling."
+      - "Live sample regressions must cover GNU line-number hunks with inline context trailers and prove canonical `@@` reconstruction before execution."
 
   - feature_id: snapshot.stage_contract
     change_risk: high
@@ -986,23 +1049,25 @@ verification:
       - "Request-side `/v1/responses*` conversation-management branch checks, `responseIdFromPath` prewrite, and `responsesRequestContext` fallback assembly are covered by the same request-bridge gate."
       - "continuation-expired and resume-client invalid_request_error payload projection is covered by the same request-bridge gate."
       - "request-side malformed tool-history contract errorsample capture is covered by the same request-bridge gate and bridge unit test."
-      - "relay-owned request-context normalization is covered by `responses-request-bridge.request-context-normalization.spec.ts`: native req_inbound snapshot must replace raw duplicate tool history, and orphan tool_result must fail without falling back to raw input."
+      - "relay-owned request-context normalization is covered by `responses-request-bridge.request-context-normalization.spec.ts`: native req_inbound snapshot must replace raw duplicate tool history, must collapse repeated identical tool-call batches to the latest output per call_id, and orphan tool_result must fail without falling back to raw input."
       - "request-context capture gating, result metadata attach, and tool-call response seeding are covered by the same request-bridge gate and submit_tool_outputs handler regressions."
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
       - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
-  - feature_id: server.responses_response_handler_bridge_surface
+  - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:
-      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/modules/llmswitch/bridge/responses-sse-bridge.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts
       - src/server/handlers/handler-response-common.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
-      - tests/sharedmodule/responses-continuation-store.spec.ts
-    integration: []
+      - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
+    integration:
+      - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
+      - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     smoke:
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
@@ -1010,24 +1075,26 @@ verification:
     build:
       - npm run build:min
     notes:
-      - "Response bridge must stay facade-only and must not grow TS response protocol semantics."
-      - "Server SSE transport ownership is split physically: `handler-response-sse.ts` owns SSE path, `handler-response-common.ts` owns shared non-protocol helpers, and `handler-response-utils.ts` must stay dispatcher + JSON path only."
-      - "response-side `responsesRequestContext` fallback resolution is covered by the response-bridge unit test plus single-bridge gate; handler files must not locally choose between result metadata and fallback context."
-      - "direct passthrough SSE metadata/internal-carrier guard is covered by the response-bridge unit test plus direct-contract/force-SSE regressions; handler SSE file must not locally parse metadata control fields."
-      - "Continuation lifecycle orchestration for capture/record/finalize is covered by the same response-bridge gate and continuation-store regressions."
-      - "SSE terminal-state parsing for `response.completed` / `response.done` must stay behind the same response-bridge gate."
-      - "client-close cleanup eligibility, terminal-event requirement gating, and probe finish_reason resolution are covered by the same response-bridge gate."
-      - "probe-triggered continuation-persist decisions are covered by the same response-bridge gate."
-      - "force-SSE JSON bridge payload normalization/sanitize and client-visible finish_reason derivation are covered by the same response-bridge gate."
-      - "failure-to-clear continuation policy for `sse_stream_error` / `sse_incomplete` / `json*` is covered by the same response-bridge gate."
-      - "Responses SSE `event:error` payload builders (`sse_bridge_error`, `upstream_stream_incomplete`, structured upstream SSE error projection) are covered by the same response-bridge gate and SSE blackbox regressions."
-      - "SSE frame summary parsing and provider-protocol hint detection for usage/logging must stay behind the same response-bridge gate."
-      - "JSON chat usage normalization and request log context projection must stay behind the same response-bridge gate; `handler-response-utils.ts` is dispatcher only."
-      - "chat.completion -> response JSON normalization shell is covered by the same response-bridge gate."
-      - "force-SSE body classification and continuation-probe (`tool_calls` / `required_action`) inspection are covered by the same response-bridge gate."
-      - "SSE dispatch eligibility and `__sse_responses` payload-shape detection are covered by the same response-bridge gate plus force-SSE/direct contract regressions."
-      - "client-close continuation cleanup policy and closed-before-terminal continuation repair policy are covered by the same response-bridge gate."
-      - "stream-end terminal-repair / continuation-repair / incomplete-error decision policy is covered by the same response-bridge gate."
+      - "Response SSE bridge must stay facade-only and must not grow TS response protocol semantics."
+      - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
+  - feature_id: server.responses_response_handler_bridge_surface
+    change_risk: high
+    unit:
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - src/server/handlers/handler-response-sse.ts
+      - src/server/handlers/handler-response-utils.ts
+    contract:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:server-function-map-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Response lifecycle bridge must stay facade-only and must not grow TS response protocol semantics."
+      - "Continuation lifecycle orchestration for capture/record/finalize and conversation clear-policy semantics stay behind the lifecycle bridge surface."
 
   - feature_id: cli.command_surface
     change_risk: medium
@@ -1200,6 +1267,8 @@ verification:
     unit:
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
+      - src/server/runtime/http-server/direct-decision.ts
+      - src/server/runtime/http-server/direct-client-disconnect.ts
     contract:
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
     integration:
@@ -1207,10 +1276,14 @@ verification:
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:provider-failure-ban-blackbox
       - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
+      - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     build:
       - npm run build:min
     notes:
@@ -1222,15 +1295,21 @@ verification:
       - src/server/utils/http-error-mapper.ts
     contract:
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+      - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
+      - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
     integration:
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-tool-validation.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
+      - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
+      - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
+      - pnpm exec jest tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
     build:
       - npm run build:min
     notes:

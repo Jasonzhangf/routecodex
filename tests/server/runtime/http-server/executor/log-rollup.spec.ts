@@ -111,8 +111,12 @@ describe('log rollup', () => {
     const reqLine2 = lines.find((line) => line.includes('req=req-a-2'));
     expect(reqLine1).toBeDefined();
     expect(reqLine2).toBeDefined();
-    expect(reqLine1).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
-    expect(reqLine2).toContain('\x1b[97mfinish_reason=stop\x1b[0m');
+    expect(reqLine1?.replace(/\u001b\[[0-9;]*m/g, '')).toContain('finish_reason=tool_calls');
+    expect(reqLine2?.replace(/\u001b\[[0-9;]*m/g, '')).toContain('finish_reason=stop');
+    expect(reqLine1).toContain('finish_reason=\x1b[97mtool_calls');
+    expect(reqLine2).toContain('finish_reason=\x1b[97mstop');
+    expect(reqLine1?.includes('\x1b[97m')).toBe(true);
+    expect(reqLine2?.includes('\x1b[97m')).toBe(true);
     const reqIndex1 = lines.findIndex((line) => line.includes('req=req-a-1'));
     const reqIndex2 = lines.findIndex((line) => line.includes('req=req-a-2'));
     expect(reqIndex1).toBeLessThan(reqIndex2);
@@ -302,7 +306,7 @@ describe('log rollup', () => {
 
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-rt'))).toBe(true);
-    expect(lines.some((line) => line.includes('cache.hit=75.0%'))).toBe(true);
+    expect(lines.some((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes('cache.hit=75.0%'))).toBe(true);
     expect(lines.some((line) => line.includes('usage('))).toBe(true);
   });
 });

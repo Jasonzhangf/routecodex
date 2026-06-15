@@ -34,6 +34,173 @@ describe('native required exports for sse stream helpers', () => {
     expect(missing).toEqual([]);
   });
 
+  test('packaged shared responses semantics barrel exports req_inbound context snapshot helper', async () => {
+    const mod = (await import(
+      path.resolve(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+      )
+    )) as Record<string, unknown>;
+    expect(typeof mod.captureReqInboundResponsesContextSnapshotWithNative).toBe('function');
+  });
+
+  test('native req_inbound capture collapses latest output when an identical tool-call batch repeats', async () => {
+    const mod = (await import(
+      path.resolve(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+      )
+    )) as {
+      captureReqInboundResponsesContextSnapshotWithNative: (input: {
+        rawRequest: Record<string, unknown>;
+        requestId?: string;
+      }) => Record<string, unknown>;
+    };
+
+    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+      requestId: 'req_native_dup_batch_1',
+      rawRequest: {
+        model: 'gpt-5.4',
+        tools: [{ type: 'function', function: { name: 'write_stdin', parameters: { type: 'object', properties: {} } } }],
+        input: [
+          {
+            type: 'function_call',
+            id: 'call_dup',
+            call_id: 'call_dup',
+            name: 'write_stdin',
+            arguments: '{"session_id":1,"chars":""}',
+          },
+          {
+            type: 'function_call',
+            id: 'call_dup',
+            call_id: 'call_dup',
+            name: 'write_stdin',
+            arguments: '{"session_id":1,"chars":""}',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup',
+            output: 'Chunk ID: abc\\nOutput:\\nfirst',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_dup',
+            output: 'write_stdin failed: Unknown process id 1',
+          },
+        ],
+      },
+    });
+
+    const input = Array.isArray(captured.input) ? captured.input : [];
+    expect(input).toHaveLength(2);
+    expect(input[0]).toMatchObject({ type: 'function_call', call_id: 'call_dup' });
+    expect(input[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_dup',
+      output: 'write_stdin failed: Unknown process id 1',
+    });
+  });
+
+  test('native req_inbound capture rewrites auto-injected stop hook pair into text input for next turn', async () => {
+    const mod = (await import(
+      path.resolve(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+      )
+    )) as {
+      captureReqInboundResponsesContextSnapshotWithNative: (input: {
+        rawRequest: Record<string, unknown>;
+        requestId?: string;
+      }) => Record<string, unknown>;
+    };
+
+    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+      requestId: 'req_native_stopless_rewrite_1',
+      rawRequest: {
+        model: 'gpt-5.4',
+        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object', properties: {} } } }],
+        input: [
+          {
+            type: 'function_call',
+            call_id: 'call_servertool_cli_stop_1',
+            name: 'exec_command',
+            arguments:
+              "{\"cmd\":\"routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":0,\\\"maxRepeats\\\":3}'\"}",
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_servertool_cli_stop_1',
+            output:
+              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"你必须补齐 stop schema。","schemaGuidance":{"requiredFields":["stopreason","reason"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}',
+          },
+        ],
+      },
+    });
+
+    const input = Array.isArray(captured.input) ? captured.input : [];
+    expect(input).toHaveLength(1);
+    expect(input[0]).toMatchObject({
+      role: 'user',
+      content: [
+        expect.objectContaining({
+          type: 'input_text',
+          text: expect.stringContaining('你必须补齐 stop schema。'),
+        }),
+      ],
+    });
+    expect(JSON.stringify(input)).not.toContain('call_servertool_cli_stop_1');
+    expect(JSON.stringify(input)).not.toContain('function_call_output');
+  });
+
+  test('native req_inbound capture preserves user-initiated stop hook tool history', async () => {
+    const mod = (await import(
+      path.resolve(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+      )
+    )) as {
+      captureReqInboundResponsesContextSnapshotWithNative: (input: {
+        rawRequest: Record<string, unknown>;
+        requestId?: string;
+      }) => Record<string, unknown>;
+    };
+
+    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+      requestId: 'req_native_stopless_preserve_1',
+      rawRequest: {
+        model: 'gpt-5.4',
+        tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object', properties: {} } } }],
+        input: [
+          {
+            type: 'function_call',
+            call_id: 'call_user_stop_1',
+            name: 'exec_command',
+            arguments:
+              "{\"cmd\":\"routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":0,\\\"maxRepeats\\\":3}'\"}",
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_user_stop_1',
+            output:
+              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"继续。"}',
+          },
+        ],
+      },
+    });
+
+    const input = Array.isArray(captured.input) ? captured.input : [];
+    expect(input).toHaveLength(2);
+    expect(input[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_user_stop_1',
+      name: 'exec_command',
+    });
+    expect(input[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_user_stop_1',
+    });
+  });
+
   test('does not require removed apply_patch legacy export', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('augmentApplyPatchErrorContentJson');
   });

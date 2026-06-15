@@ -157,7 +157,7 @@ export async function runServerSideToolEngine(
       options,
       toolCall: cliProjectedToolCall,
       ...(additionalToolCalls.length ? { additionalToolCalls } : {}),
-      reasoningText: `RouteCodex intercepted servertool ${cliProjectedToolCall.name} and will execute it through the client-visible CLI path.`
+      reasoningText: `继续执行本地 hook ${cliProjectedToolCall.name}。`
     });
     return {
       mode: 'tool_flow',

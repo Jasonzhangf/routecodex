@@ -66,6 +66,21 @@
 
 禁止先做“切 provider 试试”，再回头补 recoverable 判定。
 
+此前文档默认把 `router-direct` / `provider-direct` 视为“passthrough + hooks only”边界；这对 payload/response 是成立的，但对 provider 执行期错误不成立。
+
+Jason 当前确认的产品中心原则：
+
+- 只要当前 route pool（以及产品允许的下一阶段 secondary/default pool）仍有候选 provider，provider 执行期错误就不应直接中断对话；
+- 应先进入统一策略中心，完成计数、冷却投影、排除当前 provider、切换下一候选；
+- 只有候选全部耗尽时，才允许错误投影到客户端。
+
+据此新增硬规则：
+
+1. `router-direct` / `provider-direct` 可以保留 request/response payload passthrough；
+2. 但 provider `send/processIncomingDirect` 错误不得再 `report-only then rethrow`；
+3. direct consumer 也必须消费 `ErrorErr05ExecutionDecision`，直到候选耗尽；
+4. Host 不得把“主池空时切 default”做成本地 fallback；若产品需要该能力，必须在 VR policy / route contract 中显式建模。
+
 ### 5. health 是 policy 投影，不是 transport 猜测
 provider health 只能来源于统一 policy 计算结果。
 provider transport / converter / reporter 不得再根据自己看到的局部信息直接推导 health 影响。
@@ -141,6 +156,8 @@ provider/runtime/send/convert/direct error
 - 不 reroute
 - 不高频重放
 
+补充边界：只有在当前合法候选集合已经耗尽时，才允许 direct return。若仍有 route-pool / VR 明确允许的 secondary pool 候选，则必须继续走统一策略，不得直接 client-visible。
+
 ### Rule 2: 可恢复错误
 - 必须先进入统一错误动作队列做 blocking wait，等待序列固定 `1s -> 2s -> 3s -> repeat`
 - 等待后按 Router policy / executor decision 执行：容量类错误显式 reroute 到未排除候选；普通 recoverable transport/5xx 可 same-provider retry 一次，重复后 reroute
@@ -150,8 +167,12 @@ provider/runtime/send/convert/direct error
 ### Rule 3: reroute 是唯一恢复执行动作
 容量类错误只允许 `reroute_explicit_alternative`；普通 recoverable transport/5xx 只允许一次 same-provider blocking retry，重复失败必须 reroute 或 fail-fast。无候选时不能通过等待 provider 冷却或 `PROVIDER_NOT_AVAILABLE` 循环伪造恢复。防风暴等待只属于统一 error action queue，不是 provider 成功兜底。
 
+补充边界：`router-direct` / `provider-direct` 不得因为“是 direct path”就绕过这条规则。direct path 可以直通 payload，但错误恢复动作仍必须遵守同一条 reroute/exhaustion contract。
+
 ### Rule 4: recoverable 默认 health-neutral
 只要是 recoverable provider 执行期错误，默认不毒化 provider health。
+
+补充边界：`client_disconnect`（包括 upstream `HTTP_499` + `client abort request` / `client closed request`）比 recoverable 更弱，必须视为非 provider failure：不计 health、不计 cooldown、不进入 provider-visible client projection。
 
 ### Rule 5: reporter 不得二次脑补
 `emitProviderError(...)` 的输入必须已经带上明确的：

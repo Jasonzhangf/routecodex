@@ -1,5 +1,7 @@
+// feature_id: hub.req_inbound_responses_context_capture
 use crate::hub_bridge_actions::convert_bridge_input_to_chat_messages;
 use crate::hub_bridge_actions::BridgeInputToChatInput;
+use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_call_normalization::normalize_apply_patch_output_text;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{
@@ -625,8 +627,12 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
             let mut saw_function_calls = false;
             let mut seen_function_call_signatures =
                 std::collections::HashSet::<String>::new();
+            let mut deduped_identical_function_call_ids =
+                std::collections::HashSet::<String>::new();
             let mut completed_tool_output_signatures =
                 std::collections::HashMap::<String, std::collections::HashSet<String>>::new();
+            let mut latest_tool_output_index_by_call_id =
+                std::collections::HashMap::<String, usize>::new();
 
             for (index, entry) in items.iter().enumerate() {
                 let Some(row) = entry.as_object() else {
@@ -702,6 +708,7 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                             .map(|signature| format!("{value}\n{signature}"))
                             .unwrap_or_else(|| value.clone());
                         if seen_function_call_signatures.contains(semantic_signature.as_str()) {
+                            deduped_identical_function_call_ids.insert(value);
                             continue;
                         }
                         seen_function_call_signatures.insert(semantic_signature);
@@ -760,9 +767,24 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                         continue;
                     }
                     seen_signatures.insert(payload_signature);
-                    normalized.push(Value::Object(
-                        strip_provider_tool_sentinel_residue_from_row(rewritten_row),
-                    ));
+                    let normalized_output =
+                        Value::Object(strip_provider_tool_sentinel_residue_from_row(rewritten_row));
+                    if deduped_identical_function_call_ids.contains(call_id.as_str()) {
+                        if let Some(existing_index) =
+                            latest_tool_output_index_by_call_id.get(call_id.as_str()).copied()
+                        {
+                            normalized[existing_index] = normalized_output;
+                        } else {
+                            latest_tool_output_index_by_call_id
+                                .insert(call_id.clone(), normalized.len());
+                            normalized.push(normalized_output);
+                        }
+                        continue;
+                    }
+                    latest_tool_output_index_by_call_id
+                        .entry(call_id)
+                        .or_insert(normalized.len());
+                    normalized.push(normalized_output);
                     continue;
                 }
 
@@ -860,8 +882,10 @@ fn has_responses_submit_tool_outputs(raw_request_row: &Map<String, Value>) -> bo
 pub fn capture_req_inbound_responses_context_snapshot(
     input: ResponsesContextCaptureInput,
 ) -> Result<Value, String> {
-    let raw_request_row = input
-        .raw_request
+    let mut normalized_request = input.raw_request.clone();
+    normalize_shell_like_tool_calls_before_governance(&mut normalized_request)
+        .map_err(|error| error.to_string())?;
+    let raw_request_row = normalized_request
         .as_object()
         .cloned()
         .ok_or_else(|| "Responses payload must be an object".to_string())?;
@@ -1518,6 +1542,60 @@ mod tests {
         assert_eq!(normalized.len(), 2);
         assert_eq!(normalized[0]["call_id"], "call_dup");
         assert_eq!(normalized[1]["call_id"], "call_dup");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_collapses_distinct_outputs_when_identical_call_batch_repeats(
+    ) {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "write_stdin",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "id": "call_dup",
+              "call_id": "call_dup",
+              "name": "write_stdin",
+              "arguments": "{\"session_id\":1,\"chars\":\"\"}"
+            },
+            {
+              "type": "function_call",
+              "id": "call_dup",
+              "call_id": "call_dup",
+              "name": "write_stdin",
+              "arguments": "{\"session_id\":1,\"chars\":\"\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_dup",
+              "output": "Chunk ID: abc\\nOutput:\\nfirst"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_dup",
+              "output": "write_stdin failed: Unknown process id 1"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["type"], "function_call");
+        assert_eq!(normalized[0]["call_id"], "call_dup");
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[1]["call_id"], "call_dup");
+        assert_eq!(
+            normalized[1]["output"],
+            "write_stdin failed: Unknown process id 1"
+        );
     }
 
     #[test]

@@ -409,7 +409,12 @@ pub fn evaluate_stop_schema_gate(
         };
     }
 
-    let next_step = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
+    let next_step = parsed
+        .next_step
+        .clone()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let next_suggested_path = parsed
         .next_suggested_path
         .as_deref()
@@ -417,12 +422,13 @@ pub fn evaluate_stop_schema_gate(
         .unwrap_or("");
     if !next_step.is_empty() {
         let missing_fields = remaining_missing_fields(&parsed);
-        return schema_invalid_followup(
+        return schema_followup(
             "stop_schema_continue_next_step",
             used,
             provided_cap,
-            &format!("你已经提供 next_step，说明目标/过程/证据/原因/排除项/排查顺序仍有缺口。本轮不允许停止，不要重写全部 schema，只补还缺的字段：{}。立即调用工具执行这个下一步，并用结果补齐证据、问题原因、已排除因素和后续排查顺序：{}", missing_fields.join(", "), next_step),
-            parsed,
+            next_step.as_str(),
+            Some(parsed),
+            true,
             missing_fields,
             0,
         );
@@ -1795,8 +1801,7 @@ mod tests {
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
         let text = decision.followup_text.unwrap();
-        assert!(text.contains("运行 targeted tests"));
-        assert!(text.contains("立即调用工具执行这个下一步"));
+        assert_eq!(text, "运行 targeted tests");
         assert!(decision.count_budget);
         assert!(decision.missing_fields.contains(&"evidence".to_string()));
     }

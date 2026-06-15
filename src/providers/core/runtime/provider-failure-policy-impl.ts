@@ -125,6 +125,31 @@ export function isProviderFailureClientDisconnect(error: unknown): boolean {
   if (message.includes('client_disconnected') || message.includes('client disconnected')) {
     return true;
   }
+  // Upstream 499 (nginx "Client Closed Request") with a body that signals the
+  // end-client closed the request must be treated as a transport cancellation,
+  // not a normal upstream 4xx. 4xx 499 must NEVER be a real provider error:
+  // no cooldown, no health impact, no error-projection leak to caller.
+  const errStatus = (err as { status?: unknown; statusCode?: unknown }).status;
+  const errStatusCode = (err as { status?: unknown; statusCode?: unknown }).statusCode;
+  const statusLooksLike499 =
+    errStatus === 499
+    || errStatusCode === 499
+    || code === 'HTTP_499'
+    || /http\s+499[:\s]/i.test(message);
+  if (statusLooksLike499) {
+    const bodyHints = [
+      message,
+      typeof (err as { details?: { upstreamMessage?: unknown } }).details?.upstreamMessage === 'string'
+        ? ((err as { details: { upstreamMessage: string } }).details.upstreamMessage).toLowerCase()
+        : '',
+    ];
+    if (bodyHints.some((hint) => hint.includes('client abort request') || hint.includes('client closed request'))) {
+      return true;
+    }
+  }
+  if (message.includes('client abort request') || message.includes('client closed request')) {
+    return true;
+  }
   if (
     err.name === 'AbortError'
     && (
@@ -1061,6 +1086,9 @@ export function isProviderFailureHealthNeutral(args: {
     return true;
   }
   if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {
+    return true;
+  }
+  if (isProviderFailureClientDisconnect(args.error)) {
     return true;
   }
   if (args.classification === 'recoverable') {

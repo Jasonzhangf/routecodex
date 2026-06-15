@@ -1,5 +1,5 @@
 import { resolveBoolFromEnv } from './utils.js';
-import { resolveSessionAnsiColor } from '../../../../utils/session-log-color.js';
+import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
 import { getSessionClientRegistry } from '../session-client-registry.js';
 import { getTokenStatsSnapshot } from './token-stats-store.js';
 import {
@@ -16,6 +16,7 @@ import {
   normalizeFinishReason,
   buildKey,
   colorize,
+  highlightLogKeyValues,
   formatRoutePool,
   formatProvider,
   shortSessionId,
@@ -28,8 +29,7 @@ import {
   ANSI_VR,
   ANSI_USAGE,
   ANSI_SESSION,
-  ANSI_BAR,
-  ANSI_WHITE
+  ANSI_BAR
 } from './log-rollup-format-blocks.js';
 import { computeCacheHitRatio } from './usage-aggregator.js';
 
@@ -50,6 +50,7 @@ type VirtualRouterHitRecord = {
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   totalTokens?: number;
+  logSessionColorKey?: string;
 };
 
 type UsageRollupRecord = {
@@ -79,6 +80,7 @@ type UsageRollupRecord = {
   firstContentAtMs?: number;
   lastContentAtMs?: number;
   requestStartedAtMs?: number;
+  logSessionColorKey?: string;
 };
 
 type SessionRequestEvent = {
@@ -107,6 +109,7 @@ type SessionRequestEvent = {
   firstContentAtMs?: number;
   lastContentAtMs?: number;
   requestStartedAtMs?: number;
+  logSessionColorKey?: string;
 };
 
 type VirtualRouterHitAgg = {
@@ -328,13 +331,27 @@ function shouldDropBucket(map: Map<string, unknown>, key: string): boolean {
 }
 
 
+function resolveSessionRealtimeColor(context: {
+  logSessionColorKey?: string;
+  sessionId?: string;
+}): string {
+  return (
+    resolveSessionAnsiColor(resolveSessionLogColorKey({
+      logSessionColorKey: context.logSessionColorKey,
+      sessionId: context.sessionId
+    })) || ANSI_SESSION
+  );
+}
+
 function emitRealtimeSessionRequestLog(args: {
   sessionId: string;
   projectPath?: string;
   event: SessionRequestEvent;
 }): void {
-  const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
-  const hi = (value: string | number): string => `${ANSI_WHITE}${value}${ANSI_RESET}${sessionColor}`;
+  const sessionColor = resolveSessionRealtimeColor({
+    logSessionColorKey: args.event.logSessionColorKey,
+    sessionId: args.sessionId
+  });
   const sessionLabel = shortSessionId(args.sessionId);
   const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
   const project = trimPathForLog(projectResolution.path || '-');
@@ -359,15 +376,16 @@ function emitRealtimeSessionRequestLog(args: {
     `[session-request][rt] session=${sessionLabel}`,
     `req=${requestLabel}`,
     `${routePool}->${provider}`,
-    `total=${hi(formatMs(args.event.latencyMs))}`,
-    `internal=${hi(formatMs(coreInternalMs))}`,
-    `external=${hi(formatMs(args.event.externalLatencyMs))}`,
-    `calls=${hi(calls)}`,
-    `fail=${hi(retries)}`,
-    `attempts=${hi(args.event.providerAttemptCount)}`,
-    `tokens.day=${hi(formatTokens(ts.daily.totalTokens))}`,
-    `tokens.all=${hi(formatTokens(ts.alltime.totalTokens))}`,
-    `project=${project}`
+    `total=${formatMs(args.event.latencyMs)}`,
+    `internal=${formatMs(coreInternalMs)}`,
+    `external=${formatMs(args.event.externalLatencyMs)}`,
+    `attempts=${args.event.providerAttemptCount}`,
+    `fail=${retries}`,
+    `calls=${calls}`
+  ];
+  const tokenSummary = [
+    `tokens.day=${formatTokens(ts.daily.totalTokens)}`,
+    `tokens.all=${formatTokens(ts.alltime.totalTokens)}`
   ];
   if (hasReqTokens) {
     const tokParts: string[] = [];
@@ -422,14 +440,26 @@ function emitRealtimeSessionRequestLog(args: {
       tokParts.push(`cache.write=${formatWholeNumber(reqUsage.cacheCreationTokens)}`);
     }
     if (reqUsage.totalTokens !== undefined) tokParts.push(`total=${formatWholeNumber(reqUsage.totalTokens)}`);
-    parts.push(`usage(${tokParts.join(' ')})`);
+    tokenSummary.push(`usage(${tokParts.join(' ')})`);
   }
-  console.log(colorize(parts.join(' '), sessionColor));
+  const abnormalParts = [
+    args.event.trafficWaitMs >= 100 ? `wait.traffic=${formatMs(args.event.trafficWaitMs)}` : '',
+    args.event.clientInjectWaitMs >= 100 ? `wait.inject=${formatMs(args.event.clientInjectWaitMs)}` : '',
+    args.event.sseDecodeMs >= 100 ? `decode.sse=${formatMs(args.event.sseDecodeMs)}` : '',
+    args.event.codecDecodeMs >= 100 ? `decode.codec=${formatMs(args.event.codecDecodeMs)}` : ''
+  ].filter(Boolean);
+  tokenSummary.push(`project=${project}`);
+  if (abnormalParts.length > 0) {
+    tokenSummary.push(`${ANSI_BOLD}diag=${abnormalParts.join(',')}${ANSI_RESET}${sessionColor}`);
+  }
+  parts.push(tokenSummary.join(' '));
+  console.log(colorize(highlightLogKeyValues(parts.join(' '), sessionColor), sessionColor));
 }
 
 function emitRealtimeVirtualRouterHitLog(args: {
   sessionId: string;
   projectPath?: string;
+  logSessionColorKey?: string;
   routeName: string;
   poolId: string;
   providerKey: string;
@@ -446,7 +476,10 @@ function emitRealtimeVirtualRouterHitLog(args: {
   cacheCreationTokens?: number;
   totalTokens?: number;
 }): void {
-  const sessionColor = resolveSessionAnsiColor(args.sessionId) || ANSI_SESSION;
+  const sessionColor = resolveSessionRealtimeColor({
+    logSessionColorKey: args.logSessionColorKey,
+    sessionId: args.sessionId
+  });
   const sessionLabel = shortSessionId(args.sessionId);
   const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
   const project = trimPathForLog(projectResolution.path || '-');
@@ -457,18 +490,21 @@ function emitRealtimeVirtualRouterHitLog(args: {
   const stoplessSuffix = args.stoplessMode
     ? ` stopless=${args.stoplessMode} state=${args.stoplessArmed === true ? 'armed' : 'ready'}`
     : '';
-  console.log(
-    colorize(
-      `[virtual-router-hit][rt] session=${sessionLabel} project=${project} session_source=${projectResolution.source}`,
-      sessionColor
-    )
-  );
-  console.log(
-    colorize(
-      `  ${routePool} -> ${provider} [concurrency:${active}/${max}] session.virtual_hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}${args.reason ? ` reason=${args.reason}` : ''}${stoplessSuffix}`,
-      sessionColor
-    )
-  );
+  const summary = [
+    '[virtual-router-hit][rt]',
+    `session=${sessionLabel}`,
+    `${routePool}->${provider}`,
+    `concurrency=${active}/${max}`,
+    `hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}`,
+    `project=${project}`
+  ];
+  if (args.reason) {
+    summary.push(`reason=${args.reason}`);
+  }
+  if (stoplessSuffix) {
+    summary.push(stoplessSuffix.trim());
+  }
+  console.log(colorize(summary.join(' '), sessionColor));
 }
 
 function resolveProjectPathFromRegistry(sessionId: string): { path?: string; source: 'registry.tmux' | 'registry.bound' | 'none' } {
@@ -570,6 +606,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
       emitRealtimeVirtualRouterHitLog({
         sessionId,
         projectPath: sessionExisting.projectPath,
+        logSessionColorKey: event.logSessionColorKey,
         routeName,
         poolId,
         providerKey,
@@ -618,6 +655,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
     emitRealtimeVirtualRouterHitLog({
       sessionId,
       projectPath: sessionRollups.get(sessionId)?.projectPath,
+      logSessionColorKey: event.logSessionColorKey,
       routeName,
       poolId,
       providerKey,
@@ -755,7 +793,10 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     totalTokens: typeof event.totalTokens === 'number' ? event.totalTokens : undefined,
     firstContentAtMs: typeof event.firstContentAtMs === 'number' ? event.firstContentAtMs : undefined,
     lastContentAtMs: typeof event.lastContentAtMs === 'number' ? event.lastContentAtMs : undefined,
-    requestStartedAtMs: typeof event.requestStartedAtMs === 'number' ? event.requestStartedAtMs : undefined
+    requestStartedAtMs: typeof event.requestStartedAtMs === 'number' ? event.requestStartedAtMs : undefined,
+    logSessionColorKey: typeof event.logSessionColorKey === 'string' && event.logSessionColorKey.trim()
+      ? event.logSessionColorKey.trim()
+      : undefined
   };
   if (!isRealtimeRollupEnabled()) {
     const sessionEvents = sessionRequestEvents.get(sessionId);
@@ -1179,12 +1220,14 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
       const routePool = formatRoutePool(event.routeName, event.poolId);
       const provider = formatProvider(event.providerKey, event.model);
       const requestLabel = shortRequestId(event.requestId);
-      const finishReasonTag = ` ${ANSI_WHITE}finish_reason=${event.finishReason ?? 'unknown'}${ANSI_RESET}`;
       console.log(
-        `${colorize(
-          `     ${requestIdx + 1}. [${ts}] req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(event.latencyMs)} internal=${formatMs(event.internalLatencyMs)} external=${formatMs(event.externalLatencyMs)} retries=${event.retryCount} attempts=${event.providerAttemptCount} wait.traffic=${formatMs(event.trafficWaitMs)} wait.inject=${formatMs(event.clientInjectWaitMs)} decode.sse=${formatMs(event.sseDecodeMs)} decode.codec=${formatMs(event.codecDecodeMs)}`,
+        colorize(
+          highlightLogKeyValues(
+            `     ${requestIdx + 1}. [${ts}] req=${requestLabel} ${routePool} -> ${provider} total=${formatMs(event.latencyMs)} internal=${formatMs(event.internalLatencyMs)} external=${formatMs(event.externalLatencyMs)} retries=${event.retryCount} attempts=${event.providerAttemptCount} wait.traffic=${formatMs(event.trafficWaitMs)} wait.inject=${formatMs(event.clientInjectWaitMs)} decode.sse=${formatMs(event.sseDecodeMs)} decode.codec=${formatMs(event.codecDecodeMs)} finish_reason=${event.finishReason ?? 'unknown'}`,
+            sessionColor
+          ),
           sessionColor
-        )}${finishReasonTag}`
+        )
       );
     }
   }

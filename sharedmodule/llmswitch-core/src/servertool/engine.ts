@@ -18,11 +18,10 @@ import {
 import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
-import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { runFollowupMainline } from './backend-route-mainline-block.js';
+import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
 import {
-  planStopMessageCliProjectionSeedWithNative,
   planStoplessOrchestrationActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -84,34 +83,6 @@ type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>
 type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
-
-function buildStopMessageCliProjectionResult(args: {
-  options: ServerToolOrchestrationOptions;
-  execution: NonNullable<ServerToolEngineResult['execution']>;
-  finalChatResponse: JsonObject;
-  flowId: string;
-  totalSteps: number;
-  logProgress: (step: number, total: number, message: string, extra?: Record<string, unknown>) => void;
-}): ServerToolOrchestrationResult {
-  const seed = planStopMessageCliProjectionSeedWithNative({
-    execution: args.execution,
-    finalChatResponse: args.finalChatResponse
-  });
-  const projection = buildServertoolCliProjectionForAutoFlow({
-    options: args.options,
-    flowId: seed.flowId,
-    reasoningText: seed.reasoningText,
-    input: seed.input as JsonObject
-  });
-  args.logProgress(5, args.totalSteps, 'completed (stop_message_auto cli projection; no reenter)', {
-    flowId: seed.flowId
-  });
-  return {
-    chat: projection.chatResponse,
-    executed: true,
-    flowId: seed.flowId
-  };
-}
 
 function summarizeServertoolExecutionForSnapshot(engineResult: ServerToolEngineResult): Record<string, unknown> {
   const finalChat = engineResult.finalChatResponse as Record<string, unknown>;
@@ -175,6 +146,38 @@ function summarizeServertoolExecutionForSnapshot(engineResult: ServerToolEngineR
     summary.followup = followupSummary;
   }
   return summary;
+}
+
+function extractStoplessReasoningText(finalChatResponse: JsonObject): string {
+  const choice = Array.isArray((finalChatResponse as any).choices) ? (finalChatResponse as any).choices[0] : null;
+  const message = choice && typeof choice === 'object' ? choice.message : null;
+  const candidates: unknown[] = [
+    message?.reasoning_text,
+    message?.reasoning_content,
+    message?.content,
+    (finalChatResponse as any).output_text
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return 'RouteCodex projected stopless continuation to client CLI.';
+}
+
+function extractStoplessLoopState(execution: ServerToolEngineResult['execution']): {
+  repeatCount: number;
+  maxRepeats: number;
+} {
+  const state = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? (execution.context as Record<string, unknown>).serverToolLoopState
+    : null;
+  const row = state && typeof state === 'object' && !Array.isArray(state)
+    ? state as Record<string, unknown>
+    : {};
+  const repeatCount = typeof row.repeatCount === 'number' ? row.repeatCount : 1;
+  const maxRepeats = typeof row.maxRepeats === 'number' ? row.maxRepeats : Math.max(repeatCount, 1);
+  return { repeatCount, maxRepeats };
 }
 
 function recordServertoolExecutionSnapshot(args: {
@@ -377,15 +380,27 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  if (stoplessPlan.action === 'cli_projection') {
-    return buildStopMessageCliProjectionResult({
-      options,
-      execution: engineResult.execution,
-      finalChatResponse: engineResult.finalChatResponse,
+  if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow) {
+    const loopState = extractStoplessLoopState(engineResult.execution);
+    const projection = buildServertoolCliProjectionForAutoFlow({
+      options: { requestId: options.requestId },
       flowId,
-      totalSteps,
-      logProgress
+      reasoningText: extractStoplessReasoningText(engineResult.finalChatResponse),
+      input: {
+        flowId,
+        repeatCount: loopState.repeatCount,
+        maxRepeats: loopState.maxRepeats
+      }
     });
+    logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
+      flowId,
+      reason: stoplessPlan.reason
+    });
+    return {
+      chat: projection.chatResponse,
+      executed: true,
+      flowId: engineResult.execution.flowId
+    };
   }
   return runFollowupMainline({
     adapterContext: options.adapterContext,

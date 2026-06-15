@@ -16,8 +16,9 @@ export function createServertoolCommand(
   }
 ): void {
   const servertool = program
-    .command('servertool')
-    .description('Run RouteCodex servertool CLI operations');
+    .command('hook')
+    .alias('servertool')
+    .description('Run RouteCodex hook CLI operations');
 
   servertool
     .command('run <toolName>')
