@@ -1,4 +1,7 @@
 ## 2026-06-15 note.md consolidation index
+- apply_patch audit fixes landed and green: latest=2026-06-15；已确认 `hub_req_inbound_context_capture.rs` 的 canonical writeback、`standardized_request.rs` 的 responses input 预规范化、以及 relay store 的 `output_text/commentary -> input_text` 历史合法化均已转绿。
+- apply_patch 审计文档最终收口：latest=2026-06-15；已补 direct/relay 最终 owner 矩阵、重复 surface / 删除候选、server 层协议污染嫌疑点、以及“为何 5555 是 relay / 为何 5520 仍有 apply_patch 问题”的显式回答块。
+- apply_patch direct/relay owner audit split：latest=2026-06-15；已基于 live 日志、online smoke、样本、function-map 确认 `5520 direct` / `5555 relay` 分链真相、唯一 owner 与当前 gate 缺口。
 - direct request passthrough reasoning/apply_patch contract relock：latest=2026-06-15；已确认 direct provider runtime 不再按 reasoning 触发 sanitize，且 direct 样本显式锁住 freeform `apply_patch` tool 定义原样透传上游。
 - 5520 direct SSE duplicate terminal frames live truth：latest=2026-06-15；已确认线上 `0.90.3071` 仍在 `response.completed(required_action)` 后本地补一套 tool terminal frames，且全局安装 dist 未带上 direct skip 修复。
 - reasoning retention audit split：latest=2026-06-15；已确认 direct live 本次未见 SSE 壳层吞 reasoning，但 relay/local responses conversation store 仍显式丢弃 standalone reasoning output item。
@@ -44,6 +47,141 @@
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/providers/runtime/responses-provider.direct-passthrough.spec.ts --runInBand` PASS
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts tests/server/runtime/http-server/router-direct-pipeline.spec.ts tests/server/runtime/http-server/provider-direct-pipeline.spec.ts --runInBand` PASS
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:responses-direct-tool-shape-contract` PASS
+
+## 2026-06-15 apply_patch direct/relay owner audit split
+
+- 分链真相已确认：
+  - `5520` 相关 `apply_patch` grammar 400 样本 `openai-responses-router-gpt-5.4-20260614T230414428-345124-2702` 明确是 direct：
+    - 日志证据：`~/.rcc/logs/server-5520.log`
+    - 同一窗口内同时存在：
+      - `[port:5520 group:gateway_priority_5520] ▶ [/v1/responses] ...`
+      - `[virtual-router-hit] ... -> asxs.crsa.gpt-5.4`
+      - `[router-direct.send][openai-responses-router-gpt-5.4-20260614T230414428-345124-2702] error`
+      - upstream `Invalid lark grammar ... unknown name: "begin_patch"`
+    - 结论：这是 request transport contract / direct provider wire 问题，不是 relay/store/SSE。
+  - `5555` 两类经典失败都不是 direct：
+    - `openai-responses-router-gpt-5.4-20260613T223253714-340912-698`
+      - `[port:5555 ...] [virtual-router-hit] ... -> minimax.key1.MiniMax-M3`
+      - provider 返回 `invalid params, tool call result does not follow tool call (2013)`
+      - 没有 `[router-direct.send]`
+      - 结论：relay request-side history 投影到上游 chat/protocol 的形状问题。
+    - `openai-responses-router-gpt-5.4-20260613T231359101-341020-806`
+      - `[port:5555 ...] [virtual-router-hit] ...`
+      - 本地失败：`orphan_tool_result ... code=hub_pipeline_context_capture_failed`
+      - 没有 `[router-direct.send]`
+      - 结论：relay request-side native context capture 本地拒绝；失败发生在 provider transport 之前。
+- 5555 relay 当前 apply_patch 在线 smoke 证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5555/v1/responses RCC_APPLY_PATCH_ONLINE_MODEL=gpt-5.4 RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs`
+  - PASS：`ok=true`、`customInputCount=3`、`functionArgumentPatchLeakCount=0`
+  - 结论：当前 relay apply_patch 主链没有复现“空 arguments / function_call patch 泄漏”。
+- owner 清单（已绑定 function-map / 实码）：
+  - direct request 语义保留：
+    - feature: `responses.direct_tool_shape_contract`
+    - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
+    - TS shell: `src/providers/core/runtime/responses-provider.ts`
+  - relay request handler facade：
+    - feature: `server.responses_request_handler_bridge_surface`
+    - file: `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+    - 职责：handler entry、resume/scope materialize facade、native capture 调用；不是 tool-history owner。
+  - relay request-side tool history / orphan / duplicate 真 owner：
+    - feature: `hub.req_inbound_responses_context_capture`
+    - files:
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`
+      - `.../hub_req_inbound_tool_call_normalization.rs`
+      - `.../hub_req_inbound_tool_output_snapshot.rs`
+    - 职责：tool history normalize、shell-like tool call rewrite、orphan_tool_result fail-fast、duplicate compare/rewrite。
+  - apply_patch freeform 参数/grammar/live-context 真 owner：
+    - feature: `tool.apply_patch_freeform_contract`
+    - files:
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+      - `.../resp_process_stage1_tool_governance_blocks/apply_patch_live_context.rs`
+    - 职责：grammar/schema、参数 canonicalization、GNU hunk 修形、live-context compare；不是 handler/store。
+  - relay store / continuation owner：
+    - file: `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+    - native helpers:
+      - `convertOutputToInputItems`
+      - `resumeConversationPayload`
+      - `stripStoredContextInputMedia`
+    - 职责：relay 本地 store、scope/owner 隔离、response->input history 持久化；`direct` continuation 不本地持久化。
+  - relay response JSON/SSE client projection 真 owner：
+    - feature: `hub.response_responses_client_projection`
+    - Rust owner file:
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`
+    - TS shell:
+      - `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+      - `src/server/handlers/handler-response-sse.ts`
+    - 职责：apply_patch `function_call -> custom_tool_call`、delta 聚合、done 去重、client-visible model/reasoning restore。
+- 新增高风险闭环证据：relay store 当前吃的是 response outbound/projection 后的语义，不是 provider raw response
+  - JSON path：
+    - `src/server/handlers/handler-response-utils.ts`
+    - `prepareResponsesJsonClientDispatchPlanForHttp(...)` -> `normalizeResponsesClientPayloadForHttp(...)` -> `clientBody`
+    - 随后 `persistResponsesConversationLifecycleForHttp({ body: sanitized })`
+    - 这里的 `sanitized` 来源于 `clientBody` / projected payload，而不是 provider raw。
+  - SSE path：
+    - `src/server/handlers/handler-response-sse.ts`
+    - `persistNativeSseConversationState()` 把 `stripInternalKeysDeep(contractProbe.probe)` 作为 `body` 传给 `persistResponsesConversationLifecycleForHttp(...)`
+    - 这里持久化的也不是 provider raw stream，而是 probe 聚合后的 response 语义。
+  - relay store：
+    - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+    - `recordResponse()` 里 `convertOutputToInputItems(response)` 直接从上述 `body` 生成下一轮历史 `entry.input`
+  - 结论：
+    - 若 response outbound/projection 没做严格协议校验或映射错误，污染确实会进入 relay 本地 history；
+    - 下一轮 `resumeConversationPayload/materializeContinuationPayload` 会把这份污染重新发上游，形成请求侧 `400`。
+- 已拿到一条“response 语义错层进入历史 -> 上游 400”的实锤样本：
+  - diag：`~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260615T001004109-345184-2762.json`
+  - `requestBody.input_len=399`
+  - 其中大量 `type=message` 的 `content` part 含 `output_text`，例如：
+    - `message_idx 21 bad_types ['output_text']`
+    - `message_idx 30 bad_types ['output_text']`
+    - 后续大量重复
+  - `/v1/responses` 合法下一轮请求 content type 应为：`input_text/text/image_url/video_url/input_audio/file`；`output_text` 属于响应语义，不应进入请求历史。
+  - 真 owner 落点：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+    - `normalize_output_item_to_input(item)` 对 `type=message` 当前直接把 `content` 原样抄回 input，没有把 `output_text` 投影成合法 input 侧形状。
+    - 这份输出随后经 `responses-conversation-store.ts -> recordResponse() -> convertOutputToInputItems(response) -> entry.input` 持久化。
+  - 结论：
+    - 至少一类 relay 400 已被证实是“response 侧 message/content 映射错层 + store 持久化 + 下一轮 restore 发回上游”的闭环问题。
+    - 这不是 direct request sanitize 问题。
+- 当前 gate 状态与缺口：
+  - 已绿：
+    - `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts`
+    - `tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts`
+    - `tests/server/runtime/http-server/router-direct-pipeline.spec.ts`
+    - `tests/server/runtime/http-server/provider-direct-pipeline.spec.ts`
+    - `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts`
+    - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts`
+    - `node scripts/architecture/verify-apply-patch-freeform-contract.mjs`
+    - 5555 / 5520 apply_patch online smoke
+  - 仍红 / 缺口：
+    - `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts`
+      - case1：`captures required_action -> completed -> done ...` timeout
+      - case2：`turns early upstream close into explicit error instead of client hang` 期望 `event:error` 未出现
+    - 结论：这是 relay 更大范围 SSE 收口 gap；不能证明 apply_patch 主链坏，但说明 response/SSE contract 仍有独立风险。
+- 后续修复顺序建议：
+  1. relay SSE 黑盒残留：`responses-response-bridge.ts` + `handler-response-sse.ts` + Rust outbound projection 边界
+  2. 5555 request-side reopened tool history live fixture：把 `2013` 样本固化进 request/history 红测
+  3. 5555 local orphan_tool_result live fixture：把 `hub_pipeline_context_capture_failed` live 形状固化进 native capture/red test
+  4. 仅在证据显示时再继续 direct；当前 direct apply_patch 主问题已从“错误整形”收口到“上游 grammar / 正常 patch context mismatch”
+
+## 2026-06-15 apply_patch 审计文档最终收口
+
+- `docs/goals/apply-patch-direct-relay-full-audit-plan.md` 已补四块最终结构：
+  - `13. 重复 surface / 删除候选 / server 层协议修补嫌疑点`
+  - `14. 最终 owner 矩阵`
+  - `15. 样本 -> owner -> 风险 -> gate 缺口 一览`
+  - `16. 显式回答块`
+- 已明确三类边界：
+  - `responses-sse-bridge.ts` 是 duplicate surface，不是第二语义 owner；
+  - `handler-response-utils.ts` / `handler-response-sse.ts` 不是协议真源，但当前确实参与 relay response persistence 污染路径；
+  - `5520 direct` 当前没有新证据证明 server request 侧在主动修补 `apply_patch` payload。
+- 已收口的审计结论：
+  - `5555` 的关键 `apply_patch` 问题样本 S2/S3/S5 都是 relay，不是 direct；
+  - `5520` 的关键 `apply_patch` 问题样本 S1/S4 属于 direct contract / carryover / projection 问题；
+  - 当前最需要优先修的唯一 owner 顺序是：
+    1. `hub_req_inbound_context_capture.rs`
+    2. `responses-request-standardization.real-samples.red.spec.ts`
+    3. `shared_responses_conversation_utils.rs`
+    4. `hub_bridge_actions/history.rs` / `bridge_input.rs`
 
 ## 2026-06-15 5520 direct SSE duplicate terminal frames live truth
 
@@ -1815,3 +1953,129 @@ live HTTP 验证必须区分 stopless 透明续轮（user input reenter，无工
 - Unified remaining stopless feature anchor in router-hotpath-napi/servertool_core_blocks.rs to hub.servertool_stopless_cli_continuation so function-map growth gate can resolve the new contract consistently.
 
 - Registered tests/servertool/stop-schema-lifecycle-contract.spec.ts in function-map and verification-map required test lists for hub.servertool_stopless_cli_continuation.
+
+## 2026-06-15 responses outbound/store audit split
+- Live diag evidence: `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260615T001004109-345184-2762.json`
+  - `requestBody.input` contains many `type=message` items whose `content` parts are `output_text`.
+  - Sample: `message_idx 21` has `phase:"commentary"` and `content:[{type:"output_text", ...}]`.
+  - Count scan: `output_text_msgs=53`, `reasoning_items=50`, `reasoning_parts=0`.
+- Rust store owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+  - `normalize_output_item_to_input(item)` for `type=message` clones `content` as-is.
+  - `type=reasoning` is preserved as a standalone item with `summary/content/encrypted_content`.
+- TS bridge owner: `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+  - `persistResponsesConversationLifecycleForHttp(...)` forwards response body into store projection without response-layer protocol audit.
+- Current conclusion:
+  - 已证实的污染层是 response outbound / store / restore 链。
+  - 已证实的非法历史形状是 `assistant message.content.output_text` 被 replay 到下一轮 request。
+  - `reasoning` 目前还没证实是错映射；当前样本里它是 standalone item，不是 part-level `reasoning_text`。
+- 最新 gate 现状：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts` 当前有现成红点，`fails fast when direct and relay continuations coexist under one scope without explicit owner` 实际返回了 relay continuation，不是 `null`。
+  - 这说明 continuation owner 隔离 gate 仍有洞，和 direct/relay owner split 风险一致。
+- Relay response truth split:
+  - JSON path: `prepareResponsesJsonClientDispatchPlanForHttp(...)` 先调用 `projectResponsesClientPayloadForClientForHttp(...)`，`handler-response-utils.ts` 再把 `sanitized clientBody` 传给 `persistResponsesConversationLifecycleForHttp(...)`。
+  - SSE path: `handler-response-sse.ts` 维护 `contractProbe`，结束时把 `stripInternalKeysDeep(contractProbe.probe)` 传给 `persistResponsesConversationLifecycleForHttp(...)`。
+  - 当前 relay 本质是把“client-projected payload / projected probe”当成 continuation history 真相落盘；如果 response outbound 没做 `/v1/responses` 协议审计，错误字段就会进入历史并在下一轮请求打到上游。
+
+## 2026-06-15 apply_patch failure-guidance audit correction
+- 纠偏：当前 worktree 里没有看到 apply_patch failure guidance 修复真正落到代码；此前“已修好 failure guidance”的判断不成立。
+- Rust request/store owner 现状：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`
+  - `normalize_tool_output_text_for_storage(raw)` 仍只做 `strip_provider_tool_sentinel_residue + unwrap_chunked_exec_transcript_shape + trim`
+  - 真正写回 `function_call_output/tool_result` 的调用点只调用 `normalize_tool_output_text_for_storage(output_value)`，没有传 `tool_name`
+  - 因此 apply_patch 不会走 `canonicalize_tool_output_text_for_compare(... apply_patch ...)` 里的 `normalize_apply_patch_output_text(...)`
+- 直接证据：
+  - 位置一：`hub_req_inbound_context_capture.rs` 约第 209 行，`normalize_tool_output_text_for_storage(raw: &str)`
+  - 位置二：`hub_req_inbound_context_capture.rs` 约第 749 行，写回 `output` 时仍只调用 `normalize_tool_output_text_for_storage(output_value)`
+- real-sample gate 现状：
+  - `tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts` 对 `2026-06-07-apply-patch-error-carryover-curated` 仍断言：
+    - 包含 `apply_patch verification failed`
+    - 包含 `Failed to find expected lines`
+    - 不包含 `APPLY_PATCH_ERROR: apply_patch did not apply`
+  - 这会把旧错误行为锁成 PASS，不能证明 canonical guidance 已闭环。
+- apply_patch contract gate 现状：
+  - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts` 当前只锁 freeform/schema 与“不走 servertool”
+  - 还没有锁 failure guidance 必须包含 `Retry with apply_patch only` / `workspace-relative` / `Do not switch to exec_command`
+- function-map / verification-map 现状：
+  - `docs/architecture/function-map.yml` 的 `tool.apply_patch_freeform_contract` summary/required_tests 只覆盖 freeform patch contract、schema、line-edit/live-context 修复
+  - `docs/architecture/verification-map.yml` 的 `tool.apply_patch_freeform_contract` 只列 `apply-patch-chat-process-contract`、native regression matrix、freeform schema passthrough
+  - 结论：当前 map/gate 名义上覆盖 `apply_patch` 主合同，但没有显式锁 failure-guidance / canonical retry text / tool-aware storage normalization
+- S4 sample mapping:
+  - curated fixture: `tests/fixtures/errorsamples/responses-request-standardization/2026-06-07-apply-patch-error-carryover-curated/*`
+  - requestId: `openai-responses-router-gpt-5.5-20260607T022906302-288146-11057`
+  - live log: `~/.rcc/logs/server-5520.log`
+    - `[virtual-router-hit] default/gateway-priority-5520-priority-default -> llmgate.key1.free-gpt-5.5`
+    - `[router-direct.send] ... statusCode=503`
+  - 结论：样本来源是 `5520 direct`，上游先 503；fixture 锁住的是“后续 request-side history 仍携带 raw apply_patch verification failed 文本”的 carryover 问题，不是 relay response/store 问题。
+
+## 2026-06-15 direct/relay unified error chain 审计（本轮产出，未动实现）
+
+- 用户目标：审计为何 499 直接返客户端；统一 direct 与 relay 的 provider error 链；接入 primary_exhausted -> default pool。
+- 现状（代码证实，未改）：
+  - `decideDirectRouterRetry` 已消费统一 ErrorErr05 plan；`isClientDisconnectLikeError` 已在入口短路。
+  - `decideDirectProviderRetry` 强制 rethrow（provider-mode 单点 binding）。
+  - `mapErrorToHttp` 已经在 `isClientDisconnectLikeForProjection` 把 499 拉 204。
+  - `planPrimaryExhaustedToDefaultPoolNative` 暴露但 host（`request-executor.ts` / `http-server/index.ts`）未调用，仍在 1s/2s/3s 阻塞退避后直接 throw。
+  - 用户 06-15 08:52:30 日志 `failed: HTTP 499` 与 499+client abort 应得 204 的 SSOT 矛盾：G1 待定位真正的 res.status(499) 投影点（不在 mapErrorToHttp，估计在 router-direct caller 错误透传）。
+- Gap：
+  - G1 client_disconnect 没有真正落到 204。
+  - G2 provider-mode 单点 binding 与中心原则冲突，需 Jason 拍板。
+  - G3 primary_exhausted -> default pool 未接入 host。
+  - G4 SSE midstream error 未进统一链。
+  - G5 错误码 wrap 可能让 upstreamMessage 丢失。
+  - G6 mapErrorToHttp 短路顺序无问题。
+- 落盘：
+  - `docs/goals/direct-relay-unified-error-chain-audit.md`（278 行，本轮权威真源）。
+  - 含 §6 决策项 D1/D2/D3（待 Jason 拍板）。
+  - 含 §8 `/goal` 提示词模板（落地修复执行）。
+- 下一步：等 Jason 拍 D1/D2/D3，再按 Phase B-F 执行；本轮仅文档/审计，不写实现。
+
+## 2026-06-15 live verify of missing capture / asxs 502
+- Live probes on current installed `0.90.3071` did not reproduce the two reported runtime failures.
+- `http://127.0.0.1:5555/v1/responses` returned `200` for a minimal probe and the body contained a normal completed response.
+- `http://127.0.0.1:5520/v1/responses` with `provider=asxs.crsa.gpt-5.4` also returned `200` for a minimal probe.
+- The earlier `native captureReqInboundResponsesContextSnapshotJson is required but unavailable` lines are therefore classified as historical runtime / install-state evidence, not as a currently reproducible source-code regression.
+- The `asxs` `HTTP_502` sample in `~/.rcc/logs/server-5520.log` shows a direct `router-direct.send` failure followed by provider switch and later successful completion, so it is an upstream/provider transient, not a persistent config break.
+
+## 2026-06-15 gate audit for apply_patch direct/relay plan
+- `npm run verify:apply-patch-freeform-contract` PASS.
+- `npm run verify:apply-patch-regressions` PASS (`total=41 fixed=18 stillFailing=23 mismatches=0`).
+- Rust focused gate PASS:
+  - `cargo test normalize_responses_input_items_dedupes_repeated_apply_patch_error_statuses --lib -- --nocapture`
+  - workdir=`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi`
+- But sharedmodule Jest suites that the function-map / verification-map names as required gates are currently not reliably executable:
+  - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`
+  - `tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts`
+  - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+- Current failure mode is environment/runtime setup, not business assertion:
+  - Jest CJS parse hits `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js` with `Unexpected token 'export'`
+  - `native-required-exports-sse-stream.spec.ts` hits `import.meta.url` parse failure
+  - `responses-continuation-store.spec.ts` also reports missing `sharedmodule/llmswitch-core/dist/conversion/shared/responses-conversation-store.js`
+- Conclusion: current gate gap is two-layered:
+  1. some assertions still lock old behavior
+  2. some named tests are not runnable enough to be trusted as active gates
+## 2026-06-15 apply_patch audit fixes landed and green
+
+- 已落 Rust owner 修复一：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs`
+  - `normalize_tool_output_text_for_storage` 现在接 `tool_name`
+  - `apply_patch` 失败 output 在真正写回历史时就 canonicalize 成 `APPLY_PATCH_ERROR: ...`
+  - 不再只在 compare/dedupe 阶段做 canonical guidance
+- 已落 Rust owner 修复二：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs`
+  - `/v1/responses input[]` 进入 `convert_bridge_input_to_chat_messages(...)` 之前，先复用 `normalize_responses_input_items(...)`
+  - 修掉 curated real-sample 仍带 raw `apply_patch verification failed...` 的第二入口
+- 已落 Rust owner 修复三：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+  - relay store 在 `response.output[type=message].content` 落历史时，把 `output_text` / `text` / `commentary` 改写为合法 request history `input_text`
+  - `canonicalize_continuation_item(...)` 同步做该归一化，避免 stored `input_text` 与 incoming replay `output_text` 前缀匹配失败
+- 补强 gate：
+  - `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+  - `tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts`
+- 2026-06-15 验证证据：
+  - PASS `cargo test -q -p router-hotpath-napi normalize_responses_input_items_dedupes_repeated_apply_patch_error_statuses --lib -- --nocapture`
+  - PASS `cargo test -q -p router-hotpath-napi convert_responses_output_to_input_items_rewrites_output_text_message_content_to_input_text --lib -- --nocapture`
+  - PASS `cargo test -q -p router-hotpath-napi restore_matches_prefix_when_stored_input_text_and_incoming_replays_output_text --lib -- --nocapture`
+  - PASS `cargo test -q -p router-hotpath-napi responses_standardization_preserves_input_in_semantics_for_tool_result_followup --lib -- --nocapture`
+  - PASS `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/build-core.mjs`
+  - PASS `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/apply-patch-chat-process-contract.spec.ts --runInBand`
+  - PASS `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/responses-continuation-store.spec.ts --runInBand -t 'records response message output_text as legal request history input_text instead of replaying response-only content types|restores previous_response_id by session scope when incoming input replays the exact prefix'`
+  - PASS `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/responses-request-standardization.real-samples.red.spec.ts --runInBand`

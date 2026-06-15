@@ -131,6 +131,60 @@ describe('apply_patch freeform chat-process contract', () => {
     expect(tool?.parameters).toBeUndefined();
   });
 
+  it('canonicalizes apply_patch failure guidance before tool history re-enters standardized messages', async () => {
+    const { coerceStandardizedRequestFromPayloadWithNative } = await import(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js'
+    );
+    const output = coerceStandardizedRequestFromPayloadWithNative({
+      payload: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_patch_error',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: '*** Begin Patch\n*** Update File: note.txt\n@@\n-old\n+new\n*** End Patch\n',
+                },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            name: 'apply_patch',
+            tool_call_id: 'call_patch_error',
+            content:
+              'apply_patch verification failed: invalid patch: Failed to find expected lines in /tmp/demo.txt',
+          },
+        ],
+        tools: [{ type: 'function', function: { name: 'apply_patch' } }],
+        parameters: {},
+      },
+      normalized: {
+        id: 'req-apply-patch-failure-guidance-contract',
+        entryEndpoint: '/v1/chat/completions',
+        stream: false,
+        processMode: 'chat',
+      },
+    });
+
+    const messages = Array.isArray(output.standardizedRequest.messages)
+      ? output.standardizedRequest.messages
+      : [];
+    const toolMessage = messages.find((message: any) => message?.role === 'tool');
+    const content = toolMessage?.content;
+    expect(typeof content).toBe('string');
+    expect(content).toContain('APPLY_PATCH_ERROR: apply_patch did not apply');
+    expect(content).toContain('Retry with apply_patch only');
+    expect(content).toContain('workspace-relative');
+    expect(content).toContain('Do not switch to exec_command');
+    expect(content).not.toContain('verification failed');
+    expect(content).not.toContain('/tmp/demo.txt');
+  });
+
   it('never executes apply_patch locally through server-side tool engine', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');

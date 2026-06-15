@@ -257,6 +257,44 @@ fn normalize_responses_history_items(items: Vec<Value>) -> Vec<Value> {
         .collect::<Vec<_>>()
 }
 
+fn normalize_message_content_part_for_request_history(part: &Value) -> Option<Value> {
+    let row = part.as_object()?;
+    let part_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match part_type.as_str() {
+        "input_text" => Some(part.clone()),
+        "output_text" | "text" | "commentary" => {
+            let text = row
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?;
+            Some(serde_json::json!({
+                "type": "input_text",
+                "text": text,
+            }))
+        }
+        "image_url" | "input_image" | "video_url" | "input_audio" | "file" => Some(part.clone()),
+        _ => None,
+    }
+}
+
+fn normalize_message_content_for_request_history(value: Option<&Value>) -> Vec<Value> {
+    value
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(normalize_message_content_part_for_request_history)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
     let row = item.as_object()?;
     let item_type = row
@@ -271,17 +309,13 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
             .and_then(Value::as_str)
             .unwrap_or("assistant")
             .to_string();
-        let content = row
-            .get("content")
-            .and_then(Value::as_array)
-            .cloned()
-            .map(Value::Array)
-            .or_else(|| {
-                row.get("text").and_then(Value::as_str).map(|text| {
-                    Value::Array(vec![serde_json::json!({ "type": "text", "text": text })])
-                })
-            })
-            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let content = if row.get("content").is_some() {
+            Value::Array(normalize_message_content_for_request_history(row.get("content")))
+        } else {
+            row.get("text").and_then(Value::as_str).map(|text| {
+                Value::Array(vec![serde_json::json!({ "type": "input_text", "text": text })])
+            }).unwrap_or_else(|| Value::Array(Vec::new()))
+        };
         return Some(serde_json::json!({
           "type": "message",
           "role": role,
@@ -886,7 +920,13 @@ fn canonicalize_continuation_item(value: &Value) -> Value {
     };
     let item_type = read_trimmed_string(row.get("type"));
     let role = read_trimmed_string(row.get("role"));
-    let content = row.get("content").cloned();
+    let content = if row.get("content").is_some() {
+        Some(Value::Array(normalize_message_content_for_request_history(
+            row.get("content"),
+        )))
+    } else {
+        None
+    };
 
     if role.is_some() && content.is_some() && item_type.as_deref() == Some("message") {
         return serde_json::json!({
@@ -1990,6 +2030,71 @@ mod tests {
         assert_eq!(input[0]["type"], json!("message"));
         let serialized = serde_json::to_string(payload).unwrap();
         assert!(!serialized.contains("historical leak"));
+    }
+
+    #[test]
+    fn convert_responses_output_to_input_items_rewrites_output_text_message_content_to_input_text() {
+        let response = json!({
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        { "type": "output_text", "text": "world" },
+                        { "type": "commentary", "text": "progress" }
+                    ]
+                }
+            ]
+        });
+
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["type"], json!("message"));
+        assert_eq!(items[0]["role"], json!("assistant"));
+        assert_eq!(items[0]["content"][0]["type"], json!("input_text"));
+        assert_eq!(items[0]["content"][0]["text"], json!("world"));
+        assert_eq!(items[0]["content"][1]["type"], json!("input_text"));
+        assert_eq!(items[0]["content"][1]["text"], json!("progress"));
+        let serialized = serde_json::to_string(&items).unwrap();
+        assert!(!serialized.contains("\"output_text\""));
+        assert!(!serialized.contains("\"commentary\""));
+    }
+
+    #[test]
+    fn restore_matches_prefix_when_stored_input_text_and_incoming_replays_output_text() {
+        let restored = restore_responses_continuation_payload(
+            &json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hello" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "input_text", "text": "world" }] }
+                ]
+            }),
+            &json!({
+                "model": "gpt-5.4",
+                "stream": true,
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hello" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "world" }] },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        let payload = restored.get("payload").and_then(Value::as_object).unwrap();
+        assert_eq!(
+            payload.get("previous_response_id").and_then(Value::as_str),
+            Some("resp_prev")
+        );
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["content"][0]["text"].as_str(), Some("next"));
     }
 
     #[test]

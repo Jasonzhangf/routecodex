@@ -206,16 +206,13 @@ fn build_function_call_semantic_signature(row: &Map<String, Value>) -> Option<St
     Some(format!("{name}\n{arguments}"))
 }
 
-fn normalize_tool_output_text_for_storage(raw: &str) -> String {
+fn normalize_tool_output_text_for_storage(tool_name: Option<&str>, raw: &str) -> String {
     let stripped = strip_provider_tool_sentinel_residue(raw);
-    if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(stripped.as_str()) {
-        return unwrapped;
-    }
-    stripped.trim().to_string()
-}
-
-fn canonicalize_tool_output_text_for_compare(tool_name: Option<&str>, raw: &str) -> String {
-    let normalized = normalize_tool_output_text_for_storage(raw);
+    let normalized = if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(stripped.as_str()) {
+        unwrapped
+    } else {
+        stripped.trim().to_string()
+    };
     if tool_name
         .map(|value| value.trim().eq_ignore_ascii_case("apply_patch"))
         .unwrap_or(false)
@@ -223,6 +220,10 @@ fn canonicalize_tool_output_text_for_compare(tool_name: Option<&str>, raw: &str)
         return normalize_apply_patch_output_text(normalized.as_str());
     }
     normalized
+}
+
+fn canonicalize_tool_output_text_for_compare(tool_name: Option<&str>, raw: &str) -> String {
+    normalize_tool_output_text_for_storage(tool_name, raw)
 }
 
 fn build_duplicate_responses_call_id_rewrites(
@@ -574,7 +575,7 @@ fn is_bare_client_mcp_bridge_tool(tool_row: &Map<String, Value>, name: Option<&s
         .unwrap_or(false)
 }
 
-fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<Vec<Value>> {
+pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<Vec<Value>> {
     let input = raw_request.get("input")?;
     match input {
         Value::Array(items) => {
@@ -746,14 +747,17 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                     }
                     let mut rewritten_row =
                         rewrite_responses_tool_history_entry_call_id(index, row, &call_id_rewrites);
+                    let compare_tool_name =
+                        tool_name_by_call_id.get(call_id.as_str()).map(String::as_str);
                     if let Some(output_value) = rewritten_row.get("output").and_then(Value::as_str) {
                         rewritten_row.insert(
                             "output".to_string(),
-                            Value::String(normalize_tool_output_text_for_storage(output_value)),
+                            Value::String(normalize_tool_output_text_for_storage(
+                                compare_tool_name,
+                                output_value,
+                            )),
                         );
                     }
-                    let compare_tool_name =
-                        tool_name_by_call_id.get(call_id.as_str()).map(String::as_str);
                     let compare_output = rewritten_row
                         .get("output")
                         .and_then(Value::as_str)
@@ -1686,6 +1690,13 @@ mod tests {
             .expect("normalized input");
         assert_eq!(normalized.len(), 2);
         assert_eq!(normalized[1]["type"], "function_call_output");
+        let output = normalized[1]["output"].as_str().expect("normalized output");
+        assert!(output.starts_with("APPLY_PATCH_ERROR:"));
+        assert!(output.contains("Retry with apply_patch only"));
+        assert!(output.contains("workspace-relative"));
+        assert!(output.contains("Do not switch to exec_command"));
+        assert!(!output.contains("Failed to find expected lines"));
+        assert!(!output.contains("verification failed"));
     }
 
     #[test]

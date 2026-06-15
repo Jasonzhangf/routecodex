@@ -150,6 +150,88 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
+  it('records response message output_text as legal request history input_text instead of replaying response-only content types', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-output-text-1'),
+      sessionId: 'sess-output-text',
+      conversationId: 'conv-output-text',
+      providerKey: 'crs.direct.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true,
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-output-text-1'),
+      providerKey: 'crs.direct.gpt-5.4',
+      response: {
+        id: 'resp-output-text-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'world' },
+              { type: 'commentary', text: 'progress note' }
+            ]
+          }
+        ]
+      }
+    });
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-output-text-2'),
+      sessionId: 'sess-output-text',
+      payload: {
+        model: 'gpt-5.4',
+        stream: true,
+        metadata: { conversation_id: 'conv-output-text' },
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'hello' }]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          { type: 'input_text', text: 'world' },
+          { type: 'input_text', text: 'progress note' }
+        ]
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next turn' }]
+      }
+    ]);
+    expect(JSON.stringify(materialized)).not.toContain('"output_text"');
+    expect(JSON.stringify(materialized)).not.toContain('"commentary"');
+  });
+
   it('RED: submit_tool_outputs resume must preserve direct providerKey pin for same-provider remote continuation ownership', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-direct-pin-1'),

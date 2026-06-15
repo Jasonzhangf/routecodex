@@ -1,4 +1,6 @@
-use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
+use crate::hub_req_inbound_tool_call_normalization::{
+    normalize_apply_patch_output_text, normalize_shell_like_tool_calls_before_governance,
+};
 use crate::shared_metadata_semantics::read_runtime_metadata;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -75,6 +77,22 @@ fn clone_message_content(content: Option<&Value>) -> Value {
     Value::String(js_like_string(content))
 }
 
+fn normalize_chat_tool_message_content(role: &str, name: Option<&str>, content: Value) -> Value {
+    if !role.eq_ignore_ascii_case("tool") {
+        return content;
+    }
+    let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) else {
+        return content;
+    };
+    if !name.eq_ignore_ascii_case("apply_patch") {
+        return content;
+    }
+    match content {
+        Value::String(text) => Value::String(normalize_apply_patch_output_text(text.as_str())),
+        other => other,
+    }
+}
+
 fn normalize_tool_call(tool_call: &Value) -> Option<Value> {
     let row = as_object(tool_call)?;
     let id = row.get("id")?.as_str()?.trim().to_string();
@@ -126,7 +144,9 @@ fn normalize_chat_message(message: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("user")
         .to_string();
-    let content = clone_message_content(message_row.get("content"));
+    let tool_name = message_row.get("name").and_then(|v| v.as_str());
+    let content =
+        normalize_chat_tool_message_content(role.as_str(), tool_name, clone_message_content(message_row.get("content")));
 
     let mut out = Map::new();
     out.insert("role".to_string(), Value::String(role));
@@ -1181,5 +1201,54 @@ mod tests {
             Value::String("Need to call echo_json with ping.".to_string())
         );
         assert_eq!(standardized["messages"][1]["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[test]
+    fn standardization_canonicalizes_apply_patch_tool_failure_history_content() {
+        let chat = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_patch_1",
+                            "type": "function",
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch\n"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "name": "apply_patch",
+                    "tool_call_id": "call_patch_1",
+                    "content": "apply_patch verification failed: Failed to find expected lines in /tmp/demo.txt"
+                }
+            ],
+            "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+            "parameters": { "model": "gpt-5.4" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/responses",
+            Some("req_apply_patch_tool_history"),
+        )
+        .expect("standardized");
+
+        let content = standardized["messages"][1]["content"]
+            .as_str()
+            .expect("tool content");
+        assert!(content.contains("APPLY_PATCH_ERROR: apply_patch did not apply"));
+        assert!(content.contains("Retry with apply_patch only"));
+        assert!(content.contains("workspace-relative"));
+        assert!(content.contains("Do not switch to exec_command"));
+        assert!(!content.contains("verification failed"));
+        assert!(!content.contains("/tmp/demo.txt"));
     }
 }

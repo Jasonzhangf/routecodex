@@ -1,4 +1,5 @@
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
+use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
 use serde_json::{Map, Value};
@@ -44,10 +45,12 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
             messages
         } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
+            let normalized_input_items = normalize_responses_input_items(payload)
+                .unwrap_or_else(|| input_items.clone());
             let allow_output_only_resume_tool_result =
-                is_output_only_resume_tool_result(payload, input_items.as_slice());
+                is_output_only_resume_tool_result(payload, normalized_input_items.as_slice());
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-                input: drop_stale_orphan_responses_tool_outputs(payload, input_items),
+                input: drop_stale_orphan_responses_tool_outputs(payload, normalized_input_items),
                 tools: tools.clone(),
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),

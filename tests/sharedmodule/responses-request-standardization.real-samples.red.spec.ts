@@ -62,9 +62,12 @@ describe('responses request standardization real-sample regressions', () => {
     if (fixtureName === '2026-06-07-apply-patch-error-carryover-curated') {
       expect(messages.length).toBe(5);
       expect(messages.filter((message: any) => message?.role === 'tool')).toHaveLength(2);
-      expect(serializedMessages).toContain('apply_patch verification failed');
-      expect(serializedMessages).toContain('Failed to find expected lines');
-      expect(serializedMessages).not.toContain('APPLY_PATCH_ERROR: apply_patch did not apply');
+      expect(serializedMessages).toContain('APPLY_PATCH_ERROR: apply_patch did not apply');
+      expect(serializedMessages).toContain('Retry with apply_patch only');
+      expect(serializedMessages).toContain('workspace-relative');
+      expect(serializedMessages).toContain('Do not switch to exec_command');
+      expect(serializedMessages).not.toContain('apply_patch verification failed');
+      expect(serializedMessages).not.toContain('Failed to find expected lines');
       expect(serializedMessages).not.toContain('Chunk ID:');
       expect(serializedMessages).not.toContain('Original token count:');
     }
