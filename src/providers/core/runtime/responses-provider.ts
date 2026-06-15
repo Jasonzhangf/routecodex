@@ -99,20 +99,6 @@ function applyRequestRuntimeMetadataToProviderContext(
   context.pipelineId = context.pipelineId ?? runtimeMetadata.pipelineId;
 }
 
-function shouldSanitizeDirectResponsesBody(body: Record<string, unknown>): boolean {
-  const input = Array.isArray(body.input) ? body.input : null;
-  if (!input) {
-    return false;
-  }
-  return input.some((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return false;
-    }
-    const row = item as Record<string, unknown>;
-    return row.type === 'reasoning' && ('content' in row || 'encrypted_content' in row);
-  });
-}
-
 function buildDirectResponsesSemanticTimeoutError(code: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'): Error & { code: string } {
   return Object.assign(new Error(code), { code });
 }
@@ -428,9 +414,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (model) {
       builtBody.model = model;
     }
-    const overriddenBody = shouldSanitizeDirectResponsesBody(builtBody)
-      ? await this.sanitizeResponsesProviderOutboundBody(builtBody, context)
-      : builtBody;
+    const overriddenBody = builtBody;
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
         ? extractSubmitToolOutputsPayload(overriddenBody)

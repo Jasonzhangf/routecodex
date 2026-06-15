@@ -12,21 +12,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     messages: payload.messages ?? [],
     tools: payload.tools
   }),
-  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => {
-    const next = structuredClone(input.payload);
-    if (Array.isArray(next.input)) {
-      next.input = next.input.map((item: any) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item) || item.type !== 'reasoning') {
-          return item;
-        }
-        const sanitized = { ...item };
-        delete sanitized.content;
-        delete sanitized.encrypted_content;
-        return sanitized;
-      });
-    }
-    return next;
-  },
+  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
@@ -88,7 +74,7 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody).toBe(inbound);
   });
 
-  test('sanitizes reasoning content on direct provider path before sending upstream', async () => {
+  test('preserves reasoning content on direct provider path before sending upstream', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-reasoning-filter',
       type: 'responses-http-provider',
@@ -132,10 +118,12 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).not.toBe(inbound);
+    expect(capturedBody).toBe(inbound);
     expect(capturedBody.input[1].type).toBe('reasoning');
-    expect(capturedBody.input[1].content).toBeUndefined();
-    expect(capturedBody.input[1].encrypted_content).toBeUndefined();
+    expect(capturedBody.input[1].content).toEqual([
+      { type: 'reasoning_text', text: 'must not reach provider runtime' },
+    ]);
+    expect(capturedBody.input[1].encrypted_content).toBeNull();
     expect(capturedBody.input[1].summary).toEqual([{ type: 'summary_text', text: 'summary stays' }]);
   });
 
@@ -171,7 +159,21 @@ describe('ResponsesProvider direct passthrough', () => {
       model: 'gpt-5.4',
       previous_response_id: 'resp_prev_turn',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
-      tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      tools: [
+        { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } },
+        {
+          type: 'custom',
+          name: 'apply_patch',
+          format: {
+            type: 'grammar',
+            syntax: 'lark',
+            definition:
+              'start: begin_patch hunk+ end_patch\n'
+              + 'begin_patch: "*** Begin Patch" LF\n'
+              + 'end_patch: "*** End Patch" LF?\n'
+          },
+        },
+      ],
       tool_choice: 'auto',
       include: ['reasoning.encrypted_content'],
       reasoning: { effort: 'high' },

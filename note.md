@@ -1,4 +1,5 @@
 ## 2026-06-15 note.md consolidation index
+- direct request passthrough reasoning/apply_patch contract relock：latest=2026-06-15；已确认 direct provider runtime 不再按 reasoning 触发 sanitize，且 direct 样本显式锁住 freeform `apply_patch` tool 定义原样透传上游。
 - 5520 direct SSE duplicate terminal frames live truth：latest=2026-06-15；已确认线上 `0.90.3071` 仍在 `response.completed(required_action)` 后本地补一套 tool terminal frames，且全局安装 dist 未带上 direct skip 修复。
 - reasoning retention audit split：latest=2026-06-15；已确认 direct live 本次未见 SSE 壳层吞 reasoning，但 relay/local responses conversation store 仍显式丢弃 standalone reasoning output item。
 - stopless blackbox CLI contract update：latest=2026-06-15；旧 `scripts/tests/stopless-followup-blackbox.mjs` 仍断言 server-side reenter / upstream>=2，已改为 CLI projection 合同并在线黑盒转绿。
@@ -31,6 +32,18 @@
 - 2026-06-15 验证证据：
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/tests/stopless-followup-blackbox.mjs` PASS
   - 结果：`upstreamHits=1`, `providers=["crs1"]`, `execCommand="routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1}'"`
+
+## 2026-06-15 direct request passthrough reasoning/apply_patch contract relock
+
+- 根因复核：`src/providers/core/runtime/responses-provider.ts` 之前会在 direct path 上按 `input[].type=reasoning` 触发 `sanitizeResponsesProviderOutboundBody(...)`，这违反了 `responses.direct_tool_shape_contract` 的“same-protocol direct request body identity is preserved”。
+- 修复：删除 direct path 的 `shouldSanitizeDirectResponsesBody(...)` 分支；`processIncomingDirect()` 现在直接把 `builtBody` 作为 provider wire。
+- 合同补强：`tests/providers/runtime/responses-provider.direct-passthrough.spec.ts`
+  - reasoning 样本现在断言 `capturedBody === inbound`，且 reasoning `content/encrypted_content/summary` 原样保留；
+  - direct payload 样本显式加入 freeform `apply_patch` grammar tool，锁死 `tools` 原样透传，不允许 direct runtime 再做工具定义清洗。
+- 2026-06-15 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/providers/runtime/responses-provider.direct-passthrough.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/direct-passthrough-minimum-overrides.spec.ts tests/server/runtime/http-server/router-direct-pipeline.spec.ts tests/server/runtime/http-server/provider-direct-pipeline.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:responses-direct-tool-shape-contract` PASS
 
 ## 2026-06-15 5520 direct SSE duplicate terminal frames live truth
 
