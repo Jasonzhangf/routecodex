@@ -31,14 +31,32 @@
    - 看 Mermaid 视图和 review 表格。
    - 这是从 `mainline-call-map.yml` 自动生成的 render artifact，不是第二份真源。
 
-6. `docs/architecture/wiki/coverage-matrix.md`
+6. `docs/architecture/wiki/request-mainline-call-graph.md`
+   - 只看 request 主线，不在总图里混 response/error。
+
+7. `docs/architecture/wiki/response-mainline-call-graph.md`
+   - 只看 response 主线，适合补 owner / review resp 节点。
+
+8. `docs/architecture/wiki/error-mainline-call-graph.md`
+   - 只看统一错误链。
+
+9. `docs/architecture/wiki/runtime-lifecycle-call-graph.md`
+   - 只看 runtime lifecycle / pid / stop-intent / instance registry。
+
+10. `docs/architecture/wiki/servertool-ownership-map.md`
+   - 看 `hub.servertool_*` owner 聚合页。
+
+11. `docs/architecture/wiki/virtual-router-ownership-map.md`
+   - 看 `vr.* / virtual_router.*` owner 聚合页。
+
+12. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-7. `docs/architecture/verification-map.yml`
+13. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-8. `docs/goals/*`
+14. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -53,6 +71,12 @@
 - `docs/architecture/function-map.yml`
 - `docs/architecture/mainline-call-map.yml`
 - `docs/architecture/wiki/mainline-call-graph.md`
+- `docs/architecture/wiki/request-mainline-call-graph.md`
+- `docs/architecture/wiki/response-mainline-call-graph.md`
+- `docs/architecture/wiki/error-mainline-call-graph.md`
+- `docs/architecture/wiki/runtime-lifecycle-call-graph.md`
+- `docs/architecture/wiki/servertool-ownership-map.md`
+- `docs/architecture/wiki/virtual-router-ownership-map.md`
 - `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`
@@ -87,4 +111,5 @@
 - `npm run verify:function-map-compile-gate`
 - `npm run verify:architecture-mainline-call-map`
 - `npm run verify:architecture-mainline-mermaid-sync`
+- `node scripts/architecture/verify-architecture-wiki-sync.mjs`
 - `npm run verify:architecture-ci`

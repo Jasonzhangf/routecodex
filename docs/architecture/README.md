@@ -6,6 +6,12 @@
   - 架构 wiki 路径索引：先看哪里、owner 和 mainline 分别去哪查、closeout/gate 去哪查
 - `wiki/coverage-matrix.md`
   - 架构 wiki 覆盖矩阵：哪些逻辑已有 review 面，哪些逻辑还缺
+- `wiki/request-mainline-call-graph.md`
+- `wiki/response-mainline-call-graph.md`
+- `wiki/error-mainline-call-graph.md`
+- `wiki/runtime-lifecycle-call-graph.md`
+- `wiki/servertool-ownership-map.md`
+- `wiki/virtual-router-ownership-map.md`
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -35,12 +41,26 @@
   - 记录当前 wiki 覆盖状态与下一批待补页面
   - 用于防止 function map / mainline map 已有，但 review 面仍长期缺失
 
+- `wiki/request-mainline-call-graph.md` / `wiki/response-mainline-call-graph.md` / `wiki/error-mainline-call-graph.md` / `wiki/runtime-lifecycle-call-graph.md`
+  - 从 `mainline-call-map.yml` 自动生成的分链 review 面
+  - 用于只看单条主线，降低总图 review 噪音
+
+- `wiki/servertool-ownership-map.md` / `wiki/virtual-router-ownership-map.md`
+  - 从 `function-map.yml` 自动生成的专题 owner 聚合页
+  - 用于专题审计时快速收敛 owner、验证栈、允许/禁止修改路径
+
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`
   - 用于改动前后快速确定必须跑哪些验证
 
 - `scripts/architecture/verify-architecture-templates.mjs`
   - 检查架构模板文件是否存在、非空、最小字段齐全
+
+- `scripts/architecture/render-architecture-wiki-pages.mjs`
+  - 自动生成 wiki 分链页和专题 owner 页
+
+- `scripts/architecture/verify-architecture-wiki-sync.mjs`
+  - 检查所有自动生成 wiki 页面是否与真源同步
 
 - `scripts/architecture/verify-function-map-coverage.mjs`
   - 检查 function-map 与 verification-map 的 feature 覆盖关系
@@ -133,3 +153,4 @@
    - `npm run verify:responses-request-compat-rust-only`
 6. 若某功能跨越多个 facade / wrapper / runtime shell，除 `function-map.yml` 外还应同步补 `mainline-call-map.yml`。
 7. `mainline-call-map.yml` 变更后，必须同步运行 `npm run render:architecture-mainline-mermaid` 并让 `wiki/mainline-call-graph.md` 保持同步。
+8. 自动生成 wiki 页变更后，必须同步运行 `node scripts/architecture/render-architecture-wiki-pages.mjs` 并通过 `node scripts/architecture/verify-architecture-wiki-sync.mjs`。

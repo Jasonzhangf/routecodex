@@ -1,0 +1,52 @@
+<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `node scripts/architecture/render-architecture-wiki-pages.mjs`. -->
+# Request Mainline Call Graph
+
+Source of truth:
+- `docs/architecture/mainline-call-map.yml` defines adjacent edges for this chain
+- `docs/architecture/function-map.yml` enriches owner summary and owner module context
+
+Render rules:
+- This page is a filtered render artifact, not a second architecture truth source.
+- `anchored` = verified caller/callee binding
+- `partial` = edge is bound, but only part of the transition is concretely anchored
+- `binding pending` = edge intentionally left unresolved until code audit pins the real bridge
+
+## request.mainline
+
+HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build.
+
+Entry contract: `ServerReqInbound01ClientRaw` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  ProviderReqOutbound06WirePayload["ProviderReqOutbound06WirePayload"]
+  HubReqOutbound05ProviderSemantic["HubReqOutbound05ProviderSemantic"]
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqInbound02Standardized["HubReqInbound02Standardized"]
+  ServerReqInbound01ClientRaw["ServerReqInbound01ClientRaw"]
+  ServerReqInbound01ClientRaw -->|req-00| HubReqInbound02Standardized
+  ServerReqInbound01ClientRaw -->|req-01| HubReqInbound02Standardized
+  HubReqInbound02Standardized -->|req-02| HubReqChatProcess03Governed
+  HubReqChatProcess03Governed -->|req-03| VrRoute04SelectedTarget
+  VrRoute04SelectedTarget -->|req-04| HubReqOutbound05ProviderSemantic
+  HubReqOutbound05ProviderSemantic -.->|req-05| ProviderReqOutbound06WirePayload
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerReqInbound01ClientRaw anchored;
+  class HubReqInbound02Standardized anchored;
+  class HubReqChatProcess03Governed pending;
+  class VrRoute04SelectedTarget pending;
+  class HubReqOutbound05ProviderSemantic pending;
+  class ProviderReqOutbound06WirePayload partial;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| req-00 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `server.responses_request_handler_bridge_surface`<br/>/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner |
+| req-01 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | binding pending | `binding pending` | `request.route_selection.runtime_vs_typed` | `binding pending` |
+| req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | binding pending | `binding pending` | `request.req_outbound_05.runtime_vs_typed` | `binding pending` |
+| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | partial | `runReqOutboundStage3CompatWithNative -> run_req_outbound_stage3_compat_json` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |

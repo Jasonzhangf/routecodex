@@ -97,8 +97,10 @@
     "verify:error-pipeline-contract": "node scripts/architecture/verify-error-pipeline-contract.mjs",
     "verify:architecture-owner-queryability": "node scripts/architecture/verify-architecture-owner-queryability.mjs",
     "render:architecture-mainline-mermaid": "node scripts/architecture/render-mainline-mermaid.mjs",
+    "render:architecture-wiki-pages": "node scripts/architecture/render-architecture-wiki-pages.mjs",
     "verify:architecture-mainline-call-map": "node scripts/architecture/verify-architecture-mainline-call-map.mjs",
     "verify:architecture-mainline-mermaid-sync": "node scripts/architecture/verify-architecture-mainline-mermaid-sync.mjs",
+    "verify:architecture-wiki-sync": "node scripts/architecture/verify-architecture-wiki-sync.mjs",
     "verify:architecture-feature-map-growth-discipline": "node scripts/architecture/verify-architecture-feature-map-growth-discipline.mjs",
     "verify:architecture-forbidden-path-growth": "node scripts/architecture/verify-architecture-forbidden-path-growth.mjs",
     "verify:architecture-adjacent-builder-naming": "node scripts/architecture/verify-architecture-adjacent-builder-naming.mjs",
@@ -216,7 +218,8 @@
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
     "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
-    "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs"
+    "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs",
+    "verify:runtime-lifecycle-pid-rebase": "node scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

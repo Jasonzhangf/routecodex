@@ -24,7 +24,7 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function loadFeatureOwners(root) {
+export function loadFeatureOwners(root) {
   const parsed = loadYaml(root, FUNCTION_MAP_PATH);
   const owners = new Map();
   for (const row of parsed?.owners ?? []) {
@@ -330,6 +330,56 @@ function renderEdgeTable(chain, owners) {
   return lines.join('\n');
 }
 
+function renderMainlineChainSection(chain, owners) {
+  const lines = [];
+  lines.push(`## ${chain.chain_id}`);
+  lines.push('');
+  lines.push(chain.summary);
+  lines.push('');
+  lines.push(`Entry contract: \`${chain.entry_contract.node}\` via \`${chain.entry_contract.owner_doc}\``);
+  lines.push('');
+  lines.push(renderMermaidChain(chain));
+  lines.push('');
+  lines.push(renderEdgeTable(chain, owners));
+  lines.push('');
+  return lines;
+}
+
+export function renderMainlineChainMarkdown(root, chainId, options = {}) {
+  const { failures, parsed, owners } = validateMainlineCallMap(root);
+  if (failures.length > 0) {
+    throw new Error(`cannot render mainline chain with invalid map:\n- ${failures.join('\n- ')}`);
+  }
+
+  const chain = (parsed.chains ?? []).find((row) => row?.chain_id === chainId);
+  if (!chain) {
+    throw new Error(`unknown mainline chain: ${chainId}`);
+  }
+
+  const title = typeof options.title === 'string' && options.title.trim()
+    ? options.title.trim()
+    : chain.chain_id;
+
+  const lines = [
+    '<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `node scripts/architecture/render-architecture-wiki-pages.mjs`. -->',
+    `# ${title}`,
+    '',
+    'Source of truth:',
+    `- \`${MAINLINE_CALL_MAP_PATH}\` defines adjacent edges for this chain`,
+    `- \`${FUNCTION_MAP_PATH}\` enriches owner summary and owner module context`,
+    '',
+    'Render rules:',
+    '- This page is a filtered render artifact, not a second architecture truth source.',
+    '- `anchored` = verified caller/callee binding',
+    '- `partial` = edge is bound, but only part of the transition is concretely anchored',
+    '- `binding pending` = edge intentionally left unresolved until code audit pins the real bridge',
+    '',
+    ...renderMainlineChainSection(chain, owners),
+  ];
+
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
 export function renderMainlineCallGraphMarkdown(root) {
   const { failures, parsed, owners } = validateMainlineCallMap(root);
   if (failures.length > 0) {
@@ -353,16 +403,7 @@ export function renderMainlineCallGraphMarkdown(root) {
   ];
 
   for (const chain of parsed.chains ?? []) {
-    lines.push(`## ${chain.chain_id}`);
-    lines.push('');
-    lines.push(chain.summary);
-    lines.push('');
-    lines.push(`Entry contract: \`${chain.entry_contract.node}\` via \`${chain.entry_contract.owner_doc}\``);
-    lines.push('');
-    lines.push(renderMermaidChain(chain));
-    lines.push('');
-    lines.push(renderEdgeTable(chain, owners));
-    lines.push('');
+    lines.push(...renderMainlineChainSection(chain, owners));
   }
 
   if (Array.isArray(parsed.shared_multi_reference_functions) && parsed.shared_multi_reference_functions.length > 0) {

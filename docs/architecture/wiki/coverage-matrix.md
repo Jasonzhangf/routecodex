@@ -11,17 +11,21 @@
 | --- | --- | --- | --- |
 | Mainline call graph | `docs/architecture/wiki/mainline-call-graph.md` | done | 自动生成，自 `function-map.yml` + `mainline-call-map.yml` |
 | Wiki entry index | `docs/architecture/wiki/README.md` | done | 入口导航 |
+| Request mainline detail | `docs/architecture/wiki/request-mainline-call-graph.md` | done | 自动生成，请求主线分页面 |
+| Response mainline detail | `docs/architecture/wiki/response-mainline-call-graph.md` | done | 自动生成，响应主线分页面 |
+| Error chain detail | `docs/architecture/wiki/error-mainline-call-graph.md` | done | 自动生成，错误主线分页面 |
+| Runtime lifecycle detail | `docs/architecture/wiki/runtime-lifecycle-call-graph.md` | done | 自动生成，runtime lifecycle 分页面 |
+| Servertool ownership map | `docs/architecture/wiki/servertool-ownership-map.md` | done | 自动生成，按 `hub.servertool_*` 聚合 |
+| Virtual Router ownership map | `docs/architecture/wiki/virtual-router-ownership-map.md` | done | 自动生成，按 `vr.* / virtual_router.*` 聚合 |
 | Pipeline topology | `docs/design/pipeline-type-topology-and-module-boundaries.md` | done | 结构真源，不放在 wiki 重复写 |
 
 ## Missing Wiki Pages
 
 | Area | Target page | Priority | What it should cover |
 | --- | --- | --- | --- |
-| Response mainline detail | `docs/architecture/wiki/response-mainline-call-graph.md` | high | resp-01/02/03/04 owner、边、split binding、入口协议 |
-| Request mainline detail | `docs/architecture/wiki/request-mainline-call-graph.md` | high | req-00..05、split binding、request owner 路径 |
-| Error chain detail | `docs/architecture/wiki/error-mainline-call-graph.md` | high | error Err01..06、policy consumer、client projection |
-| Runtime lifecycle detail | `docs/architecture/wiki/runtime-lifecycle-call-graph.md` | medium | pid cache / stop-intent / instance registry |
-| Servertool followup detail | `docs/architecture/wiki/servertool-followup-call-graph.md` | medium | followup / CLI projection / stopless lifecycle |
+| Metadata boundary detail | `docs/architecture/wiki/metadata-boundary-map.md` | medium | metadata carrier、provider/client leak boundary、control/data split |
+| Responses direct/relay detail | `docs/architecture/wiki/responses-direct-relay-map.md` | medium | direct vs relay ownership、continuation owner、passthrough boundary |
+| Servertool followup call graph | `docs/architecture/wiki/servertool-followup-call-graph.md` | medium | followup / CLI projection / stopless lifecycle / backend-route |
 
 ## Rule
 
@@ -32,3 +36,10 @@
 3. wiki review page
 
 三个里面至少要有两个先落盘，再进入实现。
+
+## Generated Pages
+
+- Rebuild:
+  - `node scripts/architecture/render-architecture-wiki-pages.mjs`
+- Verify sync:
+  - `node scripts/architecture/verify-architecture-wiki-sync.mjs`
