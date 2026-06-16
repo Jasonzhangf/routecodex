@@ -18,6 +18,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   createResponsesJsonToSseConverter: jest.fn(),
   createResponsesSseToJsonConverter: jest.fn(),
   finalizeResponsesConversationRequestRetention: jest.fn(),
+  lookupResponsesContinuationByResponseId: jest.fn(),
   materializeLatestResponsesContinuationByScope: jest.fn(),
   preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({})),
   recordResponsesResponseForRequest: jest.fn(),
@@ -35,6 +36,44 @@ const { assertDirectPassthroughResponsesSseMetadataIsolationForHttp } = await im
 );
 
 describe('responses-response-bridge direct SSE metadata guard', () => {
+  it('allows direct passthrough response.metadata SSE frames with ordinary provider metadata', () => {
+    const frame = [
+      'event: response.metadata',
+      `data: ${JSON.stringify({
+        type: 'response.metadata',
+        metadata: {
+          source: 'provider',
+          trace_id: 'trace-upstream',
+        },
+      })}`,
+      '',
+      '',
+    ].join('\n');
+
+    expect(() => {
+      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame, 'req_direct_response_metadata_event');
+    }).not.toThrow();
+  });
+
+  it('RED: rejects response.metadata SSE frames whose metadata contains internal control fields', () => {
+    const frame = [
+      'event: response.metadata',
+      `data: ${JSON.stringify({
+        type: 'response.metadata',
+        metadata: {
+          providerKey: 'openai.key1.gpt-5.4',
+          __rt: { routeHint: 'thinking' },
+        },
+      })}`,
+      '',
+      '',
+    ].join('\n');
+
+    expect(() => {
+      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame, 'req_direct_response_metadata_leak');
+    }).toThrow('direct passthrough SSE metadata contains internal control fields');
+  });
+
   it('RED: rejects direct passthrough SSE frames whose metadata contains internal control fields', () => {
     const frame = [
       'event: response.output_item.done',

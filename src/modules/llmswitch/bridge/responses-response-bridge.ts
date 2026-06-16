@@ -44,6 +44,7 @@ const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set
   'response.failed',
   'response.cancelled',
   'response.done',
+  'response.metadata',
   'response.output_item.added',
   'response.output_item.done',
   'response.content_part.added',
