@@ -301,22 +301,28 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/primary_exhausted_to_default_pool.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs
+      - src/server/runtime/http-server/http-server-bootstrap.ts
+      - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
+      - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
-      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     integration:
       - cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib
+      - pnpm exec jest tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     build:
       - npm run build:min
     notes:
       - "Primary exhausted -> default pool contract must stay Rust-owned; host only consumes plan."
+      - "Host verification must prove real route-tier extraction stays ordered, route-scoped, and unflattened before calling Rust."
       - "Forward and reverse candidate-exhaustion cases both required; no local fallback chain synthesis."
 
   - feature_id: quota.unified_control_surface

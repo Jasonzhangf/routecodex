@@ -1047,6 +1047,7 @@ mod tests {
                 unsafe { napi::Env::from_raw(std::ptr::null_mut()) },
                 &vec![provider_key.to_string()],
                 "No available providers after applying routing instructions",
+                None,
             );
 
         // 429 cooldown returns HTTP_429 (has min_recoverable_cooldown_ms), not PROVIDER_NOT_AVAILABLE

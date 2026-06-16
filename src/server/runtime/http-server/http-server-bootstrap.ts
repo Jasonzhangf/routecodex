@@ -595,6 +595,57 @@ export async function initializeRouteErrorHub(server: any): Promise<void> {
  * Extract all target provider keys from a routingPolicyGroup.
  * Used to inject allowedProviders per router port.
  */
+export interface RoutingPolicyGroupRouteTier {
+  id: string;
+  targets: string[];
+  priority: number;
+  backup?: boolean;
+}
+
+function readRoutingPolicyGroupsNode(userConfig: UnknownObject): Record<string, unknown> | null {
+  const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
+  if (vr && typeof vr.routingPolicyGroups === 'object' && !Array.isArray(vr.routingPolicyGroups)) {
+    return vr.routingPolicyGroups as Record<string, unknown>;
+  }
+  return null;
+}
+
+function normalizeRoutingTierTarget(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeRoutingRouteName(routeName: string): string {
+  const trimmed = routeName.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const bare = trimmed.split('/').map((part) => part.trim()).find(Boolean);
+  return bare || '';
+}
+
+function collectRoutingTierTargets(entry: Record<string, unknown>): string[] {
+  const targets: string[] = [];
+  const pushTarget = (value: unknown): void => {
+    const normalized = normalizeRoutingTierTarget(value);
+    if (!normalized || targets.includes(normalized)) {
+      return;
+    }
+    targets.push(normalized);
+  };
+  if (Array.isArray(entry.targets)) {
+    for (const target of entry.targets) {
+      pushTarget(target);
+    }
+  }
+  pushTarget(entry.target);
+  pushTarget(entry.provider);
+  return targets;
+}
+
 export function extractProviderKeysForRoutingGroup(
   userConfig: UnknownObject,
   groupId: string,
@@ -642,13 +693,7 @@ export function extractProviderKeysForRoutingGroup(
     }
     return collected;
   };
-  const groupsNode = (() => {
-    const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
-    if (vr && typeof vr.routingPolicyGroups === 'object') {
-      return vr.routingPolicyGroups as Record<string, unknown>;
-    }
-    return null;
-  })();
+  const groupsNode = readRoutingPolicyGroupsNode(userConfig);
   if (!groupsNode) return [];
   const groupNode =
     groupsNode[groupId] && typeof groupsNode[groupId] === 'object'
@@ -691,4 +736,52 @@ export function extractProviderKeysForRoutingGroup(
     }
   }
   return [...new Set(keys)];
+}
+
+export function extractRoutingTiersForRoutingGroupRoute(
+  userConfig: UnknownObject,
+  groupId: string,
+  routeName: string,
+): RoutingPolicyGroupRouteTier[] {
+  const normalizedRouteName = normalizeRoutingRouteName(routeName);
+  if (!normalizedRouteName) {
+    return [];
+  }
+  const groupsNode = readRoutingPolicyGroupsNode(userConfig);
+  if (!groupsNode) {
+    return [];
+  }
+  const groupNode =
+    groupsNode[groupId] && typeof groupsNode[groupId] === 'object' && !Array.isArray(groupsNode[groupId])
+      ? (groupsNode[groupId] as Record<string, unknown>)
+      : null;
+  if (!groupNode) {
+    return [];
+  }
+  const routing =
+    groupNode.routing && typeof groupNode.routing === 'object' && !Array.isArray(groupNode.routing)
+      ? (groupNode.routing as Record<string, unknown>)
+      : null;
+  if (!routing) {
+    return [];
+  }
+  const routeEntry = routing[normalizedRouteName];
+  if (!routeEntry) {
+    return [];
+  }
+  const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
+  return pools
+    .filter((pool): pool is Record<string, unknown> => Boolean(pool) && typeof pool === 'object' && !Array.isArray(pool))
+    .map((entry, index) => ({
+      id:
+        typeof entry.id === 'string' && entry.id.trim()
+          ? entry.id.trim()
+          : `${normalizedRouteName}:${index}`,
+      targets: collectRoutingTierTargets(entry),
+      priority: typeof entry.priority === 'number' && Number.isFinite(entry.priority)
+        ? entry.priority
+        : 0,
+      backup: entry.backup === true ? true : undefined,
+    }))
+    .sort((left, right) => right.priority - left.priority);
 }

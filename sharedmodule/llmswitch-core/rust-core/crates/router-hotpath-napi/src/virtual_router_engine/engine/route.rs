@@ -550,6 +550,7 @@ impl VirtualRouterEngineCore {
                             "All providers unavailable for model {}.{}",
                             provider_id, canonical_model_id
                         ),
+                        None,
                     ));
                 }
                 let route_key = format!("direct:{}.{}", provider_id, canonical_model_id);

@@ -38,7 +38,11 @@ import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir, resolvePortScopedSessionDir } from './session-dir.js';
 import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
-import { shouldLogStageEvent, extractProviderKeysForRoutingGroup } from './http-server-bootstrap.js';
+import {
+  shouldLogStageEvent,
+  extractProviderKeysForRoutingGroup,
+  extractRoutingTiersForRoutingGroupRoute,
+} from './http-server-bootstrap.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
 import { PortRegistry } from './port-registry.js';
@@ -80,9 +84,12 @@ import {
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
 import {
+  collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   resolvePoolExhaustedBackoffMs,
+  resolvePrimaryExhaustedRoutingContextFromError,
+  resolvePrimaryExhaustedPlan,
 } from './executor/request-executor-core-utils.js';
 import { waitWithClientAbortSignal } from './executor/request-executor-abort.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
@@ -458,9 +465,11 @@ export class RouteCodexHttpServer {
       },
       getHubPipeline: (routingPolicyGroup?: string) => this.resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup),
       getModuleDependencies: () => this.getModuleDependencies(),
+      getRoutingTiers: (routingPolicyGroup, routeName) =>
+        extractRoutingTiersForRoutingGroupRoute(this.userConfig, routingPolicyGroup, routeName),
       executeNestedInput: (nestedInput) => this.executePortAwarePipeline(
         typeof nestedInput.metadata?.routecodexLocalPort === 'number'
-          ? nestedInput.metadata.routecodexLocalPort
+        ? nestedInput.metadata.routecodexLocalPort
           : undefined,
         nestedInput
       ),
@@ -1444,6 +1453,47 @@ export class RouteCodexHttpServer {
           this.logStage('router-direct.pool_exhausted.backoff_wait.completed', input.requestId, {
             waitMs,
             poolExhaustedBackoffAttempt: retryState.poolExhaustedBackoffAttempts,
+          });
+          return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt);
+        }
+        // G3: primary_exhausted -> default_pool. Before failing fast, ask the
+        // Rust VR planner for a default_pool plan and re-inject it as the next
+        // allowedProviders target list. Host MUST NOT synthesize fallback
+        // targets locally.
+        const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(retryState.lastError ?? error);
+        const primaryExhaustedRoute = primaryExhaustedContext?.route;
+        const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+          ? extractRoutingTiersForRoutingGroupRoute(
+              this.userConfig,
+              metadataForHub.routecodexRoutingPolicyGroup,
+              primaryExhaustedRoute,
+            )
+          : [];
+        const plan = resolvePrimaryExhaustedPlan({
+          route: primaryExhaustedRoute ?? '',
+          tiers: primaryExhaustedTiers,
+          exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
+          knownTargets: collectPrimaryExhaustedKnownTargets(primaryExhaustedTiers)
+        });
+        this.logStage('router-direct.primary_exhausted_to_default_pool.evaluated', input.requestId, {
+          planStatus: plan.status,
+          routeName: primaryExhaustedRoute,
+          defaultPoolTargets: plan.defaultPoolTargets,
+          fromTierId: plan.fromTierId ?? null,
+          fromTierPriority: plan.fromTierPriority ?? null,
+          exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
+          excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
+          allowedProviders: Array.isArray(metadataForHub.allowedProviders) ? metadataForHub.allowedProviders : undefined,
+          routecodexRoutingPolicyGroup: metadataForHub.routecodexRoutingPolicyGroup
+        });
+        if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
+          retryState.excludedProviderKeys.clear();
+          retryState.poolExhaustedBackoffAttempts = 0;
+          retryState.retryProviderKey = undefined;
+          metadataForHub.allowedProviders = [...plan.defaultPoolTargets];
+          this.logStage('router-direct.primary_exhausted_to_default_pool.applied', input.requestId, {
+            defaultPoolTargets: plan.defaultPoolTargets,
+            fromTierId: plan.fromTierId ?? null
           });
           return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt);
         }

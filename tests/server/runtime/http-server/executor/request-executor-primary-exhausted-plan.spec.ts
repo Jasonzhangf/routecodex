@@ -1,66 +1,88 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeAll, describe, expect, it } from '@jest/globals';
 
-const planPrimaryExhaustedToDefaultPoolNative = jest.fn();
+type CoreUtilsModule = typeof import('../../../../../src/server/runtime/http-server/executor/request-executor-core-utils.js');
 
-jest.mock('../../../../../src/modules/llmswitch/bridge.js', () => ({
-  planPrimaryExhaustedToDefaultPoolNative,
-}));
+let coreUtilsModule: CoreUtilsModule;
 
-import { resolvePrimaryExhaustedPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-core-utils.js';
+beforeAll(async () => {
+  coreUtilsModule = await import('../../../../../src/server/runtime/http-server/executor/request-executor-core-utils.js');
+});
 
 describe('request-executor primary exhausted plan bridge', () => {
-  it('[forward] delegates primary_exhausted -> default_pool to native VR planner', () => {
-    planPrimaryExhaustedToDefaultPoolNative.mockReturnValue({
-      status: 'default_pool',
-      defaultPoolTargets: ['sdfv.key1.gpt-5.5'],
-      fromTierId: 'primary',
-      fromTierPriority: 0,
+  it('[forward] uses the Rust planner contract on raw route-target ids', () => {
+    const result = coreUtilsModule.resolvePrimaryExhaustedPlan({
+      route: 'coding',
+      tiers: [
+        { id: 'coding-primary', targets: ['fwd.gpt.gpt-5.5'], priority: 200 },
+        { id: 'coding-backup', targets: ['fwd.minimax.MiniMax-M3'], priority: 100, backup: true },
+      ],
+      exhaustedTargets: ['fwd.gpt.gpt-5.5'],
+      knownTargets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3'],
     });
 
-    const result = resolvePrimaryExhaustedPlan({
-      route: 'search',
-      tiers: [
-        { id: 'primary', targets: ['1token.key1.gpt-5.5'], priority: 0 },
-        { id: 'default', targets: ['sdfv.key1.gpt-5.5'], priority: 1, backup: true },
-      ],
-      exhaustedTargets: ['1token.key1.gpt-5.5'],
-      knownTargets: ['1token.key1.gpt-5.5', 'sdfv.key1.gpt-5.5'],
-    });
-
-    expect(planPrimaryExhaustedToDefaultPoolNative).toHaveBeenCalledTimes(1);
-    expect(planPrimaryExhaustedToDefaultPoolNative).toHaveBeenCalledWith({
-      route: 'search',
-      tiers: [
-        { id: 'primary', targets: ['1token.key1.gpt-5.5'], priority: 0 },
-        { id: 'default', targets: ['sdfv.key1.gpt-5.5'], priority: 1, backup: true },
-      ],
-      exhaustedTargets: ['1token.key1.gpt-5.5'],
-      knownTargets: ['1token.key1.gpt-5.5', 'sdfv.key1.gpt-5.5'],
-    });
     expect(result).toEqual({
       status: 'default_pool',
-      defaultPoolTargets: ['sdfv.key1.gpt-5.5'],
-      fromTierId: 'primary',
-      fromTierPriority: 0,
+      defaultPoolTargets: ['fwd.minimax.MiniMax-M3'],
+      fromTierId: 'coding-backup',
+      fromTierPriority: 100,
     });
   });
 
-  it('[reverse] preserves no_default_pool_needed without synthesizing host fallback targets', () => {
-    planPrimaryExhaustedToDefaultPoolNative.mockReturnValue({
-      status: 'no_default_pool_needed',
-      defaultPoolTargets: [],
-      fromTierId: null,
-      fromTierPriority: null,
+  it('[forward] extracts real exhausted route + raw route-target identity from VR error details', () => {
+    const context = coreUtilsModule.resolvePrimaryExhaustedRoutingContextFromError({
+      code: 'PROVIDER_NOT_AVAILABLE',
+      details: {
+        primaryExhaustedRouteName: 'coding',
+        primaryExhaustedTargets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'],
+        unavailableRoutePools: [
+          {
+            routeName: 'coding',
+            poolId: 'coding-primary',
+            poolTargets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'],
+          },
+          {
+            routeName: 'default',
+            poolId: 'default-primary',
+            poolTargets: ['mimo.mimo-v2.5'],
+          },
+        ],
+      },
     });
 
-    const result = resolvePrimaryExhaustedPlan({
-      route: 'search',
-      tiers: [{ id: 'primary', targets: ['1token.key1.gpt-5.5'], priority: 0 }],
-      exhaustedTargets: ['1token.key1.gpt-5.5'],
-      knownTargets: ['1token.key1.gpt-5.5'],
+    expect(context).toEqual({
+      route: 'coding',
+      exhaustedTargets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'],
+    });
+  });
+
+  it('[reverse] does not guess exhausted route from metadata or routingPolicyGroup when VR error lacks route truth', () => {
+    const context = coreUtilsModule.resolvePrimaryExhaustedRoutingContextFromError({
+      code: 'PROVIDER_NOT_AVAILABLE',
+      details: {
+        candidateProviderKeys: ['asxs.crsa.gpt-5.4'],
+      },
+      metadata: {
+        routeHint: 'tools',
+        routeName: 'search/gateway-priority-5555-weighted-search',
+        routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      },
     });
 
-    expect(result.defaultPoolTargets).toEqual([]);
-    expect(result.status).toBe('no_default_pool_needed');
+    expect(context).toBeNull();
+  });
+
+  it('[reverse] production module no longer exports mutable primary exhausted test setter', () => {
+    expect('__setPrimaryExhaustedPlanNativeForTests' in coreUtilsModule).toBe(false);
+  });
+
+  it('[forward] known target collection preserves raw route target ids and dedupes in-order', () => {
+    expect(coreUtilsModule.collectPrimaryExhaustedKnownTargets([
+      { targets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'] },
+      { targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3'] },
+    ])).toEqual([
+      'fwd.gpt.gpt-5.5',
+      'halphen.glm-5.2',
+      'fwd.minimax.MiniMax-M3',
+    ]);
   });
 });

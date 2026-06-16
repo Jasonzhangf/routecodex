@@ -1,5 +1,6 @@
 import { writeClientSnapshot } from '../../../../providers/core/utils/snapshot-writer.js';
 import { evaluateSingletonRoutePoolExhaustionNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import { planPrimaryExhaustedToDefaultPoolNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
@@ -116,6 +117,109 @@ export interface ResolvePrimaryExhaustedPlanOutput {
   fromTierPriority?: number | null;
 }
 
+export interface PrimaryExhaustedRoutingContext {
+  route: string;
+  exhaustedTargets: string[];
+}
+
+function normalizePrimaryExhaustedRouteName(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const bare = trimmed.split('/').map((part) => part.trim()).find(Boolean);
+  return bare || undefined;
+}
+
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readPrimaryExhaustedTargets(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      continue;
+    }
+    const trimmed = item.trim();
+    if (!trimmed || out.includes(trimmed)) {
+      continue;
+    }
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export function resolvePrimaryExhaustedRoutingContextFromError(
+  error: unknown,
+): PrimaryExhaustedRoutingContext | null {
+  const details = asObjectRecord((error as { details?: unknown } | null | undefined)?.details);
+  if (!details) {
+    return null;
+  }
+
+  const route = normalizePrimaryExhaustedRouteName(details.primaryExhaustedRouteName);
+  let exhaustedTargets = readPrimaryExhaustedTargets(details.primaryExhaustedTargets);
+
+  if ((!route || exhaustedTargets.length === 0) && Array.isArray(details.unavailableRoutePools)) {
+    const firstRouteName = details.unavailableRoutePools
+      .map((entry) => asObjectRecord(entry))
+      .map((entry) => normalizePrimaryExhaustedRouteName(entry?.routeName))
+      .find((value): value is string => Boolean(value));
+    if (firstRouteName) {
+      const derivedTargets: string[] = [];
+      for (const rawEntry of details.unavailableRoutePools) {
+        const entry = asObjectRecord(rawEntry);
+        if (!entry) {
+          continue;
+        }
+        if (normalizePrimaryExhaustedRouteName(entry.routeName) !== firstRouteName) {
+          continue;
+        }
+        for (const target of readPrimaryExhaustedTargets(entry.poolTargets)) {
+          if (!derivedTargets.includes(target)) {
+            derivedTargets.push(target);
+          }
+        }
+      }
+      exhaustedTargets = exhaustedTargets.length > 0 ? exhaustedTargets : derivedTargets;
+      return exhaustedTargets.length > 0 ? { route: route ?? firstRouteName, exhaustedTargets } : null;
+    }
+  }
+
+  if (!route || exhaustedTargets.length === 0) {
+    return null;
+  }
+  return { route, exhaustedTargets };
+}
+
+export function collectPrimaryExhaustedKnownTargets(
+  tiers: Array<{ targets: string[] }>,
+): string[] {
+  const knownTargets: string[] = [];
+  for (const tier of tiers) {
+    if (!Array.isArray(tier.targets)) {
+      continue;
+    }
+    for (const target of tier.targets) {
+      if (typeof target !== 'string' || !target.trim() || knownTargets.includes(target)) {
+        continue;
+      }
+      knownTargets.push(target);
+    }
+  }
+  return knownTargets;
+}
+
 /**
  * Host-side adapter around `planPrimaryExhaustedToDefaultPoolNative` (Rust).
  *
@@ -127,13 +231,6 @@ export interface ResolvePrimaryExhaustedPlanOutput {
 export function resolvePrimaryExhaustedPlan(
   input: ResolvePrimaryExhaustedPlanInput
 ): ResolvePrimaryExhaustedPlanOutput {
-  // Lazy import to avoid pulling the bridge module during unit tests that
-  // deliberately isolate the helper. The function is also re-exported via
-  // the bridge index for direct host use.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { planPrimaryExhaustedToDefaultPoolNative } = require('../../../../modules/llmswitch/bridge.js') as {
-    planPrimaryExhaustedToDefaultPoolNative: (i: ResolvePrimaryExhaustedPlanInput) => ResolvePrimaryExhaustedPlanOutput;
-  };
   return planPrimaryExhaustedToDefaultPoolNative({
     route: input.route,
     tiers: input.tiers,

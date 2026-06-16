@@ -828,6 +828,7 @@ impl VirtualRouterEngineCore {
             env,
             &all_candidate_keys,
             "No available providers after applying routing instructions",
+            Some(&unavailable_route_pools),
         ))
     }
 
@@ -1372,6 +1373,7 @@ pub(crate) fn build_provider_not_available_error(
     env: Env,
     candidate_keys: &[String],
     message: impl AsRef<str>,
+    unavailable_route_pools: Option<&[Value]>,
 ) -> String {
     let now_ms = now_ms();
     let mut min_recoverable_cooldown_ms: Option<i64> = None;
@@ -1391,11 +1393,17 @@ pub(crate) fn build_provider_not_available_error(
         );
     }
 
+    let unavailable_route_pool_value = unavailable_route_pools
+        .filter(|items| !items.is_empty())
+        .map(|items| Value::Array(items.to_vec()));
+    let (primary_exhausted_route_name, primary_exhausted_targets) =
+        derive_primary_exhausted_route_details(unavailable_route_pools.unwrap_or(&[]));
+
     if let Some(min_wait_ms) = min_recoverable_cooldown_ms {
         let has_concurrency_busy = hints.iter().any(|item| item.source == "concurrency.busy");
         let mut sorted_hints = hints;
         sorted_hints.sort_by_key(|item| item.wait_ms);
-        let details = json!({
+        let mut details = json!({
             "status": 429,
             "statusCode": 429,
             "retryable": true,
@@ -1420,6 +1428,29 @@ pub(crate) fn build_provider_not_available_error(
                 }))
                 .collect::<Vec<Value>>()
         });
+        if let Value::Object(ref mut map) = details {
+            if let Some(route_pools) = unavailable_route_pool_value.clone() {
+                map.insert("unavailableRoutePools".to_string(), route_pools);
+            }
+            if let Some(route_name) = primary_exhausted_route_name.clone() {
+                map.insert(
+                    "primaryExhaustedRouteName".to_string(),
+                    Value::String(route_name),
+                );
+            }
+            if !primary_exhausted_targets.is_empty() {
+                map.insert(
+                    "primaryExhaustedTargets".to_string(),
+                    Value::Array(
+                        primary_exhausted_targets
+                            .iter()
+                            .cloned()
+                            .map(Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+        }
         return format_virtual_router_error_with_details(
             "HTTP_429",
             if has_concurrency_busy {
@@ -1438,7 +1469,7 @@ pub(crate) fn build_provider_not_available_error(
     }
 
     if !blockers.is_empty() {
-        let details = json!({
+        let mut details = json!({
             "candidateProviderCount": candidate_keys.len(),
             "candidateProviderKeys": candidate_keys,
             "unavailableProviders": blockers
@@ -1449,6 +1480,28 @@ pub(crate) fn build_provider_not_available_error(
                 }))
                 .collect::<Vec<Value>>()
         });
+        if let Value::Object(ref mut map) = details {
+            if let Some(route_pools) = unavailable_route_pool_value {
+                map.insert("unavailableRoutePools".to_string(), route_pools);
+            }
+            if let Some(route_name) = primary_exhausted_route_name {
+                map.insert(
+                    "primaryExhaustedRouteName".to_string(),
+                    Value::String(route_name),
+                );
+            }
+            if !primary_exhausted_targets.is_empty() {
+                map.insert(
+                    "primaryExhaustedTargets".to_string(),
+                    Value::Array(
+                        primary_exhausted_targets
+                            .into_iter()
+                            .map(Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+        }
         return format_virtual_router_error_with_details(
             "PROVIDER_NOT_AVAILABLE",
             message,
@@ -1457,6 +1510,47 @@ pub(crate) fn build_provider_not_available_error(
     }
 
     format_virtual_router_error("PROVIDER_NOT_AVAILABLE", message)
+}
+
+fn derive_primary_exhausted_route_details(
+    unavailable_route_pools: &[Value],
+) -> (Option<String>, Vec<String>) {
+    let Some(first_route_name) = unavailable_route_pools.iter().find_map(|entry| {
+        entry.get("routeName")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }) else {
+        return (None, Vec::new());
+    };
+
+    let mut targets: Vec<String> = Vec::new();
+    for entry in unavailable_route_pools {
+        let Some(route_name) = entry
+            .get("routeName")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if route_name != first_route_name {
+            continue;
+        }
+        let Some(pool_targets) = entry.get("poolTargets").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        for target in pool_targets {
+            let Some(raw) = target.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            if !targets.iter().any(|existing| existing == raw) {
+                targets.push(raw.to_string());
+            }
+        }
+    }
+
+    (Some(first_route_name), targets)
 }
 
 #[cfg(test)]
@@ -2938,8 +3032,22 @@ mod tests {
             None,
             unsafe { Env::from_raw(std::ptr::null_mut()) },
         );
-        // Should fail because no providers are available
-        assert!(result.is_err());
+        let error = result.expect_err("selection should fail");
+        let parsed: Value = serde_json::from_str(&error).expect("virtual router error json");
+        assert_eq!(parsed["code"], "PROVIDER_NOT_AVAILABLE");
+        assert_eq!(parsed["details"]["primaryExhaustedRouteName"], "default");
+        assert_eq!(
+            parsed["details"]["primaryExhaustedTargets"],
+            json!(["test.key1.model"])
+        );
+        assert_eq!(
+            parsed["details"]["unavailableRoutePools"][0]["routeName"],
+            "default"
+        );
+        assert_eq!(
+            parsed["details"]["unavailableRoutePools"][0]["poolTargets"],
+            json!(["test.key1.model"])
+        );
     }
 
     #[test]

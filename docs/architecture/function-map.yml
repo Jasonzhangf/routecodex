@@ -576,15 +576,22 @@ owners:
       - plan_primary_exhausted_to_default_pool_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/server/runtime/http-server/http-server-bootstrap.ts
+      - src/server/runtime/http-server/index.ts
+      - src/server/runtime/http-server/request-executor.ts
+      - src/server/runtime/http-server/executor/request-executor-core-utils.ts
+      - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - docs
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/handlers
-      - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/router
     required_tests:
+      - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     required_gates:
@@ -593,6 +600,7 @@ owners:
     migration_target: rust
     notes:
       - "Host must consume Rust plan only; no local synthesis of default-pool chain."
+      - "Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership."
       - "Unknown target and empty default-pool are explicit contract states, never fallback."
       - "Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list."
 

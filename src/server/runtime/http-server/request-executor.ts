@@ -60,11 +60,14 @@ import {
   describeRequestSemanticsResolution
 } from './executor/provider-response-utils.js';
 import {
+  collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   mergeMetadataPreservingDefined,
   resolvePoolCooldownWaitMs,
   resolvePoolExhaustedBackoffMs,
+  resolvePrimaryExhaustedRoutingContextFromError,
+  resolvePrimaryExhaustedPlan,
   shouldBlockSingletonRoutePoolExhaustion,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
@@ -257,6 +260,7 @@ export type RequestExecutorDeps = {
     getHandleByRuntimeKey(runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined;
   };
   getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
+  getRoutingTiers?(routingPolicyGroup: string, routeName: string): Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
   getModuleDependencies(): ModuleDependencies;
   executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
@@ -632,6 +636,41 @@ export class HubRequestExecutor implements RequestExecutor {
               logStage('hub.pool_exhausted.backoff_wait.completed', providerRequestId, {
                 waitMs,
                 poolExhaustedBackoffAttempt: poolExhaustedBackoffAttempts
+              });
+              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
+              continue;
+            }
+            // G3: primary_exhausted -> default_pool. Before failing fast, ask the
+            // Rust VR planner for a default_pool plan and re-inject it as the
+            // next allowedProviders target list. Host MUST NOT synthesize
+            // fallback targets locally.
+            const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(lastError ?? pipelineError);
+            const primaryExhaustedRoute = primaryExhaustedContext?.route;
+            const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
+              ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, primaryExhaustedRoute) ?? []
+              : [];
+            const plan = resolvePrimaryExhaustedPlan({
+              route: primaryExhaustedRoute ?? '',
+              tiers: primaryExhaustedTiers,
+              exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
+              knownTargets: collectPrimaryExhaustedKnownTargets(primaryExhaustedTiers)
+            });
+            logStage('provider.primary_exhausted_to_default_pool.evaluated', providerRequestId, {
+              planStatus: plan.status,
+              routeName: primaryExhaustedRoute,
+              defaultPoolTargets: plan.defaultPoolTargets,
+              fromTierId: plan.fromTierId ?? null,
+              exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
+              excludedProviderKeys: Array.from(excludedProviderKeys)
+            });
+            if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
+              excludedProviderKeys.clear();
+              poolExhaustedBackoffAttempts = 0;
+              retryProviderKeyForNextAttempt = undefined;
+              metadataForAttempt.allowedProviders = [...plan.defaultPoolTargets];
+              logStage('provider.primary_exhausted_to_default_pool.applied', providerRequestId, {
+                defaultPoolTargets: plan.defaultPoolTargets,
+                fromTierId: plan.fromTierId ?? null
               });
               allowPoolExhaustedBackoffBeyondAttemptBudget = true;
               continue;

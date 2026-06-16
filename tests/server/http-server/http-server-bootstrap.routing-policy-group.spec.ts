@@ -1,5 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
-import { extractProviderKeysForRoutingGroup } from '../../../src/server/runtime/http-server/http-server-bootstrap.js';
+import {
+  extractProviderKeysForRoutingGroup,
+  extractRoutingTiersForRoutingGroupRoute,
+} from '../../../src/server/runtime/http-server/http-server-bootstrap.js';
 
 describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => {
   test('normalizes provider.model targets into provider-id allowlist', () => {
@@ -114,5 +117,54 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
 
   test('returns empty array for missing routingPolicyGroup', () => {
     expect(extractProviderKeysForRoutingGroup({ virtualrouter: { routingPolicyGroups: {} } } as any, 'missing')).toEqual([]);
+  });
+
+  test('extracts exact route tiers for primary_exhausted planner without flattening forwarders', () => {
+    const userConfig = {
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_priority_5555: {
+            routing: {
+              coding: [
+                {
+                  id: 'coding-primary',
+                  priority: 200,
+                  mode: 'priority',
+                  targets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'],
+                },
+                {
+                  id: 'coding-backup',
+                  priority: 100,
+                  backup: true,
+                  targets: ['fwd.minimax.MiniMax-M3'],
+                },
+              ],
+              default: [
+                {
+                  id: 'default-primary',
+                  priority: 50,
+                  targets: ['mimo.mimo-v2.5'],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    expect(extractRoutingTiersForRoutingGroupRoute(userConfig as any, 'gateway_priority_5555', 'coding')).toEqual([
+      {
+        id: 'coding-primary',
+        priority: 200,
+        backup: undefined,
+        targets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'],
+      },
+      {
+        id: 'coding-backup',
+        priority: 100,
+        backup: true,
+        targets: ['fwd.minimax.MiniMax-M3'],
+      },
+    ]);
   });
 });
