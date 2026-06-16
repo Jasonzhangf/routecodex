@@ -58,14 +58,20 @@
 14. `docs/architecture/wiki/server-responses-sse-bridge-map.md`
    - 看 server `JSON/SSE` 出口 facade、Rust response projection owner、以及 JSON/SSE 等价缺口。
 
-15. `docs/architecture/wiki/coverage-matrix.md`
+15. `docs/architecture/wiki/responses-direct-relay-map.md`
+   - 看 `/v1/responses` 的 `direct` vs `relay` continuation ownership、合法入口、非法 crossing、provider pin。
+
+16. `docs/architecture/wiki/servertool-followup-call-graph.md`
+   - 看 `followup / CLI projection / stopless` 三条 servertool 分支如何回到主链，以及谁是 owner。
+
+17. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-16. `docs/architecture/verification-map.yml`
+18. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-17. `docs/goals/*`
+19. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -89,6 +95,8 @@
 - `docs/architecture/wiki/metadata-boundary-map.md`
 - `docs/architecture/wiki/chat-process-protocol-mapping.md`
 - `docs/architecture/wiki/server-responses-sse-bridge-map.md`
+- `docs/architecture/wiki/responses-direct-relay-map.md`
+- `docs/architecture/wiki/servertool-followup-call-graph.md`
 - `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`

@@ -15,6 +15,8 @@
 - `wiki/metadata-boundary-map.md`
 - `wiki/chat-process-protocol-mapping.md`
 - `wiki/server-responses-sse-bridge-map.md`
+- `wiki/responses-direct-relay-map.md`
+- `wiki/servertool-followup-call-graph.md`
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -63,6 +65,14 @@
 - `wiki/server-responses-sse-bridge-map.md`
   - server `JSON/SSE` response facade 与 Rust projection owner 的 review 面
   - 用于审计 SSE bridge 是否保持薄壳，以及 JSON/SSE 是否对同一响应语义等价
+
+- `wiki/responses-direct-relay-map.md`
+  - `/v1/responses` direct vs relay ownership、合法 continuation 入口、非法 crossing 与 provider pin 的 review 面
+  - 用于审计 continuation 是否仍按 `entryKind + continuationOwner + scope` 三重隔离
+
+- `wiki/servertool-followup-call-graph.md`
+  - `followup / CLI projection / stopless` 三条 servertool 主链分支的 review 面
+  - 用于审计 followup 是否仍只走 relay reenter，CLI/stopless 是否仍与 followup 隔离
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`
