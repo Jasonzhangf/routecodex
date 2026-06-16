@@ -49,14 +49,20 @@
 11. `docs/architecture/wiki/virtual-router-ownership-map.md`
    - 看 `vr.* / virtual_router.*` owner 聚合页。
 
-12. `docs/architecture/wiki/coverage-matrix.md`
+12. `docs/architecture/wiki/metadata-boundary-map.md`
+   - 看 `sessionId/requestId/continuationOwner` 等 metadata 如何在 request/response 闭环中传递，以及哪里必须断开。
+
+13. `docs/architecture/wiki/chat-process-protocol-mapping.md`
+   - 看 `openai-chat / openai-responses / anthropic-messages` 三协议如何进入统一 chat process 语义，以及当前映射漏洞。
+
+14. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-13. `docs/architecture/verification-map.yml`
+15. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-14. `docs/goals/*`
+16. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -77,6 +83,8 @@
 - `docs/architecture/wiki/runtime-lifecycle-call-graph.md`
 - `docs/architecture/wiki/servertool-ownership-map.md`
 - `docs/architecture/wiki/virtual-router-ownership-map.md`
+- `docs/architecture/wiki/metadata-boundary-map.md`
+- `docs/architecture/wiki/chat-process-protocol-mapping.md`
 - `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`

@@ -12,6 +12,8 @@
 - `wiki/runtime-lifecycle-call-graph.md`
 - `wiki/servertool-ownership-map.md`
 - `wiki/virtual-router-ownership-map.md`
+- `wiki/metadata-boundary-map.md`
+- `wiki/chat-process-protocol-mapping.md`
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -48,6 +50,14 @@
 - `wiki/servertool-ownership-map.md` / `wiki/virtual-router-ownership-map.md`
   - 从 `function-map.yml` 自动生成的专题 owner 聚合页
   - 用于专题审计时快速收敛 owner、验证栈、允许/禁止修改路径
+
+- `wiki/metadata-boundary-map.md`
+  - metadata / continuation scope 的 request/response 闭环 review 面
+  - 用于审计 `sessionId / requestId / pipelineId / continuationOwner` 如何传递、哪里必须断开
+
+- `wiki/chat-process-protocol-mapping.md`
+  - 三协议 `openai-chat / openai-responses / anthropic-messages` 进入统一 chat process 的字段映射 review 面
+  - 用于审计哪些语义已 lift 到 `chat/semantics`，哪些还残留在 legacy metadata / transitional surfaces
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`
