@@ -25,6 +25,34 @@ describe('http-error-mapper policy-exhausted gate', () => {
     })).toThrow(/policy\/candidate exhaustion/);
   });
 
+  it('[forward] mapErrorToHttp remains a pure 4xx projector outside ErrorErr06 gating', () => {
+    const args = {
+      message: 'bad params',
+      code: 'HTTP_400',
+      status: 400,
+      requestId: 'req_g7_unexhausted',
+      providerKey: 'p.q.model',
+      details: { policyExhausted: false, candidateExhausted: false },
+    };
+    const payload = mapErrorToHttp(args);
+    expect(payload.status).toBe(400);
+    expect(payload.body.error.message).toBe('Upstream rejected the request');
+  });
+
+  it('[reverse] mapErrorToHttp 4xx with policyExhausted=true still projects correctly', () => {
+    const args = {
+      message: 'model not found',
+      code: 'HTTP_400',
+      status: 400,
+      requestId: 'req_g7_exhausted',
+      providerKey: 'p.q.model',
+      details: { policyExhausted: true, upstreamCode: 'HTTP_400' },
+    };
+    const payload = mapErrorToHttp(args);
+    expect(payload.status).toBe(400);
+    expect(payload.body.error.message).toBe('Upstream rejected the request');
+  });
+
   it('[reverse] detailed upstream 4xx with exhausted marker still projects correctly', () => {
     const payload = project_error_err_06_client_from_error_err_05_execution_decision({
       message: 'HTTP 400: upstream rejected payload',
@@ -49,14 +77,17 @@ describe('http-error-mapper policy-exhausted gate', () => {
     expect(payload.body.error.code).toBe('MALFORMED_REQUEST');
   });
 
-  it('[reverse] client_disconnect projects to 204 without exhausted marker', () => {
-    const payload = project_error_err_06_client_from_error_err_05_execution_decision({
+  it('[reverse] client_disconnect must NOT project any HTTP status code or body (non-projectable sentinel)', () => {
+    // Per docs/goals/provider-error-chain-direct-relay-audit-2026-06-15.md §0.4:
+    // client_disconnect = server stop request + keep disconnect, no 204 body, no CLIENT_DISCONNECTED JSON.
+    const args = {
       message: 'HTTP 499: {"error":{"message":"client abort request"}}',
       code: 'HTTP_499',
       status: 499,
       requestId: 'req_client_abort',
-    });
-    expect(payload.status).toBe(204);
-    expect(payload.body.error.code).toBe('CLIENT_DISCONNECTED');
+    };
+    expect(() => mapErrorToHttp(args)).toThrow(/client_disconnect/i);
+    expect(() => project_error_err_06_client_from_error_err_05_execution_decision(args))
+      .toThrow(/client_disconnect/i);
   });
 });

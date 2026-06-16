@@ -1,8 +1,18 @@
-import { mapErrorToHttp } from '../../../src/server/utils/http-error-mapper.js';
+import { mapErrorToHttp, ClientDisconnectHttpProjectionError } from '../../../src/server/utils/http-error-mapper.js';
+
+function expectClientDisconnectSentinel(args: unknown): void {
+  let thrown: unknown;
+  try {
+    mapErrorToHttp(args);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(ClientDisconnectHttpProjectionError);
+}
 
 describe('http-error-mapper 499 client-disconnect suppression', () => {
-  it('does not return upstream 499 + body to client when upstream body signals client abort', () => {
-    const payload = mapErrorToHttp({
+  it('throws ClientDisconnectHttpProjectionError (no client body) when upstream body signals client abort', () => {
+    expectClientDisconnectSentinel({
       message: 'HTTP 499: {"error":{"code":"HTTP_499","status":499}}',
       code: 'HTTP_499',
       status: 499,
@@ -26,35 +36,36 @@ describe('http-error-mapper 499 client-disconnect suppression', () => {
         providerKey: 'asxs.crsa.gpt-5.4-mini',
       },
     });
-    // Client-visible 499 must not leak to caller. 499 means "Client Closed Request" and is
-    // a transport cancellation, not a client-valid error.
-    expect(payload.status).not.toBe(499);
-    expect(payload.body.error.message.toLowerCase()).not.toContain('client abort request');
-    expect(payload.body.error.message.toLowerCase()).not.toContain('upstream rejected');
-    // No provider cooldown side-effect signal: code is a neutral client-disconnect marker.
-    expect(payload.body.error.code).toBe('CLIENT_DISCONNECTED');
   });
 
-  it('does not return upstream 499 when message contains client abort request', () => {
-    const payload = mapErrorToHttp({
+  it('throws ClientDisconnectHttpProjectionError when message contains client abort request', () => {
+    expectClientDisconnectSentinel({
       message: 'client abort request',
       code: 'HTTP_499',
       status: 499,
       requestId: 'req_test_499_abort',
       providerKey: 'asxs.crsa.gpt-5.4-mini',
     });
-    expect(payload.status).not.toBe(499);
-    expect(payload.body.error.message.toLowerCase()).not.toContain('client abort request');
-    expect(payload.body.error.code).toBe('CLIENT_DISCONNECTED');
   });
 
-  it('keeps ordinary 4xx (e.g. 400) on the rejection path', () => {
-    const payload = mapErrorToHttp({
+  it('ordinary 4xx now requires exhaustion marker before projection', () => {
+    const payloadWithoutMarker = mapErrorToHttp({
       message: 'HTTP 400: bad params',
       code: 'HTTP_400',
       status: 400,
       requestId: 'req_test_400',
       providerKey: 'p.q.model',
+    });
+    expect(payloadWithoutMarker.status).toBe(400);
+    expect(payloadWithoutMarker.body.error.message).toBe('Upstream rejected the request');
+
+    const payload = mapErrorToHttp({
+      message: 'HTTP 400: bad params',
+      code: 'HTTP_400',
+      status: 400,
+      requestId: 'req_test_400_exhausted',
+      providerKey: 'p.q.model',
+      details: { policyExhausted: true },
     });
     expect(payload.status).toBe(400);
     expect(payload.body.error.message).toBe('Upstream rejected the request');

@@ -121,6 +121,33 @@ function tryExtractNestedJsonErrorMessage(raw?: string): { message?: string; req
   }
 }
 
+/**
+ * Sentinel error thrown by `mapErrorToHttp` when the error represents a client_disconnect
+ * transport cancellation (HTTP_499 / `client abort request` / `client closed request` /
+ * `CLIENT_DISCONNECTED`). Per
+ * `docs/goals/provider-error-chain-direct-relay-audit-2026-06-15.md` §0.4, client_disconnect
+ * is non-projectable: there is no client-visible HTTP status code, no JSON body, and no
+ * SSE event frame. Callers must `catch` this sentinel, terminate the response silently
+ * (res.end / res.destroy), and tag internal logs / usage summary with `client_disconnect=true`.
+ */
+export class ClientDisconnectHttpProjectionError extends Error {
+  readonly code = 'CLIENT_DISCONNECT_NON_PROJECTABLE';
+  readonly statusCode = 0;
+  readonly requestId: string | undefined;
+  constructor(requestId?: string, message = 'client_disconnect non-projectable sentinel') {
+    super(message);
+    this.name = 'ClientDisconnectHttpProjectionError';
+    this.requestId = requestId;
+  }
+}
+
+export function isClientDisconnectHttpProjectionSentinel(error: unknown): boolean {
+  return error instanceof ClientDisconnectHttpProjectionError
+    || (Boolean(error)
+      && typeof error === 'object'
+      && (error as { code?: unknown }).code === 'CLIENT_DISCONNECT_NON_PROJECTABLE');
+}
+
 export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const error = normalizeErrorPayload(err);
   const baseMessage = typeof error.message === 'string' ? error.message : String(err ?? 'Unknown error');
@@ -163,19 +190,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     });
   }
 
-  if (isClientDisconnectLikeForProjection({
-    status,
-    code: normalizedCode,
-    baseMessage,
-    upstreamMessage,
-    effectiveUpstreamMessage,
-  })) {
-    return formatPayload(204, {
-      message: 'Client disconnected before upstream response completed',
-      code: CLIENT_DISCONNECT_PUBLIC_CODE,
-      request_id: requestId,
-      ...validationFields,
-    });
+  if (isClientDisconnectHttpProjectionCandidate(error)) {
+    throw new ClientDisconnectHttpProjectionError(requestId);
   }
 
   const timeoutHint = `${baseMessage} ${extractString(error.code) || ''} ${extractString(upstreamCode) || ''}`.toLowerCase();
@@ -240,6 +256,23 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     request_id: requestId,
     ...validationFields,
     ...detailField
+  });
+}
+
+export function isClientDisconnectHttpProjectionCandidate(err: unknown): boolean {
+  const error = normalizeErrorPayload(err);
+  const baseMessage = typeof error.message === 'string' ? error.message : String(err ?? 'Unknown error');
+  const upstream = extractUpstreamError(error);
+  const status = normalizeStatus(extractStatus(error), upstream.status);
+  const normalizedCode = String(upstream.code || extractString(error.code) || '').trim().toUpperCase();
+  const nestedJson = tryExtractNestedJsonErrorMessage(upstream.message || baseMessage);
+  const effectiveUpstreamMessage = nestedJson?.message || upstream.message;
+  return isClientDisconnectLikeForProjection({
+    status,
+    code: normalizedCode,
+    baseMessage,
+    upstreamMessage: upstream.message,
+    effectiveUpstreamMessage,
   });
 }
 
@@ -315,7 +348,15 @@ function isProviderProjectionCandidate(error: RawErrorPayload, status: number, n
 }
 
 export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {
-  const projected = mapErrorToHttp(error);
+  let projected: HttpErrorPayload;
+  try {
+    projected = mapErrorToHttp(error);
+  } catch (err) {
+    if (isClientDisconnectHttpProjectionSentinel(err)) {
+      return 'client_disconnect=true request_aborted_by_client';
+    }
+    throw err;
+  }
   const message = projected.body.error.message;
   if (fallback !== undefined && projected.status !== 401 && projected.status !== 403 && projected.status !== 429) {
     return fallback;

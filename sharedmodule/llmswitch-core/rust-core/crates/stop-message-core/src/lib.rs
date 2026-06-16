@@ -2086,8 +2086,9 @@ mod tests {
     #[test]
     fn needs_user_input_not_exposed_to_model() {
         // The STOP_SCHEMA_JSON_EXAMPLE should contain needs_user_input
-        // but stopreason should NOT contain 3
+        // but stopreason should NOT contain 3 and forcestop stays internal-only.
         assert!(STOP_SCHEMA_JSON_EXAMPLE.contains("needs_user_input"));
         assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains(r#"stopreason":3"#));
+        assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains("forcestop"));
     }
 }

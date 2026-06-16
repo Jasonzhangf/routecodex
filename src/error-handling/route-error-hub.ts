@@ -1,6 +1,10 @@
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
-import { mapErrorToHttp, type HttpErrorPayload } from '../server/utils/http-error-mapper.js';
+import {
+  isClientDisconnectHttpProjectionSentinel,
+  mapErrorToHttp,
+  type HttpErrorPayload
+} from '../server/utils/http-error-mapper.js';
 import {
   formatErrorForErrorCenter,
   type ErrorExtras
@@ -97,7 +101,13 @@ export class RouteErrorHub {
 
     let http: HttpErrorPayload | undefined;
     if (options?.includeHttpResult) {
-      http = mapErrorToHttp(this.buildHttpPayload(normalized));
+      try {
+        http = mapErrorToHttp(this.buildHttpPayload(normalized));
+      } catch (error) {
+        if (!isClientDisconnectHttpProjectionSentinel(error)) {
+          throw error;
+        }
+      }
     }
 
     return { http };
