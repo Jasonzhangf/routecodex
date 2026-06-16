@@ -14,6 +14,7 @@
 - `wiki/virtual-router-ownership-map.md`
 - `wiki/metadata-boundary-map.md`
 - `wiki/chat-process-protocol-mapping.md`
+- `wiki/server-responses-sse-bridge-map.md`
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -58,6 +59,10 @@
 - `wiki/chat-process-protocol-mapping.md`
   - 三协议 `openai-chat / openai-responses / anthropic-messages` 进入统一 chat process 的字段映射 review 面
   - 用于审计哪些语义已 lift 到 `chat/semantics`，哪些还残留在 legacy metadata / transitional surfaces
+
+- `wiki/server-responses-sse-bridge-map.md`
+  - server `JSON/SSE` response facade 与 Rust projection owner 的 review 面
+  - 用于审计 SSE bridge 是否保持薄壳，以及 JSON/SSE 是否对同一响应语义等价
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`

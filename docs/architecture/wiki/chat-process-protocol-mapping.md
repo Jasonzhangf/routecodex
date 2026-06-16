@@ -85,6 +85,43 @@ flowchart LR
 | continuation owner/restore truth | internal only | internal only, explicit protocol fields rebuilt from semantics | internal only |
 | hidden reasoning retention | protocol-dependent internal carrier | protocol-dependent internal carrier | anthropic/native carrier and projection owner |
 
+## Field-Level Mapping Matrix
+
+### Request Fields
+
+| Unified meaning | `openai-chat` request field | `openai-responses` request field | `anthropic-messages` request field | Unified target |
+| --- | --- | --- | --- | --- |
+| user / assistant history | `messages[]` | `input[]` / restored `fullInput` | `messages[]` | `ChatEnvelope.messages` |
+| system instruction | system role message | `instructions` or leading system `input_text` | top-level `system` | `semantics.system.textBlocks` |
+| tool declaration list | `tools[]` | `tools[]` | `tools[]` | `semantics.tools.clientToolsRaw` |
+| explicit no-tools intent | empty `tools[]` / tool policy hints | empty `tools[]` | empty `tools[]` | `semantics.tools.explicitEmpty` |
+| tool result submission | `role=tool` + `tool_call_id` | `function_call_output` / `submit_tool_outputs` | `tool_result` + `tool_use_id` | `chat.toolOutputs` |
+| continuation anchor | session/conversation continuity | `previous_response_id` / `response_id` / `responsesResume.*` | message-level continuity hints | `semantics.continuation.*` |
+| response schema / format hint | response format style fields | `response_format` family | schema guidance / tool guidance | protocol supplement under `semantics.*` |
+| anthropic alias map | n/a | n/a | tool name aliasing | `semantics.tools.toolNameAliasMap` |
+
+### Response Fields
+
+| Unified meaning | `openai-chat` response field | `openai-responses` response field | `anthropic-messages` response field | Unified source |
+| --- | --- | --- | --- | --- |
+| assistant text | `choices[].message.content` | `output_text` / `output[].content[].text` | assistant text block | governed plain text response |
+| tool call request | `assistant.tool_calls[]` | `output.function_call` + `required_action.submit_tool_outputs.tool_calls[]` | `content[].tool_use` | governed tool-call response |
+| tool-call id | `tool_calls[].id` | `call_id` / `id` | `tool_use.id` | same semantic tool-call identity |
+| tool result linkage | `tool_call_id` in next request | `function_call_output.call_id` | `tool_result.tool_use_id` | same semantic linkage id |
+| terminal marker | `finish_reason` | `response.completed` / `response.done` | content-block terminal / final completion | unified terminal response state |
+| continuation resume truth | internal only | rebuilt protocol fields only | internal only | `semantics.continuation` |
+| hidden reasoning | hidden/internal | replay-safe retained subset only | hidden/internal native carrier | internal carrier only |
+
+## JSON / SSE Equality Surface
+
+| Semantic | JSON surface | SSE surface | Must hold |
+| --- | --- | --- | --- |
+| terminal completion | final JSON body | `response.completed` / `response.done` | same terminal truth |
+| tool call availability | final `assistant.tool_calls` or `required_action` | completed event / final SSE frame | same consumer-visible tool call set |
+| tool-call ids | final body ids | terminal SSE frame ids | ids must match exactly |
+| plain text output | final text field | accumulated SSE visible output | semantic equality, not necessarily byte-for-byte chunking |
+| error projection | JSON error body | `event:error` or terminal error frame | same error class, no success-wrapped error |
+
 ## Legacy Metadata Keys That Must Not Reach Chat Process
 
 来自 `CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` 的 fail-fast 清单：
@@ -150,6 +187,8 @@ flowchart TD
 | `verify:protocol-mapping-audit-coverage` | 断言三协议对 `preserved/lossy/dropped/unsupported` 都有显式 audit |
 | `verify:tool-call-id-roundtrip-three-protocols` | 锁住 `tool_call_id / call_id / tool_use_id` roundtrip 一致性 |
 | `verify:continuation-owner-three-protocols` | 锁住 `entryKind + continuationOwner + scope` 不被协议特判绕回去 |
+| `verify:responses-sse-json-equality` | 锁住 JSON 与 SSE 对同一响应语义等价，尤其 tool call / required_action / terminal |
+| `verify:server-responses-sse-bridge-surface` | 锁住 server 只有单一 SSE bridge surface，不把协议语义散回 handler |
 
 ## Review Checklist
 
@@ -159,3 +198,5 @@ flowchart TD
 - response projection 是否同时覆盖 `openai-chat`、`openai-responses`、`anthropic-messages`。
 - `tool_call_id / call_id / tool_use_id` 是否保持可追溯一致。
 - 有损或不支持字段是否进入 `protocolMapping` audit，而不是静默丢失。
+- JSON 与 SSE 是否对同一响应语义等价。
+- server SSE bridge 是否仍是 facade-only 单一出口，而不是重新长出第二份协议语义。

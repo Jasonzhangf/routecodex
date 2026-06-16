@@ -55,14 +55,17 @@
 13. `docs/architecture/wiki/chat-process-protocol-mapping.md`
    - 看 `openai-chat / openai-responses / anthropic-messages` 三协议如何进入统一 chat process 语义，以及当前映射漏洞。
 
-14. `docs/architecture/wiki/coverage-matrix.md`
+14. `docs/architecture/wiki/server-responses-sse-bridge-map.md`
+   - 看 server `JSON/SSE` 出口 facade、Rust response projection owner、以及 JSON/SSE 等价缺口。
+
+15. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-15. `docs/architecture/verification-map.yml`
+16. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-16. `docs/goals/*`
+17. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -85,6 +88,7 @@
 - `docs/architecture/wiki/virtual-router-ownership-map.md`
 - `docs/architecture/wiki/metadata-boundary-map.md`
 - `docs/architecture/wiki/chat-process-protocol-mapping.md`
+- `docs/architecture/wiki/server-responses-sse-bridge-map.md`
 - `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`

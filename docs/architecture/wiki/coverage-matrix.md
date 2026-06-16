@@ -27,6 +27,7 @@
 | Chat-process protocol mapping | `docs/architecture/wiki/chat-process-protocol-mapping.md` | done | `openai-chat / openai-responses / anthropic-messages` 统一语义字段与映射漏洞 |
 | Responses direct/relay detail | `docs/architecture/wiki/responses-direct-relay-map.md` | medium | direct vs relay ownership、continuation owner、passthrough boundary |
 | Servertool followup call graph | `docs/architecture/wiki/servertool-followup-call-graph.md` | medium | followup / CLI projection / stopless lifecycle / backend-route |
+| Server SSE bridge surface | `docs/architecture/wiki/server-responses-sse-bridge-map.md` | done | server JSON/SSE facade、Rust projection owner、JSON/SSE equality gaps |
 
 ## Rule
 
