@@ -197,6 +197,50 @@ describe('stopless CLI continuation', () => {
     }
   });
 
+  test('stopless no-schema advances 1 -> 2 -> 3 when session truth exists only in __rt.responsesRequestContext', async () => {
+    isolateSessionDir('no-schema-progress-relay-rt');
+    const sessionId = `session-stopless-relay-rt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestIds = [
+      `req-stopless-relay-rt-${Date.now()}-1`,
+      `req-stopless-relay-rt-${Date.now()}-2`,
+      `req-stopless-relay-rt-${Date.now()}-3`
+    ];
+    const commands: string[] = [];
+    const outputs: Array<Record<string, any>> = [];
+
+    for (const requestId of requestIds) {
+      const adapterContext = buildAdapterContext({
+        sessionId: '',
+        requestId
+      });
+      (adapterContext as any).__rt = {
+        responsesRequestContext: {
+          sessionId,
+          conversationId: `conv-${sessionId}`
+        }
+      };
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('need more evidence'),
+        adapterContext,
+        requestId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        reenterPipeline: async () => {
+          throw new Error('stopless CLI projection must not reenter');
+        }
+      });
+      const command = extractExecCommand(result.chat);
+      commands.push(command);
+      outputs.push(await runStoplessCliStdout(command));
+    }
+
+    expect(commands.map(extractRepeatCount)).toEqual([1, 2, 3]);
+    expect(outputs.map((entry) => entry.repeatCount)).toEqual([1, 2, 3]);
+    for (const command of commands) {
+      expect(command).toContain(`--session-id '${sessionId}'`);
+    }
+  });
+
   test('invalid stop schema returns detailed correction result and preserves it into next-turn CLI stdout', async () => {
     isolateSessionDir('invalid-schema-detail');
     const sessionId = `session-stopless-invalid-${Date.now()}-${Math.random().toString(16).slice(2)}`;

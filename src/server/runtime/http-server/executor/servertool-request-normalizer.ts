@@ -15,6 +15,13 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function readRuntimeResponsesRequestContext(
+  baseContext: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const runtime = asFlatRecord(baseContext.__rt);
+  return asFlatRecord(runtime?.responsesRequestContext);
+}
+
 function payloadContainsRccFence(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') {
     return false;
@@ -31,7 +38,9 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   entryOriginRequest: unknown
 ): void {
   const entryOrigin = asFlatRecord(entryOriginRequest);
-  const responsesRequestContext = asFlatRecord(baseContext.responsesRequestContext);
+  const responsesRequestContext =
+    asFlatRecord(baseContext.responsesRequestContext)
+    ?? readRuntimeResponsesRequestContext(baseContext);
   if (!entryOrigin) {
     const sessionIdFromResponsesContext =
       readSessionLikeToken(baseContext.sessionId) ??

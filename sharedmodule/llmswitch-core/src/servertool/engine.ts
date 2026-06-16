@@ -206,7 +206,20 @@ function readStoplessSessionId(adapterContext: unknown): string | undefined {
     ? record.__rt as Record<string, unknown>
     : null;
   const rt = runtime && typeof runtime.sessionId === 'string' ? runtime.sessionId.trim() : '';
-  return rt || undefined;
+  if (rt) {
+    return rt;
+  }
+  const responsesRequestContext =
+    runtime?.responsesRequestContext
+    && typeof runtime.responsesRequestContext === 'object'
+    && !Array.isArray(runtime.responsesRequestContext)
+      ? runtime.responsesRequestContext as Record<string, unknown>
+      : null;
+  const relaySessionId =
+    responsesRequestContext && typeof responsesRequestContext.sessionId === 'string'
+      ? responsesRequestContext.sessionId.trim()
+      : '';
+  return relaySessionId || undefined;
 }
 
 function readStoplessRouteName(adapterContext: unknown): string | undefined {

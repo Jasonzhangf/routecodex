@@ -312,11 +312,36 @@ function buildServertoolRoutingMetadata(
 ): Record<string, unknown> {
   const metadata = asRecord(record.metadata);
   const runtime = asRecord(runtimeMetadata);
+  const responsesRequestContext =
+    asRecord(record.responsesRequestContext)
+    ?? asRecord(metadata?.responsesRequestContext)
+    ?? asRecord(runtime?.responsesRequestContext);
+  const sessionId =
+    readNonEmptyString(record.sessionId)
+    ?? readNonEmptyString(metadata?.sessionId)
+    ?? readNonEmptyString(runtime?.sessionId)
+    ?? readNonEmptyString(responsesRequestContext?.sessionId);
+  const conversationId =
+    readNonEmptyString(record.conversationId)
+    ?? readNonEmptyString(metadata?.conversationId)
+    ?? readNonEmptyString(runtime?.conversationId)
+    ?? readNonEmptyString(responsesRequestContext?.conversationId);
   return {
     ...(metadata ?? {}),
     ...(runtime ?? {}),
-    ...record
+    ...record,
+    ...(responsesRequestContext ? { responsesRequestContext } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(conversationId ? { conversationId } : {})
   };
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function buildPersistableRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {

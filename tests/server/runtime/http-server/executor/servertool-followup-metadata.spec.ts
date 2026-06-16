@@ -55,6 +55,26 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata.conversationId).toBe('conv_relay_ctx');
   });
 
+  it('backfills session identifiers from nested __rt.responsesRequestContext when headers are absent', () => {
+    const metadata = buildServerToolNestedRequestMetadata({
+      baseMetadata: {
+        __rt: {
+          responsesRequestContext: {
+            sessionId: 'sess_relay_rt_ctx',
+            conversationId: 'conv_relay_rt_ctx'
+          }
+        }
+      },
+      extraMetadata: {
+        __rt: { serverToolFollowup: true }
+      },
+      entryEndpoint: '/v1/responses'
+    });
+
+    expect(metadata.sessionId).toBe('sess_relay_rt_ctx');
+    expect(metadata.conversationId).toBe('conv_relay_rt_ctx');
+  });
+
   it('backfills daemon tmux and workdir continuity tokens from preserved headers', () => {
     const metadata = buildServerToolNestedRequestMetadata({
       baseMetadata: {},

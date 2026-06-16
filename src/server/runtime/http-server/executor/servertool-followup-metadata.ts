@@ -189,7 +189,9 @@ function readResponsesRequestContextIdentifiers(
   sessionId?: string;
   conversationId?: string;
 } {
-  const responsesRequestContext = asRecord(metadata?.responsesRequestContext);
+  const responsesRequestContext =
+    asRecord(metadata?.responsesRequestContext)
+    ?? asRecord(asRecord(metadata?.__rt)?.responsesRequestContext);
   const sessionId = readNonEmptyString(responsesRequestContext?.sessionId);
   const conversationId = readNonEmptyString(responsesRequestContext?.conversationId);
   return {

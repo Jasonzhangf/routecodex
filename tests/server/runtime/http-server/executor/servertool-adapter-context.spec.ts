@@ -153,6 +153,32 @@ describe('servertool adapter context builder', () => {
     expect(context.conversationId).toBe('conv-relay');
   });
 
+  it('backfills session and conversation identifiers from nested __rt.responsesRequestContext metadata', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        __rt: {
+          responsesRequestContext: {
+            sessionId: 'sess-relay-rt',
+            conversationId: 'conv-relay-rt'
+          }
+        }
+      },
+      requestId: 'req-session-relay-rt-backfill',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBe('sess-relay-rt');
+    expect(context.conversationId).toBe('conv-relay-rt');
+  });
+
   it('forwards reasoning stop seed errors to onReasoningStopSeedError callback', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
