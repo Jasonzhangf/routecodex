@@ -42,14 +42,14 @@ flowchart LR
   class ProviderReqOutbound06WirePayload partial;
 ```
 
-| step | transition | status | caller -> callee | owner |
-| --- | --- | --- | --- | --- |
-| req-00 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` | `server.responses_request_handler_bridge_surface`<br/>/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner |
-| req-01 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
-| req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
-| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | binding pending | `binding pending` | `binding pending` |
-| req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | binding pending | `binding pending` | `binding pending` |
-| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | partial | `runReqOutboundStage3CompatWithNative -> run_req_outbound_stage3_compat_json` | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| req-00 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `server.responses_request_handler_bridge_surface`<br/>/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner |
+| req-01 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
+| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | binding pending | `binding pending` | `request.route_selection.runtime_vs_typed` | `binding pending` |
+| req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | binding pending | `binding pending` | `request.req_outbound_05.runtime_vs_typed` | `binding pending` |
+| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | partial | `runReqOutboundStage3CompatWithNative -> run_req_outbound_stage3_compat_json` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
 
 ## response.mainline
 
@@ -78,12 +78,12 @@ flowchart LR
   class ServerRespOutbound05ClientFrame anchored;
 ```
 
-| step | transition | status | caller -> callee | owner |
-| --- | --- | --- | --- | --- |
-| resp-01 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `run_hub_resp_inbound_02_parsed_entrypoint -> parse_hub_resp_inbound_02_from_provider_resp_inbound_01` | `binding pending` |
-| resp-02 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `run_hub_resp_chatprocess_03_governed_entrypoint -> build_hub_resp_chatprocess_03_from_hub_resp_inbound_02` | `binding pending` |
-| resp-03 | `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> projectResponsesClientPayloadForClientNative` | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore |
-| resp-04 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sendPipelineResponse -> sendSsePipelineResponse` | `server.responses_response_handler_bridge_surface`<br/>/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner |
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| resp-01 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `run_hub_resp_inbound_02_parsed_entrypoint -> parse_hub_resp_inbound_02_from_provider_resp_inbound_01` |  | `binding pending` |
+| resp-02 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `run_hub_resp_chatprocess_03_governed_entrypoint -> build_hub_resp_chatprocess_03_from_hub_resp_inbound_02` |  | `binding pending` |
+| resp-03 | `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> projectResponsesClientPayloadForClientNative` |  | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore |
+| resp-04 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sendPipelineResponse -> sendSsePipelineResponse` |  | `server.responses_response_handler_bridge_surface`<br/>/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner |
 
 ## error.mainline
 
@@ -112,12 +112,12 @@ flowchart LR
   class ErrorErr06ClientProjected anchored;
 ```
 
-| step | transition | status | caller -> callee | owner |
-| --- | --- | --- | --- | --- |
-| err-01 | `ErrorErr01SourceRaised -> ErrorErr02HostCaptured` | anchored | `reportProviderErrorToRouterPolicy -> reportProviderErrorToRouterPolicy` | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
-| err-02 | `ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified` | anchored | `classifyProviderFailure -> classifyProviderFailure` | `error.provider_failure_policy`<br/>provider error cataloging, runtime classification, router policy application, client-disconnect and upstream-stream-incomplete routing |
-| err-03 | `ErrorErr03RuntimeClassified -> ErrorErr05ExecutionDecision` | partial | `resolveProviderRetryExecutionPlan -> consume_error_err_05_execution_decision_from_error_err_04_router_policy` | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
-| err-04 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| err-01 | `ErrorErr01SourceRaised -> ErrorErr02HostCaptured` | anchored | `reportProviderErrorToRouterPolicy -> reportProviderErrorToRouterPolicy` |  | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
+| err-02 | `ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified` | anchored | `classifyProviderFailure -> classifyProviderFailure` |  | `error.provider_failure_policy`<br/>provider error cataloging, runtime classification, router policy application, client-disconnect and upstream-stream-incomplete routing |
+| err-03 | `ErrorErr03RuntimeClassified -> ErrorErr05ExecutionDecision` | partial | `resolveProviderRetryExecutionPlan -> consume_error_err_05_execution_decision_from_error_err_04_router_policy` |  | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
+| err-04 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` |  | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
 
 ## runtime.lifecycle.mainline
 
@@ -155,15 +155,15 @@ flowchart LR
   class RuntimeInstanceRecord pending;
 ```
 
-| step | transition | status | caller -> callee | owner |
-| --- | --- | --- | --- | --- |
-| rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
-| rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
-| rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> writeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 
 ## Shared Multi-Reference Functions
 
@@ -184,7 +184,7 @@ Use them when runtime orchestration and typed contract builders are separate lay
 | binding_id | transition | owner | runtime symbols | typed symbols | note |
 | --- | --- | --- | --- | --- | --- |
 | request.route_selection.runtime_vs_typed | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | `vr.route_selection`<br/>virtual router route classification and selected target truth | `select_route`<br/>`apply_vr_route_04_selection` | `build_vr_route_04_from_hub_req_chatprocess_03` | Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge. |
-| request.req_outbound_05.runtime_vs_typed | `HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic` |  | `run_hub_req_outbound_05_provider_semantic_entrypoint` | `run_hub_req_outbound_05_provider_semantic_entrypoint`<br/>`build_hub_req_outbound_05_from_hub_req_chatprocess_03` | Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge. |
+| request.req_outbound_05.runtime_vs_typed | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` |  | `run_hub_req_outbound_05_provider_semantic_entrypoint` | `run_hub_req_outbound_05_provider_semantic_entrypoint`<br/>`build_hub_req_outbound_05_from_hub_req_chatprocess_03` | Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge. |
 
 ## Maintenance Rules
 

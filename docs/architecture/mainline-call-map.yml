@@ -50,6 +50,7 @@ chains:
         from_node: HubReqChatProcess03Governed
         to_node: VrRoute04SelectedTarget
         binding_pending: true
+        split_binding_id: request.route_selection.runtime_vs_typed
         owner_feature_id: binding pending
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
@@ -58,6 +59,7 @@ chains:
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
         binding_pending: true
+        split_binding_id: request.req_outbound_05.runtime_vs_typed
         owner_feature_id: binding pending
         semantic_input: "virtual-router target selection and route decision"
         semantic_output: "provider-semantic outbound payload aligned to selected target"
@@ -320,7 +322,7 @@ split_bindings:
         file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
     note: "Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge."
   - binding_id: request.req_outbound_05.runtime_vs_typed
-    from_node: HubReqChatProcess03Governed
+    from_node: VrRoute04SelectedTarget
     to_node: HubReqOutbound05ProviderSemantic
     runtime_symbols:
       - symbol: run_hub_req_outbound_05_provider_semantic_entrypoint

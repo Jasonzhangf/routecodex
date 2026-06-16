@@ -62,10 +62,32 @@ function requireString(failures, where, fieldName, value) {
   return value.trim();
 }
 
+function validateSymbolRows(root, failures, where, rows, fieldName) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    failures.push(`${where}: missing ${fieldName}`);
+    return [];
+  }
+
+  const normalized = [];
+  for (const [index, row] of rows.entries()) {
+    const rowWhere = `${where} ${fieldName}[${index}]`;
+    const symbol = requireString(failures, rowWhere, 'symbol', row?.symbol);
+    const relPath = requireString(failures, rowWhere, 'file', row?.file);
+    if (relPath && !fileExists(root, relPath)) {
+      failures.push(`${rowWhere}: missing file ${relPath}`);
+    } else if (relPath && symbol && !symbolExistsInFile(root, relPath, symbol)) {
+      failures.push(`${rowWhere}: symbol not found in ${relPath}: ${symbol}`);
+    }
+    normalized.push({ symbol, file: relPath });
+  }
+  return normalized;
+}
+
 export function validateMainlineCallMap(root) {
   const failures = [];
   const parsed = loadYaml(root, MAINLINE_CALL_MAP_PATH);
   const owners = loadFeatureOwners(root);
+  const pendingEdgesBySplitBindingId = new Map();
 
   if (!parsed || typeof parsed !== 'object') {
     failures.push('mainline-call-map parsed to empty/non-object root');
@@ -128,6 +150,18 @@ export function validateMainlineCallMap(root) {
       }
 
       if (pending) {
+        const splitBindingId =
+          typeof edge?.split_binding_id === 'string' ? edge.split_binding_id.trim() : '';
+        if (splitBindingId) {
+          const refs = pendingEdgesBySplitBindingId.get(splitBindingId) ?? [];
+          refs.push({
+            chainId,
+            stepId,
+            fromNode: edge?.from_node ?? '',
+            toNode: edge?.to_node ?? '',
+          });
+          pendingEdgesBySplitBindingId.set(splitBindingId, refs);
+        }
         requireString(failures, edgeWhere, 'note', edge?.note);
         continue;
       }
@@ -149,6 +183,53 @@ export function validateMainlineCallMap(root) {
         if (symbol && !symbolExistsInFile(root, relPath, symbol)) {
           failures.push(`${edgeWhere}: ${kind}_symbol not found in ${relPath}: ${symbol}`);
         }
+      }
+    }
+  }
+
+  const splitBindingIds = new Set();
+  for (const split of parsed.split_bindings ?? []) {
+    const bindingId = requireString(failures, 'split_bindings', 'binding_id', split?.binding_id);
+    const where = bindingId ? `split binding ${bindingId}` : 'split binding';
+    if (bindingId) {
+      if (splitBindingIds.has(bindingId)) {
+        failures.push(`${where}: duplicate binding_id`);
+      }
+      splitBindingIds.add(bindingId);
+    }
+
+    const fromNode = requireString(failures, where, 'from_node', split?.from_node);
+    const toNode = requireString(failures, where, 'to_node', split?.to_node);
+    const ownerFeatureId =
+      typeof split?.owner_feature_id === 'string' ? split.owner_feature_id.trim() : '';
+    requireString(failures, where, 'note', split?.note);
+    if (ownerFeatureId && !owners.has(ownerFeatureId)) {
+      failures.push(`${where}: owner_feature_id not found in function-map: ${ownerFeatureId}`);
+    }
+
+    validateSymbolRows(root, failures, where, split?.runtime_symbols, 'runtime_symbols');
+    validateSymbolRows(root, failures, where, split?.typed_symbols, 'typed_symbols');
+
+    const linkedEdges = bindingId ? (pendingEdgesBySplitBindingId.get(bindingId) ?? []) : [];
+    if (bindingId && linkedEdges.length === 0) {
+      failures.push(`${where}: no binding pending edge references this split_binding_id`);
+      continue;
+    }
+    for (const edge of linkedEdges) {
+      if (edge.fromNode !== fromNode || edge.toNode !== toNode) {
+        failures.push(
+          `${where}: linked pending edge ${edge.chainId}/${edge.stepId} transition ${edge.fromNode} -> ${edge.toNode} does not match split binding transition ${fromNode} -> ${toNode}`
+        );
+      }
+    }
+  }
+
+  for (const [bindingId, edges] of pendingEdgesBySplitBindingId.entries()) {
+    if (!splitBindingIds.has(bindingId)) {
+      for (const edge of edges) {
+        failures.push(
+          `chain ${edge.chainId} edge ${edge.stepId}: split_binding_id not found in split_bindings: ${bindingId}`
+        );
       }
     }
   }
@@ -223,8 +304,8 @@ function renderMermaidChain(chain) {
 
 function renderEdgeTable(chain, owners) {
   const lines = [
-    '| step | transition | status | caller -> callee | owner |',
-    '| --- | --- | --- | --- | --- |',
+    '| step | transition | status | caller -> callee | split binding | owner |',
+    '| --- | --- | --- | --- | --- | --- |',
   ];
 
   for (const edge of chain.edges ?? []) {
@@ -233,13 +314,17 @@ function renderEdgeTable(chain, owners) {
     const binding = isPendingEdge(edge)
       ? '`binding pending`'
       : `\`${edge.caller_symbol} -> ${edge.callee_symbol}\``;
+    const splitBinding =
+      isPendingEdge(edge) && typeof edge.split_binding_id === 'string' && edge.split_binding_id.trim()
+        ? `\`${edge.split_binding_id.trim()}\``
+        : '';
     const owner = (() => {
       const featureId = edge.owner_feature_id ?? 'binding pending';
       const ownerInfo = owners.get(featureId);
       if (!ownerInfo?.summary) return `\`${featureId}\``;
       return `\`${featureId}\`<br/>${ownerInfo.summary}`;
     })();
-    lines.push(`| ${edge.step_id} | ${transition} | ${status} | ${binding} | ${owner} |`);
+    lines.push(`| ${edge.step_id} | ${transition} | ${status} | ${binding} | ${splitBinding} | ${owner} |`);
   }
 
   return lines.join('\n');
