@@ -45,6 +45,10 @@ jest.unstable_mockModule(
         providerKey: entry.providerKey,
       },
     })),
+    stripStoredContextInputMedia: jest.fn((input: unknown) => ({
+      changed: false,
+      messages: Array.isArray(input) ? input : [],
+    })),
   })
 );
 
@@ -209,7 +213,7 @@ describe('http-server direct result metadata propagation', () => {
     expect(result.body).toBe(readonlyBody);
     expect((result.body as Record<string, unknown>).model).toBe('gpt-5.4');
   });
-  it('router-direct responses result records response retention state instead of leaving pending request payload orphaned', async () => {
+  it('router-direct completed responses clear captured request state instead of leaving stale continuation history', async () => {
     captureResponsesRequestContext({
       requestId: 'req-router-direct-retention-success',
       sessionId: 'sess-router-direct-success',
@@ -266,9 +270,11 @@ describe('http-server direct result metadata propagation', () => {
     });
 
     const stats = responsesConversationStore.getDebugStats();
+    expect(stats.requestMapSize).toBe(0);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
-    expect(stats.responseIndexSize).toBe(1);
-    expect(stats.scopeIndexSize).toBe(1);
+    expect(stats.responseIndexSize).toBe(0);
+    expect(stats.scopeIndexSize).toBe(0);
+    expect(stats.retainedInputItems).toBe(0);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-router-direct-retention-success-next',
@@ -295,7 +301,7 @@ describe('http-server direct result metadata propagation', () => {
       },
     });
 
-    expect(restored?.payload.previous_response_id).toBe('resp-router-direct-success');
+    expect(restored).toBeNull();
   });
 
   it('router-direct result clears captured responses request on recoverable upstream 502', async () => {

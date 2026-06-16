@@ -1905,7 +1905,7 @@ export class RouteCodexHttpServer {
         || '__sse_responses' in (responseBody as Record<string, unknown>)
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
-      } else {
+      } else if (finishReason === 'tool_calls') {
         await recordResponsesResponseForRequest({
           requestId: input.requestId,
           response: responseBody as Record<string, unknown>,
@@ -1920,8 +1920,10 @@ export class RouteCodexHttpServer {
           allowScopeContinuation: true,
         });
         await finalizeResponsesConversationRequestRetention(input.requestId, {
-          keepForSubmitToolOutputs: finishReason === 'tool_calls',
+          keepForSubmitToolOutputs: true,
         });
+      } else {
+        await clearResponsesConversationByRequestId(input.requestId);
       }
     }
     const baseResult: PipelineExecutionResult = {
