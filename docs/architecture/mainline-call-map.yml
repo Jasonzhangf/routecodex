@@ -53,7 +53,7 @@ chains:
         owner_feature_id: binding pending
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
-        note: "Need concrete governed request -> VR select bridge symbols from stage/runtime owner; keep pending until stage wrapper audit verifies caller."
+        note: "Do not fake one edge here: runtime route select/apply and typed VrRoute04 contract builder are split. See split binding request.route_selection.runtime_vs_typed."
       - step_id: req-04
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
@@ -61,7 +61,7 @@ chains:
         owner_feature_id: binding pending
         semantic_input: "virtual-router target selection and route decision"
         semantic_output: "provider-semantic outbound payload aligned to selected target"
-        note: "Fill VR decision -> req outbound semantic edge."
+        note: "Do not fake one edge here: runtime route application and typed HubReqOutbound05 builder are split. See split binding request.req_outbound_05.runtime_vs_typed."
       - step_id: req-05
         from_node: HubReqOutbound05ProviderSemantic
         to_node: ProviderReqOutbound06WirePayload
@@ -176,6 +176,91 @@ chains:
         semantic_output: "client-visible http error projection"
         status: anchored
 
+  - chain_id: runtime.lifecycle.mainline
+    summary: "Managed server and token-daemon lifecycle: pid cache write on start, stop-intent write on stop, instance registry as binding_pending."
+    entry_contract:
+      node: ServerPidCacheRecord
+      owner_doc: docs/design/server-runtime-lifecycle-ssot.md
+    edges:
+      - step_id: rtl-01
+        from_node: ServerStartCommand
+        to_node: ServerPidCacheRecord
+        caller_symbol: writeServerPidCache
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: writeServerPidCache
+        callee_file: src/utils/server-runtime-pid.ts
+        owner_feature_id: runtime.lifecycle.pid_cache
+        semantic_input: "server port + pid number"
+        semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        status: anchored
+      - step_id: rtl-02
+        from_node: ServerStartCommand
+        to_node: ServerPidCacheRecord
+        caller_symbol: writeServerPidCache
+        caller_file: src/index.ts
+        callee_symbol: writeServerPidCache
+        callee_file: src/utils/server-runtime-pid.ts
+        owner_feature_id: runtime.lifecycle.pid_cache
+        semantic_input: "server port + pid number"
+        semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        status: anchored
+      - step_id: rtl-03
+        from_node: ServerStopCommand
+        to_node: StopIntentRecord
+        caller_symbol: writeDaemonStopIntent
+        caller_file: src/cli/commands/stop.ts
+        callee_symbol: writeServerStopIntent
+        callee_file: src/utils/server-runtime-stop-intent.ts
+        owner_feature_id: runtime.lifecycle.stop_intent
+        semantic_input: "port + stop reason + timestamp"
+        semantic_output: "stop-intent.json written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        status: anchored
+      - step_id: rtl-04
+        from_node: ServerStartCommand
+        to_node: StopIntentRecord
+        caller_symbol: consumeDaemonStopIntent
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: consumeServerStopIntent
+        callee_file: src/utils/server-runtime-stop-intent.ts
+        owner_feature_id: runtime.lifecycle.stop_intent
+        semantic_input: "port context"
+        semantic_output: "stop-intent record if fresh TTL-valid intent exists, otherwise null"
+        status: anchored
+      - step_id: rtl-05
+        from_node: TokenDaemonBootstrap
+        to_node: TokenDaemonPidRecord
+        caller_symbol: resolveTokenDaemonPidPath
+        caller_file: src/cli.ts
+        callee_symbol: resolveTokenDaemonPidPath
+        callee_file: src/utils/server-runtime-pid.ts
+        owner_feature_id: runtime.lifecycle.pid_cache
+        semantic_input: "daemon identity"
+        semantic_output: "resolved path under <rccUserDir>/run/token-daemon.pid"
+        status: anchored
+      - step_id: rtl-06
+        from_node: TokenDaemonBootstrap
+        to_node: TokenDaemonPidRecord
+        caller_symbol: resolveTokenDaemonPidPath
+        caller_file: src/commands/token-daemon.ts
+        callee_symbol: resolveTokenDaemonPidPath
+        callee_file: src/utils/server-runtime-pid.ts
+        owner_feature_id: runtime.lifecycle.pid_cache
+        semantic_input: "daemon identity"
+        semantic_output: "resolved path under <rccUserDir>/run/token-daemon.pid"
+        status: anchored
+      - step_id: rtl-07
+        from_node: ServerLifecycleState
+        to_node: RuntimeInstanceRecord
+        caller_symbol: writeRuntimeInstance
+        caller_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: writeRuntimeInstance
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + lifecycle status + metadata"
+        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        status: binding pending
+        note: "No main runtime caller wired yet. Helper exists; wiring required."
+
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture
     symbol: captureReqInboundResponsesContextSnapshotJson
@@ -184,7 +269,6 @@ shared_multi_reference_functions:
     reused_by_chains:
       - request.mainline
     note: "Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture."
-
   - function_id: native.responses_client_projection
     symbol: projectResponsesClientPayloadForClientNative
     file: src/modules/llmswitch/bridge/native-exports.ts
@@ -192,7 +276,6 @@ shared_multi_reference_functions:
     reused_by_chains:
       - response.mainline
     note: "Thin host/native facade; truth owner remains Rust."
-
   - function_id: error.execution_decision_consumer
     symbol: resolveProviderRetryExecutionPlan
     file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
@@ -200,9 +283,58 @@ shared_multi_reference_functions:
     reused_by_chains:
       - error.mainline
     note: "Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision."
+  - function_id: runtime.lifecycle.pid_cache_writer
+    symbol: writeServerPidCache
+    file: src/utils/server-runtime-pid.ts
+    owner_feature_id: runtime.lifecycle.pid_cache
+    reused_by_chains:
+      - runtime.lifecycle.mainline
+    note: "Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity."
+  - function_id: runtime.lifecycle.stop_intent_signal
+    symbol: writeServerStopIntent
+    file: src/utils/server-runtime-stop-intent.ts
+    owner_feature_id: runtime.lifecycle.stop_intent
+    reused_by_chains:
+      - runtime.lifecycle.mainline
+    note: "Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade."
+  - function_id: runtime.lifecycle.stop_intent_consumer
+    symbol: consumeServerStopIntent
+    file: src/utils/server-runtime-stop-intent.ts
+    owner_feature_id: runtime.lifecycle.stop_intent
+    reused_by_chains:
+      - runtime.lifecycle.mainline
+    note: "Consumes and TTL-gates stop-intent.json; same owner truth as the writer."
+
+split_bindings:
+  - binding_id: request.route_selection.runtime_vs_typed
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRoute04SelectedTarget
+    owner_feature_id: vr.route_selection
+    runtime_symbols:
+      - symbol: select_route
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - symbol: apply_vr_route_04_selection
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/vr_route_04_selection_boundary.rs
+    typed_symbols:
+      - symbol: build_vr_route_04_from_hub_req_chatprocess_03
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
+    note: "Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge."
+  - binding_id: request.req_outbound_05.runtime_vs_typed
+    from_node: HubReqChatProcess03Governed
+    to_node: HubReqOutbound05ProviderSemantic
+    runtime_symbols:
+      - symbol: run_hub_req_outbound_05_provider_semantic_entrypoint
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+    typed_symbols:
+      - symbol: run_hub_req_outbound_05_provider_semantic_entrypoint
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - symbol: build_hub_req_outbound_05_from_hub_req_chatprocess_03
+        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+    note: "Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge."
 
 maintenance_rules:
   - "Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code."
   - "Each edge must bind one adjacent mainline transition only."
   - "If a facade/wrapper is listed, also record the truth owner feature_id."
   - "When a feature changes mainline entry/exit, update this file in the same change set."
+  - "If runtime orchestration and typed contract builders are different layers, record them in split_bindings instead of compressing them into one fake edge."

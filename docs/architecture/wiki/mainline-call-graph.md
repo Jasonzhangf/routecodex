@@ -119,6 +119,52 @@ flowchart LR
 | err-03 | `ErrorErr03RuntimeClassified -> ErrorErr05ExecutionDecision` | partial | `resolveProviderRetryExecutionPlan -> consume_error_err_05_execution_decision_from_error_err_04_router_policy` | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
 | err-04 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
 
+## runtime.lifecycle.mainline
+
+Managed server and token-daemon lifecycle: pid cache write on start, stop-intent write on stop, instance registry as binding_pending.
+
+Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
+
+```mermaid
+flowchart LR
+  RuntimeInstanceRecord["RuntimeInstanceRecord"]
+  ServerLifecycleState["ServerLifecycleState"]
+  TokenDaemonPidRecord["TokenDaemonPidRecord"]
+  TokenDaemonBootstrap["TokenDaemonBootstrap"]
+  StopIntentRecord["StopIntentRecord"]
+  ServerStopCommand["ServerStopCommand"]
+  ServerPidCacheRecord["ServerPidCacheRecord"]
+  ServerStartCommand["ServerStartCommand"]
+  ServerStartCommand -->|rtl-01| ServerPidCacheRecord
+  ServerStartCommand -->|rtl-02| ServerPidCacheRecord
+  ServerStopCommand -->|rtl-03| StopIntentRecord
+  ServerStartCommand -->|rtl-04| StopIntentRecord
+  TokenDaemonBootstrap -->|rtl-05| TokenDaemonPidRecord
+  TokenDaemonBootstrap -->|rtl-06| TokenDaemonPidRecord
+  ServerLifecycleState -->|rtl-07| RuntimeInstanceRecord
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ServerStartCommand anchored;
+  class ServerPidCacheRecord anchored;
+  class ServerStopCommand anchored;
+  class StopIntentRecord anchored;
+  class TokenDaemonBootstrap anchored;
+  class TokenDaemonPidRecord anchored;
+  class ServerLifecycleState pending;
+  class RuntimeInstanceRecord pending;
+```
+
+| step | transition | status | caller -> callee | owner |
+| --- | --- | --- | --- | --- |
+| rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
+| rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |
@@ -126,6 +172,19 @@ flowchart LR
 | native.responses_context_capture | `captureReqInboundResponsesContextSnapshotJson` | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse | Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture. |
 | native.responses_client_projection | `projectResponsesClientPayloadForClientNative` | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore | Thin host/native facade; truth owner remains Rust. |
 | error.execution_decision_consumer | `resolveProviderRetryExecutionPlan` | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute | Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision. |
+| runtime.lifecycle.pid_cache_writer | `writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state | Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity. |
+| runtime.lifecycle.stop_intent_signal | `writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade. |
+| runtime.lifecycle.stop_intent_consumer | `consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Consumes and TTL-gates stop-intent.json; same owner truth as the writer. |
+
+## Split Bindings
+
+These records explain why some mainline edges intentionally stay `binding pending`.
+Use them when runtime orchestration and typed contract builders are separate layers.
+
+| binding_id | transition | owner | runtime symbols | typed symbols | note |
+| --- | --- | --- | --- | --- | --- |
+| request.route_selection.runtime_vs_typed | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | `vr.route_selection`<br/>virtual router route classification and selected target truth | `select_route`<br/>`apply_vr_route_04_selection` | `build_vr_route_04_from_hub_req_chatprocess_03` | Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge. |
+| request.req_outbound_05.runtime_vs_typed | `HubReqChatProcess03Governed -> HubReqOutbound05ProviderSemantic` |  | `run_hub_req_outbound_05_provider_semantic_entrypoint` | `run_hub_req_outbound_05_provider_semantic_entrypoint`<br/>`build_hub_req_outbound_05_from_hub_req_chatprocess_03` | Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge. |
 
 ## Maintenance Rules
 
@@ -133,3 +192,4 @@ flowchart LR
 - Each edge must bind one adjacent mainline transition only.
 - If a facade/wrapper is listed, also record the truth owner feature_id.
 - When a feature changes mainline entry/exit, update this file in the same change set.
+- If runtime orchestration and typed contract builders are different layers, record them in split_bindings instead of compressing them into one fake edge.

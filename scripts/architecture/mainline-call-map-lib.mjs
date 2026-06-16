@@ -296,6 +296,40 @@ export function renderMainlineCallGraphMarkdown(root) {
     lines.push('');
   }
 
+  if (Array.isArray(parsed.split_bindings) && parsed.split_bindings.length > 0) {
+    lines.push('## Split Bindings');
+    lines.push('');
+    lines.push('These records explain why some mainline edges intentionally stay `binding pending`.');
+    lines.push('Use them when runtime orchestration and typed contract builders are separate layers.');
+    lines.push('');
+    lines.push('| binding_id | transition | owner | runtime symbols | typed symbols | note |');
+    lines.push('| --- | --- | --- | --- | --- | --- |');
+    for (const row of parsed.split_bindings) {
+      const ownerInfo =
+        typeof row.owner_feature_id === 'string' ? owners.get(row.owner_feature_id) : undefined;
+      const owner =
+        typeof row.owner_feature_id === 'string' && row.owner_feature_id.trim()
+          ? ownerInfo?.summary
+            ? `\`${row.owner_feature_id}\`<br/>${ownerInfo.summary}`
+            : `\`${row.owner_feature_id}\``
+          : '';
+      const runtimeSymbols = Array.isArray(row.runtime_symbols)
+        ? row.runtime_symbols
+            .map((entry) => `\`${entry.symbol}\``)
+            .join('<br/>')
+        : '';
+      const typedSymbols = Array.isArray(row.typed_symbols)
+        ? row.typed_symbols
+            .map((entry) => `\`${entry.symbol}\``)
+            .join('<br/>')
+        : '';
+      lines.push(
+        `| ${row.binding_id} | \`${row.from_node} -> ${row.to_node}\` | ${owner} | ${runtimeSymbols} | ${typedSymbols} | ${row.note ?? ''} |`
+      );
+    }
+    lines.push('');
+  }
+
   if (Array.isArray(parsed.maintenance_rules) && parsed.maintenance_rules.length > 0) {
     lines.push('## Maintenance Rules');
     lines.push('');

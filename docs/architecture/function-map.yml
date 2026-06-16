@@ -1848,6 +1848,90 @@ owners:
     notes:
       - "daemon-admin is handler-family projection; it must not own quota/health/routing state."
       - "state mutators call into manager/* or llmswitch-core; daemon-admin only projects HTTP and auth."
+  - feature_id: runtime.lifecycle.pid_cache
+    status: active
+    summary: "server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state"
+    owner_kind: ts_runtime_owner
+    owner_scope: "server pid cache writer/reader helpers under runtime-lifecycle subdir"
+    owner_module: src/utils/server-runtime-pid.ts
+    canonical_types:
+      - ServerPidCacheRecord
+    canonical_builders:
+      - resolveServerPidCachePath
+      - writeServerPidCache
+      - readServerPidCache
+      - unlinkServerPidCacheBestEffort
+      - resolveTokenDaemonPidPath
+    allowed_paths:
+      - src/utils/server-runtime-pid.ts
+      - src/cli/commands/start.ts
+      - src/index.ts
+      - src/cli.ts
+      - src/commands/token-daemon.ts
+      - scripts/cleanup-stale-server-pids.mjs
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/red-tests/runtime_pids_moved_out_of_rcc_home_root.test.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    migration_target: rust
+    notes:
+      - "PID file is a cache, never the source of truth. Authoritative state is HTTP /health + listener identity (port + trusted RouteCodex command)."
+  - feature_id: runtime.lifecycle.stop_intent
+    status: active
+    summary: "stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL"
+    owner_kind: ts_runtime_owner
+    owner_scope: "stop intent writer/consumer/reaper under runtime-lifecycle subdir"
+    owner_module: src/utils/server-runtime-stop-intent.ts
+    canonical_types:
+      - StopIntentRecord
+    canonical_builders:
+      - resolveServerStopIntentPath
+      - writeServerStopIntent
+      - consumeServerStopIntent
+      - clearServerStopIntent
+    allowed_paths:
+      - src/utils/server-runtime-stop-intent.ts
+      - src/utils/daemon-stop-intent.ts
+      - src/cli/commands/start.ts
+      - src/cli/commands/stop.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/utils/daemon-stop-intent.spec.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    migration_target: rust
+    notes:
+      - "Re-export layer src/utils/daemon-stop-intent.ts only re-exports the new helper."
+  - feature_id: runtime.lifecycle.instance_registry
+    status: active
+    summary: "managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json"
+    owner_kind: ts_runtime_owner
+    owner_scope: "instance declaration writer/reader/state-update"
+    owner_module: src/utils/runtime-instance-registry.ts
+    canonical_types:
+      - RuntimeInstance
+      - InstanceLifecycleStatus
+    canonical_builders:
+      - resolveRuntimeInstancePath
+      - writeRuntimeInstance
+      - readRuntimeInstance
+      - updateRuntimeInstanceStatus
+      - removeRuntimeInstance
+    allowed_paths:
+      - src/utils/runtime-instance-registry.ts
+      - tests/utils/runtime-instance-registry.spec.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/utils/runtime-instance-registry.spec.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    migration_target: rust
+    notes:
+      - "Authoritative description of the instance, not the pid cache."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "HTTP server entry / lifecycle / port registry / route wiring is a thin shell over handlers and manager modules"
