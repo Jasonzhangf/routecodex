@@ -240,6 +240,7 @@ owners:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
+      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
@@ -249,12 +250,16 @@ owners:
       - "servertool-core owns stopless sessionId-only state matching and CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
       - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
       - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
-      - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (`stop_message_auto`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
+      - "Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass."
+      - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (internal `stop_message_auto`, public CLI alias `reasoning_stop`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
       - "If `finish_reason=stop` arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed."
       - "For invalid/malformed schema, the stop hook must return the parse/interpretation result itself plus field/value/shape errors, so the model receives a corrective guidance loop instead of a bare rejection."
       - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook."
       - "When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history."
       - "CLI command input stays status-only (`flowId/repeatCount/maxRepeats`); continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string."
+      - "Client-visible exec_command must use the public stopless alias `reasoning_stop`; the client payload must not leak internal marker `__servertool_cli_projection`."
+      - "NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only."
+      - "Same-session NoSchema stopless progression must advance `used/repeatCount` 1 -> 2 -> 3 through the real CLI wrapper persistence path, not only through mocked state writes."
       - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback or server-side stopless followup/reenter."
 
@@ -1027,6 +1032,8 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1036,8 +1043,11 @@ owners:
     migration_target: rust
     notes:
       - "JSON body and SSE frame client-visible Responses tool projection must stay Rust-owned; TS handler may parse SSE event/data boundaries, hold opaque native state, and write returned frames only."
+      - "Direct passthrough metadata must not bypass client-visible Responses replay-safe projection; request passthrough is independent from response outbound protocol cleanup."
       - "TS handler must not restore apply_patch function_call-to-custom_tool_call conversion, freeform argument parsing, delta aggregation, done de-duplication, frame heuristic routing, or projection fallback that writes the original frame on native failure."
       - "Client-visible response model and reasoning-effort restore must stay Rust-owned through `project_responses_client_payload_for_client`; TS must not parse metadata to patch response payloads."
+      - "Responses client-visible payload must not emit `reasoning.content`; only replay-safe fields such as `summary` and `encrypted_content` may leave the Rust owner, otherwise later `/v1/responses` history replay will poison direct provider requests."
+      - "Client-visible replay history must not persist internal stopless/servertool CLI `function_call` artifacts or illegal pending fields like `status=in_progress`; replay-safe cleanup belongs to the Rust owner and persistence contract, not a TS post-pass."
 
   - feature_id: hub.response_provider_sse_materialization
     status: active
@@ -2113,6 +2123,8 @@ owners:
     notes:
       - "Response lifecycle bridge may pass opaque continuation/conversation-store IO only."
       - "Server handler must not keep local response-id rebinding, continuation retention/finalization, or conversation clear-policy semantics."
+      - "Responses response->history persistence must not replay provider/client-only reasoning payload fields into next request history; illegal `reasoning.content` must be stripped before continuation/materialize so direct/relay followup requests never send non-empty reasoning content arrays upstream."
+      - "Responses response->history persistence must also strip internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields before record/replay, otherwise next `/v1/responses` request will inherit poisoned history."
   - feature_id: cli.command_surface
     status: active
     summary: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"

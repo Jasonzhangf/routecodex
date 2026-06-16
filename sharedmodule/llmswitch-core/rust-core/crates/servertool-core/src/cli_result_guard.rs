@@ -4,6 +4,7 @@ use crate::cli_contract;
 use serde_json::{Map, Value};
 
 const ROUTECODEX_STOP_MESSAGE_AUTO_CLI: &str = "routecodex hook run stop_message_auto";
+const ROUTECODEX_REASONING_STOP_CLI: &str = "routecodex hook run reasoning_stop";
 const MAX_SCAN_DEPTH: usize = 10;
 const MAX_SCAN_NODES: usize = 2000;
 
@@ -135,7 +136,9 @@ fn text_contains_stop_message_auto_cli_result(text: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    if trimmed.contains(ROUTECODEX_STOP_MESSAGE_AUTO_CLI) {
+    if trimmed.contains(ROUTECODEX_STOP_MESSAGE_AUTO_CLI)
+        || trimmed.contains(ROUTECODEX_REASONING_STOP_CLI)
+    {
         return true;
     }
     for candidate in parse_json_object_candidates(trimmed) {
@@ -200,7 +203,7 @@ mod tests {
                         "messages": [{
                             "role": "tool",
                             "content": [{
-                                "text": "routecodex servertool run stop_message_auto --input-json '{}'"
+                                "text": "routecodex hook run reasoning_stop --input-json '{}' --session-id 'session-a' --request-id 'req-a'"
                             }]
                         }]
                     }
@@ -218,7 +221,7 @@ mod tests {
                 "__raw_request_body": {
                     "messages": [{
                         "role": "user",
-                        "content": "routecodex servertool run stop_message_auto --input-json '{}'"
+                        "content": "routecodex hook run reasoning_stop --input-json '{}' --session-id 'session-a' --request-id 'req-a'"
                     }]
                 }
             }

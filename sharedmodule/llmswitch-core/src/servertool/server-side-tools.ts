@@ -165,7 +165,11 @@ export async function runServerSideToolEngine(
       execution: {
         flowId: 'servertool_cli_projection',
         context: {
-          servertoolCliProjection: projection.chatResponse.__servertool_cli_projection as JsonObject
+          servertoolCliProjection: {
+            clientCallId: projection.clientCallId,
+            toolName: projection.toolName,
+            requestId: options.requestId
+          } as JsonObject
         }
       }
     };

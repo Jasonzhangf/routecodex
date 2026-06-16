@@ -9,7 +9,7 @@ describe('servertool CLI native bridge', () => {
     const nativeProjection = buildClientExecCliProjectionOutputWithNative({
       flowId: 'stop_message_flow',
       input: {
-        continuationPrompt: '继续执行原任务',
+        continuationPrompt: '继续做下一步',
         repeatCount: 1,
         maxRepeats: 3
       }
@@ -21,7 +21,8 @@ describe('servertool CLI native bridge', () => {
       repeatCount: 1,
       maxRepeats: 3
     });
-    expect(nativeProjection.execCommand).toContain('routecodex hook run stop_message_auto');
+    expect(nativeProjection.execCommand).toContain('routecodex hook run reasoning_stop');
+    expect(nativeProjection.execCommand).not.toContain('stop_message_auto');
     expect(nativeProjection.execCommand).not.toContain('continuationPrompt');
     expect(nativeProjection.execCommand).not.toContain('继续执行原任务');
     expect(nativeProjection.execCommand).not.toContain('stdoutPreview');
@@ -41,10 +42,7 @@ describe('servertool CLI native bridge', () => {
     expect((shell as any).choices?.[0]?.finish_reason).toBe('tool_calls');
     expect(toolCall?.function?.name).toBe('exec_command');
     expect(JSON.parse(toolCall.function.arguments).cmd).toBe(nativeProjection.execCommand);
-    expect((shell as any).__servertool_cli_projection).toMatchObject({
-      toolName: 'stop_message_auto',
-      requestId: 'req_native_bridge'
-    });
+    expect((shell as any).__servertool_cli_projection).toBeUndefined();
     expect(JSON.stringify(shell)).not.toContain('"metadata"');
     expect(JSON.stringify(shell)).not.toContain('"__rt"');
   });
@@ -59,7 +57,7 @@ describe('servertool CLI native bridge', () => {
     const rawProjection = (buildProjection as (input: string) => unknown)(JSON.stringify({
       flowId: 'stop_message_flow',
       input: {
-        continuationPrompt: '继续执行原任务',
+        continuationPrompt: '继续做下一步',
         repeatCount: 1,
         maxRepeats: 3
       }

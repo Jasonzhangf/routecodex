@@ -121,6 +121,7 @@ verification:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
+      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/stop-message-auto.goal-default.spec.ts
@@ -131,9 +132,12 @@ verification:
       - npm run build:min
     notes:
       - "stopless is a Rust-owned CLI continuation: state key is strictly sessionId (no tmux/conversation/inject fallback), and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
-      - "Validation must prove stop hook injection is unconditional for stopless-managed turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
+      - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
+      - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoning_stop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
       - "Command input must not contain continuationPrompt/schemaGuidance/raw prompt text; CLI stdout must carry continuationPrompt/schemaGuidance for the next model turn."
+      - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
+      - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while same-session CLI wrapper progression advances repeatCount 1 -> 2 -> 3."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
@@ -141,7 +145,7 @@ verification:
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
-      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts --runInBand`."
+      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
 
   - feature_id: hub.servertool_flow_presentation
     change_risk: medium
@@ -559,6 +563,7 @@ verification:
       - src/server/handlers/handler-response-utils.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -572,6 +577,9 @@ verification:
     notes:
       - "Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames."
       - "Responses client-visible model/reasoning restore from metadata must stay Rust-owned; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`."
+      - "Rust response projection contract must lock that client-visible reasoning items never contain `content`; replay-safe `summary`/`encrypted_content` only."
+      - "Direct passthrough metadata must not short-circuit replay-safe response projection; transport directness cannot leak `reasoning.content` or item-level pending `status` into client history."
+      - "Rust response projection contract must also lock that internal stopless/servertool CLI `function_call` artifacts and illegal pending fields like `status=in_progress` never become replayable client history for the next `/v1/responses` request."
 
   - feature_id: hub.response_provider_sse_materialization
     change_risk: high
@@ -1095,6 +1103,8 @@ verification:
     notes:
       - "Response lifecycle bridge must stay facade-only and must not grow TS response protocol semantics."
       - "Continuation lifecycle orchestration for capture/record/finalize and conversation clear-policy semantics stay behind the lifecycle bridge surface."
+      - "responses-continuation-store contract must lock both message-content legalization (`output_text/commentary -> input_text`) and reasoning-history legalization (`reasoning.content` must not replay into next request payload)."
+      - "responses-continuation-store contract must also lock replay-safe persistence: internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields must not survive record/replay."
 
   - feature_id: cli.command_surface
     change_risk: medium

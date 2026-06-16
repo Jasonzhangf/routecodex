@@ -213,7 +213,8 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     expect(toolCall.function.name).toBe('exec_command');
-    expect(command).toContain('routecodex hook run stop_message_auto');
+    expect(command).toContain('routecodex hook run reasoning_stop');
+    expect(command).not.toContain('stop_message_auto');
     expect(extractCommandInput(command).repeatCount).toBe(2);
   });
 
@@ -350,6 +351,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(result.flowId).toBe('stop_message_flow');
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     expect(toolCall.function.name).toBe('exec_command');
-    expect(JSON.parse(toolCall.function.arguments).cmd).toContain('routecodex hook run stop_message_auto');
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    expect(command).toContain('routecodex hook run reasoning_stop');
+    expect(command).not.toContain('stop_message_auto');
   });
 });

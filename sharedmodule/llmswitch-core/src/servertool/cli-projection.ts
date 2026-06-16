@@ -28,7 +28,7 @@ export function buildServertoolCliProjectionForToolCall(args: {
 }): ServertoolCliProjectionPlan {
   const toolName = args.toolCall.name;
   const input = parseArguments(args.toolCall.arguments);
-  const reasoningText = args.reasoningText || `继续执行本地 hook ${toolName}。`;
+  const reasoningText = args.reasoningText || `继续执行本地工具 ${toolName}。`;
   const sessionId = readSessionIdFromOptions(args.options);
   if (toolName === 'stop_message_auto' && !sessionId) {
     throw new Error(

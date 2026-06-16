@@ -163,7 +163,7 @@ function extractStoplessReasoningText(finalChatResponse: JsonObject): string {
       return candidate.trim();
     }
   }
-  return 'RouteCodex projected stopless continuation to client CLI.';
+  return '继续推进当前任务。';
 }
 
 function extractStoplessLoopState(execution: ServerToolEngineResult['execution']): {

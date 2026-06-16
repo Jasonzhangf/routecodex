@@ -217,7 +217,8 @@ describe('stopless CLI continuation', () => {
     expect(result.flowId).toBe('stop_message_flow');
     expect(reenterPipeline).not.toHaveBeenCalled();
     const command = extractExecCommand(result.chat);
-    expect(command).toMatch(/^routecodex hook run stop_message_auto --input-json '/);
+    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).not.toContain('stop_message_auto');
   });
 
   test('stopless CLI command is status-only and does not leak continuation prompt text', async () => {
@@ -249,6 +250,7 @@ describe('stopless CLI continuation', () => {
     expect(command).not.toContain('schemaGuidance');
     expect(command).not.toContain('第一轮核对');
     expect(command).not.toContain('stop schema');
+    expect(command).not.toContain('stop_message_auto');
   });
 
   test('terminal stopless result stays terminal and does not project CLI', async () => {

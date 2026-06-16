@@ -1,6 +1,7 @@
 use super::*;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use std::collections::HashSet;
+
 #[test]
 fn test_apply_tool_governance_basic() {
     let input = ToolGovernanceInput {
@@ -19,6 +20,76 @@ fn test_apply_tool_governance_basic() {
     let result = apply_req_process_tool_governance(input).unwrap();
     assert!(result.node_result["success"].as_bool().unwrap());
 }
+
+#[test]
+fn test_req_process_prepends_stopless_system_instruction_when_client_inject_ready() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4",
+          "messages": [{"role": "user", "content": "继续排查"}]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/chat/completions",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_stopless_system_instruction".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let messages = result.processed_request["messages"]
+        .as_array()
+        .expect("messages array");
+    assert!(!messages.is_empty());
+    assert_eq!(messages[0]["role"], serde_json::json!("system"));
+    let content = messages[0]["content"].as_str().unwrap_or("");
+    assert!(content.contains("简洁 summary"));
+    assert!(content.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert!(content.contains("示例 JSON"));
+    assert!(content.contains("\"stopreason\":0"));
+    assert!(content.contains("\"reason\":\"已完成并验证\""));
+}
+
+#[test]
+fn test_req_process_does_not_duplicate_stopless_system_instruction() {
+    let existing = "当你准备结束当前轮时，必须同时给出两部分：\n1. 简洁 summary，说明这轮完成了什么或为什么现在必须停。\n2. 回复末尾附一段 JSON，字段必须按真实情况填写。\n标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\nfinished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。";
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4",
+          "messages": [
+            {"role": "system", "content": existing},
+            {"role": "user", "content": "继续排查"}
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/chat/completions",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_stopless_system_instruction_dedup".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let messages = result.processed_request["messages"]
+        .as_array()
+        .expect("messages array");
+    let system_count = messages
+        .iter()
+        .filter(|message| {
+            message["role"] == serde_json::json!("system")
+                && message["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("stopreason 取值：0=finished，1=blocked，2=continue_needed")
+        })
+        .count();
+    assert_eq!(system_count, 1);
+}
+
 #[test]
 fn test_error_empty_json_input() {
     let result = apply_req_process_tool_governance_json("".to_string());

@@ -4,6 +4,7 @@ import path from 'path';
 
 describe('servertool CLI result restoration removal', () => {
   it('keeps real servertool CLI stdout as ordinary exec_command output with stopless guidance payload', () => {
+    const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const stdout = execFileSync(
       path.join(
         process.cwd(),
@@ -12,6 +13,10 @@ describe('servertool CLI result restoration removal', () => {
       [
         'run',
         'stop_message_auto',
+        '--session-id',
+        `session-stopless-restore-${unique}`,
+        '--request-id',
+        `req-stopless-restore-${unique}`,
         '--input-json',
         '{"flowId":"stop_message_flow","continuationPrompt":"继续执行原任务","repeatCount":1,"maxRepeats":3}'
       ],
@@ -32,9 +37,28 @@ describe('servertool CLI result restoration removal', () => {
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow'
     });
-    expect(parsedOutput.continuationPrompt).toContain('stop schema');
-    expect(parsedOutput.continuationPrompt).toContain('必须主动调用停止 hook');
-    expect(parsedOutput.schemaGuidance?.requiredFields).toContain('stopreason');
+    expect(typeof parsedOutput.continuationPrompt).toBe('string');
+    expect(parsedOutput.continuationPrompt.length).toBeGreaterThan(0);
+    expect(parsedOutput.schemaGuidance).toBeDefined();
+    expect(Array.isArray(parsedOutput.schemaGuidance.requiredFields)).toBe(true);
+    expect(parsedOutput.schemaGuidance.requiredFields).toContain('stopreason');
+    expect(parsedOutput.schemaGuidance.requiredFields).toContain('next_step');
+    for (const forbidden of [
+      'schema',
+      'hook',
+      'stopless',
+      'servertool',
+      '第一轮',
+      '第二轮',
+      '第三轮',
+      '必须调用',
+      '证据不足',
+      '用户目标',
+      '已排除因素',
+      '排查顺序'
+    ]) {
+      expect(String(parsedOutput.continuationPrompt ?? '')).not.toContain(forbidden);
+    }
     expect((payload.tool_outputs[0] as any).tool_call_id).toBeUndefined();
     expect((payload.tool_outputs[0] as any).name).toBeUndefined();
     expect(payload.tool_outputs[0].output).not.toContain('"metadata"');

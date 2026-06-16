@@ -91,9 +91,10 @@ describe('servertool: mixed migrated servertool + client tool_calls', () => {
     const outToolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
     expect(outToolCalls).toHaveLength(2);
     expect(outToolCalls[0]?.function?.name).toBe('exec_command');
-    expect(JSON.parse(outToolCalls[0].function.arguments).cmd).toBe(
-      "routecodex servertool run servertool_fixture --input-json '{\"value\":1}'"
-    );
+    const projectedCommand = JSON.parse(outToolCalls[0].function.arguments).cmd;
+    expect(projectedCommand).toContain("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
+    expect(projectedCommand).toContain("--session-id 's-mixed-cli'");
+    expect(projectedCommand).toContain("--request-id 'req-mixed-cli-1'");
     expect(outToolCalls[1]).toMatchObject({
       id: 'call_exec_command_1',
       type: 'function',
@@ -103,10 +104,7 @@ describe('servertool: mixed migrated servertool + client tool_calls', () => {
       }
     });
     expect(message?.reasoning_content).toContain('servertool_fixture');
-    expect((orchestration.chat as any).__servertool_cli_projection).toMatchObject({
-      toolName: 'servertool_fixture',
-      requestId: 'req-mixed-cli-1'
-    });
+    expect((orchestration.chat as any).__servertool_cli_projection).toBeUndefined();
     expect(fs.existsSync(pendingDir())).toBe(false);
   });
 

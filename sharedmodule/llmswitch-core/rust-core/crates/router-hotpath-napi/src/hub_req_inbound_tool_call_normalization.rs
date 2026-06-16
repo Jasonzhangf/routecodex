@@ -15,6 +15,8 @@ const AUTO_STOP_HOOK_CALL_ID_PREFIX: &str = "call_servertool_cli_";
 const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
     "routecodex hook run stop_message_auto",
     "routecodex servertool run stop_message_auto",
+    "routecodex hook run reasoning_stop",
+    "routecodex servertool run reasoning_stop",
 ];
 
 pub(crate) fn normalize_apply_patch_output_text(raw: &str) -> String {
@@ -307,6 +309,21 @@ fn read_exec_command_cmd(arguments: Option<&Value>) -> Option<String> {
     read_command_from_args(&args)
 }
 
+fn extract_embedded_apply_patch_from_shell_command(cmd: &str) -> Option<String> {
+    let normalized = strip_provider_tool_sentinel_residue(cmd)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let start = normalized.find("*** Begin Patch")?;
+    let tail = &normalized[start..];
+    let end_relative = tail.find("*** End Patch")?;
+    let end = start + end_relative + "*** End Patch".len();
+    let patch = normalized[start..end].trim().to_string();
+    if patch.starts_with("*** Begin Patch") && patch.ends_with("*** End Patch") {
+        return Some(patch);
+    }
+    None
+}
+
 fn is_auto_injected_stop_hook_function_call(row: &Map<String, Value>) -> bool {
     let item_type = read_trimmed_string(row.get("type"))
         .unwrap_or_default()
@@ -341,42 +358,34 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             {
                 parts.push(prompt);
             }
-            if let Some(guidance) = row.get("schemaGuidance").and_then(Value::as_object) {
-                if let Some(fields) = guidance.get("requiredFields").and_then(Value::as_array) {
-                    let names: Vec<String> = fields
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string)
-                        .collect();
-                    if !names.is_empty() {
-                        parts.push(format!("必须补齐 stop schema 字段：{}。", names.join(", ")));
-                    }
-                }
-                if let Some(values) = guidance.get("stopreasonValues").and_then(Value::as_object)
-                {
-                    let finished = values
-                        .get("finished")
-                        .and_then(Value::as_i64)
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "0".to_string());
-                    let blocked = values
-                        .get("blocked")
-                        .and_then(Value::as_i64)
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "1".to_string());
-                    let continue_needed = values
-                        .get("continueNeeded")
-                        .or_else(|| values.get("continue_needed"))
-                        .and_then(Value::as_i64)
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "2".to_string());
-                    parts.push(format!(
-                        "stopreason 取值：finished={}, blocked={}, continue_needed={}.",
-                        finished, blocked, continue_needed
-                    ));
-                }
+            if let Some(schema_guidance) = row
+                .get("schemaGuidance")
+                .or_else(|| row.get("schema_guidance"))
+                .cloned()
+                .and_then(|value| serde_json::from_value::<serde_json::Value>(value).ok())
+                .and_then(|v| Some(v.clone()))
+            {
+                let trigger_hint = schema_guidance
+                    .get("triggerHint")
+                    .or_else(|| schema_guidance.get("trigger_hint"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("no_schema");
+                let repeat_count = row
+                    .get("repeatCount")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n as u32);
+                let max_repeats = row
+                    .get("maxRepeats")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n as u32)
+                    .unwrap_or(3);
+                let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
+                parts.push(render_stopless_schema_guidance_text(
+                    &schema_guidance,
+                    trigger_hint,
+                    used,
+                    max_repeats,
+                ));
             }
             if !parts.is_empty() {
                 return parts.join("\n");
@@ -384,6 +393,67 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+fn render_stopless_schema_guidance_text(
+    guidance: &serde_json::Value,
+    trigger_hint: &str,
+    used: u32,
+    max_repeats: u32,
+) -> String {
+    let required_fields = guidance
+        .get("requiredFields")
+        .or_else(|| guidance.get("required_fields"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            vec![
+                "stopreason".to_string(),
+                "reason".to_string(),
+                "has_evidence".to_string(),
+                "evidence".to_string(),
+                "issue_cause".to_string(),
+                "excluded_factors".to_string(),
+                "diagnostic_order".to_string(),
+                "done_steps".to_string(),
+                "next_step".to_string(),
+                "next_suggested_path".to_string(),
+                "needs_user_input".to_string(),
+                "learned".to_string(),
+            ]
+        });
+    let fields = required_fields.join(", ");
+    let base = format!(
+        "如果这一轮准备收尾，末尾补这段 JSON 字段：{fields}\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n"
+    );
+    let hint = match trigger_hint {
+        "no_schema" => {
+            "继续推进当前任务；如果这轮已经能收尾，就按下面格式把结论、证据和下一步一次写清楚。".to_string()
+        }
+        "invalid_schema" => {
+            "把这轮的结论重新整理成下面格式：stopreason 只能是 0/1/2；能收尾就写 reason，不能收尾就写 next_step；缺的字段直接补齐，不要留空。".to_string()
+        }
+        "non_terminal_schema" => {
+            "继续往下做；如果现在已经能收尾，就把 stopreason 改成 0 或 1；如果还没收尾，就保持 stopreason=2 并把 next_step 写具体。".to_string()
+        }
+        "budget_exhausted" => format!(
+            "这次直接收尾。优先给出最终结论；如果确实卡住，就把卡点、原因和已完成动作写清楚。stopreason 用 0 表示完成，用 1 表示阻塞。"
+        ),
+        "stop" => {
+            "如果这轮要停，末尾按下面格式补完整；如果还没停稳，就继续推进并把 next_step 写具体。".to_string()
+        }
+        _ => String::new(),
+    };
+    let sample = if trigger_hint == "budget_exhausted" {
+        "样例：{\"stopreason\":1,\"reason\":\"需要用户确认上线策略\",\"issue_cause\":\"缺少发布授权\"}".to_string()
+    } else {
+        "样例：{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"测试通过日志\",\"done_steps\":\"已编译并验证\"}".to_string()
+    };
+    format!("{base}{hint}\n{sample}")
 }
 
 fn build_responses_text_guidance_input_item(text: String) -> Value {
@@ -597,6 +667,11 @@ fn normalize_shell_like_function_call_arguments(
     if cmd.is_empty() {
         return None;
     }
+    if requested_tool_names.contains("apply_patch") {
+        if let Some(patch) = extract_embedded_apply_patch_from_shell_command(cmd.as_str()) {
+            return Some(("apply_patch".to_string(), patch));
+        }
+    }
     let mut next_args = args;
     for item in next_args.values_mut() {
         strip_provider_tool_sentinel_from_value(item);
@@ -716,12 +791,17 @@ fn normalize_message_tool_calls(
                 fn_row.get("arguments"),
                 requested_tool_names,
             ) {
+                let normalized_to_apply_patch = resolved_name == "apply_patch";
                 if resolved_name != raw_name {
                     fn_row.insert("name".to_string(), Value::String(resolved_name));
                 }
                 fn_row.insert("arguments".to_string(), Value::String(arguments));
                 if let Some(call_id) = call_id_hint.as_ref() {
-                    shell_tool_call_ids.insert(call_id.clone());
+                    if normalized_to_apply_patch {
+                        apply_patch_tool_call_ids.insert(call_id.clone());
+                    } else {
+                        shell_tool_call_ids.insert(call_id.clone());
+                    }
                 }
                 continue;
             }
@@ -786,6 +866,7 @@ fn normalize_responses_input_function_calls(
                             requested_tool_names,
                         )
                     {
+                        let normalized_to_apply_patch = resolved_name == "apply_patch";
                         if resolved_name != raw_name {
                             item_row.insert("name".to_string(), Value::String(resolved_name));
                         }
@@ -793,7 +874,11 @@ fn normalize_responses_input_function_calls(
                         let call_id = read_trimmed_string(item_row.get("call_id"))
                             .or_else(|| read_trimmed_string(item_row.get("id")));
                         if let Some(call_id) = call_id {
-                            shell_like_call_ids.insert(call_id);
+                            if normalized_to_apply_patch {
+                                apply_patch_call_ids.insert(call_id);
+                            } else {
+                                shell_like_call_ids.insert(call_id);
+                            }
                         }
                     } else if let Some((resolved_name, arguments)) =
                         normalize_write_stdin_function_call_arguments(
@@ -885,7 +970,8 @@ pub fn normalize_shell_like_tool_calls_before_governance_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_apply_patch_output_text, normalize_shell_like_tool_calls_before_governance,
+        build_stop_hook_guidance_text_from_output, normalize_apply_patch_output_text,
+        normalize_shell_like_tool_calls_before_governance,
     };
     use crate::hashline::compute_line_hash;
     use serde_json::{json, Value};
@@ -975,6 +1061,39 @@ mod tests {
         assert_eq!(args["cmd"], "npm test");
         assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/workspace");
+    }
+
+    #[test]
+    fn upgrades_shell_wrapped_canonical_patch_to_apply_patch_call() {
+        let mut payload = json!({
+          "tools": [
+            { "type": "function", "function": { "name": "exec_command" } },
+            { "type": "function", "function": { "name": "apply_patch" } }
+          ],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "fc_patch_shell",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cat > /tmp/patch-terminal-page.txt << 'PATCH_EOF'\\n*** Begin Patch\\n*** Add File: tmp/patch-from-shell.txt\\n+hello from patch\\n*** End Patch\\nPATCH_EOF\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "fc_patch_shell",
+              "output": "Invalid patch: The first line of the patch must be '*** Begin Patch'"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        assert_eq!(payload["input"][0]["name"], "apply_patch");
+        assert_eq!(
+            payload["input"][0]["arguments"],
+            "*** Begin Patch\n*** Add File: tmp/patch-from-shell.txt\n+hello from patch\n*** End Patch"
+        );
+        let output = payload["input"][1]["output"].as_str().expect("tool output");
+        assert!(output.starts_with("APPLY_PATCH_ERROR:"));
+        assert!(output.contains("Retry with apply_patch only"));
     }
 
     #[test]
@@ -1421,7 +1540,7 @@ mod tests {
             {
               "type": "function_call_output",
               "call_id": "call_servertool_cli_stop_1",
-              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"你必须补齐 stop schema 后再判断停止。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"evidence\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就再试一次；想停的时候直接告诉我一句'做完了'或'卡住了，需要你拍板'。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
             }
           ]
         });
@@ -1431,9 +1550,17 @@ mod tests {
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["role"], "user");
         let text = input[0]["content"][0]["text"].as_str().expect("text");
-        assert!(text.contains("你必须补齐 stop schema"));
-        assert!(text.contains("stopreason, reason, evidence"));
-        assert!(text.contains("continue_needed=2"));
+        assert!(text.contains("继续做下一步"));
+        assert!(text.contains("JSON"));
+        assert!(text.contains("stopreason"));
+        assert!(text.contains("0=finished"));
+        assert!(!text.contains("schema"));
+        assert!(!text.contains("hook"));
+        assert!(!text.contains("第一轮"));
+        assert!(!text.contains("上一轮你直接停了"));
+        assert!(!text.contains("停止 JSON"));
+        assert!(!text.contains("格式不对"));
+        assert!(!text.contains("重试机会"));
         assert!(!payload.to_string().contains("call_servertool_cli_stop_1"));
         assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
     }
@@ -2067,6 +2194,34 @@ mod tests {
         assert!(normalized.contains("workspace-relative"));
         assert!(normalized.contains("Keep using apply_patch"));
         assert!(!normalized.contains("absolute paths"));
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_appends_schema_guidance_from_cli_output() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "toolName": "stop_message_auto",
+                "continuationPrompt": "继续做下一步；先把手头能确认的结果拿回来。",
+                "schemaGuidance": {
+                    "requiredFields": ["stopreason", "reason", "next_step"],
+                    "stopreasonValues": {
+                        "finished": 0,
+                        "blocked": 1,
+                        "continueNeeded": 2
+                    }
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("继续做下一步"));
+        assert!(text.contains("JSON"));
+        assert!(text.contains("stopreason"));
+        assert!(text.contains("next_step"));
+        assert!(text.contains("0=finished"));
+        assert!(!text.contains("servertool"));
+        assert!(!text.contains("停止 JSON"));
+        assert!(!text.contains("格式不对"));
+        assert!(!text.contains("重试机会"));
     }
 
     fn does_not_normalize_nested_hashline_apply_patch_anymore() {

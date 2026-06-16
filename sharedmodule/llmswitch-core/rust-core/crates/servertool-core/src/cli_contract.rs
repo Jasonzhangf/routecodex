@@ -11,6 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+const SERVERTOOL_CLI_INVALID_REPEAT_RANGE: &str =
+    "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats";
+
+const STOP_MESSAGE_AUTO_TOOL_NAME: &str = "stop_message_auto";
+const REASONING_STOP_PUBLIC_TOOL_NAME: &str = "reasoning_stop";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -137,9 +142,10 @@ impl std::error::Error for ServertoolCliError {}
 pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
+    let input = normalize_cli_run_input_aliases(input)?;
     validate_cli_run_input(&input)?;
     match input.tool_name.as_str() {
-        "stop_message_auto" => build_stop_message_auto_run_output(input),
+        STOP_MESSAGE_AUTO_TOOL_NAME => build_stop_message_auto_run_output(input),
         "servertool_fixture" => build_servertool_fixture_run_output(input),
         other => Err(ServertoolCliError::UnsupportedTool(other.to_string())),
     }
@@ -253,6 +259,52 @@ fn validate_cli_run_input(input: &ServertoolCliRunInput) -> Result<(), Servertoo
     Ok(())
 }
 
+fn normalize_cli_run_input_aliases(
+    mut input: ServertoolCliRunInput,
+) -> Result<ServertoolCliRunInput, ServertoolCliError> {
+    let normalized = match input.tool_name.trim() {
+        REASONING_STOP_PUBLIC_TOOL_NAME => STOP_MESSAGE_AUTO_TOOL_NAME,
+        other => other,
+    };
+    if normalized.is_empty() {
+        return Err(ServertoolCliError::MissingField("toolName"));
+    }
+    input.tool_name = normalized.to_string();
+    Ok(input)
+}
+
+fn build_terminal_stopless_output(
+    session_id: String,
+    request_id: String,
+    continuation_prompt: String,
+    max_repeats: u32,
+) -> ServertoolCliRunOutput {
+    ServertoolCliRunOutput {
+        ok: true,
+        kind: "stop_message_auto".to_string(),
+        tool: "stop_message_auto".to_string(),
+        summary: "stopless budget exhausted".to_string(),
+        tool_name: "stop_message_auto".to_string(),
+        flow_id: "stop_message_flow".to_string(),
+        continuation_prompt,
+        repeat_count: max_repeats,
+        max_repeats,
+        session_id: Some(session_id),
+        request_id: Some(request_id),
+        schema_guidance: Some(stopless_schema_guidance_with_trigger(
+            StoplessContinuationTrigger::BudgetExhausted,
+            max_repeats.saturating_sub(1),
+            max_repeats,
+        )),
+        injected_prompt_preview: None,
+        input: serde_json::json!({
+            "flowId": "stop_message_flow",
+            "repeatCount": max_repeats,
+            "maxRepeats": max_repeats
+        }),
+    }
+}
+
 fn build_stop_message_auto_run_output(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
@@ -273,7 +325,21 @@ fn build_stop_message_auto_run_output(
             .unwrap_or(3),
     };
     if next_max_repeats == 0 || next_repeat_count > next_max_repeats {
-        return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
+        // 打满后优雅停止，不报错
+        let continuation_prompt = resolve_stopless_continuation_prompt(
+            StoplessContinuationPromptInput {
+                used: next_max_repeats.saturating_sub(1),
+                max_repeats: next_max_repeats,
+                trigger: StoplessContinuationTrigger::BudgetExhausted,
+            },
+        )
+        .expect("prompt");
+        return Ok(build_terminal_stopless_output(
+            session_id,
+            request_id,
+            continuation_prompt.client_visible_text,
+            next_max_repeats,
+        ));
     }
     let used_for_prompt = next_repeat_count.saturating_sub(1);
     let flow_id = input
@@ -312,7 +378,11 @@ fn build_stop_message_auto_run_output(
         max_repeats: next_max_repeats,
         session_id: Some(session_id),
         request_id: Some(request_id),
-        schema_guidance: Some(stopless_schema_guidance()),
+        schema_guidance: Some(stopless_schema_guidance_with_trigger(
+            StoplessContinuationTrigger::NoSchema,
+            used_for_prompt,
+            next_max_repeats,
+        )),
         injected_prompt_preview: None,
         input: canonical_input,
     })
@@ -372,7 +442,11 @@ fn build_servertool_fixture_run_output(
     })
 }
 
-pub fn stopless_schema_guidance() -> StoplessSchemaGuidance {
+pub fn stopless_schema_guidance_with_trigger(
+    trigger: StoplessContinuationTrigger,
+    used: u32,
+    max_repeats: u32,
+) -> StoplessSchemaGuidance {
     StoplessSchemaGuidance {
         required_fields: vec![
             "stopreason".to_string(),
@@ -387,7 +461,6 @@ pub fn stopless_schema_guidance() -> StoplessSchemaGuidance {
             "next_suggested_path".to_string(),
             "needs_user_input".to_string(),
             "learned".to_string(),
-            "forcestop".to_string(),
         ],
         stopreason_values: StopreasonValues {
             finished: 0,
@@ -397,19 +470,8 @@ pub fn stopless_schema_guidance() -> StoplessSchemaGuidance {
     }
 }
 
-pub fn render_stopless_schema_guidance_text(guidance: &StoplessSchemaGuidance) -> String {
-    let fields = guidance.required_fields.join(", ");
-    format!(
-        concat!(
-            "如果你要结束当前轮，请同时附上一段 JSON。\n",
-            "字段：{fields}\n",
-            "stopreason 取值：0=finished，1=blocked，2=continue_needed。\n",
-            "forcestop 只能用于已经用尽所有排查手段、模型陷入重复循环、或者用户明确要求停止时。",
-            "使用 forcestop=1 时必须同时填写 reason 说明强制停止的原因（原因不校验格式，但必须非空），",
-            "其余字段可不填写。其余字段按真实执行情况填写；没有证据就继续执行，不要空着。"
-        ),
-        fields = fields
-    )
+pub fn stopless_schema_guidance() -> StoplessSchemaGuidance {
+    stopless_schema_guidance_with_trigger(StoplessContinuationTrigger::NoSchema, 0, 3)
 }
 
 fn non_empty(raw: Option<&str>, field: &'static str) -> Result<String, ServertoolCliError> {
@@ -590,7 +652,7 @@ fn build_client_exec_command(
     let quoted_input = quote_posix_single_argument(&input_json);
     let mut cmd = format!(
         "routecodex hook run {} --input-json {}",
-        tool_name,
+        public_cli_tool_name(tool_name),
         quoted_input
     );
     if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
@@ -602,6 +664,14 @@ fn build_client_exec_command(
         cmd.push_str(&quote_posix_single_argument(&request_id));
     }
     cmd
+}
+
+fn public_cli_tool_name(tool_name: &str) -> &str {
+    if tool_name == STOP_MESSAGE_AUTO_TOOL_NAME {
+        REASONING_STOP_PUBLIC_TOOL_NAME
+    } else {
+        tool_name
+    }
 }
 
 pub fn build_client_exec_cli_projection_output(
@@ -808,12 +878,7 @@ pub fn build_client_visible_projection_shell(
                 },
                 "finish_reason": "tool_calls"
             }
-        ],
-        "__servertool_cli_projection": {
-            "clientCallId": client_call_id,
-            "toolName": tool_name,
-            "requestId": request_id
-        }
+        ]
     }))
 }
 
@@ -1004,7 +1069,6 @@ mod tests {
             .expect("NoSchema stopless CLI output must carry schema guidance");
         assert!(schema_guidance.required_fields.contains(&"stopreason".to_string()));
         assert!(schema_guidance.required_fields.contains(&"next_step".to_string()));
-        assert!(schema_guidance.required_fields.contains(&"forcestop".to_string()));
         assert_eq!(schema_guidance.stopreason_values.finished, 0);
         assert_eq!(schema_guidance.stopreason_values.blocked, 1);
         assert_eq!(schema_guidance.stopreason_values.continue_needed, 2);
@@ -1030,7 +1094,13 @@ mod tests {
                 flow_id: Some("stop_message_flow".to_string()),
                 repeat_count: None,
                 max_repeats: None,
-                session_id: Some("session-test".to_string()),
+                session_id: Some(format!(
+                    "session-status-only-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos() as u64)
+                        .unwrap_or(0)
+                )),
                 request_id: Some("req-test".to_string()),
             },
         )
@@ -1074,18 +1144,6 @@ mod tests {
                 "maxRepeats": 3
             })
         );
-    }
-
-    #[test]
-    fn renders_stopless_schema_guidance_text_without_internal_proxy_terms() {
-        let text = render_stopless_schema_guidance_text(&stopless_schema_guidance());
-        assert!(text.contains("JSON"));
-        assert!(text.contains("stopreason"));
-        assert!(text.contains("0=finished"));
-        assert!(text.contains("1=blocked"));
-        assert!(text.contains("2=continue_needed"));
-        assert!(!text.contains("servertool"));
-        assert!(!text.contains("hook"));
     }
 
     #[test]
@@ -1404,7 +1462,7 @@ mod tests {
         })
         .expect("projection output");
         let command = out["execCommand"].as_str().expect("exec command");
-        let prefix = "routecodex hook run stop_message_auto --input-json '";
+        let prefix = "routecodex hook run reasoning_stop --input-json '";
         assert!(command.starts_with(prefix));
         let input_start = prefix.len();
         let input_json = if let Some(input_end) = command[input_start..]
@@ -1456,10 +1514,7 @@ mod tests {
         assert_eq!(message["reasoning"]["summary"][0]["type"], "summary_text");
         assert!(message["reasoning"].get("content").is_none());
         assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
-        assert_eq!(
-            shell["__servertool_cli_projection"]["requestId"],
-            "req_stop_projection"
-        );
+        assert!(shell.get("__servertool_cli_projection").is_none());
         let serialized = serde_json::to_string(&shell).expect("serialize shell");
         for denied in [
             "reenterPipeline",
@@ -1702,7 +1757,7 @@ mod tests {
 
     #[test]
     fn projection_plan_error_codes_are_documented_in_tests() {
-        let repeat_err = build_servertool_cli_binary_run_command_from_client_exec_result(
+        let repeat_over_budget = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
                 input: json!({
@@ -1714,15 +1769,22 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
-                session_id: Some("session-test".to_string()),
+                session_id: Some(format!(
+                    "session-over-budget-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos() as u64)
+                        .unwrap_or(0)
+                )),
                 request_id: Some("req-test".to_string()),
             },
         )
-        .expect_err("repeat budget must fail fast");
-        assert_eq!(
-            repeat_err.to_string(),
-            "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats"
-        );
+        .expect("over budget must return terminal output, not error");
+        assert_eq!(repeat_over_budget.ok, true);
+        assert_eq!(repeat_over_budget.summary, "stopless budget exhausted");
+        assert_eq!(repeat_over_budget.repeat_count, 3);
+        assert_eq!(repeat_over_budget.max_repeats, 3);
+        assert!(!repeat_over_budget.continuation_prompt.is_empty());
 
         let flow_err = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
@@ -1735,8 +1797,14 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
-                session_id: Some("session-test".to_string()),
-                request_id: Some("req-test".to_string()),
+                session_id: Some(format!(
+                    "session-missing-flow-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos() as u64)
+                        .unwrap_or(0)
+                )),
+                request_id: Some("req-missing-flow".to_string()),
             },
         )
         .expect_err("missing flow id must fail fast");
@@ -1749,8 +1817,8 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
-                session_id: Some("session-test".to_string()),
-                request_id: Some("req-test".to_string()),
+                session_id: Some("session-denied-tool".to_string()),
+                request_id: Some("req-denied-tool".to_string()),
             },
         )
         .expect_err("fake_exec must be denied");

@@ -42,6 +42,61 @@ struct GovernanceContext {
     entry_endpoint: String,
 }
 
+const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
+    "当你准备结束当前轮时，必须同时给出两部分：\n",
+    "1. 简洁 summary，说明这轮完成了什么或为什么现在必须停。\n",
+    "2. 回复末尾附一段 JSON，字段必须按真实情况填写。\n",
+    "标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\n",
+    "stopreason 取值：0=finished，1=blocked，2=continue_needed。\n",
+    "finished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。\n",
+    "示例 JSON（已完成）：{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"列出已验证的日志/测试/文件\",\"done_steps\":\"概述已完成动作\",\"next_step\":\"无\",\"needs_user_input\":0,\"learned\":\"补充本轮结论\"}\n",
+    "示例 JSON（需继续）：{\"stopreason\":2,\"reason\":\"当前还不能收尾\",\"has_evidence\":1,\"evidence\":\"列出当前证据\",\"next_step\":\"写清楚下一步动作\",\"needs_user_input\":0}"
+);
+
+fn request_already_has_stopless_system_instruction(request: &Map<String, Value>) -> bool {
+    request
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|messages| {
+            messages.iter().any(|message| {
+                let Some(message_obj) = message.as_object() else {
+                    return false;
+                };
+                let role = message_obj.get("role").and_then(Value::as_str).unwrap_or("");
+                if role.trim().eq_ignore_ascii_case("system") {
+                    let content = message_obj
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    return content.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed");
+                }
+                false
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn prepend_stopless_system_instruction(request: &mut Map<String, Value>) {
+    if request_already_has_stopless_system_instruction(request) {
+        return;
+    }
+    let messages = request
+        .entry("messages".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !messages.is_array() {
+        *messages = Value::Array(Vec::new());
+    }
+    if let Some(message_array) = messages.as_array_mut() {
+        message_array.insert(
+            0,
+            serde_json::json!({
+                "role": "system",
+                "content": STOPLESS_SYSTEM_INSTRUCTION
+            }),
+        );
+    }
+}
+
 pub fn apply_req_process_tool_governance(
     input: ToolGovernanceInput,
 ) -> Result<ToolGovernanceOutput, String> {
@@ -55,6 +110,9 @@ pub fn apply_req_process_tool_governance(
     let runtime_metadata = read_runtime_metadata(&metadata);
     let client_inject_ready = resolve_client_inject_ready(&metadata);
     apply_chat_process_request_sanitizer(&mut request);
+    if client_inject_ready {
+        prepend_stopless_system_instruction(&mut request);
+    }
     normalize_apply_patch_freeform_tool_schema(&mut request);
 
     apply_anthropic_tool_alias_semantics(&mut request, &ctx.entry_endpoint);
@@ -151,7 +209,7 @@ eof_line: "*** End of File" LF
 
 #[cfg(test)]
 mod apply_patch_tool_schema_tests {
-    use super::normalize_apply_patch_freeform_tool_schema;
+    use super::{apply_req_process_tool_governance, normalize_apply_patch_freeform_tool_schema, ToolGovernanceInput};
     use serde_json::{json, Map, Value};
 
     fn normalize_tools(input: Value) -> Value {
@@ -214,6 +272,43 @@ mod apply_patch_tool_schema_tests {
             .as_str()
             .expect("apply_patch grammar definition");
         assert!(definition.contains("begin_patch:"));
+    }
+
+    #[test]
+    fn apply_req_process_tool_governance_projects_apply_patch_as_custom_freeform_tool() {
+        let output = apply_req_process_tool_governance(ToolGovernanceInput {
+            request: json!({
+                "model": "gpt-test",
+                "messages": [{ "role": "user", "content": "edit a file" }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "description": "canonical client apply_patch tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "patch": { "type": "string" } },
+                            "required": ["patch"]
+                        }
+                    }
+                }],
+                "parameters": {}
+            }),
+            raw_payload: Value::Null,
+            metadata: json!({}),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req-apply-patch-freeform-prod".to_string(),
+            has_active_stop_message_for_continue_execution: Some(false),
+        })
+        .expect("governed request");
+
+        let tool = output.processed_request["tools"][0].clone();
+        assert_eq!(tool["type"], json!("custom"));
+        assert_eq!(tool["name"], json!("apply_patch"));
+        assert_eq!(tool["format"]["type"], json!("grammar"));
+        assert_eq!(tool["format"]["syntax"], json!("lark"));
+        assert!(tool.get("parameters").is_none());
+        assert!(tool.get("function").is_none());
     }
 }
 
