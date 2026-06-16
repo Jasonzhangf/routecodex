@@ -31,7 +31,20 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   entryOriginRequest: unknown
 ): void {
   const entryOrigin = asFlatRecord(entryOriginRequest);
+  const responsesRequestContext = asFlatRecord(baseContext.responsesRequestContext);
   if (!entryOrigin) {
+    const sessionIdFromResponsesContext =
+      readSessionLikeToken(baseContext.sessionId) ??
+      readSessionLikeToken(responsesRequestContext?.sessionId);
+    const conversationIdFromResponsesContext =
+      readSessionLikeToken(baseContext.conversationId) ??
+      readSessionLikeToken(responsesRequestContext?.conversationId);
+    if (sessionIdFromResponsesContext && !readSessionLikeToken(baseContext.sessionId)) {
+      baseContext.sessionId = sessionIdFromResponsesContext;
+    }
+    if (conversationIdFromResponsesContext && !readSessionLikeToken(baseContext.conversationId)) {
+      baseContext.conversationId = conversationIdFromResponsesContext;
+    }
     return;
   }
   const requestMetadata = asFlatRecord(entryOrigin.metadata);
@@ -40,6 +53,7 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
 
   const sessionId =
     readSessionLikeToken(baseContext.sessionId) ??
+    readSessionLikeToken(responsesRequestContext?.sessionId) ??
     readSessionLikeToken(entryOrigin.sessionId) ??
     readSessionLikeToken(entryOrigin.session_id) ??
     readSessionLikeToken(requestMetadata?.sessionId) ??
@@ -50,6 +64,7 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
     readSessionLikeToken(capturedMetadata?.session_id);
   const conversationId =
     readSessionLikeToken(baseContext.conversationId) ??
+    readSessionLikeToken(responsesRequestContext?.conversationId) ??
     readSessionLikeToken(entryOrigin.conversationId) ??
     readSessionLikeToken(entryOrigin.conversation_id) ??
     readSessionLikeToken(requestMetadata?.conversationId) ??

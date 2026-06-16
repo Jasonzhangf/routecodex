@@ -169,16 +169,28 @@ function extractStoplessReasoningText(finalChatResponse: JsonObject): string {
 function extractStoplessLoopState(execution: ServerToolEngineResult['execution']): {
   repeatCount: number;
   maxRepeats: number;
+  triggerHint?: string;
 } {
-  const state = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? (execution.context as Record<string, unknown>).serverToolLoopState
+  const context = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
+    ? execution.context as Record<string, unknown>
+    : {};
+  const state = context
+    ? context.serverToolLoopState
     : null;
   const row = state && typeof state === 'object' && !Array.isArray(state)
     ? state as Record<string, unknown>
     : {};
   const repeatCount = typeof row.repeatCount === 'number' ? row.repeatCount : 1;
   const maxRepeats = typeof row.maxRepeats === 'number' ? row.maxRepeats : Math.max(repeatCount, 1);
-  return { repeatCount, maxRepeats };
+  const triggerHint = [
+    row.triggerHint,
+    context.stopSchemaTriggerHint
+  ].find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+  return {
+    repeatCount,
+    maxRepeats,
+    ...(typeof triggerHint === 'string' && triggerHint.trim() ? { triggerHint: triggerHint.trim() } : {})
+  };
 }
 
 function readStoplessSessionId(adapterContext: unknown): string | undefined {
@@ -451,7 +463,8 @@ export async function runServerToolOrchestration(
       input: {
         flowId,
         repeatCount: loopState.repeatCount,
-        maxRepeats: loopState.maxRepeats
+        maxRepeats: loopState.maxRepeats,
+        ...(loopState.triggerHint ? { triggerHint: loopState.triggerHint } : {})
       },
       ...(sessionId ? { sessionId, requestId: options.requestId } : {})
     });

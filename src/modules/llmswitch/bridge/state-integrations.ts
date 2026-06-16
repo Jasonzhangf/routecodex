@@ -5,7 +5,7 @@
  * clock task store compatibility wrappers.
  */
 
-import { requireCoreDist } from './module-loader.js';
+import { importCoreDist, requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
 
@@ -58,6 +58,40 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
     fn(key, state);
   } catch (error) {
     throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });
+  }
+}
+
+export async function recordStoplessContinuationState(args: {
+  sessionId: string;
+  requestId: string;
+  text: string;
+  nextUsed: number;
+  maxRepeats: number;
+  nowMs?: number;
+}): Promise<unknown> {
+  try {
+    const mod = await importCoreDist<{
+      recordStoplessContinuationState?: (input: {
+        sessionId: string;
+        requestId: string;
+        text: string;
+        nextUsed: number;
+        maxRepeats: number;
+        nowMs?: number;
+      }) => unknown;
+    }>('servertool/handlers/stop-message-auto/runtime-utils');
+    const fn = mod.recordStoplessContinuationState;
+    if (typeof fn !== 'function') {
+      throw new Error('recordStoplessContinuationState native unavailable');
+    }
+    return fn(args);
+  } catch (error) {
+    throw buildStateIntegrationFailure('stopless_continuation.record.invoke', error, {
+      sessionId: args.sessionId,
+      requestId: args.requestId,
+      nextUsed: args.nextUsed,
+      maxRepeats: args.maxRepeats
+    });
   }
 }
 

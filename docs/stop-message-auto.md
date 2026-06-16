@@ -6,7 +6,7 @@
 
 - 默认开启，默认最大连续 stop 次数为 `3`。
 - stop hook 在 stopless 管理回合中必须无条件注入并持续存在；如果注入丢失，不能期待模型主动调用，只能依赖 3 次自动停止护栏收口。
-- 状态 key 只能是 `session:<sessionId>`；没有 `sessionId` 时只能退回当前 requestId 级别，不允许命中持久会话状态。
+- 状态 key 只能是 `session:<sessionId>`；如果调用方没传 `sessionId/requestId`，CLI/runtime 必须自己补齐，但补出来的 session 只保证本次工具执行可闭环，不代表后续 turn 会命中同一个稳定会话状态。
 - 禁止用 `tmuxSessionId`、`conversationId`、`default`、`stopMessageClientInject*` 作为 stopless 状态 fallback。
 - 当 stopless 触发时，服务端必须投影一个客户端可见 `exec_command`；不得直接 `reenterPipeline`。
 - CLI command 只允许承载 `flowId`、`repeatCount`、`maxRepeats`；不得暴露 continuationPrompt/schemaGuidance/raw prompt text。

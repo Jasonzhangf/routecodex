@@ -7,6 +7,7 @@ use serde_json::Value;
 pub struct StoplessOrchestrationPlanInput {
     pub flow_id: Option<String>,
     pub execution: Value,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -22,6 +23,7 @@ pub struct StoplessOrchestrationPlan {
     pub action: StoplessOrchestrationAction,
     pub is_stop_message_flow: bool,
     pub reason: String,
+    pub session_id: Option<String>,
 }
 
 pub fn plan_stopless_orchestration_action(
@@ -46,6 +48,7 @@ pub fn plan_stopless_orchestration_action(
             action: StoplessOrchestrationAction::CliProjection,
             is_stop_message_flow: false,
             reason: "non_stop_message_flow".to_string(),
+            session_id: input.session_id,
         };
     }
     if is_stop_message_terminal_final(&input.execution) {
@@ -53,12 +56,14 @@ pub fn plan_stopless_orchestration_action(
             action: StoplessOrchestrationAction::TerminalFinal,
             is_stop_message_flow: true,
             reason: "stop_message_terminal_final".to_string(),
+            session_id: input.session_id,
         };
     }
     StoplessOrchestrationPlan {
         action: StoplessOrchestrationAction::CliProjection,
         is_stop_message_flow: true,
         reason: "stop_message_cli_projection".to_string(),
+        session_id: input.session_id,
     }
 }
 
@@ -81,10 +86,12 @@ mod tests {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
         assert_eq!(plan.reason, "stop_message_cli_projection");
+        assert!(plan.session_id.is_none());
     }
 
     #[test]
@@ -95,9 +102,11 @@ mod tests {
                 "flowId": "stop_message_flow",
                 "context": { "stopMessageTerminalFinal": true }
             }),
+            session_id: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_terminal_final");
+        assert!(plan.session_id.is_none());
     }
 
     #[test]
@@ -105,8 +114,37 @@ mod tests {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("vision_flow".to_string()),
             execution: json!({ "flowId": "vision_flow" }),
+            session_id: Some("sess-abc".to_string()),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(!plan.is_stop_message_flow);
+        assert_eq!(plan.session_id.as_deref(), Some("sess-abc"));
+    }
+
+    #[test]
+    fn stop_message_flow_cli_projection_carries_session_id() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: Some("sess-xyz".to_string()),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.session_id.as_deref(), Some("sess-xyz"));
+    }
+
+    #[test]
+    fn stop_message_flow_terminal_final_carries_session_id() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": { "stopMessageTerminalFinal": true }
+            }),
+            session_id: Some("sess-final".to_string()),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.session_id.as_deref(), Some("sess-final"));
     }
 }

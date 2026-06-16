@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-const SERVERTOOL_CLI_INVALID_REPEAT_RANGE: &str =
-    "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats";
-
 const STOP_MESSAGE_AUTO_TOOL_NAME: &str = "stop_message_auto";
 const REASONING_STOP_PUBLIC_TOOL_NAME: &str = "reasoning_stop";
 
@@ -60,6 +57,7 @@ pub struct ServertoolCliRunOutput {
 pub struct StoplessSchemaGuidance {
     pub required_fields: Vec<String>,
     pub stopreason_values: StopreasonValues,
+    pub trigger_hint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -300,7 +298,8 @@ fn build_terminal_stopless_output(
         input: serde_json::json!({
             "flowId": "stop_message_flow",
             "repeatCount": max_repeats,
-            "maxRepeats": max_repeats
+            "maxRepeats": max_repeats,
+            "triggerHint": "budget_exhausted"
         }),
     }
 }
@@ -310,26 +309,30 @@ fn build_stop_message_auto_run_output(
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
     let (session_id, request_id) = validate_stopless_session_identity(&input)?;
     let persisted = resolve_runtime_stop_message_state(&session_id);
-    let next_repeat_count = match persisted.as_ref() {
-        Some(snapshot) => snapshot.used.saturating_add(1).min(u32::MAX as i64) as u32,
-        None => input
-            .repeat_count
-            .or_else(|| read_u32(&input.input, "repeatCount"))
-            .unwrap_or(1),
-    };
-    let next_max_repeats = match persisted.as_ref() {
-        Some(snapshot) => snapshot.max_repeats.max(1).min(u32::MAX as i64) as u32,
-        None => input
-            .max_repeats
-            .or_else(|| read_u32(&input.input, "maxRepeats"))
-            .unwrap_or(3),
-    };
-    if next_max_repeats == 0 || next_repeat_count > next_max_repeats {
+    let current_repeat_count = input
+        .repeat_count
+        .or_else(|| read_u32(&input.input, "repeatCount"))
+        .or_else(|| {
+            persisted
+                .as_ref()
+                .map(|snapshot| snapshot.used.saturating_add(1).min(u32::MAX as i64) as u32)
+        })
+        .unwrap_or(1);
+    let current_max_repeats = input
+        .max_repeats
+        .or_else(|| read_u32(&input.input, "maxRepeats"))
+        .or_else(|| {
+            persisted
+                .as_ref()
+                .map(|snapshot| snapshot.max_repeats.max(1).min(u32::MAX as i64) as u32)
+        })
+        .unwrap_or(3);
+    if current_max_repeats == 0 || current_repeat_count >= current_max_repeats {
         // 打满后优雅停止，不报错
         let continuation_prompt = resolve_stopless_continuation_prompt(
             StoplessContinuationPromptInput {
-                used: next_max_repeats.saturating_sub(1),
-                max_repeats: next_max_repeats,
+                used: current_max_repeats.saturating_sub(1),
+                max_repeats: current_max_repeats,
                 trigger: StoplessContinuationTrigger::BudgetExhausted,
             },
         )
@@ -338,10 +341,10 @@ fn build_stop_message_auto_run_output(
             session_id,
             request_id,
             continuation_prompt.client_visible_text,
-            next_max_repeats,
+            current_max_repeats,
         ));
     }
-    let used_for_prompt = next_repeat_count.saturating_sub(1);
+    let used_for_prompt = current_repeat_count.saturating_sub(1);
     let flow_id = input
         .flow_id
         .as_deref()
@@ -352,20 +355,19 @@ fn build_stop_message_auto_run_output(
     if flow_id != "stop_message_flow" {
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
+    let trigger = read_stopless_trigger_hint(&input.input);
     let canonical_input = serde_json::json!({
         "flowId": flow_id,
-        "repeatCount": next_repeat_count,
-        "maxRepeats": next_max_repeats
+        "repeatCount": current_repeat_count,
+        "maxRepeats": current_max_repeats,
+        "triggerHint": stopless_trigger_hint(trigger)
     });
-    let continuation_prompt = resolve_stopless_continuation_prompt(
-        StoplessContinuationPromptInput {
-            used: used_for_prompt,
-            max_repeats: next_max_repeats,
-            trigger: StoplessContinuationTrigger::NoSchema,
-        },
-    )
-    .map_err(|_| ServertoolCliError::InvalidField("continuationPrompt"))?
-    .client_visible_text;
+    let continuation_prompt = resolve_stopless_cli_continuation_prompt(
+        trigger,
+        persisted.as_ref(),
+        used_for_prompt,
+        current_max_repeats,
+    )?;
     Ok(ServertoolCliRunOutput {
         ok: true,
         kind: "stop_message_auto".to_string(),
@@ -374,14 +376,14 @@ fn build_stop_message_auto_run_output(
         tool_name: input.tool_name,
         flow_id,
         continuation_prompt,
-        repeat_count: next_repeat_count,
-        max_repeats: next_max_repeats,
+        repeat_count: current_repeat_count,
+        max_repeats: current_max_repeats,
         session_id: Some(session_id),
         request_id: Some(request_id),
         schema_guidance: Some(stopless_schema_guidance_with_trigger(
-            StoplessContinuationTrigger::NoSchema,
+            trigger,
             used_for_prompt,
-            next_max_repeats,
+            current_max_repeats,
         )),
         injected_prompt_preview: None,
         input: canonical_input,
@@ -392,6 +394,32 @@ fn resolve_runtime_stop_message_state(
     session_id: &str,
 ) -> Option<persisted_lookup::RuntimeStopMessageStateSnapshot> {
     crate::persisted_state_fs::load_persisted_runtime_stop_message_state(session_id)
+}
+
+fn resolve_stopless_cli_continuation_prompt(
+    trigger: StoplessContinuationTrigger,
+    persisted: Option<&persisted_lookup::RuntimeStopMessageStateSnapshot>,
+    used_for_prompt: u32,
+    max_repeats: u32,
+) -> Result<String, ServertoolCliError> {
+    if matches!(
+        trigger,
+        StoplessContinuationTrigger::InvalidSchema | StoplessContinuationTrigger::NonTerminalSchema
+    ) {
+        if let Some(text) = persisted
+            .map(|snapshot| snapshot.text.trim())
+            .filter(|text| !text.is_empty())
+        {
+            return Ok(text.to_string());
+        }
+    }
+    resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+        used: used_for_prompt,
+        max_repeats,
+        trigger,
+    })
+    .map(|resolved| resolved.client_visible_text)
+    .map_err(|_| ServertoolCliError::InvalidField("continuationPrompt"))
 }
 
 fn build_servertool_fixture_run_output(
@@ -444,8 +472,8 @@ fn build_servertool_fixture_run_output(
 
 pub fn stopless_schema_guidance_with_trigger(
     trigger: StoplessContinuationTrigger,
-    used: u32,
-    max_repeats: u32,
+    _used: u32,
+    _max_repeats: u32,
 ) -> StoplessSchemaGuidance {
     StoplessSchemaGuidance {
         required_fields: vec![
@@ -467,11 +495,53 @@ pub fn stopless_schema_guidance_with_trigger(
             blocked: 1,
             continue_needed: 2,
         },
+        trigger_hint: stopless_trigger_hint(trigger).to_string(),
     }
 }
 
 pub fn stopless_schema_guidance() -> StoplessSchemaGuidance {
     stopless_schema_guidance_with_trigger(StoplessContinuationTrigger::NoSchema, 0, 3)
+}
+
+fn stopless_trigger_hint(trigger: StoplessContinuationTrigger) -> &'static str {
+    match trigger {
+        StoplessContinuationTrigger::Stop | StoplessContinuationTrigger::NoSchema => "no_schema",
+        StoplessContinuationTrigger::InvalidSchema => "invalid_schema",
+        StoplessContinuationTrigger::NonTerminalSchema => "non_terminal_schema",
+        StoplessContinuationTrigger::BudgetExhausted => "budget_exhausted",
+        StoplessContinuationTrigger::SchemaPass => "schema_pass",
+    }
+}
+
+fn read_stopless_trigger_hint(input: &Value) -> StoplessContinuationTrigger {
+    let token = input
+        .as_object()
+        .and_then(|row| row.get("triggerHint").or_else(|| row.get("trigger_hint")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("no_schema");
+    match token {
+        "stop_schema_missing" => StoplessContinuationTrigger::NoSchema,
+        "stop_schema_reason_missing" => StoplessContinuationTrigger::InvalidSchema,
+        "stop_schema_terminal_missing_fields" => StoplessContinuationTrigger::InvalidSchema,
+        "stop_schema_next_step_missing" => StoplessContinuationTrigger::InvalidSchema,
+        "stop_schema_forcestop_reason_missing" => StoplessContinuationTrigger::InvalidSchema,
+        "stop_schema_continue_without_next_step" => {
+            StoplessContinuationTrigger::NonTerminalSchema
+        }
+        "stop_schema_continue_next_step" => StoplessContinuationTrigger::NonTerminalSchema,
+        "stop_schema_budget_exhausted" => StoplessContinuationTrigger::BudgetExhausted,
+        "stop_schema_finished" => StoplessContinuationTrigger::SchemaPass,
+        "stop_schema_blocked" => StoplessContinuationTrigger::SchemaPass,
+        "stop_schema_needs_user_input" => StoplessContinuationTrigger::SchemaPass,
+        "stop_schema_forcestop" => StoplessContinuationTrigger::SchemaPass,
+        "invalid_schema" => StoplessContinuationTrigger::InvalidSchema,
+        "non_terminal_schema" => StoplessContinuationTrigger::NonTerminalSchema,
+        "budget_exhausted" => StoplessContinuationTrigger::BudgetExhausted,
+        "schema_pass" => StoplessContinuationTrigger::SchemaPass,
+        _ => StoplessContinuationTrigger::NoSchema,
+    }
 }
 
 fn non_empty(raw: Option<&str>, field: &'static str) -> Result<String, ServertoolCliError> {
@@ -588,6 +658,13 @@ fn build_client_exec_cli_projection_output_with_identity(
         if flow_id != "stop_message_flow" {
             return Err(ServertoolCliError::InvalidField("flowId"));
         }
+        let trigger_hint = input
+            .as_object()
+            .and_then(|row| row.get("triggerHint").or_else(|| row.get("trigger_hint")))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let mut input_payload = Map::new();
         input_payload.insert("flowId".to_string(), Value::String(flow_id.to_string()));
         input_payload.insert(
@@ -598,6 +675,12 @@ fn build_client_exec_cli_projection_output_with_identity(
             "maxRepeats".to_string(),
             Value::Number(serde_json::Number::from(max_repeats)),
         );
+        if let Some(trigger_hint) = trigger_hint.as_deref() {
+            input_payload.insert(
+                "triggerHint".to_string(),
+                Value::String(trigger_hint.to_string()),
+            );
+        }
         let input_json = serde_json::to_string(&Value::Object(input_payload))
             .map_err(|_| ServertoolCliError::InvalidField("json"))?;
         let cmd = build_client_exec_command(
@@ -751,6 +834,12 @@ pub fn plan_client_exec_cli_projection_output(
         canonical.insert(
             "maxRepeats".to_string(),
             Value::Number(serde_json::Number::from(max_repeats)),
+        );
+        // Always carry triggerHint in projection output
+        let trigger_hint = read_stopless_trigger_hint(&payload);
+        canonical.insert(
+            "triggerHint".to_string(),
+            Value::String(stopless_trigger_hint(trigger_hint).to_string()),
         );
         return build_client_exec_cli_projection_output_with_identity(
             &tool_name,
@@ -1078,9 +1167,12 @@ mod tests {
             json!({
                 "flowId": "stop_message_flow",
                 "repeatCount": 1,
-                "maxRepeats": 3
+                "maxRepeats": 3,
+                "triggerHint": "no_schema"
             })
         );
+        assert_eq!(schema_guidance.trigger_hint, "no_schema",
+            "NoSchema default must produce no_schema trigger_hint");
         assert_eq!(output.ok, true);
         assert_eq!(output.kind, "stop_message_auto");
     }
@@ -1141,9 +1233,12 @@ mod tests {
             json!({
                 "flowId": "stop_message_flow",
                 "repeatCount": 1,
-                "maxRepeats": 3
+                "maxRepeats": 3,
+                "triggerHint": "no_schema"
             })
         );
+        assert_eq!(schema_guidance.trigger_hint, "no_schema",
+            "NoSchema default must produce no_schema trigger_hint");
     }
 
     #[test]
@@ -1482,7 +1577,8 @@ mod tests {
             json!({
                 "flowId": "stop_message_flow",
                 "repeatCount": 2,
-                "maxRepeats": 5
+                "maxRepeats": 5,
+                "triggerHint": "no_schema"
             })
         );
         assert!(!command.contains("continuationPrompt"));
@@ -1904,4 +2000,196 @@ mod tests {
         let parsed = validate_client_exec_command_result(&raw.to_string()).expect("valid result");
         assert_eq!(parsed["toolName"], "servertool_fixture");
     }
+
+    // ── trigger hint branch tests ──────────────────────────────────────────
+
+    #[test]
+    fn stopless_cli_output_with_explicit_invalid_schema_trigger_hints_produces_invalid_schema_hint() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "triggerHint": "invalid_schema",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-trigger-test".to_string()),
+                request_id: Some("req-trigger-test".to_string()),
+            },
+        )
+        .expect("stop_message_auto output");
+        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        assert_eq!(
+            schema_guidance.trigger_hint, "invalid_schema",
+            "explicit invalid_schema triggerHint must map to invalid_schema"
+        );
+        // output.input must also carry triggerHint
+        let inp = output.input;
+        assert_eq!(inp["triggerHint"], "invalid_schema");
+    }
+
+    #[test]
+    fn stopless_cli_invalid_schema_reuses_persisted_detail_text() {
+        let session_id = format!(
+            "session-invalid-schema-detail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos() as u64)
+                .unwrap_or(0)
+        );
+        let request_id = "req-invalid-schema-detail";
+        let session_dir = std::env::temp_dir().join(format!(
+            "routecodex-stopless-invalid-schema-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        std::env::set_var("ROUTECODEX_SESSION_DIR", &session_dir);
+        let persisted = crate::persisted_lookup::record_stopless_continuation_state(
+            &session_id,
+            request_id,
+            "Stop schema 校验未通过：你声明 finished/blocked，但没有给 reason。请只补 reason，不要重写其它已通过字段。",
+            1,
+            3,
+            1,
+        )
+        .expect("persist plan");
+        crate::persisted_state_fs_write::save_persisted_runtime_stop_message_state(
+            &session_id,
+            &persisted,
+        )
+        .expect("persist state");
+
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "triggerHint": "invalid_schema",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some(session_id),
+                request_id: Some(request_id.to_string()),
+            },
+        )
+        .expect("stop_message_auto output");
+
+        assert!(output.continuation_prompt.contains("没有给 reason"));
+        assert!(output.continuation_prompt.contains("请只补 reason"));
+        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        assert_eq!(schema_guidance.trigger_hint, "invalid_schema");
+    }
+
+    #[test]
+    fn stopless_cli_output_with_explicit_non_terminal_schema_trigger_hints_produces_non_terminal_schema_hint() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "triggerHint": "non_terminal_schema",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-trigger-test".to_string()),
+                request_id: Some("req-trigger-test".to_string()),
+            },
+        )
+        .expect("stop_message_auto output");
+        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        assert_eq!(
+            schema_guidance.trigger_hint, "non_terminal_schema",
+            "explicit non_terminal_schema triggerHint must map to non_terminal_schema"
+        );
+        let inp = output.input;
+        assert_eq!(inp["triggerHint"], "non_terminal_schema");
+    }
+
+    #[test]
+    fn stopless_cli_output_with_explicit_budget_exhausted_trigger_hints_produces_budget_exhausted_hint() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "triggerHint": "budget_exhausted",
+                    "repeatCount": 3,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-trigger-test".to_string()),
+                request_id: Some("req-trigger-test".to_string()),
+            },
+        )
+        .expect("stop_message_auto output");
+        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        assert_eq!(
+            schema_guidance.trigger_hint, "budget_exhausted",
+            "explicit budget_exhausted triggerHint must map to budget_exhausted"
+        );
+        let inp = output.input;
+        assert_eq!(inp["triggerHint"], "budget_exhausted");
+    }
+
+    #[test]
+    fn stopless_cli_output_with_explicit_schema_pass_trigger_hints_produces_schema_pass_hint() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "stop_message_auto".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "triggerHint": "schema_pass",
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-trigger-test".to_string()),
+                request_id: Some("req-trigger-test".to_string()),
+            },
+        )
+        .expect("stop_message_auto output");
+        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        assert_eq!(
+            schema_guidance.trigger_hint, "schema_pass",
+            "explicit schema_pass triggerHint must map to schema_pass"
+        );
+        let inp = output.input;
+        assert_eq!(inp["triggerHint"], "schema_pass");
+    }
+
+    // projection_output_quotes_json_apostrophes already covers triggerHint in command JSON
+    // but we add a dedicated projection triggerHint test for clarity:
+    #[test]
+    fn plan_projection_includes_trigger_hint_in_command_json() {
+        let out = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
+            tool_name: Some("stop_message_auto".to_string()),
+            flow_id: Some("stop_message_flow".to_string()),
+            input: Some(json!({"repeatCount": 1, "maxRepeats": 3})),
+            repeat_count: None,
+            max_repeats: None,
+            stdout_preview: None,
+            session_id: None,
+            request_id: None,
+        })
+        .expect("projection output");
+        let command = out["execCommand"].as_str().expect("exec command");
+        // triggerHint must appear in the JSON embedded in the shell command
+        assert!(command.contains("triggerHint"), "projection command must include triggerHint: {}", command);
+    }
+
+
 }

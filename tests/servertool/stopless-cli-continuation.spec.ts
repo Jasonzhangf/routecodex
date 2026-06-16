@@ -87,6 +87,10 @@ function extractRepeatCount(command: string): number | undefined {
   return JSON.parse(inputJson).repeatCount as number | undefined;
 }
 
+function firstToolCall(resultChat: any): any {
+  return resultChat?.choices?.[0]?.message?.tool_calls?.[0];
+}
+
 function isolateSessionDir(label: string): void {
   const dir = path.join(process.cwd(), '.tmp', 'jest-stopless-cli', `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -191,6 +195,33 @@ describe('stopless CLI continuation', () => {
       expect(output.schemaGuidance.requiredFields).toContain('stopreason');
       expect(output.schemaGuidance.requiredFields).toContain('next_step');
     }
+  });
+
+  test('invalid stop schema returns detailed correction result and preserves it into next-turn CLI stdout', async () => {
+    isolateSessionDir('invalid-schema-detail');
+    const sessionId = `session-stopless-invalid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestId = `req-stopless-invalid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse(
+        '{"stopreason":0,"has_evidence":1,"evidence":"cargo test passed","done_steps":"已执行验证","issue_cause":"无","excluded_factors":"非环境问题","diagnostic_order":"先测后查"}'
+      ),
+      adapterContext: buildAdapterContext({ sessionId, requestId }),
+      requestId,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless CLI projection must not reenter');
+      }
+    });
+
+    const command = extractExecCommand(result.chat);
+    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    const output = await runStoplessCliStdout(command);
+
+    expect(output.schemaGuidance).toBeDefined();
+    expect(output.schemaGuidance.triggerHint).toBe('invalid_schema');
+    expect(String(output.continuationPrompt ?? '')).toContain('没有给 reason');
+    expect(String(output.continuationPrompt ?? '')).toContain('请只补 reason');
   });
 
   test('stopless projects CLI and never reenters pipeline', async () => {

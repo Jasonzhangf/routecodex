@@ -11,6 +11,7 @@ import {
   planStoplessDecisionContextGoalStatusWithNative,
   planStoplessDecisionContextSignalsWithNative,
   readRuntimeStopMessageStageModeWithNative,
+  recordStoplessContinuationStateWithNative,
   readServertoolFollowupFlowIdWithNative,
   resolveBdWorkingDirectoryForRecordWithNative,
   resolveClientConnectionStateWithNative,
@@ -21,6 +22,7 @@ import {
   resolveRuntimeStopMessageStateWithNative,
   resolveAdapterContextProviderKeyWithNative,
   resolveServertoolStateKeyWithNative,
+  savePersistedRuntimeStopMessageStateWithNative,
   resolveStopMessageFollowupToolContentMaxCharsWithNative,
   resolveStopMessageFollowupProviderKeyWithNative,
   resolveStopMessageSessionScopeWithNative,
@@ -124,6 +126,65 @@ export function persistStopMessageState(stickyKey: string | undefined, state: Ro
     state: buildPersistableRoutingInstructionState(state)
   });
   saveRoutingInstructionStateSync(stickyKey, plan.action === 'clear' ? null : state);
+}
+
+export function recordStoplessContinuationState(args: {
+  sessionId: string;
+  requestId: string;
+  text: string;
+  nextUsed: number;
+  maxRepeats: number;
+  nowMs?: number;
+}): {
+  key: string;
+  action: 'save' | 'clear';
+  used: number;
+  maxRepeats: number;
+} {
+  const plan = recordStoplessContinuationStateWithNative(args);
+  const persisted = plan.state as unknown as RoutingInstructionState;
+  saveRoutingInstructionStateSync(
+    plan.key,
+    plan.action === 'clear'
+      ? null
+      : persisted
+  );
+  savePersistedRuntimeStopMessageStateWithNative({
+    sessionId: args.sessionId,
+    payload: plan
+  });
+  return {
+    key: plan.key,
+    action: plan.action,
+    used: plan.used,
+    maxRepeats: plan.maxRepeats
+  };
+}
+
+export function seedStoplessCliPersistedState(args: {
+  sessionId: string;
+  requestId: string;
+  text: string;
+  nextUsed: number;
+  maxRepeats: number;
+  nowMs?: number;
+}): {
+  key: string;
+  action: 'save' | 'clear';
+  used: number;
+  maxRepeats: number;
+} {
+  const plan = recordStoplessContinuationStateWithNative(args);
+  savePersistedRuntimeStopMessageStateWithNative({
+    sessionId: args.sessionId,
+    payload: plan
+  });
+  return {
+    key: plan.key,
+    action: plan.action,
+    used: plan.used,
+    maxRepeats: plan.maxRepeats
+  };
 }
 
 export function resolveStopMessageSessionScope(

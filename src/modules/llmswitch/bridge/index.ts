@@ -97,8 +97,12 @@ export {
 } from './runtime-integrations.js';
 export {
   loadRoutingInstructionStateSync,
+  recordStoplessContinuationState,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
+  syncStoplessGoalStateFromRequest,
+  persistStoplessGoalStateSnapshot,
+  readStoplessGoalState,
   extractSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot

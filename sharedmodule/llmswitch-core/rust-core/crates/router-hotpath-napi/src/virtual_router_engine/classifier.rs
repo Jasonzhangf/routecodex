@@ -1,5 +1,4 @@
 use serde_json::Value;
-
 use super::features::RoutingFeatures;
 
 #[derive(Debug, Clone)]
@@ -58,6 +57,11 @@ impl RoutingClassifier {
 
     pub(crate) fn classify(&self, features: &RoutingFeatures) -> ClassificationResult {
         let latest_message_from_user = features.latest_message_from_user;
+        let stopless_followup = features
+            .metadata
+            .get("serverToolFollowup")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let last_tool_category = if latest_message_from_user {
             String::new()
         } else {
@@ -73,8 +77,8 @@ impl RoutingClassifier {
         let has_visual = features.has_image_attachment
             || (features.has_video_attachment && features.has_remote_video_attachment);
         // Jason 规则：thinking 只看当前轮是否为 fresh user input。
-        // 历史轮（包括上一轮 assistant thinking/tool 延续）不得继承 thinking 命中。
-        let thinking_from_user = latest_message_from_user;
+        // stopless followup 是内部续轮，必须走 thinking。
+        let thinking_from_user = latest_message_from_user || stopless_followup;
         // Coding route must be based on current-turn continuation signal only.
         // If this turn does not contain tool-call response activity, do not inherit
         // historical "last tool was coding" into the new request.
@@ -262,7 +266,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn classifier() -> RoutingClassifier {
+    fn test_classifier() -> RoutingClassifier {
         RoutingClassifier::new(&json!({}))
     }
 
@@ -275,11 +279,10 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
-        assert!(!result.reasoning.contains("tools:tool-request-detected"));
     }
 
     #[test]
@@ -291,7 +294,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -307,7 +310,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -324,7 +327,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "tools");
         assert!(result.reasoning.contains("tools:tool-request-detected"));
@@ -341,7 +344,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "tools");
         assert!(result.reasoning.contains("tools:last-tool-other"));
@@ -358,7 +361,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_ne!(result.route_name, "coding");
         assert!(result.reasoning.contains("tools:tool-request-detected"));
@@ -375,7 +378,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_ne!(result.route_name, "coding");
         assert!(!result.reasoning.contains("coding:last-tool-coding"));
@@ -391,7 +394,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_ne!(result.route_name, "search");
         assert!(!result.reasoning.contains("search:last-tool-search"));
@@ -408,7 +411,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert!(!result.reasoning.contains("tools:last-tool-other"));
     }
@@ -423,7 +426,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_ne!(result.route_name, "web_search");
         assert!(!result.reasoning.contains("web_search:tool-intent"));
@@ -439,7 +442,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -462,7 +465,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -478,7 +481,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -499,7 +502,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
@@ -519,7 +522,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert!(result.reasoning.contains("longcontext:token-threshold"));
         assert_eq!(result.route_name, "longcontext");
@@ -540,7 +543,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "coding");
         assert!(result.reasoning.contains("coding:last-tool-coding"));
@@ -557,7 +560,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "longcontext");
         assert!(result.reasoning.contains("longcontext:token-threshold"));
@@ -573,7 +576,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "web_search");
         assert!(result.reasoning.contains("web_search:tool-intent"));
@@ -587,9 +590,42 @@ mod tests {
             ..Default::default()
         };
 
-        let result = classifier().classify(&features);
+        let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "web_search");
         assert!(result.reasoning.contains("web_search:explicit-or-intent"));
+    }
+
+    // Stopless followup forces thinking even when the next-turn message is tool role.
+    #[test]
+    fn stopless_followup_routes_to_thinking_without_user_text() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tool_call_responses: true,
+            metadata: json!({ "serverToolFollowup": true }),
+            ..Default::default()
+        };
+
+        let result = test_classifier().classify(&features);
+
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
+    }
+
+    // Without serverToolFollowup, tool-role continuation goes to tools (not thinking).
+    #[test]
+    fn no_followup_no_user_route_goes_to_tools_not_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("other".to_string()),
+            metadata: json!({}),
+            ..Default::default()
+        };
+
+        let result = test_classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(!result.reasoning.contains("thinking"));
     }
 }

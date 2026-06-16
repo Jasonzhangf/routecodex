@@ -38,7 +38,9 @@ import {
   planStopMessagePersistedLookup,
   planStopMessagePersistedStateSelection,
   readRuntimeStopMessageStageMode,
-  resolveAdapterContextProviderKey
+  resolveAdapterContextProviderKey,
+  seedStoplessCliPersistedState,
+  resolveStopMessageSessionScope
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
 import { loadRoutingInstructionStateSync } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
@@ -521,8 +523,8 @@ const handler: ServerToolHandler = async (
     }
 
     const effectiveDecision = schemaGate.followup_text
-      ? { ...decision, used: schemaUsedBeforeCount, followup_text: schemaGate.followup_text, followupText: schemaGate.followup_text }
-      : decision;
+      ? { ...decision, used: schemaUsedBeforeCount, followup_text: schemaGate.followup_text, followupText: schemaGate.followup_text, stopSchemaTriggerHint: schemaGate.reason_code }
+      : { ...decision, stopSchemaTriggerHint: schemaGate.reason_code };
 
     // ── Call native handler result assembler ──
     const stickyKey = persistedLookupPlan.stickyKey || undefined;
@@ -567,6 +569,25 @@ const handler: ServerToolHandler = async (
       const nextState = applyStopMessageSnapshotToState(persistedState, snapInput);
       persistStopMessageState(key, nextState);
     }
+    const sessionScope = resolveStopMessageSessionScope(ctx.adapterContext);
+    const sessionId = typeof sessionScope === 'string' && sessionScope.startsWith('session:')
+      ? sessionScope.slice('session:'.length)
+      : '';
+    if (sessionId) {
+      seedStoplessCliPersistedState({
+        sessionId,
+        requestId: ctx.requestId,
+        text: persistPlan.snapshot.text,
+        // Keep the CLI-visible state aligned with the single post-handler truth.
+        // Older preseed semantics wrote the pre-followup used count and caused
+        // mixed native/CLI entrypoints to oscillate between used=N and used=N+1.
+        nextUsed: typeof persistPlan.snapshot.used === 'number'
+          ? persistPlan.snapshot.used
+          : schemaUsedBeforeCount,
+        maxRepeats: persistPlan.nextMaxRepeats,
+        nowMs: usedAt
+      });
+    }
 
     return {
       flowId: FLOW_ID,
@@ -577,15 +598,17 @@ const handler: ServerToolHandler = async (
             flowId: FLOW_ID,
             ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
             followup: handlerResult.followup as unknown as ServerToolFollowupPlan,
-            context: {
-              decision: effectiveDecision as unknown as JsonObject,
-              assistantStopText,
-              serverToolLoopState: {
-                flowId: FLOW_ID,
-                repeatCount: persistPlan.nextUsed,
-                maxRepeats: persistPlan.nextMaxRepeats
-              }
+          context: {
+            decision: effectiveDecision as unknown as JsonObject,
+            assistantStopText,
+            stopSchemaTriggerHint: schemaGate.reason_code,
+            serverToolLoopState: {
+              flowId: FLOW_ID,
+              repeatCount: persistPlan.nextUsed,
+              maxRepeats: persistPlan.nextMaxRepeats,
+              triggerHint: schemaGate.reason_code
             }
+          }
           }
         };
       }

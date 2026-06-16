@@ -7,6 +7,7 @@ This document defines the current stopless lifecycle. Stopless is a session-scop
 ## Contract
 
 - State matching is strictly `session:<sessionId>`.
+- If the caller omits `sessionId/requestId`, the CLI/runtime must auto-supply them; the missing caller fields must not fail the tool, but auto-generated identity is only execution-local unless a stable sessionId is injected by runtime metadata.
 - `tmuxSessionId`, `conversationId`, `default`, and `stopMessageClientInject*` are forbidden as stopless state fallback keys.
 - req_chatprocess must always inject the same stop hook contract for stopless-managed turns; if the hook is not injected, the model cannot be expected to call it.
 - Stopless must emit a client-visible `exec_command` CLI projection for non-terminal stop flows.

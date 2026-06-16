@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordStoplessContinuationState } from '../../modules/llmswitch/bridge/state-integrations.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVERTOOL_BINARY_NAME = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
@@ -62,31 +61,12 @@ export function createServertoolCommand(
         const trimmed = result.trimEnd();
         if (toolName === STOPLESS_INTERNAL_TOOL_NAME || toolName === STOPLESS_PUBLIC_TOOL_NAME) {
           const payload = JSON.parse(trimmed) as Record<string, unknown>;
-          const sessionId = typeof options.sessionId === 'string' && options.sessionId.trim()
-            ? options.sessionId.trim()
-            : (typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '');
-          const requestId = typeof options.requestId === 'string' && options.requestId.trim()
-            ? options.requestId.trim()
-            : (typeof payload.requestId === 'string' ? payload.requestId.trim() : '');
-          if (!sessionId || !requestId) {
-            throw new Error('SERVERTOOL_CLI_MISSING_STOPLESS_IDENTITY: sessionId/requestId');
+          if (typeof payload.sessionId !== 'string' || !payload.sessionId.trim()) {
+            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing sessionId');
           }
-          const continuationPrompt = typeof payload.continuationPrompt === 'string'
-            ? payload.continuationPrompt
-            : '';
-          const repeatCount = typeof payload.repeatCount === 'number'
-            ? payload.repeatCount
-            : Number(payload.repeatCount ?? 0);
-          const maxRepeats = typeof payload.maxRepeats === 'number'
-            ? payload.maxRepeats
-            : Number(payload.maxRepeats ?? 0);
-          await recordStoplessContinuationState({
-            sessionId,
-            requestId,
-            text: continuationPrompt,
-            nextUsed: repeatCount,
-            maxRepeats
-          });
+          if (typeof payload.requestId !== 'string' || !payload.requestId.trim()) {
+            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing requestId');
+          }
         }
         deps.log(trimmed);
       } catch (error) {

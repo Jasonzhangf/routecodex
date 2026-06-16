@@ -62,10 +62,25 @@ function runExpectFailure(toolName, args = {}, options = {}) {
 
 console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
 
-// RED TEST 1: stop_message_auto emits status-only stdout for stopless CLI projection
+const forbiddenStoplessTokens = [
+  'schema',
+  'hook',
+  'stopless',
+  'servertool',
+  '第一轮',
+  '第二轮',
+  '第三轮',
+  '必须调用',
+  '证据不足',
+  '用户目标',
+  '已排除因素',
+  '排查顺序',
+];
+
+// RED TEST 1: stop_message_auto emits natural-user prompt without internal markers
 {
   const raw = run('stop_message_auto', {
-    continuationPrompt: 'continue with schema',
+    continuationPrompt: '继续做下一步',
     repeatCount: 1,
     maxRepeats: 3,
   });
@@ -74,18 +89,22 @@ console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
   assert.equal(out.flowId, 'stop_message_flow', 'flowId must be stop_message_flow');
   assert.equal(out.repeatCount, 1, 'repeatCount');
   assert.equal(out.maxRepeats, 3, 'maxRepeats');
-  assert.ok(!('continuationPrompt' in out), 'stdout must not leak continuationPrompt');
+  assert.equal(typeof out.continuationPrompt, 'string', 'stdout must return natural continuationPrompt');
+  assert.ok(out.continuationPrompt.length > 0, 'continuationPrompt must be non-empty');
+  for (const token of forbiddenStoplessTokens) {
+    assert.ok(!out.continuationPrompt.includes(token), `continuationPrompt must not contain ${token}: ${out.continuationPrompt}`);
+  }
   assert.ok(!('schemaGuidance' in out), 'stdout must not leak schemaGuidance');
   assert.ok(!('injectedPromptPreview' in out), 'stdout must not leak injectedPromptPreview');
   assert.deepEqual(out.input, {
-    continuationPrompt: 'continue with schema',
+    flowId: 'stop_message_flow',
     repeatCount: 1,
     maxRepeats: 3,
-  }, 'internal input echo remains inside input only');
-  console.log('  [PASS] stop_message_auto status-only stdout');
+  }, 'internal input stays status-only');
+  console.log('  [PASS] stop_message_auto natural-user stdout');
 }
 
-// RED TEST 2: missing continuationPrompt still succeeds with status-only output
+// RED TEST 2: missing continuationPrompt still succeeds with natural-user output
 {
   const raw = run('stop_message_auto', {
     repeatCount: 1,
@@ -96,8 +115,11 @@ console.log(`[servertool-cli-blackbox] using binary: ${bin}`);
   assert.equal(out.flowId, 'stop_message_flow', 'default flowId');
   assert.equal(out.repeatCount, 1, 'repeatCount');
   assert.equal(out.maxRepeats, 3, 'maxRepeats');
-  assert.ok(!('continuationPrompt' in out), 'stdout must not leak continuationPrompt');
-  console.log('  [PASS] missing continuationPrompt stays status-only');
+  assert.equal(typeof out.continuationPrompt, 'string', 'stdout returns natural continuationPrompt');
+  for (const token of forbiddenStoplessTokens) {
+    assert.ok(!out.continuationPrompt.includes(token), `continuationPrompt must not contain ${token}: ${out.continuationPrompt}`);
+  }
+  console.log('  [PASS] missing continuationPrompt stays natural-user');
 }
 
 // RED TEST 3: web_search is NOT ClientExecCliProjection

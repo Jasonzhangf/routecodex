@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::stopless_prompt::{
+    resolve_stopless_continuation_prompt, StoplessContinuationPromptInput,
+    StoplessContinuationTrigger,
+};
+
 /// The three outcome types for servertool interception in HubRespChatProcess03Governed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +180,16 @@ pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_
                 "repeatCount/maxRepeats",
             ));
         }
-        let continuation_prompt = read_non_empty_string(&input.input, "continuationPrompt")?;
+        let continuation_prompt = read_non_empty_string(&input.input, "continuationPrompt")
+            .or_else(|_| {
+                resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+                    used: repeat_count.saturating_sub(1),
+                    max_repeats,
+                    trigger: StoplessContinuationTrigger::NoSchema,
+                })
+                .map(|resolved| resolved.client_visible_text)
+                .map_err(|_| ServertoolOutcomeError::InvalidField("continuationPrompt"))
+            })?;
         let payload = serde_json::json!({
             "flowId": flow_id,
             "continuationPrompt": continuation_prompt,

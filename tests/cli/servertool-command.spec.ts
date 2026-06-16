@@ -1,9 +1,12 @@
 import { Command } from 'commander';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
 
 describe('servertool CLI command', () => {
   const originalServertoolBin = process.env.ROUTECODEX_SERVERTOOL_BIN;
+  const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+  const originalCodexThreadId = process.env.CODEX_THREAD_ID;
   const forbiddenStdoutMarkers = [
     '"metadata"',
     '"__rt"',
@@ -35,7 +38,24 @@ describe('servertool CLI command', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/target/debug/routecodex-servertool'
     );
+    const isolatedDir = path.join(
+      process.cwd(),
+      '.tmp',
+      'jest-cli-servertool',
+      `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    );
+    fs.mkdirSync(isolatedDir, { recursive: true });
+    process.env.ROUTECODEX_SESSION_DIR = isolatedDir;
+    process.env.CODEX_THREAD_ID = `jest-servertool-cli-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   });
+
+  function uniqueStoplessIdentity(): { sessionId: string; requestId: string } {
+    const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return {
+      sessionId: `session-stopless-cli-${unique}`,
+      requestId: `req-stopless-cli-${unique}`
+    };
+  }
 
   afterEach(() => {
     if (originalServertoolBin === undefined) {
@@ -43,9 +63,20 @@ describe('servertool CLI command', () => {
     } else {
       process.env.ROUTECODEX_SERVERTOOL_BIN = originalServertoolBin;
     }
+    if (originalSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+    }
+    if (originalCodexThreadId === undefined) {
+      delete process.env.CODEX_THREAD_ID;
+    } else {
+      process.env.CODEX_THREAD_ID = originalCodexThreadId;
+    }
   });
 
   it('runs stopless through the standalone Rust binary', async () => {
+    const { sessionId, requestId } = uniqueStoplessIdentity();
     const output: string[] = [];
     const errors: string[] = [];
     const program = new Command();
@@ -64,8 +95,12 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
+      '--session-id',
+      sessionId,
+      '--request-id',
+      requestId,
       '--input-json',
-      '{"flowId":"stop_message_flow","continuationPrompt":"继续执行原任务","repeatCount":2,"maxRepeats":3}'
+      '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}'
     ]);
 
     expect(errors).toEqual([]);
@@ -75,13 +110,36 @@ describe('servertool CLI command', () => {
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
       repeatCount: 2,
-      maxRepeats: 3
+      maxRepeats: 3,
+      sessionId,
+      requestId
     });
-    expect(String(payload.continuationPrompt ?? '')).toContain('必须主动调用停止 hook');
-    expect(payload.schemaGuidance?.requiredFields).toContain('stopreason');
+    expect(typeof payload.continuationPrompt).toBe('string');
+    expect(payload.continuationPrompt.length).toBeGreaterThan(0);
+    expect(payload.schemaGuidance).toBeDefined();
+    expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
+    expect(payload.schemaGuidance.requiredFields).toContain('stopreason');
+    expect(payload.schemaGuidance.stopreasonValues.finished).toBe(0);
+    for (const forbidden of [
+      'schema',
+      'hook',
+      'stopless',
+      'servertool',
+      '第一轮',
+      '第二轮',
+      '第三轮',
+      '必须调用',
+      '证据不足',
+      '用户目标',
+      '已排除因素',
+      '排查顺序'
+    ]) {
+      expect(String(payload.continuationPrompt ?? '')).not.toContain(forbidden);
+    }
   });
 
   it('passes explicit repeat flags through to the standalone Rust binary', async () => {
+    const { sessionId, requestId } = uniqueStoplessIdentity();
     const output: string[] = [];
     const errors: string[] = [];
     const program = new Command();
@@ -100,12 +158,16 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
+      '--session-id',
+      sessionId,
+      '--request-id',
+      requestId,
       '--repeat-count',
       '2',
       '--max-repeats',
       '5',
       '--input-json',
-      '{"flowId":"stop_message_flow","continuationPrompt":"继续执行原任务","repeatCount":1,"maxRepeats":3}'
+      '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}'
     ]);
 
     expect(errors).toEqual([]);
@@ -116,12 +178,35 @@ describe('servertool CLI command', () => {
       flowId: 'stop_message_flow',
       repeatCount: 2,
       maxRepeats: 5,
+      sessionId,
+      requestId,
       input: {
         repeatCount: 2,
         maxRepeats: 5
       }
     });
-    expect(String(payload.continuationPrompt ?? '')).toContain('必须主动调用停止 hook');
+    expect(typeof payload.continuationPrompt).toBe('string');
+    expect(payload.continuationPrompt.length).toBeGreaterThan(0);
+    expect(payload.schemaGuidance).toBeDefined();
+    expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
+    expect(payload.schemaGuidance.requiredFields).toContain('next_step');
+    expect(payload.schemaGuidance.stopreasonValues.blocked).toBe(1);
+    for (const forbidden of [
+      'schema',
+      'hook',
+      'stopless',
+      'servertool',
+      '第一轮',
+      '第二轮',
+      '第三轮',
+      '必须调用',
+      '证据不足',
+      '用户目标',
+      '已排除因素',
+      '排查顺序'
+    ]) {
+      expect(String(payload.continuationPrompt ?? '')).not.toContain(forbidden);
+    }
   });
 
   it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
@@ -411,5 +496,45 @@ describe('servertool CLI command', () => {
     expect(output).toEqual([]);
     expect(errors[0]).toContain('SERVERTOOL_CLI_INVALID_JSON:');
     expect(exits).toEqual([1]);
+  });
+
+  it('auto-fills stop_message_auto session identity when caller omits it', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'stop_message_auto',
+      '--input-json',
+      '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}'
+    ]);
+
+    expect(errors).toEqual([]);
+    expectNoPrivateServertoolCarrier(output[0] ?? '');
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload).toMatchObject({
+      toolName: 'stop_message_auto',
+      flowId: 'stop_message_flow'
+    });
+    expect(typeof payload.repeatCount).toBe('number');
+    expect(payload.repeatCount).toBeGreaterThan(0);
+    expect(typeof payload.maxRepeats).toBe('number');
+    expect(payload.maxRepeats).toBeGreaterThan(0);
+    expect(typeof payload.sessionId).toBe('string');
+    expect(payload.sessionId.length).toBeGreaterThan(0);
+    expect(typeof payload.requestId).toBe('string');
+    expect(payload.requestId.length).toBeGreaterThan(0);
   });
 });

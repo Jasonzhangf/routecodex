@@ -9,6 +9,10 @@ use servertool_core::persisted_lookup::{
     plan_stop_message_persisted_lookup, resolve_servertool_sticky_key,
     resolve_stop_message_session_scope, StopMessagePersistedLookupPlannerInput,
 };
+use servertool_core::stopless_prompt::{
+    resolve_stopless_continuation_prompt, StoplessContinuationPromptInput,
+    StoplessContinuationTrigger,
+};
 use sha2::{Digest, Sha256};
 
 use crate::chat_web_search_intent::analyze_chat_web_search_intent;
@@ -28,28 +32,6 @@ pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() 
 /// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
 const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
 const CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES: [&str; 1] = ["servertool_fixture"];
-const LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT: &str = "继续执行";
-
-fn default_stop_message_execution_prompt(used: u32) -> String {
-    let prompts = [
-        "第一轮核对：只确认当前用户目标、已经完成的步骤、以及是否已有文件/日志/命令输出/测试结果作为证据。证据不足时不要询问用户、不要总结，必须直接调用工具补证据；本轮结尾必须按 stop schema 输出，且明确下一轮仍要先检查 schema 再继续。",
-        "第二轮核对：在目标、已做步骤、证据之外，补齐问题原因、已排除因素、排查顺序。仍有缺口时必须调用工具继续验证，不能空转；本轮结尾必须按 stop schema 输出，且下一轮进入前仍要先检查 schema。",
-        "第三轮最终收尾：不要开启新一轮执行，不要暴露 stopless/校验过程。直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步；若仍未完成，必须先调用工具再总结；末尾必须附 stop schema，且下一次检查仍先看 schema。",
-    ];
-    prompts
-        .get(used as usize)
-        .or_else(|| prompts.last())
-        .unwrap_or(&prompts[0])
-        .to_string()
-}
-
-fn normalize_stop_message_followup_text(text: &str, used: u32) -> String {
-    if text.trim() == LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT {
-        default_stop_message_execution_prompt(used)
-    } else {
-        text.to_string()
-    }
-}
 
 fn is_visible_text_field(key: Option<&str>) -> bool {
     matches!(
@@ -1691,7 +1673,7 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
             .map_err(napi::Error::from_reason)?;
     let client_inject_text = if visible_summary.is_empty() {
-        LEGACY_STOP_MESSAGE_FOLLOWUP_TEXT.to_string()
+        "继续执行".to_string()
     } else {
         visible_summary.clone()
     };
@@ -2110,6 +2092,15 @@ fn is_persistent_sticky_key(key: &str) -> bool {
     key.starts_with("tmux:") || key.starts_with("session:") || key.starts_with("conversation:")
 }
 
+/// Stopless path persistence is strict-session-only. The stop_message_flow
+/// `flow_id` is set above to `stop_message_flow`; the persisted key must be a
+/// `session:<sessionId>` key. We never fall back to `tmux:` or
+/// `conversation:` here, even though the generic `is_persistent_sticky_key`
+/// still accepts those prefixes for non-stopless servertool flows.
+fn is_stopless_persistent_key(key: &str) -> bool {
+    key.starts_with("session:")
+}
+
 /// Build the handler result for stop_message_auto.
 ///
 /// Rust produces the complete followup plan + persistence metadata.
@@ -2182,7 +2173,34 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .and_then(|v| v.as_u64())
         .or_else(|| input.decision.get("max_repeats").and_then(|v| v.as_u64()))
         .unwrap_or(0) as u32;
-    let followup_text = input
+    let trigger = input
+        .decision
+        .get("reason_code")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|reason_code| match reason_code {
+            "stop_schema_missing" => StoplessContinuationTrigger::NoSchema,
+            "stop_schema_reason_missing"
+            | "stop_schema_terminal_missing_fields"
+            | "stop_schema_next_step_missing"
+            | "stop_schema_forcestop_reason_missing" => {
+                StoplessContinuationTrigger::InvalidSchema
+            }
+            "stop_schema_continue_without_next_step" | "stop_schema_continue_next_step" => {
+                StoplessContinuationTrigger::NonTerminalSchema
+            }
+            "stop_schema_budget_exhausted" => StoplessContinuationTrigger::BudgetExhausted,
+            "stop_schema_finished"
+            | "stop_schema_blocked"
+            | "stop_schema_needs_user_input"
+            | "stop_schema_forcestop" => StoplessContinuationTrigger::SchemaPass,
+            _ => StoplessContinuationTrigger::NoSchema,
+        })
+        .unwrap_or(StoplessContinuationTrigger::NoSchema);
+    // Client-visible stopless followup must always go through the natural-user owner.
+    // stop-message-core's internal schema guidance must not reach the model as plain text.
+    let _raw_followup_text_ignored = input
         .decision
         .get("followupText")
         .and_then(|v| v.as_str())
@@ -2190,8 +2208,14 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| default_stop_message_execution_prompt(used));
-    let followup_text = normalize_stop_message_followup_text(&followup_text, used);
+        .unwrap_or_default();
+    let followup_text = resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+        used,
+        max_repeats,
+        trigger,
+    })
+    .map(|resolved| resolved.client_visible_text)
+    .unwrap_or_default();
     // 3. Extract runtime metadata and metadata for field lookups
     let runtime = extract_runtime(&input.adapter_context);
     let metadata = extract_metadata(&input.adapter_context);
@@ -2253,9 +2277,10 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         metadata_obj.insert("routecodexPortMode".to_string(), Value::String(rpm.clone()));
     }
     if routecodex_port_mode.as_deref() == Some("router") {
-        if let Some(ref hint) = route_hint {
-            metadata_obj.insert("routeHint".to_string(), Value::String(hint.clone()));
-        }
+        let _ = route_hint;
+        // stopless followup must always fall back to natural-user thinking classification.
+        // Carrying any historical routeHint here will pin the next turn into the old route
+        // and prevent the followup loop from re-entering the thinking pool.
     }
     metadata_obj.insert("serverToolFollowup".to_string(), Value::Bool(true));
     metadata_obj.insert(
@@ -2274,17 +2299,13 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             "maxRepeats": max_repeats
         }),
     );
-    // 7. Build followup plan
-    let followup = serde_json::json!({
-        "requestIdSuffix": ":stop_followup",
-        "injection": {
-            "ops": [
-                { "op": "append_assistant_message", "required": false },
-                { "op": "append_user_text", "text": followup_text }
-            ]
-        },
-        "metadata": Value::Object(metadata_obj)
-    });
+    // 7. Stopless followup is delivered via client-side CLI projection
+    // (routecodex hook run stop_message_auto); the next-turn continuation
+    // text must never be injected as a servertool reenter `append_user_text`
+    // op. `flow_id = stop_message_flow` and `flow = cli_projection` is the
+    // sole entry point; legacy :stop_followup requestIdSuffix paths are
+    // physically removed.
+    let followup = Value::Null;
 
     // 8. Compute persist keys (deduplicated union)
     let mut persist_keys_set: Vec<String> = Vec::new();
@@ -2298,7 +2319,10 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     .collect();
 
     for key in raw_keys {
-        if is_persistent_sticky_key(key) && !persist_keys_set.contains(&key.to_string()) {
+        if !is_stopless_persistent_key(key) {
+            continue;
+        }
+        if !persist_keys_set.contains(&key.to_string()) {
             persist_keys_set.push(key.to_string());
         }
     }
@@ -2764,7 +2788,7 @@ mod tests {
         );
         assert_eq!(
             parsed["lookupPolicy"].as_str(),
-            Some("strict_then_sticky_then_session_family")
+            Some("strict_session_only")
         );
         assert_eq!(parsed["readStopMessageSnapshot"].as_bool(), Some(false));
         assert_eq!(parsed["readStopMessageTombstone"].as_bool(), Some(true));
@@ -2944,34 +2968,14 @@ mod tests {
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let metadata = &output["followup"]["metadata"];
-        assert_eq!(metadata["modelId"].as_str(), Some("MiniMax-M3"));
-        assert_eq!(metadata["routeHint"].as_str(), Some("search"));
-        assert_eq!(metadata["serverToolFollowup"].as_bool(), Some(true));
-        assert_eq!(
-            metadata["serverToolFollowupSource"].as_str(),
-            Some("servertool.stop_message")
-        );
-        assert_eq!(
-            metadata["clientInjectSource"].as_str(),
-            Some("servertool.stop_message")
-        );
-        assert_eq!(
-            metadata["serverToolLoopState"]["flowId"].as_str(),
-            Some("stop_message_flow")
-        );
-        assert_eq!(
-            metadata["serverToolLoopState"]["repeatCount"].as_u64(),
-            Some(1)
-        );
-        assert_eq!(
-            metadata["serverToolLoopState"]["maxRepeats"].as_u64(),
-            Some(3)
-        );
-        assert!(metadata.get("providerKey").is_none());
-        assert!(metadata.get("targetProviderKey").is_none());
-        assert!(metadata.get("__shadowCompareForcedProviderKey").is_none());
-        assert!(metadata["target"].get("providerKey").is_none());
+        assert!(output["followup"].is_null());
+        assert_eq!(output["flowId"].as_str(), Some("stop_message_flow"));
+        assert_eq!(output["stateUpdate"]["used"].as_u64(), Some(1));
+        assert_eq!(output["stateUpdate"]["maxRepeats"].as_u64(), Some(3));
+        assert!(output["stateUpdate"]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("继续做下一步"));
     }
 
     #[test]
@@ -2998,13 +3002,13 @@ mod tests {
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["followup"]["injection"]["ops"][1]["text"]
-            .as_str()
-            .expect("followup text");
-        assert!(text.contains("当前用户目标"));
-        assert!(text.contains("第一轮核对"));
-        assert!(text.contains("直接调用工具补证据"));
-        assert!(!text.contains("问题原因"));
+        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        assert!(text.contains("继续做下一步"));
+        assert!(!text.contains("schema"));
+        assert!(!text.contains("hook"));
+        assert!(!text.contains("stopless"));
+        assert!(!text.contains("servertool"));
+        assert!(!text.contains("第一轮"));
         assert_ne!(text, "继续执行");
     }
 
@@ -3033,24 +3037,22 @@ mod tests {
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["followup"]["injection"]["ops"][1]["text"]
-            .as_str()
-            .expect("followup text");
-        assert!(text.contains("当前用户目标"));
-        assert!(text.contains("第一轮核对"));
-        assert!(text.contains("直接调用工具补证据"));
-        assert!(text.contains("schema"));
-        assert!(text.contains("下一轮") || text.contains("下一次检查"));
+        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        assert!(text.contains("继续做下一步"));
+        assert!(!text.contains("schema"));
+        assert!(!text.contains("hook"));
+        assert!(!text.contains("第一轮"));
         assert_ne!(text, "继续执行");
+        assert!(output["followup"].is_null());
     }
 
     #[test]
     fn test_stop_message_auto_legacy_followup_text_escalates_by_used_count() {
         for (used, expected) in [
-            (0, "第一轮核对"),
-            (1, "第二轮核对"),
-            (2, "第三轮最终收尾"),
-            (3, "第三轮最终收尾"),
+            (0, "继续做下一步"),
+            (1, "继续推进"),
+            (2, "这次不要再泛泛地说了"),
+            (3, "这次不要再泛泛地说了"),
         ] {
             let input = json!({
                 "base": {
@@ -3075,18 +3077,64 @@ mod tests {
                 &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
             )
             .expect("json output");
-            let text = output["followup"]["injection"]["ops"][1]["text"]
-                .as_str()
-                .expect("followup text");
+            let text = output["stateUpdate"]["text"].as_str().expect("followup text");
             assert!(text.contains(expected), "used={used} text={text}");
-            assert!(text.contains("schema"), "used={used} text={text}");
-            assert!(text.contains("下一轮") || text.contains("下一次检查"), "used={used} text={text}");
+            assert!(!text.contains("schema"), "used={used} text={text}");
+            assert!(!text.contains("hook"), "used={used} text={text}");
+            assert!(!text.contains("第一轮"), "used={used} text={text}");
             assert_ne!(text, "继续执行");
         }
     }
 
     #[test]
-    fn test_stop_message_auto_preserves_custom_followup_text() {
+    fn test_stop_message_auto_followup_state_progresses_used_zero_to_three() {
+        for (used, expected_repeat_count, expected_state_used) in
+            [(0_u64, 1_u64, 1_u64), (1, 2, 2), (2, 3, 3)]
+        {
+            let input = json!({
+                "base": {
+                    "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+                },
+                "decision": {
+                    "action": "trigger",
+                    "used": used,
+                    "maxRepeats": 3
+                },
+                "adapterContext": {
+                    "routeId": "search",
+                    "routecodexPortMode": "router"
+                },
+                "candidateKeys": [],
+                "stickyKey": null,
+                "strictSessionScope": null
+            });
+
+            let output: Value = serde_json::from_str(
+                &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+            )
+            .expect("json output");
+
+            assert_eq!(
+                output["stateUpdate"]["used"].as_u64(),
+                Some(expected_state_used),
+                "used={used} stateUpdate.used must advance"
+            );
+            assert_eq!(
+                output["stateUpdate"]["maxRepeats"].as_u64(),
+                Some(3),
+                "used={used} stateUpdate.maxRepeats must stay stable"
+            );
+            let text = output["stateUpdate"]["text"].as_str().unwrap_or_default();
+            assert!(
+                !text.is_empty(),
+                "used={used} stateUpdate.text must keep client-visible stopless guidance"
+            );
+            assert_eq!(expected_repeat_count, expected_state_used);
+        }
+    }
+
+    #[test]
+    fn test_stop_message_auto_overrides_custom_followup_text_with_natural_user_prompt() {
         let input = json!({
             "base": {
                 "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
@@ -3110,10 +3158,51 @@ mod tests {
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["followup"]["injection"]["ops"][1]["text"]
-            .as_str()
-            .expect("followup text");
-        assert_eq!(text, "继续执行并补齐验证证据");
+        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        assert!(text.contains("继续做下一步"));
+        assert!(!text.contains("验证证据"));
+        assert!(!text.contains("schema"));
+        assert!(!text.contains("hook"));
+    }
+
+    #[test]
+    fn test_stop_message_auto_uses_reason_code_to_select_trigger_prompt() {
+        let cases = [
+            ("stop_schema_missing", "继续推进"),
+            ("stop_schema_reason_missing", "刚才那段我没看明白"),
+            ("stop_schema_continue_next_step", "继续往下做"),
+            ("stop_schema_budget_exhausted", "不要再继续执行了"),
+        ];
+        for (reason_code, expected_fragment) in cases {
+            let input = json!({
+                "base": {
+                    "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+                },
+                "decision": {
+                    "action": "trigger",
+                    "used": 1,
+                    "maxRepeats": 3,
+                    "reason_code": reason_code
+                },
+                "adapterContext": {
+                    "routeId": "search",
+                    "routecodexPortMode": "router"
+                },
+                "candidateKeys": [],
+                "stickyKey": null,
+                "strictSessionScope": null
+            });
+
+            let output: Value = serde_json::from_str(
+                &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+            )
+            .expect("json output");
+            let text = output["stateUpdate"]["text"].as_str().unwrap_or_default();
+            assert!(
+                text.contains(expected_fragment),
+                "reason_code={reason_code} must select matching prompt fragment, got: {text}"
+            );
+        }
     }
 
     #[test]

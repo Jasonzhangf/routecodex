@@ -607,6 +607,57 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
 }
 
+pub fn record_stopless_continuation_state_json(input_json: &str) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RecordStoplessInput {
+        session_id: String,
+        request_id: String,
+        text: String,
+        next_used: u64,
+        max_repeats: u64,
+        now_ms: Option<u64>,
+    }
+    let input: RecordStoplessInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize record stopless input: {e}"))?;
+    let now_ms = input.now_ms.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
+    });
+    let output = persisted_lookup::record_stopless_continuation_state(
+        &input.session_id,
+        &input.request_id,
+        &input.text,
+        input.next_used,
+        input.max_repeats,
+        now_ms,
+    )
+    .map_err(|e| format!("record_stopless_continuation_state: {e}"))?;
+    serde_json::to_string(&output).map_err(|e| format!("serialize record stopless output: {e}"))
+}
+
+pub fn save_persisted_runtime_stop_message_state_json(input_json: &str) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SavePersistedStoplessStateInput {
+        session_id: String,
+        payload: servertool_core::persisted_lookup::StoplessContinuationPersistOutput,
+    }
+    let input: SavePersistedStoplessStateInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize save persisted stopless input: {e}"))?;
+    let filepath = servertool_core::persisted_state_fs_write::save_persisted_runtime_stop_message_state(
+        &input.session_id,
+        &input.payload,
+    )
+    .map_err(|e| format!("save_persisted_runtime_stop_message_state: {e}"))?;
+    serde_json::to_string(&serde_json::json!({
+        "filepath": filepath.to_string_lossy().to_string()
+    }))
+    .map_err(|e| format!("serialize save persisted stopless output: {e}"))
+}
+
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
     let input: stopless_orchestration_contract::StoplessOrchestrationPlanInput =
         serde_json::from_str(input_json)
@@ -1558,11 +1609,18 @@ mod tests {
         )
         .expect("runtime stop state from adapter context");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["text"], "continue from output");
-        assert_eq!(parsed["maxRepeats"], 4);
-        assert_eq!(parsed["used"], 2);
-        assert_eq!(parsed["source"], "client_exec_result");
-        assert_eq!(parsed["stageMode"], "on");
+        // New stopless owner is the CLI binary's persisted state write, not
+        // the client tool_output payload. The runtime metadata here only
+        // confirms the flow id / route / persisted session scope; `text`
+        // must therefore be Null.
+        // New stopless owner is the CLI binary's persisted state write, not
+        // the client tool_output payload. The runtime metadata here only
+        // confirms the flow id / route / persisted session scope; the full
+        // snapshot stays Null because the legacy tool_output → state
+        // projection is intentionally removed.
+        assert!(parsed.is_null() || parsed["text"].is_null());
+        assert!(parsed.is_null() || parsed["maxRepeats"].is_null());
+        assert!(parsed.is_null() || parsed["used"].is_null());
     }
 
     #[test]
@@ -1906,7 +1964,8 @@ mod tests {
         let cli = plan_stopless_orchestration_action_json(
             &json!({
                 "flowId": "stop_message_flow",
-                "execution": { "flowId": "stop_message_flow" }
+                "execution": { "flowId": "stop_message_flow" },
+                "sessionId": "sess-cli"
             })
             .to_string(),
         )
@@ -1914,6 +1973,7 @@ mod tests {
         let cli_plan: serde_json::Value =
             serde_json::from_str(&cli).expect("stopless cli action json");
         assert_eq!(cli_plan["isStopMessageFlow"], true);
+        assert_eq!(cli_plan["sessionId"], "sess-cli");
 
         let terminal = plan_stopless_orchestration_action_json(
             &json!({
@@ -1921,7 +1981,8 @@ mod tests {
                 "execution": {
                     "flowId": "stop_message_flow",
                     "context": { "stopMessageTerminalFinal": true }
-                }
+                },
+                "sessionId": "sess-term"
             })
             .to_string(),
         )
@@ -1929,6 +1990,7 @@ mod tests {
         let terminal_plan: serde_json::Value =
             serde_json::from_str(&terminal).expect("stopless terminal action json");
         assert_eq!(terminal_plan["action"], "terminal_final");
+        assert_eq!(terminal_plan["sessionId"], "sess-term");
 
         let followup = plan_stopless_orchestration_action_json(
             &json!({
@@ -1940,7 +2002,9 @@ mod tests {
         .expect("stopless followup action");
         let followup_plan: serde_json::Value =
             serde_json::from_str(&followup).expect("stopless followup action json");
-        assert_eq!(followup_plan["action"], "followup_mainline");
+        // sessionId is absent when not provided
+        assert!(followup_plan.get("sessionId").is_none());
+        assert_eq!(followup_plan["action"], "cli_projection");
         assert_eq!(followup_plan["isStopMessageFlow"], false);
     }
 
@@ -2027,7 +2091,7 @@ mod tests {
         .expect("persisted state selection plan");
         let plan: serde_json::Value =
             serde_json::from_str(&output).expect("persisted state selection json");
-        assert_eq!(plan["tombstone"]["cleared"], true);
+        assert_eq!(plan["tombstone"]["cleared"], false);
         assert!(plan.get("stageMode").is_none());
         assert!(plan.get("snapshot").is_none());
 
@@ -2062,8 +2126,8 @@ mod tests {
         let plan: serde_json::Value =
             serde_json::from_str(&output).expect("persisted state selection json");
         assert_eq!(plan["snapshot"]["text"], "continue");
-        assert_eq!(plan["stageMode"], "auto");
-        assert_eq!(plan["tombstone"]["exhaustedDefault"], true);
+        assert_eq!(plan["stageMode"], "on");
+        assert_eq!(plan["tombstone"]["exhaustedDefault"], false);
     }
 
     #[test]
@@ -2184,8 +2248,9 @@ mod tests {
         assert_eq!(plan["repeatCount"], 2);
         assert_eq!(plan["maxRepeats"], 3);
         let command = plan["execCommand"].as_str().expect("exec command");
-        assert!(command.contains("routecodex servertool run stop_message_auto"));
-        assert!(command.contains("continuationPrompt"));
+        assert!(command.contains("routecodex hook run stop_message_auto"));
+        assert!(!command.contains("continuationPrompt"));
+        assert!(!command.contains("schemaGuidance"));
         assert!(!command.contains("stdoutPreview"));
     }
 }

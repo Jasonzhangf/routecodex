@@ -98,6 +98,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                                 "flowOnlyLoopLimit": true
                             },
                             "stop_message_flow": {
+                                "noFollowup": true,
                                 "seedLoopPayload": true
                             },
                             "reasoning_stop_guard_flow": {},
@@ -666,13 +667,13 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_runtime_plan_uses_reenter_not_client_inject() {
+    fn stop_message_followup_runtime_plan_uses_skip_not_client_inject() {
         let raw = plan_servertool_followup_runtime_json("stop_message_flow".to_string())
             .expect("runtime plan json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse runtime plan");
         assert_eq!(
             parsed.get("outcomeMode").and_then(|v| v.as_str()),
-            Some("reenter")
+            Some("skip")
         );
         assert_eq!(
             parsed.get("clientInjectOnly").and_then(|v| v.as_bool()),

@@ -183,6 +183,21 @@ function extractPreservedInjectToken(
   return undefined;
 }
 
+function readResponsesRequestContextIdentifiers(
+  metadata: Record<string, unknown> | undefined
+): {
+  sessionId?: string;
+  conversationId?: string;
+} {
+  const responsesRequestContext = asRecord(metadata?.responsesRequestContext);
+  const sessionId = readNonEmptyString(responsesRequestContext?.sessionId);
+  const conversationId = readNonEmptyString(responsesRequestContext?.conversationId);
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    ...(conversationId ? { conversationId } : {})
+  };
+}
+
 export function buildServerToolNestedRequestMetadata(args: {
   baseMetadata?: Record<string, unknown>;
   extraMetadata?: Record<string, unknown>;
@@ -233,6 +248,17 @@ export function buildServerToolNestedRequestMetadata(args: {
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);
+  }
+
+  const responseContextIds = {
+    ...readResponsesRequestContextIdentifiers(baseMetadata),
+    ...readResponsesRequestContextIdentifiers(extraMetadata)
+  };
+  if (responseContextIds.sessionId && !readNonEmptyString(out.sessionId)) {
+    out.sessionId = responseContextIds.sessionId;
+  }
+  if (responseContextIds.conversationId && !readNonEmptyString(out.conversationId)) {
+    out.conversationId = responseContextIds.conversationId;
   }
 
   const runtimeMeta = asRecord((out as Record<string, unknown>).__rt);

@@ -123,7 +123,17 @@ fn normalize_parsed_instructions_against_registry(
 }
 
 fn resolve_route_hint(meta_route_03: &MetaRoute03RouteCarrier) -> Option<String> {
-    meta_route_03.get_string("routeHint")
+    let hint = meta_route_03.get_string("routeHint")?;
+    let hint_trim = hint.trim();
+    let stopless_followup = meta_route_03.get_bool("serverToolFollowup")
+        && meta_route_03.get_string("serverToolFollowupSource").as_deref()
+            == Some("servertool.stop_message");
+    if stopless_followup || (hint_trim == "tools" && meta_route_03.get_bool("serverToolFollowup")) {
+        // Stopless followup must not inherit historical route hints:
+        // the classification should fall back to thinking / default instead.
+        return None;
+    }
+    Some(hint)
 }
 
 fn route_has_any_pool(
@@ -965,6 +975,88 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("route_hint:search"));
+    }
+
+    #[test]
+    fn stopless_followup_strips_tools_route_hint_and_falls_back_to_thinking() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "继续做下一步" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-stopless-strip-tools-hint",
+            "routeHint": "tools",
+            "serverToolFollowup": true,
+            "serverToolFollowupSource": "servertool.stop_message",
+            "__rt": { "serverToolFollowup": true }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should succeed");
+        let decision = result.get("decision").expect("should have decision");
+        let reasoning = decision["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            !reasoning.contains("route_hint:tools"),
+            "stopless followup must not carry route_hint:tools, got reasoning={reasoning}"
+        );
+        assert!(
+            reasoning.contains("thinking:user-input"),
+            "stopless followup fresh user turn should be classified as thinking, got reasoning={reasoning}"
+        );
+        let provider_key = decision["providerKey"].as_str().unwrap_or_default();
+        assert_eq!(
+            provider_key, "anthropic.key1.claude-sonnet",
+            "stopless followup should land on thinking pool"
+        );
+    }
+
+    #[test]
+    fn stopless_followup_strips_search_route_hint_and_falls_back_to_thinking() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "继续做下一步" }
+            ]
+        });
+        let metadata = json!({
+            "endpoint": "/v1/chat/completions",
+            "requestId": "test-stopless-strip-search-hint",
+            "routeHint": "search",
+            "serverToolFollowup": true,
+            "serverToolFollowupSource": "servertool.stop_message",
+            "__rt": { "serverToolFollowup": true }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should succeed");
+        let decision = result.get("decision").expect("should have decision");
+        let reasoning = decision["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            !reasoning.contains("route_hint:search"),
+            "stopless followup must not carry route_hint:search, got reasoning={reasoning}"
+        );
+        assert!(
+            reasoning.contains("thinking:user-input"),
+            "stopless followup fresh user turn should be classified as thinking, got reasoning={reasoning}"
+        );
+        let provider_key = decision["providerKey"].as_str().unwrap_or_default();
+        assert_eq!(
+            provider_key, "anthropic.key1.claude-sonnet",
+            "stopless followup should land on thinking pool"
+        );
     }
 
     #[test]

@@ -63,24 +63,58 @@ pub fn plan_stop_message_persist_snapshot(
         decision_max_repeats
     };
     let schema_budget_max_repeats = resolved_max_repeats.max(1);
-    let next_max_repeats = if should_count_budget {
+    let next_max_repeats = if decision_max_repeats > 0 {
         schema_budget_max_repeats
     } else {
-        decision_max_repeats
+        schema_budget_max_repeats.max(decision_max_repeats)
     };
     let state_used = state_update.and_then(|row| read_non_negative_floor(row.get("used")));
     let no_change_count = read_non_negative_floor(input.schema_gate.get("no_change_count").or_else(|| input.schema_gate.get("noChangeCount"))).unwrap_or(0);
     let next_used = if should_count_budget {
         no_change_count.max(state_used.unwrap_or(schema_used_before_count + 1))
     } else {
-        decision_used
+        state_used.unwrap_or(decision_used)
     };
     let compare_remaining = (schema_budget_max_repeats - decision_used).max(0);
     let default_text = input.default_text.clone().unwrap_or_default();
-    let text = state_update
+    let schema_followup_text = input
+        .schema_gate
+        .get("followup_text")
+        .or_else(|| input.schema_gate.get("followupText"))
+        .map(value_to_string)
+        .filter(|value| !value.trim().is_empty());
+    let reason_code = input
+        .schema_gate
+        .get("reason_code")
+        .or_else(|| input.schema_gate.get("reasonCode"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let prefer_schema_followup_text = matches!(
+        reason_code,
+        "stop_schema_reason_missing"
+            | "stop_schema_terminal_missing_fields"
+            | "stop_schema_stopreason_missing_or_non_numeric"
+            | "stop_schema_needs_user_input_missing_next_step"
+            | "stop_schema_next_step_missing"
+            | "stop_schema_forcestop_reason_missing"
+            | "stop_schema_continue_next_step"
+            | "stop_schema_continue_without_next_step"
+    );
+    let text = if prefer_schema_followup_text {
+        schema_followup_text
+            .or_else(|| {
+                state_update
+                    .and_then(|row| row.get("text"))
+                    .map(value_to_string)
+            })
+            .unwrap_or(default_text)
+    } else {
+        state_update
         .and_then(|row| row.get("text"))
         .map(value_to_string)
-        .unwrap_or(default_text);
+        .unwrap_or(default_text)
+    };
     let provider_key = state_update
         .and_then(|row| row.get("providerKey").or_else(|| row.get("provider_key")))
         .and_then(Value::as_str)
@@ -200,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_schema_gate_does_not_advance_budget() {
+    fn missing_schema_gate_persists_runtime_used_even_when_compare_budget_is_frozen() {
         let plan = plan_stop_message_persist_snapshot(&StopMessagePersistPlanInput {
             schema_gate: json!({ "count_budget": false, "max_repeats": 3 }),
             decision: json!({ "used": 2, "max_repeats": 3 }),
@@ -212,9 +246,54 @@ mod tests {
 
         assert_eq!(plan.compare_max_repeats, 3);
         assert_eq!(plan.next_max_repeats, 3);
-        assert_eq!(plan.next_used, 2);
-        assert_eq!(plan.snapshot.used, 2);
+        assert_eq!(plan.next_used, 3);
+        assert_eq!(plan.snapshot.used, 3);
         assert_eq!(plan.snapshot.max_repeats, 3);
+    }
+
+    #[test]
+    fn missing_schema_gate_still_persists_advanced_budget_for_session_truth() {
+        let plan = plan_stop_message_persist_snapshot(&StopMessagePersistPlanInput {
+            schema_gate: json!({ "count_budget": false, "max_repeats": 3 }),
+            decision: json!({ "used": 2, "max_repeats": 3 }),
+            state_update: Some(json!({ "used": 3, "text": "schema guidance" })),
+            default_text: Some("default".to_string()),
+            schema_used_before_count: Some(json!(2)),
+            current_provider_key: None,
+        });
+
+        assert_eq!(plan.compare_max_repeats, 3);
+        assert_eq!(plan.next_max_repeats, 3);
+        assert_eq!(plan.next_used, 3);
+        assert_eq!(plan.snapshot.used, 3);
+        assert_eq!(plan.snapshot.max_repeats, 3);
+    }
+
+    #[test]
+    fn invalid_schema_prefers_detailed_followup_text_for_snapshot() {
+        let plan = plan_stop_message_persist_snapshot(&StopMessagePersistPlanInput {
+            schema_gate: json!({
+                "count_budget": true,
+                "max_repeats": 3,
+                "reason_code": "stop_schema_reason_missing",
+                "followup_text": "Stop schema 校验未通过：你声明 finished/blocked，但没有给 reason。请只补 reason，不要重写其它已通过字段。"
+            }),
+            decision: json!({ "used": 0, "max_repeats": 3 }),
+            state_update: Some(json!({
+                "used": 1,
+                "text": "继续做下一步；先把手头能确认的结果拿回来。"
+            })),
+            default_text: Some("继续执行".to_string()),
+            schema_used_before_count: Some(json!(0)),
+            current_provider_key: None,
+        });
+
+        assert_eq!(
+            plan.snapshot.text,
+            "Stop schema 校验未通过：你声明 finished/blocked，但没有给 reason。请只补 reason，不要重写其它已通过字段。"
+        );
+        assert_eq!(plan.next_used, 1);
+        assert_eq!(plan.next_max_repeats, 3);
     }
 
     #[test]

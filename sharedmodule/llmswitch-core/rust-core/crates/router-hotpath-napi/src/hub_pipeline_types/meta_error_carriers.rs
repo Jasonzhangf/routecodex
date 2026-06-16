@@ -61,6 +61,13 @@ impl MetaRoute03RouteCarrier {
             .map(ToString::to_string)
     }
 
+    pub(crate) fn get_bool(&self, field: &str) -> bool {
+        self.control
+            .get(field)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    }
+
     pub(crate) fn to_metadata_value(&self) -> Value {
         Value::Object(self.control.clone())
     }
@@ -89,6 +96,14 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     {
         control.insert("serverToolRequired".to_string(), Value::Bool(true));
     }
+    if source
+        .get("serverToolFollowup")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        control.insert("serverToolFollowup".to_string(), Value::Bool(true));
+    }
+    copy_non_empty_string(source, &mut control, "serverToolFollowupSource");
     if let Some(port) = source
         .get("routecodexLocalPort")
         .and_then(|value| value.as_i64())

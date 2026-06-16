@@ -6,14 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const LEGACY_DEFAULT_TEXT: &str = "继续执行";
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
-
-const DEFAULT_EXECUTION_PROMPTS: [&str; 3] = [
-    "继续当前用户目标。若要停止，必须在回复末尾附完整 stop schema；若字段缺失，按要求逐项补齐。证据不足时直接调用工具补证据。",
-    "继续当前用户目标。若 stop schema 缺字段，只补缺失字段，不要整体重写；若仍缺证据或原因分析，直接调用工具补齐。",
-    "你已经连续多轮没有补齐 stop schema 或内容没有实质变化。此轮必须给出完整 stop schema，或明确调用工具取得缺失证据/信息。",
-];
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
 {"stopreason":2,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
 字段规则：stopreason 只能是数字，0=finished，1=blocked，2=continue_needed；has_evidence 只能是 0 或 1；needs_user_input=true 只用于需要问用户一个简单问题，此时 next_step 必须写问题内容。"#;
@@ -183,6 +176,7 @@ pub enum Action {
 pub struct StopSchemaParsed {
     pub stopreason: Option<u8>,
     pub has_evidence: Option<u8>,
+    pub forcestop: Option<u8>,
     pub reason: Option<String>,
     pub next_step: Option<String>,
     pub next_suggested_path: Option<String>,
@@ -277,27 +271,9 @@ pub fn decide(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
         action: Action::Trigger,
         skip_reason: None,
         used: snapshot.used,
-        max_repeats: effective_max_repeats,
-        followup_text: Some(normalize_followup_text(&snapshot, snapshot.used)),
+    max_repeats: effective_max_repeats,
+        followup_text: None,
         provider_pin: ctx.provider_pin.clone(),
-    }
-}
-
-fn default_execution_prompt(used: u32) -> String {
-    DEFAULT_EXECUTION_PROMPTS
-        .get(used as usize)
-        .or_else(|| DEFAULT_EXECUTION_PROMPTS.last())
-        .unwrap_or(&DEFAULT_EXECUTION_PROMPTS[0])
-        .to_string()
-}
-
-fn normalize_followup_text(snapshot: &StopMessageSnapshot, used: u32) -> String {
-    if matches!(snapshot.source, SnapshotSource::Default)
-        || snapshot.text.trim() == LEGACY_DEFAULT_TEXT
-    {
-        default_execution_prompt(used)
-    } else {
-        snapshot.text.clone()
     }
 }
 
@@ -321,6 +297,32 @@ pub fn evaluate_stop_schema_gate(
             );
         }
     };
+
+    if parsed.forcestop == Some(1) {
+        let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
+        if reason.is_empty() {
+            return schema_invalid_followup(
+                "stop_schema_forcestop_reason_missing",
+                used,
+                provided_cap,
+                "forcestop=1 只能在不得已必须强制停止时使用，而且必须填写非空 reason 说明为什么现在必须停；reason 不校验格式，但不能为空。",
+                parsed,
+                vec!["reason".to_string()],
+                0,
+            );
+        }
+        return StopSchemaGateDecision {
+            max_repeats: provided_cap,
+            action: StopSchemaGateAction::AllowStop,
+            reason_code: "stop_schema_forcestop".to_string(),
+            summary_prefix: Some(format!("## 强制停止\n\n{}\n", reason)),
+            followup_text: None,
+            count_budget: false,
+            missing_fields: vec![],
+            no_change_count: 0,
+            parsed: Some(parsed),
+        };
+    }
 
     let stopreason = match parsed.stopreason {
         Some(v) => v,
@@ -801,13 +803,12 @@ fn schema_followup(
     if reason_code == "stop_schema_continue_next_step" {
         text.push_str(message);
     } else if used.saturating_add(1) >= effective_max
-        || (used as usize) >= DEFAULT_EXECUTION_PROMPTS.len().saturating_sub(1)
     {
-        text.push_str(default_execution_prompt(used).as_str());
+        text.push_str("这次不要再泛泛地说了。把还能验证的文件、日志、命令都直接补完；如果还是收不住，就明确写清楚卡点、已经排除的路、以及还差我拍板的那一步。\n");
         text.push_str("\n\n最终收尾 schema 缺失：不要复述 stopless/校验过程；直接给用户可读 summary，包含已完成事项、未完成事项、阻塞点/问题原因、已排除因素、建议下一步，并在末尾附 stop schema。\n");
         text.push_str(STOP_SCHEMA_JSON_EXAMPLE);
     } else {
-        text.push_str(default_execution_prompt(used).as_str());
+        text.push_str("继续做下一步；先把手头能确认的结果拿回来。\n");
         text.push_str("\n\nStop schema 校验未通过：");
         text.push_str(message);
     }
@@ -891,6 +892,7 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
     Some(StopSchemaParsed {
         stopreason: read_u8(row.get("stopreason")),
         has_evidence: read_u8(row.get("has_evidence")),
+        forcestop: read_u8(row.get("forcestop")),
         reason: read_string(row.get("reason")),
         next_step: read_string(row.get("next_step")),
         next_suggested_path: read_string(row.get("next_suggested_path")),
@@ -907,7 +909,7 @@ fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
 fn parse_first_stop_schema_json_object(text: &str) -> Option<Value> {
     parse_json_objects(text)
         .into_iter()
-        .find(|value| value.get("stopreason").is_some())
+        .find(|value| value.get("stopreason").is_some() || value.get("forcestop").is_some())
 }
 
 fn read_u8(value: Option<&Value>) -> Option<u8> {
@@ -2090,5 +2092,45 @@ mod tests {
         assert!(STOP_SCHEMA_JSON_EXAMPLE.contains("needs_user_input"));
         assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains(r#"stopreason":3"#));
         assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains("forcestop"));
+    }
+
+    #[test]
+    fn forcestop_with_reason_allows_stop_without_other_fields() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"forcestop":1,"reason":"已用尽所有排查手段，循环无法突破"}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_forcestop");
+        assert!(!decision.count_budget);
+        assert!(decision.summary_prefix.as_ref().unwrap().contains("强制停止"));
+        assert!(decision.summary_prefix.as_ref().unwrap().contains("已用尽所有排查手段"));
+    }
+
+    #[test]
+    fn forcestop_without_reason_follows_up_with_guidance() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"forcestop":1,"reason":""}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_forcestop_reason_missing");
+        assert!(decision.followup_text.as_ref().unwrap().contains("forcestop=1"));
+        assert!(decision.followup_text.as_ref().unwrap().contains("非空 reason"));
+        assert!(decision.missing_fields.contains(&"reason".to_string()));
+    }
+
+    #[test]
+    fn forcestop_takes_priority_over_stopreason_zero_missing_fields() {
+        // forcestop=1 should allow stop even when normal stop schema is incomplete
+        let decision = evaluate_stop_schema_gate(
+            r#"{"forcestop":1,"reason":"必须立刻停止","stopreason":0,"has_evidence":0,"reason":"必须立刻停止"}"#,
+            0,
+            3,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_forcestop");
     }
 }

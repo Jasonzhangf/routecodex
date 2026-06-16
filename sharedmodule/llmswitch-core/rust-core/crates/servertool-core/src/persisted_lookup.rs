@@ -1059,6 +1059,102 @@ pub fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
     read_trimmed_string(row.get("sessionId")).map(|session_id| format!("session:{session_id}"))
 }
 
+/// Synchronously build a `session:<sessionId>`-keyed stop-message persisted state
+/// payload that the CLI binary can write to disk after running the stopless
+/// continuation shell. This is the **only** owner of session-scoped stop-message
+/// state mutation: it never falls back to `tmux:`, `conversation:`, or
+/// `requestId`-based keys.
+///
+/// `next_used` is clamped into `[0, max_repeats]`. `text` is required; an empty
+/// `text` is treated as an explicit "clear" action.
+pub fn record_stopless_continuation_state(
+    session_id: &str,
+    request_id: &str,
+    text: &str,
+    next_used: u64,
+    max_repeats: u64,
+    now_ms: u64,
+) -> Result<StoplessContinuationPersistOutput, String> {
+    let session_id_trim = session_id.trim();
+    if session_id_trim.is_empty() {
+        return Err("record_stopless_continuation_state: session_id is required".to_string());
+    }
+    if !session_id_trim
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.'))
+    {
+        return Err("record_stopless_continuation_state: session_id contains invalid characters".to_string());
+    }
+    let request_id_trim = request_id.trim();
+    if request_id_trim.is_empty() {
+        return Err("record_stopless_continuation_state: request_id is required".to_string());
+    }
+    if max_repeats == 0 {
+        return Err("record_stopless_continuation_state: max_repeats must be > 0".to_string());
+    }
+    let used = next_used.min(max_repeats);
+    let key = format!("session:{session_id_trim}");
+    if text.trim().is_empty() {
+        return Ok(StoplessContinuationPersistOutput {
+            key,
+            action: "clear".to_string(),
+            state: Value::Null,
+            used,
+            max_repeats,
+        });
+    }
+    let mut state = serde_json::Map::new();
+    state.insert(
+        "stopMessageText".to_string(),
+        Value::String(text.to_string()),
+    );
+    state.insert(
+        "stopMessageMaxRepeats".to_string(),
+        Value::Number(serde_json::Number::from(max_repeats)),
+    );
+    state.insert(
+        "stopMessageUsed".to_string(),
+        Value::Number(serde_json::Number::from(used)),
+    );
+    state.insert(
+        "stopMessageSource".to_string(),
+        Value::String("default".to_string()),
+    );
+    state.insert(
+        "stopMessageStageMode".to_string(),
+        Value::String("on".to_string()),
+    );
+    state.insert(
+        "stopMessageAiMode".to_string(),
+        Value::String("off".to_string()),
+    );
+    state.insert(
+        "stopMessageUpdatedAt".to_string(),
+        Value::Number(serde_json::Number::from(now_ms)),
+    );
+    state.insert(
+        "stopMessageLastUsedAt".to_string(),
+        Value::Number(serde_json::Number::from(now_ms)),
+    );
+    Ok(StoplessContinuationPersistOutput {
+        key,
+        action: "save".to_string(),
+        state: Value::Object(state),
+        used,
+        max_repeats,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessContinuationPersistOutput {
+    pub key: String,
+    pub action: String,
+    pub state: Value,
+    pub used: u64,
+    pub max_repeats: u64,
+}
+
 pub fn resolve_servertool_sticky_key(metadata: &Value) -> String {
     if let Some(session_scope) = resolve_session_scope(metadata) {
         return session_scope;
