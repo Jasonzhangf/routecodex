@@ -48,6 +48,7 @@ async function runStoplessCliStdout(command: string) {
   const inputJson = command.match(/--input-json '([^']+)'(?=\s--session-id|\s--request-id|$)/)?.[1];
   const sessionId = command.match(/--session-id '([^']+)'/)?.[1];
   const requestId = command.match(/--request-id '([^']+)'/)?.[1];
+  const sessionDir = command.match(/ROUTECODEX_SESSION_DIR='([^']+)'/)?.[1];
   const output: string[] = [];
   const errors: string[] = [];
   const program = new Command();
@@ -63,19 +64,31 @@ async function runStoplessCliStdout(command: string) {
       throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
     }
   });
-  await program.parseAsync([
-    'node',
-    'routecodex',
-    'hook',
-    'run',
-    'stop_message_auto',
-    '--input-json',
-    inputJson ?? '{}',
-    '--session-id',
-    sessionId ?? 'session-test',
-    '--request-id',
-    requestId ?? 'req-test'
-  ]);
+  const previousSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+  if (typeof sessionDir === 'string' && sessionDir.trim()) {
+    process.env.ROUTECODEX_SESSION_DIR = sessionDir;
+  }
+  try {
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'hook',
+      'run',
+      'stop_message_auto',
+      '--input-json',
+      inputJson ?? '{}',
+      '--session-id',
+      sessionId ?? 'session-test',
+      '--request-id',
+      requestId ?? 'req-test'
+    ]);
+  } finally {
+    if (previousSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = previousSessionDir;
+    }
+  }
   return JSON.parse(output[0] ?? '{}') as Record<string, any>;
 }
 
@@ -241,6 +254,46 @@ describe('stopless CLI continuation', () => {
     }
   });
 
+  test('stopless CLI command carries sessionDir so client-side CLI can continue after env is cleared', async () => {
+    isolateSessionDir('no-schema-progress-session-dir-prefix');
+    const serverSessionDir = process.env.ROUTECODEX_SESSION_DIR ?? '';
+    const sessionId = `session-stopless-session-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestIds = [
+      `req-stopless-session-dir-${Date.now()}-1`,
+      `req-stopless-session-dir-${Date.now()}-2`,
+      `req-stopless-session-dir-${Date.now()}-3`
+    ];
+    const commands: string[] = [];
+    const outputs: Array<Record<string, any>> = [];
+
+    for (const requestId of requestIds) {
+      const adapterContext = buildAdapterContext({ sessionId, requestId });
+      (adapterContext as any).__rt = {
+        sessionDir: serverSessionDir
+      };
+      const result = await runServerToolOrchestration({
+        chat: buildStopChatResponse('need more evidence'),
+        adapterContext,
+        requestId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        reenterPipeline: async () => {
+          throw new Error('stopless CLI projection must not reenter');
+        }
+      });
+      const command = extractExecCommand(result.chat);
+      commands.push(command);
+      delete process.env.ROUTECODEX_SESSION_DIR;
+      outputs.push(await runStoplessCliStdout(command));
+    }
+
+    for (const command of commands) {
+      expect(command).toContain(`ROUTECODEX_SESSION_DIR='${serverSessionDir}'`);
+      expect(command).toContain(`--session-id '${sessionId}'`);
+    }
+    expect(outputs.map((entry) => entry.repeatCount)).toEqual([1, 2, 3]);
+  });
+
   test('invalid stop schema returns detailed correction result and preserves it into next-turn CLI stdout', async () => {
     isolateSessionDir('invalid-schema-detail');
     const sessionId = `session-stopless-invalid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -259,7 +312,7 @@ describe('stopless CLI continuation', () => {
     });
 
     const command = extractExecCommand(result.chat);
-    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).toContain("routecodex hook run reasoning_stop --input-json '");
     const output = await runStoplessCliStdout(command);
 
     expect(output.schemaGuidance).toBeDefined();
@@ -292,7 +345,7 @@ describe('stopless CLI continuation', () => {
     expect(result.flowId).toBe('stop_message_flow');
     expect(reenterPipeline).not.toHaveBeenCalled();
     const command = extractExecCommand(result.chat);
-    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).toContain("routecodex hook run reasoning_stop --input-json '");
     expect(command).not.toContain('stop_message_auto');
   });
 

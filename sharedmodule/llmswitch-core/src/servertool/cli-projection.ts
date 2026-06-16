@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
+import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   buildClientExecCliProjectionOutputWithNative,
   buildClientVisibleProjectionShellWithNative,
@@ -47,7 +48,8 @@ export function buildServertoolCliProjectionForToolCall(args: {
     requestId: args.options.requestId,
     nativeProjection,
     reasoningText,
-    additionalToolCalls: args.additionalToolCalls
+    additionalToolCalls: args.additionalToolCalls,
+    sessionDir: readSessionDirFromOptions(args.options)
   });
 }
 
@@ -86,7 +88,8 @@ export function buildServertoolCliProjectionForAutoFlow(args: {
   return buildProjectionShell({
     requestId: args.options.requestId,
     nativeProjection,
-    reasoningText: args.reasoningText
+    reasoningText: args.reasoningText,
+    sessionDir: readSessionDirFromOptions(args.options)
   });
 }
 
@@ -94,15 +97,20 @@ function buildProjectionShell(args: {
   requestId: string;
   nativeProjection: ClientExecCliProjectionOutput;
   reasoningText: string;
+  sessionDir?: string;
   additionalToolCalls?: unknown[];
 }): ServertoolCliProjectionPlan {
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
   const toolName = args.nativeProjection.toolName;
-  const command = args.nativeProjection.execCommand;
+  const command = prefixCommandWithSessionDir(args.nativeProjection.execCommand, args.sessionDir);
+  const clientProjection: ClientExecCliProjectionOutput = {
+    ...args.nativeProjection,
+    execCommand: command
+  };
   const chatResponse = buildClientVisibleProjectionShellWithNative({
     requestId: args.requestId,
     clientCallId,
-    nativeProjection: args.nativeProjection,
+    nativeProjection: clientProjection,
     reasoningText: args.reasoningText,
     ...(args.additionalToolCalls?.length ? { additionalToolCalls: args.additionalToolCalls } : {})
   }) as JsonObject;
@@ -112,6 +120,44 @@ function buildProjectionShell(args: {
     command,
     chatResponse
   };
+}
+
+function readSessionDirFromOptions(options: ServertoolCliProjectionOptions): string | undefined {
+  const ctx = options.adapterContext;
+  if (!ctx || typeof ctx !== 'object') return undefined;
+  const record = ctx as Record<string, unknown>;
+  const runtime = readRuntimeMetadata(record);
+  const candidates = [
+    runtime && typeof runtime === 'object' && !Array.isArray(runtime)
+      ? (runtime as Record<string, unknown>).sessionDir
+      : undefined,
+    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+      ? (record.__rt as Record<string, unknown>).sessionDir
+      : undefined,
+    record.sessionDir
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  const envSessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  if (envSessionDir) {
+    return envSessionDir;
+  }
+  return undefined;
+}
+
+function prefixCommandWithSessionDir(command: string, sessionDir?: string): string {
+  const trimmedSessionDir = typeof sessionDir === 'string' ? sessionDir.trim() : '';
+  if (!trimmedSessionDir) {
+    return command;
+  }
+  return `ROUTECODEX_SESSION_DIR=${quotePosixSingleArgument(trimmedSessionDir)} ${command}`;
+}
+
+function quotePosixSingleArgument(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function parseArguments(value: string): JsonObject {

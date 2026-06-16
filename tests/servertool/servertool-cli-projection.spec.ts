@@ -1,10 +1,14 @@
 import {
+  afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
   jest
 } from '@jest/globals';
+
+const ORIGINAL_SESSION_DIR = process.env.ROUTECODEX_SESSION_DIR;
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js', () => ({
   buildClientExecCliProjectionOutputWithNative: (input: any) => {
@@ -83,12 +87,29 @@ beforeAll(async () => {
   } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'));
 });
 
+beforeEach(() => {
+  delete process.env.ROUTECODEX_SESSION_DIR;
+});
+
+afterEach(() => {
+  if (ORIGINAL_SESSION_DIR === undefined) {
+    delete process.env.ROUTECODEX_SESSION_DIR;
+  } else {
+    process.env.ROUTECODEX_SESSION_DIR = ORIGINAL_SESSION_DIR;
+  }
+});
+
 describe('servertool CLI projection', () => {
   it('projects stopless auto flow to exec_command with reasoning and direct CLI input', () => {
     const projection = buildServertoolCliProjectionForAutoFlow({
       options: {
         chatResponse: {},
-        adapterContext: { sessionId: 'sess-1' } as any,
+        adapterContext: {
+          sessionId: 'sess-1',
+          __rt: {
+            sessionDir: '/tmp/rcc-stopless-port-5555'
+          }
+        } as any,
         entryEndpoint: '/v1/responses',
         requestId: 'req_stop_1',
         providerProtocol: 'openai-responses'
@@ -110,7 +131,7 @@ describe('servertool CLI projection', () => {
     expect(message.reasoning.summary[0].text).toBe('full stop summary');
     expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).toMatch(/^ROUTECODEX_SESSION_DIR='\/tmp\/rcc-stopless-port-5555' routecodex hook run reasoning_stop --input-json '/);
     const inputJson = command.match(/--input-json '(.+)'$/)?.[1];
     expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
       flowId: 'stop_message_flow',

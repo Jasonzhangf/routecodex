@@ -2407,17 +2407,8 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
             .session_id
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
-        let conversation_id = input
-            .conversation_id
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let pending_session_id = session_id.clone().or_else(|| conversation_id.clone());
-        let alias_session_ids = match (&session_id, &conversation_id) {
-            (Some(session), Some(conversation)) if session != conversation => {
-                vec![conversation.clone()]
-            }
-            _ => Vec::new(),
-        };
+        let pending_session_id = session_id.clone();
+        let alias_session_ids = Vec::new();
         let pending_injection_message_kinds =
             if configured_pending_injection_message_kinds.is_empty() {
                 vec![
@@ -3614,6 +3605,43 @@ mod tests {
                 .and_then(|v| v.as_array())
                 .map(|entries| entries.len()),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_outcome_does_not_promote_conversation_id_to_pending_session_id() {
+        let raw = serde_json::json!({
+            "toolCalls": [
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
+                { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+            ],
+            "executedToolCalls": [
+                {
+                    "id": "call_1",
+                    "name": "sample_client_tool",
+                    "arguments": "{}",
+                    "executionMode": "client_inject_only",
+                    "stripAfterExecute": true
+                }
+            ],
+            "executedFlowIds": ["sample_done"],
+            "lastExecutionFlowId": "sample_done",
+            "hasLastExecutionFollowup": true,
+            "conversationId": "conv_only_1"
+        });
+        let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        assert_eq!(
+            parsed.get("outcomeMode").and_then(|v| v.as_str()),
+            Some("mixed_client_tools")
+        );
+        assert!(parsed.get("pendingSessionId").is_none() || parsed.get("pendingSessionId") == Some(&serde_json::Value::Null));
+        assert_eq!(
+            parsed
+                .get("aliasSessionIds")
+                .and_then(|v| v.as_array())
+                .map(|entries| entries.len()),
+            Some(0)
         );
     }
 
