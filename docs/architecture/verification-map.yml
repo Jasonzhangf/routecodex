@@ -138,6 +138,7 @@ verification:
       - "Command input must not contain continuationPrompt/schemaGuidance/raw prompt text; CLI stdout must carry continuationPrompt/schemaGuidance for the next model turn."
       - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while same-session CLI wrapper progression advances repeatCount 1 -> 2 -> 3."
+      - "Validation must prove omitted caller `sessionId/requestId` is auto-filled by the Rust CLI/runtime instead of failing fast, while strict persisted matching still remains `session:<sessionId>` only."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
@@ -238,13 +239,16 @@ verification:
     contract:
       - tests/red-tests/error_chain_singleton_truth.test.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
+      - tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
     integration:
       - tests/server/runtime/executor-provider.retryable.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
+      - tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
     smoke:
       - npm run verify:provider-failure-ban-blackbox
       - pnpm exec jest tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
+      - pnpm exec jest tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
     build:
       - npm run build:min
     notes:
@@ -300,12 +304,15 @@ verification:
     contract:
       - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     integration:
       - cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib
       - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+      - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     build:
       - npm run build:min
     notes:
@@ -1281,6 +1288,7 @@ verification:
       - src/server/runtime/http-server/direct-client-disconnect.ts
     contract:
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
+      - tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
     integration:
       - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
@@ -1288,10 +1296,12 @@ verification:
       - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
+      - tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:provider-failure-ban-blackbox
       - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     build:
@@ -1307,6 +1317,7 @@ verification:
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
+      - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
     integration:
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
@@ -1315,12 +1326,31 @@ verification:
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
+      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:function-map-compile-gate
       - pnpm exec jest tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - pnpm exec jest tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
+      - pnpm exec jest tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
     build:
       - npm run build:min
     notes:
       - "Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy."
+
+  - feature_id: server.port_config_provider_failure_exemption
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/port-config-validator.ts
+      - src/server/runtime/http-server/port-config-types.ts
+    contract:
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+    integration:
+      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+    build:
+      - npm run build:min
+    notes:
+      - "Provider-mode single-binding rethrow exemption is a port spec; router-mode must not declare it."

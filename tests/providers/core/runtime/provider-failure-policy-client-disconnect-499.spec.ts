@@ -37,6 +37,24 @@ describe('provider-failure-policy upstream 499 client-disconnect', () => {
     expect(isProviderFailureClientDisconnect(error)).toBe(true);
   });
 
+  it('isProviderFailureClientDisconnect returns true when wrapper preserves upstream message only in response.data.error.message', () => {
+    const error = {
+      message: 'HTTP 499: {"error":{"code":"HTTP_499","status":499}}',
+      code: 'HTTP_499',
+      statusCode: 499,
+      response: {
+        data: {
+          error: {
+            status: 499,
+            code: 'HTTP_499',
+            message: 'client abort request',
+          },
+        },
+      },
+    };
+    expect(isProviderFailureClientDisconnect(error)).toBe(true);
+  });
+
   it('isProviderFailureClientDisconnect returns true for upstream body client abort request alone', () => {
     const error = { message: 'client abort request' };
     expect(isProviderFailureClientDisconnect(error)).toBe(true);

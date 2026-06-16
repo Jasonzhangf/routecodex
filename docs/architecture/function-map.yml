@@ -260,6 +260,7 @@ owners:
       - "Client-visible exec_command must use the public stopless alias `reasoning_stop`; the client payload must not leak internal marker `__servertool_cli_projection`."
       - "NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only."
       - "Same-session NoSchema stopless progression must advance `used/repeatCount` 1 -> 2 -> 3 through the real CLI wrapper persistence path, not only through mocked state writes."
+      - "Missing caller-provided `sessionId/requestId` is not a CLI contract failure; the Rust CLI/runtime must auto-supply execution-local identity, while persisted matching still remains strict `session:<sessionId>` with no tmux/conversation/default fallback."
       - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback or server-side stopless followup/reenter."
 
@@ -446,7 +447,7 @@ owners:
 
   - feature_id: error.provider_failure_policy
     status: active
-    summary: "provider error cataloging, runtime classification, router policy application"
+    summary: "provider error cataloging, runtime classification, router policy application, client-disconnect and upstream-stream-incomplete routing"
     owner_kind: provider_runtime
     owner_scope: "provider error cataloging, runtime classification, router policy application"
     owner_module: src/providers/core/runtime
@@ -475,6 +476,7 @@ owners:
     migration_target: rust
     notes:
       - "Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only."
+      - "Client-disconnect 499 and upstream_stream_incomplete both flow through the same provider policy chain; client projection remains a separate ErrorErr06 owner."
 
   - feature_id: error.backoff_action_queue
     status: active
@@ -2414,7 +2416,7 @@ owners:
 
   - feature_id: error.execution_decision_consumer
     status: active
-    summary: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
+    summary: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute"
     owner_kind: ts_runtime_owner
     owner_scope: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
     owner_module: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
@@ -2452,10 +2454,11 @@ owners:
     migration_target: rust
     notes:
       - "Request/direct executor may consume ErrorErr04 policy decisions and execute retry/reroute/fail-fast plans, but must not classify provider errors independently."
+      - "Primary exhausted -> default pool remains a VR/native contract; upstream_stream_incomplete is a standard reroute-capable policy outcome."
 
   - feature_id: error.client_projection
     status: active
-    summary: "ErrorErr06 client-visible HTTP/SSE error projection"
+    summary: "ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames"
     owner_kind: server_projection
     owner_scope: "ErrorErr06 client-visible HTTP/SSE error projection"
     owner_module: src/server/utils/http-error-mapper.ts
@@ -2495,3 +2498,33 @@ owners:
     migration_target: rust
     notes:
       - "ErrorErr06 may project client-visible error payloads only; it must not feed provider retry/reroute/cooldown policy."
+      - "Started-stream Responses SSE incomplete is client-visible here only after the SSE handler decides the stream already emitted semantic frames."
+
+  - feature_id: server.port_config_provider_failure_exemption
+    status: active
+    summary: "Provider-mode single-binding provider failure exemption contract"
+    owner_kind: server_config
+    owner_scope: "Per-port config validation for provider-mode single-binding rethrow exemption"
+    owner_module: src/server/runtime/http-server/port-config-validator.ts
+    canonical_types:
+      - ProviderFailureExemption
+      - PortConfig
+    canonical_builders:
+      - validatePortConfigs
+      - normalizePortsConfig
+    allowed_paths:
+      - src/server/runtime/http-server/port-config-validator.ts
+      - src/server/runtime/http-server/port-config-types.ts
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/handlers
+      - src/server/runtime/http-server/direct-decision.ts
+    required_tests:
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Provider-mode single-binding failures intentionally rethrow and do not fall back to routingPolicyGroup; router-mode must reject this exemption."

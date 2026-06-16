@@ -100,6 +100,48 @@ export function shouldBlockSingletonRoutePoolExhaustion(args: {
   }).shouldBlock;
 }
 
+
+
+export interface ResolvePrimaryExhaustedPlanInput {
+  route: string;
+  exhaustedTargets: string[];
+  knownTargets: string[];
+  tiers: Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
+}
+
+export interface ResolvePrimaryExhaustedPlanOutput {
+  status: 'no_default_pool_needed' | 'default_pool' | 'unknown_target' | 'route_not_configured';
+  defaultPoolTargets: string[];
+  fromTierId?: string | null;
+  fromTierPriority?: number | null;
+}
+
+/**
+ * Host-side adapter around `planPrimaryExhaustedToDefaultPoolNative` (Rust).
+ *
+ * Per `docs/goals/provider-error-chain-direct-relay-audit-2026-06-15.md` G3:
+ * the host MUST consult the Rust VR default-pool planner whenever a primary
+ * route pool is exhausted; the host MUST NOT synthesize a fallback target list
+ * locally. This helper is the only sanctioned host bridge.
+ */
+export function resolvePrimaryExhaustedPlan(
+  input: ResolvePrimaryExhaustedPlanInput
+): ResolvePrimaryExhaustedPlanOutput {
+  // Lazy import to avoid pulling the bridge module during unit tests that
+  // deliberately isolate the helper. The function is also re-exported via
+  // the bridge index for direct host use.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { planPrimaryExhaustedToDefaultPoolNative } = require('../../../../modules/llmswitch/bridge.js') as {
+    planPrimaryExhaustedToDefaultPoolNative: (i: ResolvePrimaryExhaustedPlanInput) => ResolvePrimaryExhaustedPlanOutput;
+  };
+  return planPrimaryExhaustedToDefaultPoolNative({
+    route: input.route,
+    tiers: input.tiers,
+    exhaustedTargets: input.exhaustedTargets,
+    knownTargets: input.knownTargets
+  });
+}
+
 export function mergeMetadataPreservingDefined(
   base: Record<string, unknown>,
   overlay?: Record<string, unknown> | null

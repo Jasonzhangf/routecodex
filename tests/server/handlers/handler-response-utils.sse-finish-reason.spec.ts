@@ -430,8 +430,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
-    expect(output).not.toContain('event: error');
-    expect(output).not.toContain('"code":"upstream_stream_incomplete"');
+    expect(output).toContain('event: error');
+    expect(output).toContain('"code":"upstream_stream_incomplete"');
+    expect(output).toContain('stream closed before response.completed');
     expect(logOutput).toContain('[response][req-stream-incomplete-failed-completion] completed');
     expect(logOutput).toContain('upstream_stream_incomplete');
     expect(logOutput).toContain('finish_reason=incomplete');

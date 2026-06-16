@@ -122,9 +122,6 @@ export function isProviderFailureClientDisconnect(error: unknown): boolean {
     return true;
   }
   const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
-  if (message.includes('client_disconnected') || message.includes('client disconnected')) {
-    return true;
-  }
   // Upstream 499 (nginx "Client Closed Request") with a body that signals the
   // end-client closed the request must be treated as a transport cancellation,
   // not a normal upstream 4xx. 4xx 499 must NEVER be a real provider error:
@@ -142,10 +139,16 @@ export function isProviderFailureClientDisconnect(error: unknown): boolean {
       typeof (err as { details?: { upstreamMessage?: unknown } }).details?.upstreamMessage === 'string'
         ? ((err as { details: { upstreamMessage: string } }).details.upstreamMessage).toLowerCase()
         : '',
+      typeof (err as { response?: { data?: { error?: { message?: unknown } } } }).response?.data?.error?.message === 'string'
+        ? String((err as { response: { data: { error: { message: string } } } }).response.data.error.message).toLowerCase()
+        : '',
     ];
     if (bodyHints.some((hint) => hint.includes('client abort request') || hint.includes('client closed request'))) {
       return true;
     }
+  }
+  if (message.includes('client_disconnected') || message.includes('client disconnected')) {
+    return true;
   }
   if (message.includes('client abort request') || message.includes('client closed request')) {
     return true;

@@ -162,7 +162,9 @@ export async function sendPipelineResponse(
     directPassthrough: resultMetadata?.__routecodexDirectPassthrough === true,
   });
 
-  const sseHandled = await sendSsePipelineResponse({
+  // G6: sendSsePipelineResponse now returns boolean | Error.
+  // Propagate Error upward so executor catch-chain can reroute provider.
+  const sseResult = await sendSsePipelineResponse({
     res,
     result,
     requestLabel,
@@ -176,7 +178,10 @@ export async function sendPipelineResponse(
     responsesRequestContext: effectiveResponsesRequestContext,
     logResponseCompleted,
   });
-  if (sseHandled) {
+  if (sseResult instanceof Error) {
+    throw sseResult;
+  }
+  if (sseResult) {
     return;
   }
 
