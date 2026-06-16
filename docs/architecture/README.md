@@ -4,6 +4,8 @@
 
 - `wiki/README.md`
   - 架构 wiki 路径索引：先看哪里、owner 和 mainline 分别去哪查、closeout/gate 去哪查
+- `wiki/coverage-matrix.md`
+  - 架构 wiki 覆盖矩阵：哪些逻辑已有 review 面，哪些逻辑还缺
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -28,6 +30,10 @@
 - `wiki/README.md`
   - 记录“当你要找架构真源时先看哪、后看哪”
   - 不是第二份设计文档，只做路径索引和使用顺序
+
+- `wiki/coverage-matrix.md`
+  - 记录当前 wiki 覆盖状态与下一批待补页面
+  - 用于防止 function map / mainline map 已有，但 review 面仍长期缺失
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`

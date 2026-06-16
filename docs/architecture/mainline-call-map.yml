@@ -89,7 +89,7 @@ chains:
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/response_typed_entrypoints.rs
         callee_symbol: parse_hub_resp_inbound_02_from_provider_resp_inbound_01
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_resp_inbound_02_parsed.rs
-        owner_feature_id: binding pending
+        owner_feature_id: hub.response_provider_sse_materialization
         semantic_input: "provider canonical/raw response payload after protocol mapping"
         semantic_output: "typed Hub resp-inbound parsed payload"
         status: anchored
@@ -100,7 +100,7 @@ chains:
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/response_typed_entrypoints.rs
         callee_symbol: build_hub_resp_chatprocess_03_from_hub_resp_inbound_02
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_resp_chatprocess_03_governed.rs
-        owner_feature_id: binding pending
+        owner_feature_id: hub.response_responses_chat_projection
         semantic_input: "typed Hub resp-inbound payload + governed response payload"
         semantic_output: "typed Hub resp-chatprocess governed payload"
         status: anchored

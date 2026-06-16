@@ -31,10 +31,14 @@
    - 看 Mermaid 视图和 review 表格。
    - 这是从 `mainline-call-map.yml` 自动生成的 render artifact，不是第二份真源。
 
-6. `docs/architecture/verification-map.yml`
+6. `docs/architecture/wiki/coverage-matrix.md`
+   - 看哪些逻辑已经有 wiki review 面，哪些还缺。
+   - 先确定下一批应该补哪一页，不要零散补图。
+
+7. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-7. `docs/goals/*`
+8. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -49,6 +53,7 @@
 - `docs/architecture/function-map.yml`
 - `docs/architecture/mainline-call-map.yml`
 - `docs/architecture/wiki/mainline-call-graph.md`
+- `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`
 
