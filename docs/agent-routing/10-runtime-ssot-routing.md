@@ -91,7 +91,10 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
 
 ## 架构索引与门禁
 - 关键功能定位先查 `docs/architecture/function-map.yml`
+- 主线 caller/callee 与 facade/runtime/typed-contract 分层先查 `docs/architecture/mainline-call-map.yml`
 - 最小验证栈先查 `docs/architecture/verification-map.yml`
+- 路径索引先查 `docs/architecture/wiki/README.md`
+- Mermaid review 面查 `docs/architecture/wiki/mainline-call-graph.md`
 - 架构规则先落模板，再升为门禁；至少保持以下验证栈可用：
   - `npm run verify:architecture-ci`
   - 逐项排查时再拆跑单项 gate：
@@ -114,12 +117,17 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
   - `npm run verify:architecture-metadata-leak-boundary`
   - `npm run verify:architecture-error-chain-bypass`
   - `npm run verify:architecture-owner-queryability`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-mainline-mermaid-sync`
   - `npm run verify:architecture-feature-map-growth-discipline`
   - `npm run verify:architecture-forbidden-path-growth`
   - `npm run verify:architecture-adjacent-builder-naming`
   - `npm run verify:architecture-snapshot-stage-contract`
 - 相关真源：
   - `docs/architecture/README.md`
+  - `docs/architecture/wiki/README.md`
+  - `docs/architecture/wiki/mainline-call-graph.md`
   - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
   - `docs/architecture/verification-map.yml`
   - `docs/architecture/snapshot-stage-contract.md`

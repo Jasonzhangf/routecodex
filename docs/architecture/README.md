@@ -2,6 +2,8 @@
 
 本目录承载“规则下沉”的项目级真源骨架，目标是把全局原则落成可查询、可维护、可逐步 gate 化的项目模板。
 
+- `wiki/README.md`
+  - 架构 wiki 路径索引：先看哪里、owner 和 mainline 分别去哪查、closeout/gate 去哪查
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
@@ -13,6 +15,19 @@
   - 记录关键功能的 `feature_id -> owner -> canonical types/builders -> allowed/forbidden paths -> required tests -> migration target`
   - 用于快速定位唯一修改点，防止重复实现和多处同时改
   - quota 生命周期、统一 control surface、`route non-empty` 这类全局不变量也必须显式登记，避免散落到 handler/executor/adapter
+
+- `mainline-call-map.yml`
+  - 记录 request / response / error 主线的相邻 caller-callee 绑定
+  - 用于识别 facade / wrapper / transitional layer 与 truth owner 的关系，防止只看 feature owner registry 仍改错主线位置
+  - 未验证的边必须显式写 `binding_pending`
+
+- `wiki/mainline-call-graph.md`
+  - 从 `mainline-call-map.yml` + `function-map.yml` 自动生成的 Mermaid review 面
+  - 只负责可视化和 review，不是第二份 SSOT；禁止手改
+
+- `wiki/README.md`
+  - 记录“当你要找架构真源时先看哪、后看哪”
+  - 不是第二份设计文档，只做路径索引和使用顺序
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`
@@ -110,3 +125,5 @@
    - `npm run verify:responses-direct-tool-shape-contract`
    - `npm run verify:responses-direct-tool-shape-rust-first`
    - `npm run verify:responses-request-compat-rust-only`
+6. 若某功能跨越多个 facade / wrapper / runtime shell，除 `function-map.yml` 外还应同步补 `mainline-call-map.yml`。
+7. `mainline-call-map.yml` 变更后，必须同步运行 `npm run render:architecture-mainline-mermaid` 并让 `wiki/mainline-call-graph.md` 保持同步。

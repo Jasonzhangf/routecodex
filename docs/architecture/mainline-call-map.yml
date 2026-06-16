@@ -1,0 +1,208 @@
+# RouteCodex mainline call map
+# Purpose:
+# - bind request/response/error mainlines to concrete caller/callee edges
+# - supplement function-map owner registry with executable call-path indexing
+# - prevent edits on facade/wrapper/transitional layers when truth owner is elsewhere
+version: 1
+status: seed
+
+chains:
+  - chain_id: request.mainline
+    summary: "HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build."
+    entry_contract:
+      node: ServerReqInbound01ClientRaw
+      owner_doc: docs/design/pipeline-type-topology-and-module-boundaries.md
+    edges:
+      - step_id: req-00
+        from_node: ServerReqInbound01ClientRaw
+        to_node: HubReqInbound02Standardized
+        caller_symbol: prepareResponsesHandlerEntryForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: planResponsesHandlerEntry
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: server.responses_request_handler_bridge_surface
+        semantic_input: "raw /v1/responses payload + entry endpoint + path response id"
+        semantic_output: "native-planned handler entry mode and normalized payload"
+        status: anchored
+      - step_id: req-01
+        from_node: ServerReqInbound01ClientRaw
+        to_node: HubReqInbound02Standardized
+        caller_symbol: buildResponsesRequestContextForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: captureReqInboundResponsesContextSnapshotJson
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: hub.req_inbound_responses_context_capture
+        semantic_input: "entry protocol request + current request metadata scope"
+        semantic_output: "request-side normalized responses context snapshot"
+        status: anchored
+      - step_id: req-02
+        from_node: HubReqInbound02Standardized
+        to_node: HubReqChatProcess03Governed
+        caller_symbol: captureReqInboundResponsesContextSnapshot
+        caller_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_symbol: captureReqInboundResponsesContextSnapshotWithNative
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts
+        owner_feature_id: hub.req_inbound_responses_context_capture
+        semantic_input: "normalized raw request envelope"
+        semantic_output: "Hub req-inbound context capture truth for later governed request build"
+        status: anchored
+      - step_id: req-03
+        from_node: HubReqChatProcess03Governed
+        to_node: VrRoute04SelectedTarget
+        binding_pending: true
+        owner_feature_id: binding pending
+        semantic_input: "governed Hub request plus route-selection-ready request metadata"
+        semantic_output: "selected virtual-router target contract"
+        note: "Need concrete governed request -> VR select bridge symbols from stage/runtime owner; keep pending until stage wrapper audit verifies caller."
+      - step_id: req-04
+        from_node: VrRoute04SelectedTarget
+        to_node: HubReqOutbound05ProviderSemantic
+        binding_pending: true
+        owner_feature_id: binding pending
+        semantic_input: "virtual-router target selection and route decision"
+        semantic_output: "provider-semantic outbound payload aligned to selected target"
+        note: "Fill VR decision -> req outbound semantic edge."
+      - step_id: req-05
+        from_node: HubReqOutbound05ProviderSemantic
+        to_node: ProviderReqOutbound06WirePayload
+        caller_symbol: runReqOutboundStage3CompatWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+        callee_symbol: run_req_outbound_stage3_compat_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+        owner_feature_id: responses.request_compat_normalization
+        semantic_input: "provider-neutral outbound semantic"
+        semantic_output: "provider-compatible wire-ready semantic payload"
+        status: partial
+
+  - chain_id: response.mainline
+    summary: "Provider response enters Hub, gets governed, then projects to client protocol and server frame."
+    entry_contract:
+      node: ProviderRespInbound01Raw
+      owner_doc: docs/design/pipeline-type-topology-and-module-boundaries.md
+    edges:
+      - step_id: resp-01
+        from_node: ProviderRespInbound01Raw
+        to_node: HubRespInbound02Parsed
+        caller_symbol: run_hub_resp_inbound_02_parsed_entrypoint
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/response_typed_entrypoints.rs
+        callee_symbol: parse_hub_resp_inbound_02_from_provider_resp_inbound_01
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_resp_inbound_02_parsed.rs
+        owner_feature_id: binding pending
+        semantic_input: "provider canonical/raw response payload after protocol mapping"
+        semantic_output: "typed Hub resp-inbound parsed payload"
+        status: anchored
+      - step_id: resp-02
+        from_node: HubRespInbound02Parsed
+        to_node: HubRespChatProcess03Governed
+        caller_symbol: run_hub_resp_chatprocess_03_governed_entrypoint
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/response_typed_entrypoints.rs
+        callee_symbol: build_hub_resp_chatprocess_03_from_hub_resp_inbound_02
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_resp_chatprocess_03_governed.rs
+        owner_feature_id: binding pending
+        semantic_input: "typed Hub resp-inbound payload + governed response payload"
+        semantic_output: "typed Hub resp-chatprocess governed payload"
+        status: anchored
+      - step_id: resp-03
+        from_node: HubRespChatProcess03Governed
+        to_node: HubRespOutbound04ClientSemantic
+        caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        callee_symbol: projectResponsesClientPayloadForClientNative
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: hub.response_responses_client_projection
+        semantic_input: "post-governed Hub response truth + entry endpoint + request context"
+        semantic_output: "client-visible responses payload after native projection"
+        status: anchored
+      - step_id: resp-04
+        from_node: HubRespOutbound04ClientSemantic
+        to_node: ServerRespOutbound05ClientFrame
+        caller_symbol: sendPipelineResponse
+        caller_file: src/server/handlers/handler-response-utils.ts
+        callee_symbol: sendSsePipelineResponse
+        callee_file: src/server/handlers/handler-response-sse.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
+        semantic_input: "client semantic body/probe"
+        semantic_output: "http json/sse frame"
+        status: anchored
+
+  - chain_id: error.mainline
+    summary: "Provider/runtime/direct failures enter unified ErrorErr chain and only then project to client-visible error."
+    entry_contract:
+      node: ErrorErr01SourceRaised
+      owner_doc: docs/design/pipeline-type-topology-and-module-boundaries.md
+    edges:
+      - step_id: err-01
+        from_node: ErrorErr01SourceRaised
+        to_node: ErrorErr02HostCaptured
+        caller_symbol: reportProviderErrorToRouterPolicy
+        caller_file: src/providers/core/utils/provider-error-reporter.ts
+        callee_symbol: reportProviderErrorToRouterPolicy
+        callee_file: src/providers/core/utils/provider-error-reporter.ts
+        owner_feature_id: error.pipeline_contract
+        semantic_input: "provider/local thrown error + stage scope"
+        semantic_output: "host-captured provider error event"
+        status: anchored
+      - step_id: err-02
+        from_node: ErrorErr02HostCaptured
+        to_node: ErrorErr03RuntimeClassified
+        caller_symbol: classifyProviderFailure
+        caller_file: src/providers/core/runtime/provider-failure-policy-impl.ts
+        callee_symbol: classifyProviderFailure
+        callee_file: src/providers/core/runtime/provider-failure-policy-impl.ts
+        owner_feature_id: error.provider_failure_policy
+        semantic_input: "host-captured provider error event"
+        semantic_output: "classified runtime failure"
+        status: anchored
+      - step_id: err-03
+        from_node: ErrorErr03RuntimeClassified
+        to_node: ErrorErr05ExecutionDecision
+        caller_symbol: resolveProviderRetryExecutionPlan
+        caller_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+        callee_symbol: consume_error_err_05_execution_decision_from_error_err_04_router_policy
+        callee_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+        owner_feature_id: error.execution_decision_consumer
+        semantic_input: "classified provider/runtime failure + retry/error snapshot"
+        semantic_output: "executor-visible retry execution decision"
+        status: partial
+      - step_id: err-04
+        from_node: ErrorErr05ExecutionDecision
+        to_node: ErrorErr06ClientProjected
+        caller_symbol: project_error_err_06_client_from_error_err_05_execution_decision
+        caller_file: src/server/utils/http-error-mapper.ts
+        callee_symbol: mapErrorToHttp
+        callee_file: src/server/utils/http-error-mapper.ts
+        owner_feature_id: error.client_projection
+        semantic_input: "execution decision result"
+        semantic_output: "client-visible http error projection"
+        status: anchored
+
+shared_multi_reference_functions:
+  - function_id: native.responses_context_capture
+    symbol: captureReqInboundResponsesContextSnapshotJson
+    file: src/modules/llmswitch/bridge/native-exports.ts
+    owner_feature_id: hub.req_inbound_responses_context_capture
+    reused_by_chains:
+      - request.mainline
+    note: "Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture."
+
+  - function_id: native.responses_client_projection
+    symbol: projectResponsesClientPayloadForClientNative
+    file: src/modules/llmswitch/bridge/native-exports.ts
+    owner_feature_id: hub.response_responses_client_projection
+    reused_by_chains:
+      - response.mainline
+    note: "Thin host/native facade; truth owner remains Rust."
+
+  - function_id: error.execution_decision_consumer
+    symbol: resolveProviderRetryExecutionPlan
+    file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+    owner_feature_id: error.execution_decision_consumer
+    reused_by_chains:
+      - error.mainline
+    note: "Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision."
+
+maintenance_rules:
+  - "Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code."
+  - "Each edge must bind one adjacent mainline transition only."
+  - "If a facade/wrapper is listed, also record the truth owner feature_id."
+  - "When a feature changes mainline entry/exit, update this file in the same change set."
