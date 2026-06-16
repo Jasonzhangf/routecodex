@@ -69,6 +69,87 @@ export const GENERATED_WIKI_PAGES = [
   },
 ];
 
+export const MANUAL_WIKI_PAGES = [
+  {
+    path: `${WIKI_ROOT}/metadata-boundary-map.md`,
+    title: '# Metadata Boundary Map',
+    minMermaidBlocks: 2,
+    requiredTokens: [
+      'Canonical sources:',
+      '## Main Rule',
+      '## Scope Keys',
+      '## Request / Response Flow',
+      '## Metadata Consumers',
+      '## Mapping Gaps / Review Findings',
+      'meta-gap-01',
+    ],
+  },
+  {
+    path: `${WIKI_ROOT}/chat-process-protocol-mapping.md`,
+    title: '# Chat Process Protocol Mapping',
+    minMermaidBlocks: 3,
+    requiredTokens: [
+      'Canonical sources:',
+      '## Main Rule',
+      '## Request-Side Semantic Mapping',
+      '## Response-Side Semantic Mapping',
+      '## Field-Level Mapping Matrix',
+      '## Mapping Gaps / Review Findings',
+      'map-gap-01',
+    ],
+  },
+  {
+    path: `${WIKI_ROOT}/server-responses-sse-bridge-map.md`,
+    title: '# Server Responses SSE Bridge Map',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      'Canonical sources:',
+      '## Main Rule',
+      '## Surface Flow',
+      '## Owner Matrix',
+      '## JSON / SSE Equality Matrix',
+      '## Gaps / Review Findings',
+      'sse-gap-01',
+    ],
+  },
+  {
+    path: `${WIKI_ROOT}/responses-direct-relay-map.md`,
+    title: '# Responses Direct Relay Map',
+    minMermaidBlocks: 3,
+    requiredTokens: [
+      'Canonical sources:',
+      '## Main Rule',
+      '## Ownership Flow',
+      '## Entry Matrix',
+      '## Direct vs Relay Ownership',
+      '## Three-key Isolation',
+      '## Legal and Illegal Paths',
+      '## Review Findings',
+      'direct-relay-gap-01',
+      '__shadowCompareForcedProviderKey',
+    ],
+  },
+  {
+    path: `${WIKI_ROOT}/servertool-followup-call-graph.md`,
+    title: '# Servertool Followup Call Graph',
+    minMermaidBlocks: 3,
+    requiredTokens: [
+      'Canonical sources:',
+      '## Main Rule',
+      '## Mainline',
+      '## Node Boundary',
+      '## Branch Split',
+      '## Owner Matrix',
+      '## Followup vs CLI',
+      '## Stopless Branch',
+      '## Review Findings',
+      'followup-gap-01',
+      'HubRespChatProcess03Governed',
+      'ServertoolReq04FollowupBuilt',
+    ],
+  },
+];
+
 function readText(root, relPath) {
   return fs.readFileSync(path.join(root, relPath), 'utf8');
 }
@@ -167,4 +248,31 @@ export function renderGeneratedWikiPages(root) {
     outputs.set(page.path, content);
   }
   return outputs;
+}
+
+export function verifyManualWikiPages(root) {
+  const failures = [];
+  for (const page of MANUAL_WIKI_PAGES) {
+    const absPath = path.join(root, page.path);
+    if (!fs.existsSync(absPath)) {
+      failures.push(`missing manual wiki page: ${page.path}`);
+      continue;
+    }
+    const current = fs.readFileSync(absPath, 'utf8');
+    if (!current.includes(page.title)) {
+      failures.push(`${page.path}: missing title ${page.title}`);
+    }
+    const mermaidCount = (current.match(/```mermaid/g) ?? []).length;
+    if (mermaidCount < (page.minMermaidBlocks ?? 1)) {
+      failures.push(
+        `${page.path}: expected at least ${page.minMermaidBlocks ?? 1} mermaid blocks, found ${mermaidCount}`
+      );
+    }
+    for (const token of page.requiredTokens ?? []) {
+      if (!current.includes(token)) {
+        failures.push(`${page.path}: missing required token ${token}`);
+      }
+    }
+  }
+  return failures;
 }
