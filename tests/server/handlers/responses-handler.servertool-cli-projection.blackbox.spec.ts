@@ -1,5 +1,18 @@
 import { runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import fs from 'node:fs';
+import path from 'node:path';
+
+function extractCommandInput(command: string): Record<string, unknown> {
+  const match = command.match(/--input-json '([^']+)'(?=\s--session-id|\s--request-id|$)/);
+  return match ? JSON.parse(match[1]) as Record<string, unknown> : {};
+}
+
+function isolateSessionDir(label: string): void {
+  const dir = path.join(process.cwd(), '.tmp', 'jest-servertool-blackbox', `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  fs.mkdirSync(dir, { recursive: true });
+  process.env.ROUTECODEX_SESSION_DIR = dir;
+}
 
 describe('servertool CLI projection blackbox', () => {
   it('returns exec_command projection and does not reenter for intercepted servertool call', async () => {
@@ -45,13 +58,16 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     expect(toolCall.function.name).toBe('exec_command');
-    expect(command).toBe("routecodex servertool run servertool_fixture --input-json '{\"value\":1}'");
+    expect(command).toContain("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
+    expect(command).toContain("--session-id 'sess-blackbox'");
+    expect(command).toContain("--request-id 'req_servertool_blackbox'");
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));
   });
 
   it('projects stopless CLI input with continuation prompt and repeat counters', async () => {
+    isolateSessionDir('stopless-lifecycle');
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_projection_lifecycle',
@@ -96,15 +112,28 @@ describe('servertool CLI projection blackbox', () => {
     expect(result.flowId).toBe('stop_message_flow');
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
-    const match = command.match(/--input-json '(.+)'$/);
-    expect(match).toBeTruthy();
-    const input = JSON.parse(match?.[1] ?? '{}');
+    const input = extractCommandInput(command);
     expect(input.flowId).toBe('stop_message_flow');
     expect(input.continuationPrompt).toBeUndefined();
     expect(input.schemaGuidance).toBeUndefined();
     expect(command).not.toMatch(/Stop schema|stop schema|stopreason/);
     expect(command).not.toContain('continuationPrompt');
     expect(command).not.toContain('继续执行');
+    for (const forbidden of [
+      'schema',
+      'stopless',
+      'servertool',
+      '第一轮',
+      '第二轮',
+      '第三轮',
+      '必须调用',
+      '证据不足',
+      '用户目标',
+      '已排除因素',
+      '排查顺序'
+    ]) {
+      expect(command).not.toContain(forbidden);
+    }
     expect(input.repeatCount).toBeGreaterThanOrEqual(0);
     expect(input.maxRepeats).toBeGreaterThanOrEqual(1);
 
@@ -118,7 +147,8 @@ describe('servertool CLI projection blackbox', () => {
   });
 
   it('re-projects stop_message_auto on submit_tool_outputs resume when current response stops again', async () => {
-    const validResumeCommand = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
+    isolateSessionDir('resume-reproject');
+    const validResumeCommand = "routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_after_cli_result',
@@ -138,6 +168,18 @@ describe('servertool CLI projection blackbox', () => {
         sessionId: 'sess-stop-cli-loop-guard-resume-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: '继续执行' }]
+        },
+        __rt: {
+          stopMessageState: {
+            stopMessageText: '继续执行原任务',
+            stopMessageMaxRepeats: 3,
+            stopMessageUsed: 1,
+            stopMessageStageMode: 'on'
+          }
+        },
         __raw_request_body: {
           model: 'gpt-5.5',
           input: [
@@ -171,10 +213,12 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     expect(toolCall.function.name).toBe('exec_command');
-    expect(command).toContain('routecodex servertool run stop_message_auto');
+    expect(command).toContain('routecodex hook run stop_message_auto');
+    expect(extractCommandInput(command).repeatCount).toBe(2);
   });
 
   it('returns terminal allow-stop result without re-projecting exec_command', async () => {
+    isolateSessionDir('allow-stop-terminal');
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_allow_stop_terminal',
@@ -242,6 +286,7 @@ describe('servertool CLI projection blackbox', () => {
   });
 
   it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {
+    isolateSessionDir('legacy-shape');
     const result = await runServerToolOrchestration({
       chat: {
         id: 'chatcmpl_stop_after_legacy_cli_result',
@@ -261,6 +306,18 @@ describe('servertool CLI projection blackbox', () => {
         sessionId: 'sess-stop-cli-legacy-shape-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: '继续执行' }]
+        },
+        __rt: {
+          stopMessageState: {
+            stopMessageText: '继续执行原任务',
+            stopMessageMaxRepeats: 3,
+            stopMessageUsed: 1,
+            stopMessageStageMode: 'on'
+          }
+        },
         __raw_request_body: {
           model: 'gpt-5.5',
           input: [
@@ -293,6 +350,6 @@ describe('servertool CLI projection blackbox', () => {
     expect(result.flowId).toBe('stop_message_flow');
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     expect(toolCall.function.name).toBe('exec_command');
-    expect(JSON.parse(toolCall.function.arguments).cmd).toContain('routecodex servertool run stop_message_auto');
+    expect(JSON.parse(toolCall.function.arguments).cmd).toContain('routecodex hook run stop_message_auto');
   });
 });

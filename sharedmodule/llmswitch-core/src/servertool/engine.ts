@@ -1,5 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import type { ProviderInvoker, ServerSideToolEngineOptions } from './types.js';
 import { runServerSideToolEngine } from './server-side-tools.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
@@ -180,6 +181,53 @@ function extractStoplessLoopState(execution: ServerToolEngineResult['execution']
   return { repeatCount, maxRepeats };
 }
 
+function readStoplessSessionId(adapterContext: unknown): string | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object') {
+    return undefined;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const direct = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
+  if (direct) {
+    return direct;
+  }
+  const runtime = record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+    ? record.__rt as Record<string, unknown>
+    : null;
+  const rt = runtime && typeof runtime.sessionId === 'string' ? runtime.sessionId.trim() : '';
+  return rt || undefined;
+}
+
+function readStoplessRouteName(adapterContext: unknown): string | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object') {
+    return undefined;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const runtimeMetadata = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
+  const directRuntime =
+    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+      ? record.__rt as Record<string, unknown>
+      : null;
+  const candidates = [
+    runtimeMetadata?.routeName,
+    directRuntime?.routeName,
+    record.routeName
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function isDirectStoplessDisabled(adapterContext: unknown): boolean {
+  const routeName = readStoplessRouteName(adapterContext)?.toLowerCase();
+  if (!routeName) {
+    return false;
+  }
+  return routeName.startsWith('router-direct') || routeName.startsWith('provider-direct');
+}
+
 function recordServertoolExecutionSnapshot(args: {
   stageRecorder?: StageRecorder;
   requestId: string;
@@ -258,6 +306,18 @@ export async function runServerToolOrchestration(
   const stopSignal = inspectStopGatewaySignal(options.chat);
   attachStopGatewayContext(options.adapterContext, stopSignal);
   if (stopSignal.observed) {
+    if (isDirectStoplessDisabled(options.adapterContext)) {
+      logStopEntry('trigger', 'skipped_direct_passthrough', {
+        reason: stopSignal.reason,
+        source: stopSignal.source,
+        eligible: stopSignal.eligible
+      });
+      logStopCompare('trigger');
+      return {
+        chat: options.chat,
+        executed: false
+      };
+    }
     logStopEntry('entry', 'observed', {
       reason: stopSignal.reason,
       source: stopSignal.source,
@@ -323,7 +383,8 @@ export async function runServerToolOrchestration(
   });
   const stoplessPlan = planStoplessOrchestrationActionWithNative({
     flowId,
-    execution: engineResult.execution
+    execution: engineResult.execution,
+    sessionId: readStoplessSessionId(options.adapterContext)
   });
   if (stopSignal.observed) {
     logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
@@ -382,15 +443,17 @@ export async function runServerToolOrchestration(
   }
   if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow) {
     const loopState = extractStoplessLoopState(engineResult.execution);
+    const sessionId = readStoplessSessionId(options.adapterContext);
     const projection = buildServertoolCliProjectionForAutoFlow({
-      options: { requestId: options.requestId },
+      options: { requestId: options.requestId, adapterContext: options.adapterContext },
       flowId,
       reasoningText: extractStoplessReasoningText(engineResult.finalChatResponse),
       input: {
         flowId,
         repeatCount: loopState.repeatCount,
         maxRepeats: loopState.maxRepeats
-      }
+      },
+      ...(sessionId ? { sessionId, requestId: options.requestId } : {})
     });
     logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
       flowId,

@@ -1,47 +1,34 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
 
-const mockConvertProviderResponse = jest.fn();
-const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
+import { remapBridgeSseErrorToHttp } from '../../../../../src/server/runtime/http-server/executor/provider-response-sse-error-normalizer.js';
 
-jest.mock('../../../../../src/modules/llmswitch/bridge.js', () => ({
-  convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder,
-  syncReasoningStopModeFromRequest: jest.fn(() => 'off'),
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
-}));
-
-describe('provider-response-converter empty OpenAI chat SSE failures', () => {
-  it('remaps Rust empty OpenAI chat SSE parse failures to retryable SSE decode errors', async () => {
-    jest.resetModules();
-    mockConvertProviderResponse.mockReset();
-    mockCreateSnapshotRecorder.mockClear();
-
-    mockConvertProviderResponse.mockRejectedValue(
-      new Error('Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain JSON data events')
+describe('provider-response-converter empty SSE failures', () => {
+  it('remaps empty OpenAI chat SSE bridge failures to retryable SSE decode errors', () => {
+    const error: Record<string, unknown> = { code: 'HTTP_HANDLER_ERROR' };
+    const changed = remapBridgeSseErrorToHttp(
+      error,
+      'Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain JSON data events'
     );
 
-    const { convertProviderResponseIfNeeded } = await import(
-      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    expect(changed).toBe(true);
+    expect(error).toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      status: 502,
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('remaps empty Anthropic SSE materialization failures to retryable SSE decode errors', () => {
+    const error: Record<string, unknown> = { code: 'HTTP_HANDLER_ERROR' };
+    const changed = remapBridgeSseErrorToHttp(
+      error,
+      'Rust HubPipeline response path failed: hub_pipeline_resp_anthropic_chat_canonicalize_failed: Anthropic SSE response did not contain materializable content blocks'
     );
 
-    await expect(convertProviderResponseIfNeeded(
-      {
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-chat',
-        providerType: 'openai',
-        requestId: 'req_empty_openai_chat_sse_retryable',
-        wantsStream: true,
-        response: { body: { mode: 'sse', captureSse: true, transport: 'prepared-request-executor' } } as any,
-        pipelineMetadata: {}
-      },
-      {
-        runtimeManager: {
-          resolveRuntimeKey: () => undefined,
-          getHandleByRuntimeKey: () => undefined
-        },
-        executeNested: async () => ({ body: { ok: true } } as any)
-      }
-    )).rejects.toMatchObject({
+    expect(changed).toBe(true);
+    expect(error).toMatchObject({
       code: 'SSE_DECODE_ERROR',
       status: 502,
       statusCode: 502,

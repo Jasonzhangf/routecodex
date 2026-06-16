@@ -18,7 +18,7 @@ export interface ServertoolCliProjectionPlan {
   chatResponse: JsonObject;
 }
 
-type ServertoolCliProjectionOptions = Pick<ServerSideToolEngineOptions, 'requestId'>;
+type ServertoolCliProjectionOptions = Pick<ServerSideToolEngineOptions, 'requestId' | 'adapterContext'>;
 
 export function buildServertoolCliProjectionForToolCall(args: {
   options: ServertoolCliProjectionOptions;
@@ -29,12 +29,19 @@ export function buildServertoolCliProjectionForToolCall(args: {
   const toolName = args.toolCall.name;
   const input = parseArguments(args.toolCall.arguments);
   const reasoningText = args.reasoningText || `继续执行本地 hook ${toolName}。`;
+  const sessionId = readSessionIdFromOptions(args.options);
+  if (toolName === 'stop_message_auto' && !sessionId) {
+    throw new Error(
+      '[servertool.cli] stop_message_auto requires sessionId on adapterContext (no session fallback allowed)'
+    );
+  }
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
     flowId: 'servertool_cli_projection',
     input,
     repeatCount: 0,
     maxRepeats: 0,
+    ...(sessionId ? { sessionId, requestId: args.options.requestId } : {})
   });
   return buildProjectionShell({
     requestId: args.options.requestId,
@@ -44,16 +51,36 @@ export function buildServertoolCliProjectionForToolCall(args: {
   });
 }
 
+function readSessionIdFromOptions(options: ServertoolCliProjectionOptions): string | undefined {
+  const ctx = options.adapterContext;
+  if (!ctx || typeof ctx !== 'object') return undefined;
+  const record = ctx as Record<string, unknown>;
+  if (typeof record.sessionId === 'string' && record.sessionId.trim()) {
+    return record.sessionId.trim();
+  }
+  const rt = record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
+    ? record.__rt as Record<string, unknown>
+    : null;
+  if (rt && typeof rt.sessionId === 'string' && rt.sessionId.trim()) {
+    return rt.sessionId.trim();
+  }
+  return undefined;
+}
+
 export function buildServertoolCliProjectionForAutoFlow(args: {
   options: ServertoolCliProjectionOptions;
   flowId: string;
   reasoningText: string;
   stdoutPreview?: string;
   input?: JsonObject;
+  sessionId?: string;
+  requestId?: string;
 }): ServertoolCliProjectionPlan {
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     flowId: args.flowId,
     input: args.input ?? {},
+    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.requestId ? { requestId: args.requestId } : {}),
     ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
   });
   return buildProjectionShell({

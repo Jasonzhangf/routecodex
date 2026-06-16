@@ -948,6 +948,29 @@ fn build_adapter_context(
     provider_protocol: &str,
     request_id: &str,
 ) -> AdapterContext {
+    let response_request_context = metadata
+        .get("responsesRequestContext")
+        .and_then(Value::as_object);
+    let session_id = metadata
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            response_request_context
+                .and_then(|row| row.get("sessionId"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let conversation_id = metadata
+        .get("conversationId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            response_request_context
+                .and_then(|row| row.get("conversationId"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
     AdapterContext {
         compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
             metadata,
@@ -997,18 +1020,39 @@ fn build_adapter_context(
             .get("groupRequestId")
             .and_then(Value::as_str)
             .map(str::to_string),
-        session_id: metadata
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        conversation_id: metadata
-            .get("conversationId")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        session_id,
+        conversation_id,
         captured_chat_request: None,
         deepseek: None,
         estimated_input_tokens: None,
         provider_id: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_adapter_context;
+    use serde_json::json;
+
+    #[test]
+    fn build_adapter_context_backfills_session_identifiers_from_responses_request_context() {
+        let metadata = json!({
+            "entryEndpoint": "/v1/responses",
+            "responsesRequestContext": {
+                "sessionId": "sess-relay-stopless",
+                "conversationId": "conv-relay-stopless"
+            }
+        });
+
+        let adapter_context = build_adapter_context(&metadata, "anthropic-messages", "req-stopless");
+        assert_eq!(
+            adapter_context.session_id.as_deref(),
+            Some("sess-relay-stopless")
+        );
+        assert_eq!(
+            adapter_context.conversation_id.as_deref(),
+            Some("conv-relay-stopless")
+        );
     }
 }
 

@@ -11,6 +11,11 @@ export function isEmptyOpenAiChatSseBridgeError(message: string): boolean {
     || normalized.includes('provider sse marker did not include materializable stream or bodytext');
 }
 
+export function isEmptyAnthropicSseBridgeError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return normalized.includes('anthropic sse response did not contain materializable content blocks');
+}
+
 export function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: string): boolean {
   const detailRecord = asRecord(error.details);
   const upstreamCode =
@@ -54,6 +59,14 @@ export function remapBridgeSseErrorToHttp(error: Record<string, unknown>, messag
     return true;
   }
   if (isEmptyOpenAiChatSseBridgeError(message)) {
+    error.status = 502;
+    error.statusCode = 502;
+    error.retryable = true;
+    error.code = 'SSE_DECODE_ERROR';
+    error.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    return true;
+  }
+  if (isEmptyAnthropicSseBridgeError(message)) {
     error.status = 502;
     error.statusCode = 502;
     error.retryable = true;
