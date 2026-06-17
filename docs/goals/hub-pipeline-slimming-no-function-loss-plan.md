@@ -71,6 +71,30 @@
 1. 继续进入 metadata center 后半段 binding：当前 `mtc-07` 已有真实 closeout/release owner，下一步只剩 `mtc-04/05/06` 的 provider/response observation family 仍是 `partial`；在此之前不先删相关 metadata/adapter glue。
 2. Jason 的 internal-field 清理完成后，补收 `assertClientResponseHasNoInternalCarriers` 对顶层 `metadata` 的 fail-fast 规则，并把对应 red test 纳入正式 gate。
 
+### Internal payload carrier pre-audit（2026-06-18）
+
+本轮不接手 Jason 正在进行的 `__routecodex_*` / SSE custom 字段删除实现，只把当前 runtime 热区、owner 可查询性、验证栈和后续收口顺序固定下来。
+
+当前已验证命令：
+
+- `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers`
+- `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-no-custom-payload-carriers`
+- `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs`
+
+当前基线：
+
+- `__routecodex*`: `runtime=76, test=81, script=10, doc=5`，runtime unique files=`26`
+- `__sse_*`: `runtime=0, test=20, script=11, doc=3`，runtime unique files=`0`
+- `response.metadata`: `runtime=11, test=13, script=2, doc=26`，runtime unique files=`4`
+
+| 候选项 | Owner feature | 当前 residue / 结论 | 风险 | 必跑验证 / gate |
+| --- | --- | --- | --- | --- |
+| `metadata.__routecodexPreselectedRoute` + `metadata.__routecodexRetryProviderKey` request-side control carriers | `hub.metadata_center_mainline` + `hub.runtime_ingress_bridge` + Rust request-route contract files | `audit only, do not broad-delete now`。当前 residue 分布在 Rust request-route contract/runtime ingress、TS `executor-metadata.ts` / `request-executor-attempt-state.ts` / `index.ts` / `handler-utils.ts`。这组字段仍承载 route select / retry pin 的 runtime side-channel；等 Jason 清理时必须迁到 `MetadataCenter` 或 runtime side-channel，不能直接在 payload 上做 prefix ban 后假绿。 | 高：误删会打穿 request route / retry provider pin 语义。 | `npm run audit:custom-payload-carriers`；`node scripts/architecture/verify-custom-payload-carrier-containment.mjs`；`tests/server/http-server/executor-metadata.spec.ts`；`tests/server/runtime/http-server/executor-metadata.binding.spec.ts`；`tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts`；`npm run build:min`。 |
+| `requestSemantics.__routecodex` followup/request-truth residue | `binding pending` | `bind-before-cleanup`。当前命中 `request-executor-response-inspect.ts`、`servertool-followup-dispatch.ts`、`provider-response-converter.ts`。按现有 function-map / verification-map，1-2 次查询内还不能唯一反查这条 carrier family 的 owner feature；在 owner 没补齐前，不做物理删除或 generic prefix gate 升级。 | 高：这是当前 review surface 的真实缺口；若继续靠 grep 改，容易把 servertool followup / response truth / client projection 三层混在一起。 | `npm run audit:custom-payload-carriers`；`npm run verify:architecture-mainline-call-map`；`npm run verify:function-map-compile-gate`；Jason 清理前先补 owner/queryability，再跑对应 feature tests。 |
+| Provider-runtime local markers: `__routecodexRequestInfo` / `__routecodexAuthPreflightFatal` / `__routecodexProviderErrorReported` / `__routecodexProviderSnapshotErrorBuffer` | `error.pipeline_contract` 部分锚定；其余 `binding pending` | `defer, owner-map first`。这些字段当前都在 provider-runtime 内部对象/错误对象上，不是 client payload；但现有 function-map 还不能稳定把 `http-request-executor.ts`、`provider-request-header-orchestrator.ts`、`oauth-header-preflight.ts`、`snapshot-writer-buffer.ts` 反查到唯一 feature。后续若要彻底去掉 `__routecodex*` 前缀，必须先补 owner map，再决定是 typed local field 还是 runtime side-channel。 | 中高：直接 rename/delete 容易打坏 auth preflight、request retry、snapshot diagnostics、provider error de-dup。 | `npm run audit:custom-payload-carriers`；`node scripts/architecture/verify-custom-payload-carrier-containment.mjs`；`tests/providers/core/utils/provider-error-reporter.spec.ts`；`npm run verify:error-pipeline-contract`；补齐 owner 后再加 focused provider-runtime tests。 |
+| Client-visible `response.metadata` guard and protocol boundary | `server.responses_response_handler_bridge_surface` + `hub.response_responses_client_projection` | `tighten after Jason cleanup`。当前 runtime 只剩 4 个文件：Rust contract files、`responses-response-bridge.ts`、provider debug hook。现在实现是“允许标准 `response.metadata`，但若内部含 `__routecodex*` / `__rt*` / internal keys 则 fail-fast”；按 Jason 最新规则，后续需要继续收口到“非标准 payload 载体一律不入 client-visible body/SSE data”。 | 高：这里直接影响 client protocol；必须保留标准协议语义，不能把合法 provider `response.metadata` 一并剪掉。 | `npm run verify:architecture-no-custom-payload-carriers`；`tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts`；`tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts`；`tests/red-tests/server_response_projection_metadata_guard.test.ts`；`tests/red-tests/server_sse_guard_e2e.test.ts`。 |
+| `__sse_*` runtime residues | `n/a (runtime zero residue)` | `runtime locked, cleanup can focus on tests/scripts/docs`。当前 runtime unique files=`0`，说明旧 SSE wrapper 自定义语义已从 runtime 面撤出；剩余残留都在 tests/scripts/docs/fixtures。 | 低：runtime 语义面已经不再依赖 `__sse_*`。 | `npm run audit:custom-payload-carriers`；`npm run verify:architecture-no-custom-payload-carriers`；`node scripts/architecture/verify-custom-payload-carrier-containment.mjs`。 |
+
 ### 候选项处置表
 
 | 候选项 | Owner | 当前状态 | 处置 | 证据 | 风险与验证 |
