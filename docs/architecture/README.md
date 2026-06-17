@@ -13,6 +13,8 @@
 - `wiki/servertool-ownership-map.md`
 - `wiki/virtual-router-ownership-map.md`
 - `wiki/metadata-boundary-map.md`
+- `wiki/metadata-center-audit.md`
+- `wiki/metadata-center-mainline-source.md`
 - `wiki/chat-process-protocol-mapping.md`
 - `wiki/server-responses-sse-bridge-map.md`
 - `wiki/responses-direct-relay-map.md`
@@ -62,6 +64,18 @@
 - `wiki/metadata-boundary-map.md`
   - metadata / continuation scope 的 request/response 闭环 review 面
   - 用于审计 `sessionId / requestId / pipelineId / continuationOwner` 如何传递、哪里必须断开
+
+- `wiki/metadata-center-audit.md`
+  - metadata center 设计输入页
+  - 用于审计当前 metadata family、重复 merge/backfill 漂移点、以及 request/response 各阶段的现状
+
+- `wiki/metadata-center-mainline-source.md`
+  - metadata center 的 request-scoped mainline source review 面
+  - 用于锁 `request_truth / continuation_context / runtime_control / provider_observation / client_attachment_scope / debug_snapshot` 的分层与写入 owner
+
+- `metadata-center-manifest.yml`
+  - metadata center 的 machine-readable lifecycle/slot/provenance manifest
+  - 给 gate/generator/agent 消费，与 wiki 页共用同一组 node ID 和 family/slot 边界
 
 - `wiki/stopless-session-mainline-source.md`
   - stopless 的 runtime metadata / current-turn `tool_outputs` 主线 review 面

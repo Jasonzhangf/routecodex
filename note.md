@@ -1,3 +1,47 @@
+## 2026-06-17 stopless hidden responsesRequestContext session leak
+
+- 现网 `0.90.3077` 日志已确认不是历史噪音：`[servertool] ... stop_message_auto ... used=0 left=3 active=true` 后，同一请求仍以 `finish_reason=tool_calls` 返回，而同条 request 的 `[session-request][rt]` 仍是 `session=unknown`。
+- 工作树与安装态 `sharedmodule/llmswitch-core/dist/servertool/engine.js` 都已含 `skipped_missing_session` gate，说明“缺 gate”不是根因。
+- 新候选根因：`src/server/runtime/http-server/executor/servertool-request-normalizer.ts` 仍把 `responsesRequestContext.sessionId/conversationId` 回填到 `baseContext.sessionId/conversationId`；而 session realtime log 不把这层 continuation context 当请求 session 真相。
+- 这会导致 stopless 在“外层请求 session=unknown，但 relay/resume context 内有旧 session”时误激活；修复方向是把 `responsesRequestContext` 从 request session truth 候选里移除，并补红测锁“responsesRequestContext-only 不得激活 stopless”。
+
+## 2026-06-17 factual Codex samples session headers audit
+
+- 只看事实样本，不做协议推断，已确认多个真实 Codex-origin request 样本都带 request session 标识，而且位置在 HTTP headers。
+- 硬证据 1：`tests/fixtures/goal-request-user-input-real-samples/provider-request.goal.nested-after-fix.json`
+  - `headers.User-Agent = codex-tui/...`
+  - `headers.originator = codex-tui`
+  - `headers.session_id = 019dfdbc-46c0-77b1-bcd6-d832b6080c9d`
+  - `headers.conversation_id = 019dfdbc-46c0-77b1-bcd6-d832b6080c9d`
+- 硬证据 2：`tests/fixtures/goal-request-user-input-real-samples/provider-request.goal.flattened-before-fix.json`
+  - `metadata.clientHeaders.session_id = 019dfdc9-bcd7-7b70-8384-8bcaa9a63e6f`
+  - `metadata.clientHeaders.conversation_id = 019dfdc9-bcd7-7b70-8384-8bcaa9a63e6f`
+  - 同样带 `user-agent = codex-tui/...` 与 `originator = codex-tui`
+- 硬证据 3：`tests/fixtures/errorsamples/2026-05-17-responses-empty-output/provider-request.json`
+  - `metadata.clientHeaders.session_id = 019e34fa-1e7a-7eb0-bab2-0752ac6ff649`
+  - `metadata.clientHeaders.conversation_id = 019e34fa-1e7a-7eb0-bab2-0752ac6ff649`
+  - 同样带 `user-agent = codex-tui/...`
+- 当前代码面对应事实：
+  - `src/server/runtime/http-server/executor-metadata.ts::extractRequestSessionIdFromHeaders()` 已支持 `session_id/session-id/x-session-id`
+  - `buildRequestMetadata()` 会把 header-derived session/conversation 写入 `MetadataCenter.request_truth`
+- 新确认的疑点不是“Codex 不带 session”，而是 live 链某处没有把这个事实反映到最终日志/功能读点：
+  - `src/server/runtime/http-server/index.ts::readSessionIdForUsageLog()` 仍只读顶层 `metadata.sessionId/session_id`，不读 `MetadataCenter.request_truth`
+  - 因此即使 request truth 已存在，usage/session realtime log 仍可能打印 `session=unknown`
+
+## 2026-06-17 stopless live replay second root cause
+
+- live 5555 replay after reinstall/restart still showed repeated `session=unknown` + `tool=stop_message_auto ... used=0 left=3 active=true`, so earlier “missing-session gate” local green was not enough for live closeout.
+- New root cause slice: stopless owner `sharedmodule/llmswitch-core/src/servertool/engine.ts::readStoplessSessionId()` treated any non-empty string as valid session truth; live chain appears to pass sentinel string `unknown`, so stopless activated instead of skipping.
+- Fix direction: normalize stopless session tokens so `unknown/none/null/-` count as missing; add red test proving sentinel `unknown` disables CLI projection.
+
+## 2026-06-17 tmux-request-session drift trim
+
+- `src/modules/llmswitch/bridge/state-integrations.ts::extractSessionIdentifiersFromMetadata()` 之前仍把 `tmuxSessionId/clientTmuxSessionId` 当成 request `sessionId` 候选，这与“tmux 只是 client attach/inject scope，不是 request session truth”冲突。
+- `src/server/runtime/http-server/session-client-registry.ts` 仍有两处旧别名残留：
+  - 记录加载/注册/heartbeat 时把 `tmuxSessionId` 回填到 `record.sessionId`
+  - callback inject body 里发送 `sessionId: tmuxSessionId`
+- 本轮已加红测并物理删除上述两处写入，先锁“tmux 不得 materialize 成 request session/stopless session truth”，再继续看 live stopless 闭环是否因此收敛。
+
 ## 2026-06-17 stopless closed-loop fix (counter + schema feedback gate)
 
 - 新发现的闭环断点分两处：
@@ -3268,3 +3312,83 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand` PASS
   - `npx tsc --noEmit --pretty false` PASS
   - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS
+
+## 2026-06-17 responsesRequestContext session truth split
+
+- 本轮确认新的主根因不是“单纯拿不到 sessionId”，而是 request session truth 与 responses continuation context 两种语义仍有残留混用。
+- 当前请求真 session 只允许来自 request metadata / entry origin request / runtime metadata 中由请求真相派生的字段；`responsesRequestContext.sessionId/conversationId` 只能作为 `/v1/responses` continuation owner context，禁止升格成 request session truth。
+- 生产残留点已定位并收口：`sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts` 之前仍把 `responsesRequestContext` 回填到顶层 `sessionId/conversationId`，导致 stop-message scope/state-key/stopless activation 可被 continuation context 污染。
+- 新 gate 已补：Jest 锁 `responsesRequestContext-only` 不得激活 stopless、不得形成 stop-message session scope/state key；`verify-servertool-rust-only.mjs` 也已禁止 runtime-utils 复活这条升格逻辑，并顺手把旧 persisted-state TS shell gate 改回“必须删除”方向。
+
+## 2026-06-17 metadata center audit start
+
+- Jason 要求把 metadata 做成集中处理中心，不再靠各层 merge/backfill/传值漂移；中心必须记录值、写入者、写入阶段、状态、覆盖历史，方便一眼定位谁写坏了。
+- 当前已确认 metadata 相关读写面很散：handler 入口 `mergePipelineMetadata`、executor `finalizeRequestExecutorAttemptMetadata`、`buildServerToolAdapterContext`、`servertool-request-normalizer`、`responses-request-bridge`、`executor-metadata`、`provider-response-converter` 都在读写 session/continuation/runtime control 类字段。
+- 下一步审计目标：按 request / response 阶段列出所有 metadata 字段类别，形成可落地的 `MetadataCenter` 输入表，再砍掉散落传递与二次 merge。
+
+## 2026-06-17 metadata center doc closure
+
+- 当前 metadata center 还处于 docs-first 阶段，已存在：audit 页、mainline source 页、manifest、function-map feature、verification-map feature、mainline-call-map chain。
+- 发现文档漂移：metadata-center-mainline-source.md 的 Status 仍写“no manifest / no function-map/mainline-call-map feature”，与仓库现状不符，需先修正文档真相再 render/gate。
+- 下一步：补 README/索引对 manifest 的正式引用，生成 repo 内 HTML，并跑 wiki/html/mainline sync gate。
+
+## 2026-06-17 metadata center html/gate closeout
+
+- metadata center mainline source 已补齐 README/索引/manifest 引用，并修正文档状态漂移。
+- gate 现状：`verify-architecture-wiki-sync` PASS，`verify-architecture-wiki-html-sync` PASS。
+- mainline-call-map 已加入 `metadata.center.mainline`，当前仍全部 `binding pending`，这是刻意保守状态，不宣称已完成代码绑定。
+- 下一步：用 Computer Use 打开 repo 内正式 HTML `docs/architecture/wiki/html/metadata-center-mainline-source.html` 做可视渲染验证，再整理实现第一刀的 owner/替换面。
+
+## 2026-06-17 metadata center impl slice 1
+
+- 已补 host-side 红测：servertool-adapter-context 与 executor-metadata 现在都要锁 `responsesRequestContext` 不能 materialize request truth。
+- 已切第一刀实现：`buildRequestMetadata` 把 request truth 与 continuation context 读取拆开；`servertool-request-normalizer` 在无 entryOrigin 时不再回填 session；`servertool-adapter-context` 仅在有 entryOrigin 时允许 backfill。
+- 正在跑定向 Jest，下一步根据失败点继续把 remaining owner 收口，而不是停在局部 patch。
+
+## 2026-06-17 metadata center impl progress
+
+- 第一批 host-side 红测已转绿：`servertool-adapter-context.spec.ts` + `executor-metadata.binding.spec.ts` PASS。
+- 已切掉的错误语义：无 entryOrigin 时不再从 flattened metadata / `responsesRequestContext` / `__rt.sessionId` 回填 request truth。
+- 当前 owner 规则：entryOrigin request 可定义 request truth；continuation context 只能留在 continuation family，不再升格。
+- 下一步：把 `MetadataCenter` 最小类型/slot/provenance contract 落成代码，并把当前 owner 改成显式 center 调用。
+
+## 2026-06-17 metadata center code module introduced
+
+- 新增 `src/server/runtime/http-server/metadata-center/metadata-center.ts` 与 `metadata-center-types.ts`，当前承载 request_truth + continuation_context + provenance 最小 contract。
+- `buildRequestMetadata` 已开始 attach `MetadataCenter` 并写入 request truth / continuation context 的最小 provenance。
+- 正在跑更大定向 Jest，确认中心挂载没有破坏 executor metadata 现有行为。
+
+## 2026-06-17 metadata center impl current blocker shape
+
+- 更大范围 `executor-metadata.spec.ts` 暴露的是 tmux request_guard / explicit tmux liveness 旧语义，不是 request truth vs continuation_context 第一阶段的直接 blocker。
+- 当前已确认与本目标直接相关并转绿的测试：
+  - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
+  - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
+- 下一步继续沿 metadata center 目标推进，不把 tmux 独立语义和 request truth 第一阶段强行搅在一刀里；tmux 一支后续单独审计。
+
+## 2026-06-17 SSE stop/tool-loss log audit
+
+- 用户怀疑 SSE 返回丢工具导致会话提前 stop；当前只做分析未改代码。
+- 已验证 release 日志现状：5520 与 5555 都有 `finish_reason=stop` 样本，但分属两条路径，不能混为一个根因。
+- 5520 样本 `openai-responses-router-gpt-5.4-20260617T194738010-361156-1610`、`...194825333-361162-1616` 是 `router-direct:* -> XL.key1.gpt-5.4.gpt-5.5`，`internal=0ms`，无 `hub.response` / `servertool`；direct pipeline 仅 provider passthrough + hooks，provider SSE 只包装 `__sse_responses`，handler 用 direct passthrough guard，不进入 Hub response conversion。现有日志只能证明这些请求最后被判 `stop`，不能证明 raw 有 tool 且投影丢失。
+- 5555 样本 `openai-responses-minimonth.key1-MiniMax-M2.7-20260617T192235609-360945-1399`、`...193258594-361026-1480` 是 relay/provider path：`provider.send completed` 后 `servertool stop_message_auto` 记录 `finish_reason=stop` + `skipped_missing_session` + `trigger_stop_schema_missing`，再 `hub.response`/client complete stop；这更像 provider/runtime response normalization 或 stop-message schema/session scope 行为，不是 direct SSE final projection。
+- 现有 installed build 有 `response.sse.project_frame`、`lastRawFrame`、`lastProjectedFrame` 诊断代码，但 release `stage-logger` 默认不打该 stage；当前 `~/.rcc` 未找到上述 requestId 的 snapshot，因此缺少 raw/projected frame 对比证据。
+- 下次复现必须开启 `ROUTECODEX_STAGE_LOG=1`（必要时加 Responses debug）并抓同一 requestId 的 `response.sse.project_frame` / `response.sse.stream.end` / `lastRawFrame` / `lastProjectedFrame` / `requiredToolCalls` / `outputFunctionCalls`，否则不能宣称“丢工具”。
+- 进一步静态追踪修正：direct passthrough 先过 `createDirectPassthroughSseGuardStream`，但后续统一 `enqueueClientSseFrame()` 仍会调用 `normalizeResponsesSseFrameForClientForHttp()`；所以 direct 并非完全不投影，真实风险窗口在 Rust `project_responses_sse_frame_for_client` + handler terminal repair。
+- Focused 验证：
+  - `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` PASS，证明 split `response.required_action` 会转成标准 tool-call frames 并最终补 `response.completed` / `response.done`。
+  - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts -t 'does not auto-close early for function_call|repairs assistant response.output_item.done'` PASS，证明 message output_item.done 可自动收口，但 function_call output_item.done 不会提前 auto-close（反向锁）。
+  - `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts` 当前 1 fail：`captures required_action -> completed -> done...` 未见 completed/done；但该 test 的 mock 只覆盖旧 facade `bridge.js`，而现行 handler 直接 import `responses-sse-bridge` / `responses-response-bridge`，需要先修 test harness 才能作为生产回归证据。
+
+## 2026-06-17 20:15:23 metadata-center stopless followup
+- 接手继续：先锁 stopless sessionId/request truth 与 continuation context 分离，先红测再修复；目标是既不无限循环，也不该激活时漏激活。
+
+- 2026-06-17 metadata-center/stopless followup: Rust stopless orchestration contract 默认无 session 也会 cli_projection，是当前“缺 session 仍激活”唯一真源根因；已改为 stop_message_flow 缺/unknown session => terminal_final(reason=stop_message_missing_session)，并删除 followup metadata 把 responsesRequestContext 回填为顶层 sessionId/conversationId 的残留。
+
+## 2026-06-17 metadata-center + stopless followup verification
+
+- 修正 gate 方向：`planStopMessagePersistedStateSelectionWithNative` / `planPersistStopMessageStateWithNative` / 对应 required exports 必须保持删除，不可复活旧 persisted-state bridge。
+- `engine.ts` 已删除 TS stopless 分支 `flowId === 'stop_message_flow'`，只调用 Rust `planStoplessOrchestrationActionWithNative` 判定。
+- stopless CLI result restore 扩展到 Responses `input[].function_call_output/tool_result/tool_message`，并优先 raw request over captured stale request。
+- stopMessageAiMode 已从 routing snapshot / budget state 预期中删除；Rust 测试同步期望 `ai_mode=None`。
+- metadata-center 新增后验证：tsc PASS、build-core PASS、verify-servertool-rust-only PASS、function-map compile gate PASS、mainline map PASS、mermaid/html sync PASS、focused Jest 49 PASS、stopless/servertool focused Jest 81 PASS、Rust servertool 298 PASS。

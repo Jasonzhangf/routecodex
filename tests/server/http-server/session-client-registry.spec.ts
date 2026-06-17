@@ -167,6 +167,38 @@ describe('SessionClientRegistry cleanup', () => {
     }
   });
 
+  it('inject callback payload does not alias tmux identity into sessionId', async () => {
+    const registry = new SessionClientRegistry();
+    registry.register({
+      daemonId: 'sessiond_payload_no_alias',
+      callbackUrl: 'http://127.0.0.1:65592/inject',
+      tmuxSessionId: 'rcc_payload_no_alias'
+    });
+
+    let parsedBody: Record<string, unknown> | undefined;
+    const originalFetch = global.fetch;
+    global.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      parsedBody = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => ''
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    try {
+      const injected = await registry.inject({
+        tmuxSessionId: 'rcc_payload_no_alias',
+        text: 'payload no alias'
+      });
+      expect(injected.ok).toBe(true);
+      expect(parsedBody?.tmuxSessionId).toBe('rcc_payload_no_alias');
+      expect(parsedBody?.sessionId).toBeUndefined();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('stale heartbeat cleanup removes record but never kills managed child pid', () => {
     const registry = new SessionClientRegistry();
     registry.register({

@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Metadata Center Mainline Source</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Metadata Center Mainline Source</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/metadata-center-mainline-source.md</code></p>
+      </header>
+      <article>
+        <h1>Metadata Center Mainline Source</h1>
+        <h2>Purpose</h2>
+        <p>This page is the review surface for the future request-scoped metadata center mainline. It answers one question only:</p>
+        <ul>
+          <li>across the request/response lifecycle, which metadata family should be written where, and which stage is the unique owner of that write.</li>
+        </ul>
+        <p>This is not a second source of truth. Current boundary/gate policy still lives in:</p>
+        <ul>
+          <li><code>docs/architecture/function-map.yml</code> -&gt; <code>feature_id: hub.metadata_boundary</code></li>
+          <li><code>docs/architecture/verification-map.yml</code> -&gt; <code>feature_id: hub.metadata_boundary</code></li>
+          <li><code>docs/architecture/mainline-call-map.yml</code></li>
+        </ul>
+        <p>This page exists because the current repo already proved that &quot;metadata passed as plain object and repeatedly merged&quot; is not queryable enough for long-lived maintenance. The immediate goal is to establish the human review surface before implementation.</p>
+        <h2>Main Rule</h2>
+        <ul>
+          <li>Metadata must converge into one request-scoped center, not continue as free-floating <code>Record&lt;string, unknown&gt;</code> merges.</li>
+          <li>The center must store both value and provenance.</li>
+          <li>Request truth, continuation context, runtime control, provider observation, client attachment scope, and debug snapshot are different families and must not share the same flat namespace.</li>
+          <li>stopless/servertool must read request truth from the center, not guess from continuation context, tmux scope, or scattered runtime fields.</li>
+        </ul>
+        <h2>Metadata Center Mainline</h2>
+        <pre class="mermaid">flowchart LR
+          MetaReq01InboundSeeded[&quot;MetaReq01InboundSeeded&lt;br/&gt;client metadata parsed into request-scoped seed&quot;]
+          MetaReq02TruthMaterialized[&quot;MetaReq02TruthMaterialized&lt;br/&gt;request truth slots fixed&quot;]
+          MetaReq03ContinuationAttached[&quot;MetaReq03ContinuationAttached&lt;br/&gt;continuation context slots attached&quot;]
+          MetaReq04RuntimeControlBound[&quot;MetaReq04RuntimeControlBound&lt;br/&gt;route/servertool/stream control slots attached&quot;]
+          MetaReq05ProviderObservationProjected[&quot;MetaReq05ProviderObservationProjected&lt;br/&gt;target/provider observation projected&quot;]
+          MetaResp06ResponseObserved[&quot;MetaResp06ResponseObserved&lt;br/&gt;finish reason / response semantics observed&quot;]
+          MetaResp07ServertoolContextProjected[&quot;MetaResp07ServertoolContextProjected&lt;br/&gt;adapter/servertool read-only projection&quot;]
+          MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&lt;br/&gt;request-scoped metadata finalized and released&quot;]
+
+          MetaReq01InboundSeeded --&gt;|mtc-01| MetaReq02TruthMaterialized
+          MetaReq02TruthMaterialized --&gt;|mtc-02| MetaReq03ContinuationAttached
+          MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
+          MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
+          MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
+          MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07ServertoolContextProjected
+          MetaResp07ServertoolContextProjected --&gt;|mtc-07| MetaResp08CloseoutReleased</pre>
+        <h2>Stage Owners and Target Families</h2>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>owner stage</th><th>metadata families allowed to write</th><th>current owner truth</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>mtc-01</code></td><td>inbound seed -&gt; request truth</td><td><code>ServerReqInbound01ClientRaw</code> / <code>HubReqInbound02Standardized</code></td><td><code>request_truth</code> seed only</td><td>handler + req_inbound capture</td></tr>
+        <tr><td><code>mtc-02</code></td><td>request truth fixed -&gt; continuation attached</td><td><code>HubReqChatProcess03Governed</code></td><td><code>continuation_context</code></td><td>responses/chat continuation semantics</td></tr>
+        <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls</td></tr>
+        <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td>selected target/provider/model/protocol</td></tr>
+        <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td>finish reason / parsed response semantics</td></tr>
+        <tr><td><code>mtc-06</code></td><td>response observed -&gt; servertool context projection</td><td><code>HubRespChatProcess03Governed</code></td><td>read-only projection from center; no new request truth</td><td>stopless/followup/servertool consumers</td></tr>
+        <tr><td><code>mtc-07</code></td><td>projected -&gt; closeout released</td><td><code>HubRespOutbound04ClientSemantic</code> / <code>ServerRespOutbound05ClientFrame</code></td><td><code>status/provenance</code> closeout only</td><td>finalize / release current request-scoped center</td></tr>
+        </tbody>
+        </table>
+        <h2>Family Definitions</h2>
+        <h3><code>request_truth</code></h3>
+        <p>These are identity facts of the current request. Later stages may read them, but must not redefine them:</p>
+        <ul>
+          <li><code>requestId</code></li>
+          <li><code>pipelineId</code></li>
+          <li><code>entryEndpoint</code></li>
+          <li><code>sessionId</code></li>
+          <li><code>conversationId</code></li>
+          <li><code>clientRequestId</code></li>
+          <li><code>portScope</code></li>
+        </ul>
+        <h3><code>continuation_context</code></h3>
+        <p>These are legal continuation/recovery inputs and must not be upgraded into request truth:</p>
+        <ul>
+          <li><code>responsesRequestContext</code></li>
+          <li><code>responsesResume</code></li>
+          <li><code>previousResponseId</code></li>
+          <li><code>responseId</code></li>
+          <li><code>toolOutputs</code></li>
+          <li><code>continuationOwner</code></li>
+          <li><code>resumeFrom</code></li>
+          <li><code>chainId</code></li>
+          <li><code>stickyScope</code></li>
+        </ul>
+        <h3><code>runtime_control</code></h3>
+        <p>These are internal control semantics:</p>
+        <ul>
+          <li><code>routeHint</code></li>
+          <li><code>routeName</code></li>
+          <li><code>routeId</code></li>
+          <li><code>providerProtocol</code></li>
+          <li><code>providerFamily</code></li>
+          <li><code>serverToolFollowup</code></li>
+          <li><code>stopMessage*</code></li>
+          <li><code>streamIntent</code></li>
+          <li><code>clientAbort</code></li>
+        </ul>
+        <h3><code>provider_observation</code></h3>
+        <p>These are routing/provider-side observations and must not write back into request truth:</p>
+        <ul>
+          <li><code>target</code></li>
+          <li><code>providerKey</code></li>
+          <li><code>assignedModelId</code></li>
+          <li><code>compatibilityProfile</code></li>
+          <li><code>responseSemantics</code></li>
+          <li><code>finishReason</code></li>
+        </ul>
+        <h3><code>client_attachment_scope</code></h3>
+        <p>These are tmux/client attachment facts, not request session truth:</p>
+        <ul>
+          <li><code>daemonId</code></li>
+          <li><code>tmuxSessionId</code></li>
+          <li><code>tmuxTarget</code></li>
+          <li><code>workdir</code></li>
+        </ul>
+        <h3><code>debug_snapshot</code></h3>
+        <p>Observability-only:</p>
+        <ul>
+          <li><code>snapshotId</code></li>
+          <li><code>bridgeHistory</code></li>
+          <li>replay/debug markers</li>
+        </ul>
+        <h2>Provenance Contract</h2>
+        <p>Each slot in the future center must keep provenance, not only value.</p>
+        <p>Minimum contract:</p>
+        <pre><code class="language-ts">type MetadataSlot&lt;T&gt; = {
+          value: T
+          family: string
+          writtenBy: {
+            module: string
+            symbol: string
+            stage: string
+          }
+          status: 'active' | 'consumed' | 'finalized' | 'released'
+          writePolicy: 'write_once' | 'replaceable' | 'append_only'
+          version: number
+          history: Array&lt;{
+            value: unknown
+            module: string
+            symbol: string
+            stage: string
+            at: number
+            reason?: string
+          }&gt;
+        }</code></pre>
+        <p>Without this provenance contract, the center would still fail the real maintenance goal: &quot;once the value is wrong, immediately know who wrote it, at which stage, and whether the overwrite was legal.&quot;</p>
+        <h2>Current Structural Problems This Page Is Meant To Eliminate</h2>
+        <h3>1. Repeated Merge</h3>
+        <p>Current repeated merge surfaces include:</p>
+        <ul>
+          <li><code>src/server/handlers/handler-utils.ts::mergePipelineMetadata</code></li>
+          <li><code>src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata</code></li>
+        </ul>
+        <p>That means current metadata has no single write ledger.</p>
+        <h3>2. Multi-source Session Backfill</h3>
+        <p><code>sessionId/conversationId</code> are currently recovered from multiple places:</p>
+        <ul>
+          <li>top-level metadata</li>
+          <li>nested <code>metadata</code></li>
+          <li><code>__rt</code></li>
+          <li><code>entryOriginRequest</code></li>
+          <li><code>capturedEntryRequest</code></li>
+          <li><code>capturedChatRequest</code></li>
+        </ul>
+        <p>This is direct evidence that request truth has no single owner.</p>
+        <h3>3. Continuation Context Pollution</h3>
+        <p><code>responsesRequestContext.sessionId/conversationId</code> belongs to continuation context only.</p>
+        <p>It must never define:</p>
+        <ul>
+          <li>request <code>sessionId</code></li>
+          <li>stopless activation input</li>
+          <li>stop-message state key</li>
+        </ul>
+        <h3>4. Client Attachment Pollution</h3>
+        <p>These must not define request session truth:</p>
+        <ul>
+          <li><code>tmuxSessionId</code></li>
+          <li><code>clientTmuxSessionId</code></li>
+          <li><code>conversationSessionId</code></li>
+          <li><code>stopMessageClientInjectSessionScope</code></li>
+        </ul>
+        <h2>Migration Order</h2>
+        <p>Before implementation, the expected implementation order is:</p>
+        <p>1. write center-facing docs and source map 2. implement <code>request_truth</code> and <code>continuation_context</code> 3. migrate stopless/servertool consumers to center reads 4. delete scattered merge/backfill paths 5. replay live failing samples</p>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>Is the field classified into the correct family rather than left in a flat namespace?</li>
+          <li>Does the stage that writes the field match the intended owner stage?</li>
+          <li>Can this field ever legally overwrite earlier request truth?</li>
+          <li>Does stopless/servertool read request truth only from the center contract?</li>
+          <li>Can a reader distinguish request truth from continuation context and client attachment scope in one query?</li>
+          <li>Does the planned center expose provenance and overwrite history for every critical slot?</li>
+        </ul>
+        <h2>Status</h2>
+        <p>Current status is documentation-only and audit-ready.</p>
+        <p>What is done:</p>
+        <ul>
+          <li>human-readable audit surface exists</li>
+          <li>metadata family split exists</li>
+          <li>mainline-stage owner proposal exists</li>
+        </ul>
+        <p>What is done in repo:</p>
+        <ul>
+          <li>machine-readable manifest exists at <code>docs/architecture/metadata-center-manifest.yml</code></li>
+          <li>dedicated <code>function-map.yml</code> feature exists as <code>hub.metadata_center_mainline</code></li>
+          <li>dedicated <code>mainline-call-map.yml</code> chain exists as <code>metadata.center.mainline</code></li>
+          <li>dedicated <code>verification-map.yml</code> feature exists as <code>hub.metadata_center_mainline</code></li>
+        </ul>
+        <p>What is not done yet:</p>
+        <ul>
+          <li>mainline call bindings are still <code>binding pending</code></li>
+          <li>no implementation yet</li>
+          <li>no live replay closeout yet</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

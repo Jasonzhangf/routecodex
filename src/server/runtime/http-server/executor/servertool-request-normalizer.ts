@@ -15,19 +15,8 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function readRuntimeResponsesRequestContext(
-  baseContext: Record<string, unknown>
-): Record<string, unknown> | undefined {
-  const runtime = asFlatRecord(baseContext.__rt);
-  return asFlatRecord(runtime?.responsesRequestContext);
-}
-
 function readNestedMetadata(baseContext: Record<string, unknown>): Record<string, unknown> | undefined {
   return asFlatRecord(baseContext.metadata);
-}
-
-function readRuntimeMetadata(baseContext: Record<string, unknown>): Record<string, unknown> | undefined {
-  return asFlatRecord(baseContext.__rt);
 }
 
 function payloadContainsRccFence(payload: unknown): boolean {
@@ -46,73 +35,25 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   entryOriginRequest: unknown
 ): void {
   const entryOrigin = asFlatRecord(entryOriginRequest);
-  const nestedMetadata = readNestedMetadata(baseContext);
-  const runtimeMetadata = readRuntimeMetadata(baseContext);
-  const responsesRequestContext =
-    asFlatRecord(baseContext.responsesRequestContext)
-    ?? asFlatRecord(nestedMetadata?.responsesRequestContext)
-    ?? readRuntimeResponsesRequestContext(baseContext);
   if (!entryOrigin) {
-    const sessionIdFromResponsesContext =
-      readSessionLikeToken(baseContext.sessionId) ??
-      readSessionLikeToken(baseContext.session_id) ??
-      readSessionLikeToken(nestedMetadata?.sessionId) ??
-      readSessionLikeToken(nestedMetadata?.session_id) ??
-      readSessionLikeToken(runtimeMetadata?.sessionId) ??
-      readSessionLikeToken(runtimeMetadata?.session_id) ??
-      readSessionLikeToken(responsesRequestContext?.sessionId);
-    const conversationIdFromResponsesContext =
-      readSessionLikeToken(baseContext.conversationId) ??
-      readSessionLikeToken(baseContext.conversation_id) ??
-      readSessionLikeToken(nestedMetadata?.conversationId) ??
-      readSessionLikeToken(nestedMetadata?.conversation_id) ??
-      readSessionLikeToken(runtimeMetadata?.conversationId) ??
-      readSessionLikeToken(runtimeMetadata?.conversation_id) ??
-      readSessionLikeToken(responsesRequestContext?.conversationId);
-    if (sessionIdFromResponsesContext && !readSessionLikeToken(baseContext.sessionId)) {
-      baseContext.sessionId = sessionIdFromResponsesContext;
-    }
-    if (conversationIdFromResponsesContext && !readSessionLikeToken(baseContext.conversationId)) {
-      baseContext.conversationId = conversationIdFromResponsesContext;
-    }
     return;
   }
   const requestMetadata = asFlatRecord(entryOrigin.metadata);
-  const capturedRequest = asFlatRecord(baseContext.capturedEntryRequest) ?? asFlatRecord(baseContext.capturedChatRequest);
-  const capturedMetadata = asFlatRecord(capturedRequest?.metadata);
 
   const sessionId =
     readSessionLikeToken(baseContext.sessionId) ??
     readSessionLikeToken(baseContext.session_id) ??
-    readSessionLikeToken(nestedMetadata?.sessionId) ??
-    readSessionLikeToken(nestedMetadata?.session_id) ??
-    readSessionLikeToken(runtimeMetadata?.sessionId) ??
-    readSessionLikeToken(runtimeMetadata?.session_id) ??
-    readSessionLikeToken(responsesRequestContext?.sessionId) ??
     readSessionLikeToken(entryOrigin.sessionId) ??
     readSessionLikeToken(entryOrigin.session_id) ??
     readSessionLikeToken(requestMetadata?.sessionId) ??
-    readSessionLikeToken(requestMetadata?.session_id) ??
-    readSessionLikeToken(capturedRequest?.sessionId) ??
-    readSessionLikeToken(capturedRequest?.session_id) ??
-    readSessionLikeToken(capturedMetadata?.sessionId) ??
-    readSessionLikeToken(capturedMetadata?.session_id);
+    readSessionLikeToken(requestMetadata?.session_id);
   const conversationId =
     readSessionLikeToken(baseContext.conversationId) ??
     readSessionLikeToken(baseContext.conversation_id) ??
-    readSessionLikeToken(nestedMetadata?.conversationId) ??
-    readSessionLikeToken(nestedMetadata?.conversation_id) ??
-    readSessionLikeToken(runtimeMetadata?.conversationId) ??
-    readSessionLikeToken(runtimeMetadata?.conversation_id) ??
-    readSessionLikeToken(responsesRequestContext?.conversationId) ??
     readSessionLikeToken(entryOrigin.conversationId) ??
     readSessionLikeToken(entryOrigin.conversation_id) ??
     readSessionLikeToken(requestMetadata?.conversationId) ??
-    readSessionLikeToken(requestMetadata?.conversation_id) ??
-    readSessionLikeToken(capturedRequest?.conversationId) ??
-    readSessionLikeToken(capturedRequest?.conversation_id) ??
-    readSessionLikeToken(capturedMetadata?.conversationId) ??
-    readSessionLikeToken(capturedMetadata?.conversation_id);
+    readSessionLikeToken(requestMetadata?.conversation_id);
 
   if (sessionId && !readSessionLikeToken(baseContext.sessionId)) {
     baseContext.sessionId = sessionId;

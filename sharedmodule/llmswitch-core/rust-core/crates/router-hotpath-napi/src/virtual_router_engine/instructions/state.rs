@@ -132,7 +132,6 @@ pub(crate) fn has_client_inject_fields(state: &RoutingInstructionState) -> bool 
         || stop.stop_message_used.is_some()
         || stop.stop_message_provider_key.is_some()
         || stop.stop_message_stage_mode.is_some()
-        || stop.stop_message_ai_mode.is_some()
         || stop.stop_message_ai_seed_prompt.is_some()
         || stop.stop_message_ai_history.is_some()
         || stop.stop_message_updated_at.is_some()
@@ -188,12 +187,6 @@ fn stop_message_state_to_map(state: &StopMessageState) -> Map<String, Value> {
             Value::String(value.clone()),
         );
     }
-    if let Some(value) = &state.stop_message_ai_mode {
-        map.insert(
-            "stopMessageAiMode".to_string(),
-            Value::String(value.clone()),
-        );
-    }
     if let Some(value) = &state.stop_message_ai_seed_prompt {
         map.insert(
             "stopMessageAiSeedPrompt".to_string(),
@@ -220,7 +213,6 @@ fn apply_stop_message_patch(state: &mut StopMessageState, patch: StopMessagePatc
             "stopMessageUpdatedAt" => state.stop_message_updated_at = None,
             "stopMessageLastUsedAt" => state.stop_message_last_used_at = None,
             "stopMessageStageMode" => state.stop_message_stage_mode = None,
-            "stopMessageAiMode" => state.stop_message_ai_mode = None,
             "stopMessageAiSeedPrompt" => state.stop_message_ai_seed_prompt = None,
             "stopMessageAiHistory" => state.stop_message_ai_history = None,
             _ => {}
@@ -268,11 +260,6 @@ fn apply_stop_message_patch(state: &mut StopMessageState, patch: StopMessagePatc
                     state.stop_message_stage_mode = Some(text.to_string());
                 }
             }
-            "stopMessageAiMode" => {
-                if let Some(text) = value.as_str() {
-                    state.stop_message_ai_mode = Some(text.to_string());
-                }
-            }
             "stopMessageAiSeedPrompt" => {
                 if let Some(text) = value.as_str() {
                     state.stop_message_ai_seed_prompt = Some(text.to_string());
@@ -316,9 +303,6 @@ fn apply_stop_message_instruction_to_state(
             "stopMessageStageMode".to_string(),
             Value::String(mode.clone()),
         );
-    }
-    if let Some(mode) = &instruction.ai_mode {
-        instruction_map.insert("stopMessageAiMode".to_string(), Value::String(mode.clone()));
     }
     if let Some(source) = &instruction.source {
         instruction_map.insert(
@@ -556,7 +540,6 @@ pub(crate) fn stop_message_state_snapshot(state: &StopMessageState) -> Option<Va
     if stage_mode.as_deref() == Some("off") || text.is_empty() || max_repeats <= 0 {
         return None;
     }
-    let ai_mode = normalize_on_off_string(&state.stop_message_ai_mode);
     let mut out = Map::new();
     out.insert("stopMessageText".to_string(), Value::String(text));
     out.insert(
@@ -591,9 +574,6 @@ pub(crate) fn stop_message_state_snapshot(state: &StopMessageState) -> Option<Va
     }
     if let Some(mode) = stage_mode {
         out.insert("stopMessageStageMode".to_string(), Value::String(mode));
-    }
-    if let Some(mode) = ai_mode {
-        out.insert("stopMessageAiMode".to_string(), Value::String(mode));
     }
     if let Some(value) = &state.stop_message_ai_seed_prompt {
         if !value.trim().is_empty() {

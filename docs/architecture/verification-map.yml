@@ -139,6 +139,7 @@ verification:
       - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
       - "Validation must prove omitted caller `sessionId/requestId/sessionDir` no longer blocks stopless CLI projection or CLI execution, and that no persisted writeback path is required."
+      - "Validation must prove `responsesRequestContext.sessionId/conversationId` stays continuation-only and cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
@@ -427,6 +428,27 @@ verification:
       - "Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update."
       - "Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection."
       - "Retired VR bootstrap provider-profile/routing/meta and stop-message parse/apply public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for Rust-internal bootstrap/profile/routing/meta or routing-instruction parse/apply helpers."
+
+  - feature_id: hub.metadata_center_mainline
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor-metadata.ts
+      - src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+      - src/server/runtime/http-server/executor/servertool-adapter-context.ts
+      - src/server/runtime/http-server/executor/servertool-request-normalizer.ts
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+    contract:
+      - tests/server/http-server/executor-metadata.spec.ts
+      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
+      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
+    integration:
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+    smoke: []
+    build:
+      - npm run build:min
+    notes:
+      - "Current stage is doc/index-only; these gates define the minimum validation surface once implementation starts."
+      - "Migration must prove request truth, continuation context, and tmux/client attachment scope no longer drift through repeated merge/backfill."
       - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
       - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
       - "Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal."

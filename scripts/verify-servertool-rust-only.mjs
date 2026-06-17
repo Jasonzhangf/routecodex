@@ -1040,7 +1040,28 @@ function checkStandaloneServertoolBinary() {
   pass('servertool-cli-no-ts-executor', `scanned ${files.length} active runtime files for deleted executor symbols`);
 }
 
-// ── Check 10: stop_message_flow must not revive reenter path ───
+// ── Check 10: responsesRequestContext must not become request session truth ──
+function checkResponsesRequestContextSessionIsolation() {
+  const content = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
+  for (const snippet of [
+    '?? readNonEmptyString(responsesRequestContext?.sessionId)',
+    '?? readNonEmptyString(responsesRequestContext?.conversationId)'
+  ]) {
+    if (content.includes(snippet)) {
+      fail(
+        'responses-request-context-session-isolation',
+        `stop-message runtime utils must not promote continuation context into request session truth: ${snippet}`
+      );
+      return;
+    }
+  }
+  pass(
+    'responses-request-context-session-isolation',
+    'responsesRequestContext session/conversation are not promoted into stop-message request truth'
+  );
+}
+
+// ── Check 11: stop_message_flow must not revive reenter path ───
 function checkStoplessNoReenterContract() {
   const deletedSpec = `${ROOT}/tests/servertool/stopless-goal-reenter.spec.ts`;
   if (existsSync(deletedSpec)) {
@@ -1098,7 +1119,7 @@ function checkLegacyReviewToolDeleted() {
   pass('legacy-review-tool-deleted', 'deleted review servertool path is absent from active servertool gates');
 }
 
-// ── Check 11: persisted lookup policy is Rust-owned ───────────
+// ── Check 12: persisted lookup policy is Rust-owned ───────────
 function checkStopMessagePersistedLookupRustOwner() {
   const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
@@ -1231,7 +1252,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'normalizeStopMessageStageModeValueWithNative',
     'hasArmedStopMessageStateWithNative',
     'planStopMessageRoutingSnapshotWithNative',
-    'planStopMessagePersistedStateSelectionWithNative',
     'planStopMessageRoutingStateApplyWithNative',
     'planStopMessageRoutingStateClearWithNative',
     'planStoplessDecisionContextSignalsWithNative',
@@ -1246,7 +1266,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'hasCompactionFlagWithNative',
     'resolveEntryEndpointWithNative',
     'resolveStopMessageFollowupToolContentMaxCharsWithNative',
-    'planPersistStopMessageStateWithNative',
     'resolveDefaultStopMessageSnapshotWithNative',
     'resolveImplicitGeminiStopMessageSnapshotWithNative',
   ]) {
@@ -1265,7 +1284,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"normalizeStopMessageStageModeValueJson"',
     '"hasArmedStopMessageStateJson"',
     '"planStopMessageRoutingSnapshotJson"',
-    '"planStopMessagePersistedStateSelectionJson"',
     '"planStopMessageRoutingStateApplyJson"',
     '"planStopMessageRoutingStateClearJson"',
     '"planStoplessDecisionContextSignalsJson"',
@@ -1280,7 +1298,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"hasCompactionFlagJson"',
     '"resolveEntryEndpointJson"',
     '"resolveStopMessageFollowupToolContentMaxCharsJson"',
-    '"planPersistStopMessageStateJson"',
     '"resolveDefaultStopMessageSnapshotJson"',
     '"resolveImplicitGeminiStopMessageSnapshotJson"',
   ]) {
@@ -1807,32 +1824,36 @@ function checkStopMessagePersistedLookupRustOwner() {
   }
 
   const persistStopMessageStateBlock = extractFunctionBlock(runtimeUtils, 'persistStopMessageState');
-  if (!persistStopMessageStateBlock.includes('planPersistStopMessageStateWithNative')) {
+  if (persistStopMessageStateBlock.trim()) {
     fail(
       'servertool-persist-stop-message-state-ts-thin-shell',
-      'runtime-utils.ts persistStopMessageState must call planPersistStopMessageStateWithNative'
+      'runtime-utils.ts persistStopMessageState must stay physically deleted'
     );
   }
-  for (const keyword of [
-    'stoplessGoalState',
-    'forcedTarget',
-    'preferTarget',
-    '.size',
-    'preCommandScriptPath',
-    'preCommandUpdatedAt',
-    'stopMessageLastUsedAt',
-    'stopMessageText',
-    'stopMessageMaxRepeats',
-    'stopMessageUsed',
-    'stopMessageStageMode',
-    'stopMessageAiMode',
-    'Number.isFinite',
-    'trim()',
+  pass(
+    'servertool-persist-stop-message-state-ts-thin-shell',
+    'runtime-utils.ts persistStopMessageState TS shell is absent'
+  );
+
+  for (const forbidden of [
+    'planStopMessagePersistedStateSelectionWithNative',
+    'planPersistStopMessageStateWithNative'
   ]) {
-    if (persistStopMessageStateBlock.includes(keyword)) {
+    if (nativeWrapper.includes(forbidden)) {
       fail(
-        'servertool-persist-stop-message-state-ts-thin-shell',
-        `runtime-utils.ts persistStopMessageState must not contain TS persist-state semantic "${keyword}"`
+        'stop-message-runtime-state-bridge',
+        `${NATIVE_SERVERTOOL_CORE_WRAPPER} must not revive deleted persisted-state bridge ${forbidden}`
+      );
+    }
+  }
+  for (const forbidden of [
+    '"planStopMessagePersistedStateSelectionJson"',
+    '"planPersistStopMessageStateJson"'
+  ]) {
+    if (readRequired(NATIVE_REQUIRED_EXPORTS).includes(forbidden)) {
+      fail(
+        'stop-message-runtime-state-required-export',
+        `${NATIVE_REQUIRED_EXPORTS} must not revive deleted persisted-state export ${forbidden}`
       );
     }
   }
@@ -4345,8 +4366,6 @@ function checkStoplessOrchestrationActionRustOwner() {
   }
 
   for (const keyword of [
-    "flowId === 'stop_message_flow'",
-    'flowId !== \'stop_message_flow\'',
     'function isStopMessageTerminalFinal',
     'stopMessageTerminalFinal === true',
   ]) {
@@ -4774,6 +4793,7 @@ checkNoOldCliRestorationRuntime();
 checkMigratedProjectionDoesNotReenter();
 checkApplyPatchNotCliProjected();
 checkStandaloneServertoolBinary();
+checkResponsesRequestContextSessionIsolation();
 checkStoplessNoReenterContract();
 checkLegacyReviewToolDeleted();
 checkStopMessagePersistedLookupRustOwner();

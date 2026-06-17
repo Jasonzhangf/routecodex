@@ -251,17 +251,71 @@ chains:
         semantic_output: "resolved path under <rccUserDir>/run/token-daemon.pid"
         status: anchored
       - step_id: rtl-07
-        from_node: ServerLifecycleState
+        from_node: ServerStartCommand
         to_node: RuntimeInstanceRecord
         caller_symbol: writeRuntimeInstance
-        caller_file: src/utils/runtime-instance-registry.ts
+        caller_file: src/cli/commands/start.ts
         callee_symbol: writeRuntimeInstance
         callee_file: src/utils/runtime-instance-registry.ts
         owner_feature_id: runtime.lifecycle.instance_registry
-        semantic_input: "port + lifecycle status + metadata"
-        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
-        status: binding pending
-        note: "No main runtime caller wired yet. Helper exists; wiring required."
+        semantic_input: "port + host + command + configPath + ownerScope + status=declared"
+        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (direct server spawn)"
+        status: anchored
+      - step_id: rtl-08
+        from_node: DaemonSupervisorLoop
+        to_node: RuntimeInstanceRecord
+        caller_symbol: writeRuntimeInstance
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: writeRuntimeInstance
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
+        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (daemon supervisor first spawn)"
+        status: anchored
+      - step_id: rtl-09
+        from_node: DaemonRestartLoop
+        to_node: RuntimeInstanceRecord
+        caller_symbol: writeRuntimeInstance
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: writeRuntimeInstance
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
+        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (managed restart child)"
+        status: anchored
+      - step_id: rtl-10
+        from_node: ServerStartCommand
+        to_node: RuntimeInstanceRecord
+        caller_symbol: updateRuntimeInstanceStatus
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: updateRuntimeInstanceStatus
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + status=healthy"
+        semantic_output: "instance.json status promoted to healthy after restart probe passes"
+        status: anchored
+      - step_id: rtl-11
+        from_node: StartShutdownHandler
+        to_node: RuntimeInstanceRecord
+        caller_symbol: updateRuntimeInstanceStatus
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: updateRuntimeInstanceStatus
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + status=shutdown-intent"
+        semantic_output: "instance.json status promoted to shutdown-intent before HTTP shutdown request"
+        status: anchored
+      - step_id: rtl-12
+        from_node: ServerStopCommand
+        to_node: RuntimeInstanceRecord
+        caller_symbol: updateRuntimeInstanceStatus
+        caller_file: src/cli/commands/stop.ts
+        callee_symbol: updateRuntimeInstanceStatus
+        callee_file: src/utils/runtime-instance-registry.ts
+        owner_feature_id: runtime.lifecycle.instance_registry
+        semantic_input: "port + status=shutdown-intent + notes.source=cli.stop"
+        semantic_output: "instance.json status promoted to shutdown-intent on stop request"
+        status: anchored
 
   - chain_id: runtime.tmux_client_binding.mainline
     summary: "tmux/client attachment registry: daemon registration persists records, conversation binding narrows to tmux session, executor/runtime lookup consumes binding without turning it into request identity truth."
@@ -339,8 +393,8 @@ chains:
         callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "adapterContext/runtime metadata plus current request body/tool_outputs"
-        semantic_output: "runtime stopless snapshot restored from metadata or current CLI tool_output"
+        semantic_input: "adapterContext/runtime metadata plus current request body/tool_outputs; request session truth may come from request metadata but never from responsesRequestContext"
+        semantic_output: "runtime stopless snapshot restored from request-local metadata or current CLI tool_output without continuation-context session promotion"
         status: anchored
       - step_id: stl-03
         from_node: StoplessState03RuntimeSnapshotResolved
@@ -387,6 +441,97 @@ chains:
         semantic_output: "thinking route; historical tools route hint must not dominate stopless turn"
         status: anchored
 
+  - chain_id: metadata.center.mainline
+    summary: "future request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
+    entry_contract:
+      node: MetaReq01InboundSeeded
+      owner_doc: docs/architecture/wiki/metadata-center-mainline-source.md
+    edges:
+      - step_id: mtc-01
+        from_node: MetaReq01InboundSeeded
+        to_node: MetaReq02TruthMaterialized
+        caller_symbol: buildRequestMetadata
+        caller_file: src/server/runtime/http-server/executor-metadata.ts
+        callee_symbol: mergePipelineMetadata
+        callee_file: src/server/handlers/handler-utils.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "client request metadata seed plus request body metadata"
+        semantic_output: "request truth candidates (`requestId/sessionId/conversationId/entryEndpoint/clientRequestId`) captured into one request-scoped carrier"
+        status: binding pending
+        note: "Current implementation still uses flat metadata merge; future center must replace this with typed request_truth slots."
+      - step_id: mtc-02
+        from_node: MetaReq02TruthMaterialized
+        to_node: MetaReq03ContinuationAttached
+        caller_symbol: buildResponsesRequestContextForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: buildResponsesRequestContextForHttp
+        callee_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "request truth plus responses continuation inputs"
+        semantic_output: "continuation context attached separately from request truth; `responsesRequestContext.*` must not redefine request `sessionId/conversationId`"
+        status: binding pending
+        note: "Current implementation still builds continuation context on flat metadata/request objects; future center must attach `continuation_context` as a separate family with no write-back into `request_truth`."
+      - step_id: mtc-03
+        from_node: MetaReq03ContinuationAttached
+        to_node: MetaReq04RuntimeControlBound
+        caller_symbol: finalizeRequestExecutorAttemptMetadata
+        caller_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+        callee_symbol: finalizeRequestExecutorAttemptMetadata
+        callee_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "request metadata carrier plus pipeline result metadata"
+        semantic_output: "runtime control (`routeHint/routeName/serverToolFollowup/stream`) attached without flattening over request truth"
+        status: binding pending
+        note: "Current implementation still merges flat objects; metadata center must split request truth and runtime control families."
+      - step_id: mtc-04
+        from_node: MetaReq04RuntimeControlBound
+        to_node: MetaReq05ProviderObservationProjected
+        caller_symbol: resolveRequestExecutorPipelineAttempt
+        caller_file: src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts
+        callee_symbol: resolveRequestExecutorPipelineAttempt
+        callee_file: src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "selected target plus runtime metadata for current attempt"
+        semantic_output: "provider observation (`target/providerKey/compatibilityProfile/model`) projected as separate family"
+        status: binding pending
+        note: "Current implementation still carries provider/routing observation through shared metadata/result objects; future center must project `provider_observation` without reopening request-truth writes."
+      - step_id: mtc-05
+        from_node: MetaReq05ProviderObservationProjected
+        to_node: MetaResp06ResponseObserved
+        caller_symbol: convertProviderResponseIfNeeded
+        caller_file: src/server/runtime/http-server/executor/provider-response-converter.ts
+        callee_symbol: convertProviderResponseIfNeeded
+        callee_file: src/server/runtime/http-server/executor/provider-response-converter.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
+        semantic_output: "response observation (`finishReason/responseSemantics`) attached without overwriting request truth"
+        status: binding pending
+        note: "Current response conversion path still reads/writes mixed metadata and response fields together; future center must append response observation/provenance without flattening over earlier families."
+      - step_id: mtc-06
+        from_node: MetaResp06ResponseObserved
+        to_node: MetaResp07ServertoolContextProjected
+        caller_symbol: buildServerToolAdapterContext
+        caller_file: src/server/runtime/http-server/executor/servertool-adapter-context.ts
+        callee_symbol: backfillAdapterContextSessionIdentifiersFromEntryOriginRequest
+        callee_file: src/server/runtime/http-server/executor/servertool-request-normalizer.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "request/continuation/runtime/provider observation families"
+        semantic_output: "read-only servertool projection; request truth must stay distinct from continuation context and client attachment scope"
+        status: binding pending
+        note: "Current adapter context still performs session backfill from multiple sources; future center should replace this with deterministic projections."
+      - step_id: mtc-07
+        from_node: MetaResp07ServertoolContextProjected
+        to_node: MetaResp08CloseoutReleased
+        caller_symbol: buildProviderExecutionSuccessResult
+        caller_file: src/server/runtime/http-server/executor/request-executor-provider-response.ts
+        callee_symbol: buildProviderExecutionSuccessResult
+        callee_file: src/server/runtime/http-server/executor/request-executor-provider-response.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "response observation plus final client/servertool outcome"
+        semantic_output: "metadata center status finalized/released for the current request closeout"
+        status: binding pending
+        note: "No explicit center exists yet; this edge documents the intended closeout owner for future implementation."
+
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture
     symbol: captureReqInboundResponsesContextSnapshotJson
@@ -430,6 +575,20 @@ shared_multi_reference_functions:
     reused_by_chains:
       - runtime.lifecycle.mainline
     note: "Consumes and TTL-gates stop-intent.json; same owner truth as the writer."
+  - function_id: runtime.lifecycle.instance_registry_writer
+    symbol: writeRuntimeInstance
+    file: src/utils/runtime-instance-registry.ts
+    owner_feature_id: runtime.lifecycle.instance_registry
+    reused_by_chains:
+      - runtime.lifecycle.mainline
+    note: "Atomic write via temp file + rename; authoritative description of the instance, not the pid cache."
+  - function_id: runtime.lifecycle.instance_registry_status
+    symbol: updateRuntimeInstanceStatus
+    file: src/utils/runtime-instance-registry.ts
+    owner_feature_id: runtime.lifecycle.instance_registry
+    reused_by_chains:
+      - runtime.lifecycle.mainline
+    note: "Promotes instance.json status; caller must already have a record via writeRuntimeInstance."
   - function_id: runtime.tmux_client_binding_lookup
     symbol: resolveBoundTmuxSession
     file: src/server/runtime/http-server/session-client-registry.ts

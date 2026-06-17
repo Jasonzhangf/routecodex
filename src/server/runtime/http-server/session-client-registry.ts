@@ -161,7 +161,7 @@ export class SessionClientRegistry {
         const record: SessionClientRecord = {
           daemonId,
           callbackUrl,
-          ...(tmuxSessionId ? { tmuxSessionId, sessionId: tmuxSessionId } : {}),
+          ...(tmuxSessionId ? { tmuxSessionId } : {}),
           ...(normalizeWorkdir(rec.workdir) ? { workdir: normalizeWorkdir(rec.workdir) } : {}),
           ...(Array.isArray(rec.conversationSessionIds)
             ? {
@@ -268,7 +268,7 @@ export class SessionClientRegistry {
     const record: SessionClientRecord = {
       daemonId: input.daemonId,
       callbackUrl: input.callbackUrl,
-      ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId, sessionId: resolvedTmuxSessionId } : {}),
+      ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId } : {}),
       ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {}),
       ...(preservedConversationIds.length ? { conversationSessionIds: preservedConversationIds } : {}),
       ...(input.clientType ? { clientType: input.clientType } : {}),
@@ -315,7 +315,6 @@ export class SessionClientRegistry {
     rec.lastHeartbeatAtMs = now;
     if (resolvedTmuxSessionId) {
       rec.tmuxSessionId = resolvedTmuxSessionId;
-      rec.sessionId = resolvedTmuxSessionId;
     }
     const workdir = normalizeWorkdir(input?.workdir);
     if (workdir) {
@@ -822,7 +821,6 @@ export class SessionClientRegistry {
             requestId: args.requestId,
             source: args.source,
             tmuxSessionId,
-            sessionId: tmuxSessionId,
             ...(workdirHint ? { workdir: workdirHint } : {})
           }),
           signal: controller.signal

@@ -17,6 +17,19 @@ describe('llmswitch bridge state-integrations', () => {
     });
   });
 
+  it('does not treat tmux identifiers as request session identifiers', async () => {
+    const mod = await import('../../../../src/modules/llmswitch/bridge/state-integrations.js');
+    expect(
+      mod.extractSessionIdentifiersFromMetadata({
+        tmuxSessionId: 'tmux_only_1',
+        clientTmuxSessionId: 'tmux_only_2',
+        conversationId: 'conv_2'
+      })
+    ).toEqual({
+      conversationId: 'conv_2'
+    });
+  });
+
   it('keeps removed clock and heartbeat state integrations absent', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/state-integrations.ts'),

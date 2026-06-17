@@ -1,0 +1,179 @@
+lifecycle_id: metadata.center.mainline
+summary: request-scoped metadata center for request truth, continuation context, runtime control, provider observation, client attachment scope, and debug/replay provenance
+owner_feature_id: hub.metadata_center_mainline
+entrypoint:
+  node_id: MetaReq01InboundSeeded
+  wiki_page: docs/architecture/wiki/metadata-center-mainline-source.md
+  call_map_chain_id: metadata.center.mainline
+node_ids:
+  - MetaReq01InboundSeeded
+  - MetaReq02TruthMaterialized
+  - MetaReq03ContinuationAttached
+  - MetaReq04RuntimeControlBound
+  - MetaReq05ProviderObservationProjected
+  - MetaResp06ResponseObserved
+  - MetaResp07ServertoolContextProjected
+  - MetaResp08CloseoutReleased
+families:
+  request_truth:
+    slots:
+      - requestId
+      - pipelineId
+      - entryEndpoint
+      - sessionId
+      - conversationId
+      - clientRequestId
+      - portScope
+  continuation_context:
+    slots:
+      - responsesRequestContext
+      - responsesResume
+      - previousResponseId
+      - responseId
+      - toolOutputs
+      - continuationOwner
+      - resumeFrom
+      - chainId
+      - stickyScope
+  runtime_control:
+    slots:
+      - routeHint
+      - routeName
+      - routeId
+      - providerProtocol
+      - providerFamily
+      - serverToolFollowup
+      - stopMessage
+      - streamIntent
+      - clientAbort
+  provider_observation:
+    slots:
+      - target
+      - providerKey
+      - assignedModelId
+      - compatibilityProfile
+      - responseSemantics
+      - finishReason
+  client_attachment_scope:
+    slots:
+      - daemonId
+      - tmuxSessionId
+      - tmuxTarget
+      - workdir
+  debug_snapshot:
+    slots:
+      - snapshotId
+      - bridgeHistory
+      - traceMarkers
+provenance:
+  required_fields:
+    - family
+    - writtenBy.module
+    - writtenBy.symbol
+    - writtenBy.stage
+    - status
+    - writePolicy
+    - version
+    - history
+  status_values:
+    - active
+    - consumed
+    - finalized
+    - released
+  write_policies:
+    - write_once
+    - replaceable
+    - append_only
+stages:
+  - node_id: MetaReq01InboundSeeded
+    owner: ServerReqInbound01ClientRaw
+    write_families:
+      - request_truth
+    read_families: []
+  - node_id: MetaReq02TruthMaterialized
+    owner: HubReqInbound02Standardized
+    write_families:
+      - request_truth
+    read_families:
+      - request_truth
+  - node_id: MetaReq03ContinuationAttached
+    owner: HubReqChatProcess03Governed
+    write_families:
+      - continuation_context
+    read_families:
+      - request_truth
+      - continuation_context
+  - node_id: MetaReq04RuntimeControlBound
+    owner: VrRoute04SelectedTarget
+    write_families:
+      - runtime_control
+    read_families:
+      - request_truth
+      - continuation_context
+      - runtime_control
+  - node_id: MetaReq05ProviderObservationProjected
+    owner: HubReqOutbound05ProviderSemantic
+    write_families:
+      - provider_observation
+    read_families:
+      - request_truth
+      - runtime_control
+      - provider_observation
+  - node_id: MetaResp06ResponseObserved
+    owner: HubRespInbound02Parsed
+    write_families:
+      - provider_observation
+      - debug_snapshot
+    read_families:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - provider_observation
+  - node_id: MetaResp07ServertoolContextProjected
+    owner: HubRespChatProcess03Governed
+    write_families:
+      - runtime_control
+    read_families:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - provider_observation
+  - node_id: MetaResp08CloseoutReleased
+    owner: HubRespOutbound04ClientSemantic
+    write_families:
+      - debug_snapshot
+    read_families:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - provider_observation
+      - debug_snapshot
+boundaries:
+  request_truth:
+    must_not_be_overwritten_by:
+      - continuation_context
+      - runtime_control
+      - provider_observation
+      - client_attachment_scope
+      - debug_snapshot
+  continuation_context:
+    must_not_be_overwritten_by:
+      - request_truth
+      - client_attachment_scope
+  client_attachment_scope:
+    must_not_be_overwritten_by:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - provider_observation
+  debug_snapshot:
+    live_path_only: false
+    replay_scope_required: true
+verification:
+  min_wiki_page: docs/architecture/wiki/metadata-center-mainline-source.md
+  min_call_map_chain: metadata.center.mainline
+  min_function_feature: hub.metadata_center_mainline
+  required_gates:
+    - npm run verify:function-map-compile-gate
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-wiki-sync

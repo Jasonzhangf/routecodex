@@ -193,6 +193,21 @@ function extractStoplessLoopState(execution: ServerToolEngineResult['execution']
   };
 }
 
+function normalizeStoplessSessionToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const lowered = trimmed.toLowerCase();
+  if (lowered === 'unknown' || lowered === 'none' || lowered === 'null' || lowered === '-') {
+    return undefined;
+  }
+  return trimmed;
+}
+
 function readStoplessSessionId(adapterContext: unknown): string | undefined {
   if (!adapterContext || typeof adapterContext !== 'object') {
     return undefined;
@@ -203,69 +218,26 @@ function readStoplessSessionId(adapterContext: unknown): string | undefined {
     record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
       ? record.metadata as Record<string, unknown>
       : null;
-  const direct = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
+  const direct = normalizeStoplessSessionToken(record.sessionId);
   if (direct) {
     return direct;
   }
   const runtime = record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
     ? record.__rt as Record<string, unknown>
     : null;
-  const metadataSession =
-    metadata && typeof metadata.sessionId === 'string'
-      ? metadata.sessionId.trim()
-      : '';
+  const metadataSession = normalizeStoplessSessionToken(metadata?.sessionId);
   if (metadataSession) {
     return metadataSession;
   }
-  const rt = runtime && typeof runtime.sessionId === 'string' ? runtime.sessionId.trim() : '';
+  const rt = normalizeStoplessSessionToken(runtime?.sessionId);
   if (rt) {
     return rt;
   }
-  const runtimeMetadataSession =
-    runtimeMetadata && typeof runtimeMetadata.sessionId === 'string'
-      ? runtimeMetadata.sessionId.trim()
-      : '';
+  const runtimeMetadataSession = normalizeStoplessSessionToken(runtimeMetadata?.sessionId);
   if (runtimeMetadataSession) {
     return runtimeMetadataSession;
   }
-  const responsesRequestContext =
-    (
-      runtime?.responsesRequestContext
-      && typeof runtime.responsesRequestContext === 'object'
-      && !Array.isArray(runtime.responsesRequestContext)
-        ? runtime.responsesRequestContext as Record<string, unknown>
-        : metadata?.responsesRequestContext
-    )
-    && typeof (
-      (
-        runtime?.responsesRequestContext
-        && typeof runtime.responsesRequestContext === 'object'
-        && !Array.isArray(runtime.responsesRequestContext)
-          ? runtime.responsesRequestContext as Record<string, unknown>
-          : metadata?.responsesRequestContext
-      )
-    ) === 'object'
-      ? (
-        (
-          runtime?.responsesRequestContext
-          && typeof runtime.responsesRequestContext === 'object'
-          && !Array.isArray(runtime.responsesRequestContext)
-            ? runtime.responsesRequestContext as Record<string, unknown>
-            : metadata?.responsesRequestContext
-        ) as Record<string, unknown>
-      )
-      : (
-        runtimeMetadata?.responsesRequestContext
-        && typeof runtimeMetadata.responsesRequestContext === 'object'
-        && !Array.isArray(runtimeMetadata.responsesRequestContext)
-          ? runtimeMetadata.responsesRequestContext as Record<string, unknown>
-          : null
-      );
-  const relaySessionId =
-    responsesRequestContext && typeof responsesRequestContext.sessionId === 'string'
-      ? responsesRequestContext.sessionId.trim()
-      : '';
-  return relaySessionId || undefined;
+  return undefined;
 }
 
 function readStoplessRouteName(adapterContext: unknown): string | undefined {
@@ -452,10 +424,12 @@ export async function runServerToolOrchestration(
     stageRecorder: options.stageRecorder,
     logNonBlocking: logServerToolNonBlocking
   });
+  const totalSteps = 5;
+  const stoplessSessionId = readStoplessSessionId(options.adapterContext);
   const stoplessPlan = planStoplessOrchestrationActionWithNative({
     flowId,
     execution: engineResult.execution,
-    sessionId: readStoplessSessionId(options.adapterContext)
+    sessionId: stoplessSessionId
   });
   if (stopSignal.observed) {
     logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
@@ -466,7 +440,6 @@ export async function runServerToolOrchestration(
     });
     logStopCompare('trigger', flowId);
   }
-  const totalSteps = 5;
   logProgress(1, totalSteps, 'matched', { flowId });
   recordServertoolExecutionSnapshot({
     stageRecorder: options.stageRecorder,

@@ -597,7 +597,6 @@ export interface StopMessageStateSnapshot {
   stopMessageUpdatedAt?: number;
   stopMessageLastUsedAt?: number;
   stopMessageStageMode?: "on" | "off" | "auto";
-  stopMessageAiMode?: "on" | "off";
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
 }

@@ -159,11 +159,13 @@ describe('stopless CLI continuation', () => {
   });
 
   test('stopless next turn restores runtime state from current tool output instead of persisted file state', async () => {
+    const sessionId = `session-stopless-loop-${Date.now()}`;
     const first = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
       adapterContext: buildAdapterContext({
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        providerProtocol: 'openai-responses',
+        sessionId
       }),
       requestId: `req-stopless-first-${Date.now()}`,
       entryEndpoint: '/v1/responses',
@@ -181,13 +183,15 @@ describe('stopless CLI continuation', () => {
     const secondAdapterContext = buildAdapterContext({
       requestId: `req-stopless-second-${Date.now()}`,
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
+      providerProtocol: 'openai-responses',
+      sessionId
     }) as any;
     delete secondAdapterContext.capturedChatRequest;
     secondAdapterContext.__raw_request_body = {
-      tool_outputs: [
+      input: [
         {
-          tool_name: 'stop_message_auto',
+          type: 'function_call_output',
+          call_id: 'call_servertool_cli',
           output: JSON.stringify(firstOutput)
         }
       ]
@@ -209,6 +213,174 @@ describe('stopless CLI continuation', () => {
     expect(secondCommand).not.toContain('--session-dir');
     expect(secondCommand).not.toContain('--session-id');
     expect(secondCommand).not.toContain('--request-id');
+  });
+
+  test('missing session makes stopless terminal instead of projecting CLI', async () => {
+    const adapterContext = buildAdapterContext({
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: '   '
+    }) as any;
+    delete adapterContext.capturedChatRequest;
+    delete adapterContext.sessionId;
+    delete adapterContext.metadata;
+    delete adapterContext.__rt;
+
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext,
+      requestId: `req-stopless-missing-session-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('missing-session stopless must not reenter');
+      }
+    });
+
+    expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
+    expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+  });
+
+  test('sentinel unknown session makes stopless terminal instead of projecting CLI', async () => {
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: {
+        ...buildAdapterContext({
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId: 'unknown'
+        }),
+        metadata: {
+          sessionId: 'unknown'
+        },
+        __rt: {
+          sessionId: 'unknown',
+          responsesRequestContext: {
+            sessionId: 'unknown'
+          }
+        }
+      } as any,
+      requestId: `req-stopless-unknown-session-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('unknown-session stopless must not reenter');
+      }
+    });
+
+    expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
+    expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+  });
+
+  test('responsesRequestContext-only session makes stopless terminal instead of projecting CLI', async () => {
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: {
+        ...buildAdapterContext({
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId: ''
+        }),
+        metadata: {
+          responsesRequestContext: {
+            sessionId: 'sess-hidden-relay',
+            conversationId: 'conv-hidden-relay'
+          }
+        },
+        __rt: {
+          responsesRequestContext: {
+            sessionId: 'sess-hidden-relay-rt',
+            conversationId: 'conv-hidden-relay-rt'
+          }
+        }
+      } as any,
+      requestId: `req-stopless-hidden-relay-session-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('responsesRequestContext-only stopless must not reenter');
+      }
+    });
+
+    expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
+    expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+  });
+
+  test('stopless reaches max repeats and turns terminal instead of looping forever', async () => {
+    const sessionId = `session-stopless-terminal-${Date.now()}`;
+    const first = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: buildAdapterContext({
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        sessionId
+      }),
+      requestId: `req-stopless-terminal-first-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless terminal path must not reenter');
+      }
+    });
+    const firstOutput = await runStoplessCliStdout(extractExecCommand(first.chat));
+
+    const second = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: {
+        ...buildAdapterContext({
+          requestId: `req-stopless-terminal-second-${Date.now()}`,
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId
+        }),
+        __raw_request_body: {
+          input: [{
+            type: 'function_call_output',
+            call_id: 'call_servertool_cli',
+            output: JSON.stringify(firstOutput)
+          }]
+        }
+      } as any,
+      requestId: `req-stopless-terminal-second-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless terminal path must not reenter');
+      }
+    });
+    const secondOutput = await runStoplessCliStdout(extractExecCommand(second.chat));
+
+    const third = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: {
+        ...buildAdapterContext({
+          requestId: `req-stopless-terminal-third-${Date.now()}`,
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId
+        }),
+        __raw_request_body: {
+          input: [{
+            type: 'function_call_output',
+            call_id: 'call_servertool_cli',
+            output: JSON.stringify(secondOutput)
+          }]
+        }
+      } as any,
+      requestId: `req-stopless-terminal-third-${Date.now()}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless terminal path must not reenter');
+      }
+    });
+
+    expect(secondOutput.repeatCount).toBe(3);
+    expect(maybeExtractExecCommand(third.chat)).toBeUndefined();
+    expect(JSON.stringify(third.chat)).not.toContain('routecodex hook run reasoning_stop');
   });
 
   test('terminal stopless result stays terminal and does not project CLI', async () => {

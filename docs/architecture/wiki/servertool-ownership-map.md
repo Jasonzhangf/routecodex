@@ -324,6 +324,7 @@ Notes:
 - Model side must stay unaware of stopless identity; stopless CLI command and CLI stdout no longer require `sessionId/requestId/sessionDir`, and persisted writeback must stay absent.
 - TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows.
 - Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.
+- `responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.
 
 ## hub.servertool_flow_presentation
 

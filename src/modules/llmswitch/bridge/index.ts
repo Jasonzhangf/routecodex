@@ -103,6 +103,7 @@ export {
   persistStoplessGoalStateSnapshot,
   readStoplessGoalState,
   extractSessionIdentifiersFromMetadata,
+  extractContinuationContextSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot
 } from './state-integrations.js';

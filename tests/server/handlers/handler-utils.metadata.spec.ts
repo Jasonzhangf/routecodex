@@ -4,6 +4,7 @@ import {
   mergePipelineMetadata,
   stripRequestBodyMetadataForPipeline
 } from '../../../src/server/handlers/handler-utils.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   it('throws on client routeHint metadata (no silent drop)', () => {
@@ -14,6 +15,8 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   });
 
   it('accepts session scope metadata fields and forwards them through carrier only', () => {
+    const internalMetadata = { providerProtocol: 'openai-responses' } as Record<string, unknown>;
+    const center = MetadataCenter.attach(internalMetadata);
     const merged = mergePipelineMetadata(
       {
         sessionId: 'sess-1',
@@ -23,7 +26,7 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
         client_tmux_session_id: 'tmux-1',
         rcc_session_client_tmux_session_id: 'tmux-legacy'
       },
-      { providerProtocol: 'openai-responses' }
+      internalMetadata
     );
     expect(merged).toMatchObject({
       sessionId: 'sess-1',
@@ -34,6 +37,7 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
       rcc_session_client_tmux_session_id: 'tmux-legacy',
       providerProtocol: 'openai-responses'
     });
+    expect(MetadataCenter.read(merged)).toBe(center);
   });
 
   it('keeps session scope fields stable when request metadata is absent', () => {

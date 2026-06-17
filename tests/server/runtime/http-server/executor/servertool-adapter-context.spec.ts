@@ -129,7 +129,7 @@ describe('servertool adapter context builder', () => {
     expect(context.conversationId).toBe('conv-origin');
   });
 
-  it('backfills session and conversation identifiers from relay responsesRequestContext metadata', async () => {
+  it('does not synthesize request session and conversation identifiers from relay responsesRequestContext metadata', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
 
@@ -149,11 +149,35 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(context.sessionId).toBe('sess-relay');
-    expect(context.conversationId).toBe('conv-relay');
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
   });
 
-  it('backfills session and conversation identifiers from nested __rt.responsesRequestContext metadata', async () => {
+  it('does not synthesize request truth from relay requestSessionId aliases inside responsesRequestContext', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        responsesRequestContext: {
+          requestSessionId: 'sess-relay-request-alias',
+          requestConversationId: 'conv-relay-request-alias'
+        }
+      },
+      requestId: 'req-session-relay-request-alias',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
+  });
+
+  it('does not synthesize request session and conversation identifiers from nested __rt.responsesRequestContext metadata', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
 
@@ -175,11 +199,37 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(context.sessionId).toBe('sess-relay-rt');
-    expect(context.conversationId).toBe('conv-relay-rt');
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
   });
 
-  it('backfills session and conversation identifiers from metadata.sessionId without entry origin request', async () => {
+  it('does not treat top-level responsesRequestContext session fields as request truth when metadata bag is already flattened', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-flat',
+          conversationId: 'conv-relay-flat'
+        },
+        sessionId: 'sess-relay-flat',
+        conversationId: 'conv-relay-flat'
+      },
+      requestId: 'req-session-relay-flat-backfill',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
+  });
+
+  it('does not backfill request session and conversation identifiers from metadata.sessionId without entry origin request', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
 
@@ -197,11 +247,11 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(context.sessionId).toBe('sess-meta-direct');
-    expect(context.conversationId).toBe('conv-meta-direct');
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
   });
 
-  it('backfills session and conversation identifiers from __rt.sessionId without entry origin request', async () => {
+  it('does not backfill request session and conversation identifiers from __rt.sessionId without entry origin request', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();
 
@@ -221,8 +271,8 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(context.sessionId).toBe('sess-rt-direct');
-    expect(context.conversationId).toBe('conv-rt-direct');
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
   });
 
   it('forwards reasoning stop seed errors to onReasoningStopSeedError callback', async () => {

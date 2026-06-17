@@ -37,7 +37,7 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata.conversationId).toBe('conv_456');
   });
 
-  it('backfills session identifiers from relay responsesRequestContext when headers are absent', () => {
+  it('does not upgrade relay responsesRequestContext into request session identifiers when headers are absent', () => {
     const metadata = buildServerToolNestedRequestMetadata({
       baseMetadata: {
         responsesRequestContext: {
@@ -51,11 +51,11 @@ describe('servertool followup nested request metadata', () => {
       entryEndpoint: '/v1/responses'
     });
 
-    expect(metadata.sessionId).toBe('sess_relay_ctx');
-    expect(metadata.conversationId).toBe('conv_relay_ctx');
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
   });
 
-  it('backfills session identifiers from nested __rt.responsesRequestContext when headers are absent', () => {
+  it('does not upgrade nested __rt.responsesRequestContext into request session identifiers when headers are absent', () => {
     const metadata = buildServerToolNestedRequestMetadata({
       baseMetadata: {
         __rt: {
@@ -71,8 +71,8 @@ describe('servertool followup nested request metadata', () => {
       entryEndpoint: '/v1/responses'
     });
 
-    expect(metadata.sessionId).toBe('sess_relay_rt_ctx');
-    expect(metadata.conversationId).toBe('conv_relay_rt_ctx');
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
   });
 
   it('backfills daemon tmux and workdir continuity tokens from preserved headers', () => {

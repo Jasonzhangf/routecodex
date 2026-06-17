@@ -127,8 +127,10 @@ Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle
 
 ```mermaid
 flowchart LR
+  StartShutdownHandler["StartShutdownHandler"]
+  DaemonRestartLoop["DaemonRestartLoop"]
+  DaemonSupervisorLoop["DaemonSupervisorLoop"]
   RuntimeInstanceRecord["RuntimeInstanceRecord"]
-  ServerLifecycleState["ServerLifecycleState"]
   TokenDaemonPidRecord["TokenDaemonPidRecord"]
   TokenDaemonBootstrap["TokenDaemonBootstrap"]
   StopIntentRecord["StopIntentRecord"]
@@ -141,7 +143,12 @@ flowchart LR
   ServerStartCommand -->|rtl-04| StopIntentRecord
   TokenDaemonBootstrap -->|rtl-05| TokenDaemonPidRecord
   TokenDaemonBootstrap -->|rtl-06| TokenDaemonPidRecord
-  ServerLifecycleState -->|rtl-07| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
+  DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
+  DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-10| RuntimeInstanceRecord
+  StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
+  ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -151,8 +158,10 @@ flowchart LR
   class StopIntentRecord anchored;
   class TokenDaemonBootstrap anchored;
   class TokenDaemonPidRecord anchored;
-  class ServerLifecycleState pending;
-  class RuntimeInstanceRecord pending;
+  class RuntimeInstanceRecord anchored;
+  class DaemonSupervisorLoop anchored;
+  class DaemonRestartLoop anchored;
+  class StartShutdownHandler anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -163,7 +172,12 @@ flowchart LR
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 
 ## runtime.tmux_client_binding.mainline
 
@@ -243,6 +257,52 @@ flowchart LR
 | stl-05 | `StoplessCli06ClientExecuted -> StoplessReq08NextTurnMaterialized` | anchored | `has_stop_message_auto_cli_result_in_request_json -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
 | stl-06 | `StoplessReq08NextTurnMaterialized -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
 
+## metadata.center.mainline
+
+future request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.
+
+Entry contract: `MetaReq01InboundSeeded` via `docs/architecture/wiki/metadata-center-mainline-source.md`
+
+```mermaid
+flowchart LR
+  MetaResp08CloseoutReleased["MetaResp08CloseoutReleased"]
+  MetaResp07ServertoolContextProjected["MetaResp07ServertoolContextProjected"]
+  MetaResp06ResponseObserved["MetaResp06ResponseObserved"]
+  MetaReq05ProviderObservationProjected["MetaReq05ProviderObservationProjected"]
+  MetaReq04RuntimeControlBound["MetaReq04RuntimeControlBound"]
+  MetaReq03ContinuationAttached["MetaReq03ContinuationAttached"]
+  MetaReq02TruthMaterialized["MetaReq02TruthMaterialized"]
+  MetaReq01InboundSeeded["MetaReq01InboundSeeded"]
+  MetaReq01InboundSeeded -->|mtc-01| MetaReq02TruthMaterialized
+  MetaReq02TruthMaterialized -->|mtc-02| MetaReq03ContinuationAttached
+  MetaReq03ContinuationAttached -->|mtc-03| MetaReq04RuntimeControlBound
+  MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
+  MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
+  MetaResp06ResponseObserved -->|mtc-06| MetaResp07ServertoolContextProjected
+  MetaResp07ServertoolContextProjected -->|mtc-07| MetaResp08CloseoutReleased
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class MetaReq01InboundSeeded pending;
+  class MetaReq02TruthMaterialized pending;
+  class MetaReq03ContinuationAttached pending;
+  class MetaReq04RuntimeControlBound pending;
+  class MetaReq05ProviderObservationProjected pending;
+  class MetaResp06ResponseObserved pending;
+  class MetaResp07ServertoolContextProjected pending;
+  class MetaResp08CloseoutReleased pending;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| mtc-01 | `MetaReq01InboundSeeded -> MetaReq02TruthMaterialized` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-02 | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07ServertoolContextProjected` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-07 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |
@@ -253,6 +313,8 @@ flowchart LR
 | runtime.lifecycle.pid_cache_writer | `writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state | Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity. |
 | runtime.lifecycle.stop_intent_signal | `writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade. |
 | runtime.lifecycle.stop_intent_consumer | `consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Consumes and TTL-gates stop-intent.json; same owner truth as the writer. |
+| runtime.lifecycle.instance_registry_writer | `writeRuntimeInstance` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json | Atomic write via temp file + rename; authoritative description of the instance, not the pid cache. |
+| runtime.lifecycle.instance_registry_status | `updateRuntimeInstanceStatus` | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json | Promotes instance.json status; caller must already have a record via writeRuntimeInstance. |
 | runtime.tmux_client_binding_lookup | `resolveBoundTmuxSession` | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json | Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership. |
 
 ## Split Bindings

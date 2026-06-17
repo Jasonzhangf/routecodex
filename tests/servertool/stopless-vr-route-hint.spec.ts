@@ -14,6 +14,25 @@ describe('stopless VR route hint contract', () => {
     expect(scope).toBe('session:sess-vr-route');
   });
 
+  it('responsesRequestContext session does not become stop-message session scope', () => {
+    const scope = resolveStopMessageSessionScope({
+      requestId: 'req-vr-route-rrc-only',
+      metadata: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-only',
+          conversationId: 'conv-relay-only'
+        }
+      },
+      __rt: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-only-rt',
+          conversationId: 'conv-relay-only-rt'
+        }
+      }
+    } as any);
+    expect(scope).toBeUndefined();
+  });
+
   it('stopless followup never carries route_hint:tools in normalized metadata', () => {
     const meta = {
       sessionId: 'sess-vr-route-2',

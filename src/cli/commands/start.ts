@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccUserDir } from '../../config/user-data-paths.js';
+import { writeRuntimeInstance, updateRuntimeInstanceStatus } from '../../utils/runtime-instance-registry.js';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
@@ -636,6 +637,19 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               cwd: spawnPlan.cwd
             });
             writePidFile(childProc.pid);
+            try {
+              writeRuntimeInstance({
+                port: resolvedPort,
+                host: serverHost,
+                command: 'rcc start (daemon supervisor)',
+                configPath: configPath,
+                ownerScope: 'cli.start.daemon',
+                status: 'declared',
+                routeCodexHomeDir: routeCodexHome,
+              });
+            } catch (error) {
+              logStartNonBlocking(ctx, 'write_runtime_instance.daemon_supervisor', error, { port: resolvedPort });
+            }
 
             const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
               childProc.on('exit', (code, signal) => {
@@ -906,11 +920,29 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                   });
                   activeChildProc = nextChild;
                   writePidFile(nextChild.pid);
+                  try {
+                    writeRuntimeInstance({
+                      port: resolvedPort,
+                      host: serverHost,
+                      command: 'rcc start (daemon restart)',
+                      configPath: configPath,
+                      ownerScope: 'cli.start.daemon',
+                      status: 'declared',
+                      routeCodexHomeDir: routeCodexHome,
+                    });
+                  } catch (error) {
+                    logStartNonBlocking(ctx, 'write_runtime_instance.daemon_restart', error, { port: resolvedPort });
+                  }
                   forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
                   forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
                   attachChildExitHandler(nextChild);
                   const probe = await waitForChildHealthyOrExit(nextChild, restartDeadline);
                   if (probe.healthy) {
+                    try {
+                      updateRuntimeInstanceStatus({ port: resolvedPort, status: 'healthy', routeCodexHomeDir: routeCodexHome });
+                    } catch (error) {
+                      logStartNonBlocking(ctx, 'update_runtime_instance.healthy', error, { port: resolvedPort });
+                    }
                     ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'}, attempt=${attempt})`);
                     restartInFlight = false;
                     return;
@@ -977,6 +1009,19 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           });
           activeChildProc = proc;
           writePidFile(proc.pid);
+          try {
+            writeRuntimeInstance({
+              port: resolvedPort,
+              host: serverHost,
+              command: 'rcc start',
+              configPath: configPath,
+              ownerScope: 'cli.start',
+              status: 'declared',
+              routeCodexHomeDir: routeCodexHome,
+            });
+          } catch (error) {
+            logStartNonBlocking(ctx, 'write_runtime_instance', error, { port: resolvedPort });
+          }
           forwardToConsoleAndLog((proc as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
           forwardToConsoleAndLog((proc as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
           attachChildExitHandler(proc);
@@ -1019,6 +1064,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             return;
           }
           shuttingDown = true;
+          try {
+            updateRuntimeInstanceStatus({ port: resolvedPort, status: 'shutdown-intent', routeCodexHomeDir: routeCodexHome });
+          } catch (error) {
+            logStartNonBlocking(ctx, 'update_runtime_instance.shutdown_intent', error, { port: resolvedPort });
+          }
           try {
             await applyLifecycleOrThrow({
               action: 'server_shutdown_requested',

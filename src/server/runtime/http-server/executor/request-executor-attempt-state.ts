@@ -6,6 +6,7 @@ import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-meta
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 
 export type PreparedRequestExecutorAttemptState = {
   metadataForAttempt: Record<string, unknown>;
@@ -91,6 +92,27 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
 } {
   const pipelineMetadata = args.pipelineResult.metadata ?? {};
   const mergedMetadata = mergeMetadataPreservingDefined(args.metadataForAttempt, pipelineMetadata);
+  const metadataCenter = MetadataCenter.read(args.metadataForAttempt);
+  if (metadataCenter) {
+    MetadataCenter.bind(mergedMetadata, metadataCenter);
+    const requestTruth = metadataCenter.readRequestTruth();
+    if (requestTruth.sessionId) {
+      mergedMetadata.sessionId = requestTruth.sessionId;
+    } else {
+      delete mergedMetadata.sessionId;
+    }
+    if (requestTruth.conversationId) {
+      mergedMetadata.conversationId = requestTruth.conversationId;
+    } else {
+      delete mergedMetadata.conversationId;
+    }
+    if (requestTruth.requestId) {
+      mergedMetadata.requestId = requestTruth.requestId;
+    }
+    if (requestTruth.clientRequestId) {
+      mergedMetadata.clientRequestId = requestTruth.clientRequestId;
+    }
+  }
   registerRequestLogContext(args.requestId, {
     logSessionColorKey: mergedMetadata.logSessionColorKey,
     clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,

@@ -347,7 +347,6 @@ fn is_stop_message_empty(state: &RoutingInstructionState) -> bool {
         && state.stop_message_state.stop_message_provider_key.is_none()
         && state.stop_message_state.stop_message_last_used_at.is_none()
         && state.stop_message_state.stop_message_stage_mode.is_none()
-        && state.stop_message_state.stop_message_ai_mode.is_none()
         && state
             .stop_message_state
             .stop_message_ai_seed_prompt
@@ -517,8 +516,6 @@ fn same_stop_message_config(
                 .stop_message_stage_mode
                 .as_deref(),
         )
-        && normalize_text(existing.stop_message_state.stop_message_ai_mode.as_deref())
-            == normalize_text(persisted.stop_message_state.stop_message_ai_mode.as_deref())
 }
 
 fn normalize_text(value: Option<&str>) -> String {
@@ -724,12 +721,6 @@ fn serialize_stop_message_state(state: &RoutingInstructionState, out: &mut Map<S
     if let Some(value) = &state.stop_message_stage_mode {
         out.insert(
             "stopMessageStageMode".to_string(),
-            Value::String(value.clone()),
-        );
-    }
-    if let Some(value) = &state.stop_message_ai_mode {
-        out.insert(
-            "stopMessageAiMode".to_string(),
             Value::String(value.clone()),
         );
     }
@@ -1014,10 +1005,6 @@ fn deserialize_stop_message_state(obj: &Map<String, Value>, state: &mut RoutingI
         obj.get("stopMessageLastUsedAt").and_then(|v| v.as_i64());
     state.stop_message_state.stop_message_stage_mode = obj
         .get("stopMessageStageMode")
-        .and_then(|v| v.as_str())
-        .map(|v| v.to_string());
-    state.stop_message_state.stop_message_ai_mode = obj
-        .get("stopMessageAiMode")
         .and_then(|v| v.as_str())
         .map(|v| v.to_string());
     state.stop_message_state.stop_message_ai_seed_prompt = obj

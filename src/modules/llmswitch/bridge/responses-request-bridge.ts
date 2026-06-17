@@ -25,6 +25,7 @@ import {
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
@@ -113,7 +114,7 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   resumeMeta?: Record<string, unknown>;
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
-  return {
+  const metadata: Record<string, unknown> = {
     stream: args.streamPlan.outboundStream,
     clientRequestId: args.clientRequestId,
     clientStream: args.streamPlan.acceptsSse || undefined,
@@ -126,6 +127,28 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
     responsesRequestContext: args.requestContext,
   };
+  const center = MetadataCenter.attach(metadata);
+  center.writeContinuationContext(
+    'responsesRequestContext',
+    args.requestContext,
+    {
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'buildResponsesPipelineMetadataForHttp',
+      stage: 'HubReqInbound02Standardized'
+    }
+  );
+  if (args.resumeMeta) {
+    center.writeContinuationContext(
+      'responsesResume',
+      args.resumeMeta,
+      {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'HubReqInbound02Standardized'
+      }
+    );
+  }
+  return metadata;
 }
 
 export function buildResponsesConversationPortScopeForHttp(
@@ -612,12 +635,23 @@ export function attachResponsesRequestContextToResultForHttp(args: {
   if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
     return args.resultMetadata;
   }
-  return {
+  const nextMetadata = {
     ...(args.resultMetadata || {}),
     responsesRequestContext:
       (args.resultMetadata?.responsesRequestContext as Record<string, unknown> | undefined)
       ?? args.requestContext,
   };
+  const center = MetadataCenter.attach(nextMetadata);
+  center.writeContinuationContext(
+    'responsesRequestContext',
+    (nextMetadata.responsesRequestContext as Record<string, unknown>) ?? args.requestContext,
+    {
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'attachResponsesRequestContextToResultForHttp',
+      stage: 'HubRespChatProcess03Governed'
+    }
+  );
+  return nextMetadata;
 }
 
 export async function recordResponsesResponseForHttp(args: {

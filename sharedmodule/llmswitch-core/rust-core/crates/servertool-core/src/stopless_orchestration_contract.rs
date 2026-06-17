@@ -26,9 +26,22 @@ pub struct StoplessOrchestrationPlan {
     pub session_id: Option<String>,
 }
 
+fn normalize_stopless_session_id(value: Option<String>) -> Option<String> {
+    let trimmed = value?.trim().to_string();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered == "unknown" || lowered == "none" || lowered == "null" || lowered == "-" {
+        return None;
+    }
+    Some(trimmed)
+}
+
 pub fn plan_stopless_orchestration_action(
     input: StoplessOrchestrationPlanInput,
 ) -> StoplessOrchestrationPlan {
+    let session_id = normalize_stopless_session_id(input.session_id);
     let flow_id = input
         .flow_id
         .as_deref()
@@ -48,7 +61,7 @@ pub fn plan_stopless_orchestration_action(
             action: StoplessOrchestrationAction::CliProjection,
             is_stop_message_flow: false,
             reason: "non_stop_message_flow".to_string(),
-            session_id: input.session_id,
+            session_id,
         };
     }
     if is_stop_message_terminal_final(&input.execution) {
@@ -56,7 +69,15 @@ pub fn plan_stopless_orchestration_action(
             action: StoplessOrchestrationAction::TerminalFinal,
             is_stop_message_flow: true,
             reason: "stop_message_terminal_final".to_string(),
-            session_id: input.session_id,
+            session_id,
+        };
+    }
+    if session_id.is_none() {
+        return StoplessOrchestrationPlan {
+            action: StoplessOrchestrationAction::TerminalFinal,
+            is_stop_message_flow: true,
+            reason: "stop_message_missing_session".to_string(),
+            session_id: None,
         };
     }
     if is_stop_message_budget_exhausted(&input.execution) {
@@ -64,14 +85,14 @@ pub fn plan_stopless_orchestration_action(
             action: StoplessOrchestrationAction::TerminalFinal,
             is_stop_message_flow: true,
             reason: "stop_message_budget_exhausted".to_string(),
-            session_id: input.session_id,
+            session_id,
         };
     }
     StoplessOrchestrationPlan {
         action: StoplessOrchestrationAction::CliProjection,
         is_stop_message_flow: true,
         reason: "stop_message_cli_projection".to_string(),
-        session_id: input.session_id,
+        session_id,
     }
 }
 
@@ -112,11 +133,37 @@ mod tests {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
-            session_id: None,
+            session_id: Some("sess-default".to_string()),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
         assert_eq!(plan.reason, "stop_message_cli_projection");
+        assert_eq!(plan.session_id.as_deref(), Some("sess-default"));
+    }
+
+    #[test]
+    fn stop_message_flow_missing_session_stays_terminal() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: None,
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_missing_session");
+        assert!(plan.session_id.is_none());
+    }
+
+    #[test]
+    fn stop_message_flow_unknown_session_stays_terminal() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: Some(" unknown ".to_string()),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_missing_session");
         assert!(plan.session_id.is_none());
     }
 
@@ -128,11 +175,11 @@ mod tests {
                 "flowId": "stop_message_flow",
                 "context": { "stopMessageTerminalFinal": true }
             }),
-            session_id: None,
+            session_id: Some("sess-terminal".to_string()),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_terminal_final");
-        assert!(plan.session_id.is_none());
+        assert_eq!(plan.session_id.as_deref(), Some("sess-terminal"));
     }
 
     #[test]
@@ -233,7 +280,7 @@ mod tests {
                     }
                 }
             }),
-            session_id: None,
+            session_id: Some("sess-budget".to_string()),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_budget_exhausted");
@@ -250,7 +297,7 @@ mod tests {
                 "flowId": "stop_message_flow",
                 "context": {}
             }),
-            session_id: None,
+            session_id: Some("sess-still-cli".to_string()),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
     }

@@ -9,6 +9,7 @@ import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { writeDaemonStopIntent } from '../../utils/daemon-stop-intent.js';
+import { updateRuntimeInstanceStatus } from '../../utils/runtime-instance-registry.js';
 import type { GuardianLifecycleEvent, GuardianStopResult } from '../guardian/types.js';
 
 type Spinner = {
@@ -292,11 +293,30 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
 
           try {
             const home = ctx.getHomeDir ?? (() => homedir());
+            const routeCodexHomeDir = resolveRccUserDir(home());
             writeDaemonStopIntent(resolvedPort, {
               source: 'cli.stop',
-              routeCodexHomeDir: resolveRccUserDir(home()),
+              routeCodexHomeDir,
               pid: process.pid
             });
+            try {
+              updateRuntimeInstanceStatus({
+                port: resolvedPort,
+                status: 'shutdown-intent',
+                routeCodexHomeDir,
+                notes: { source: 'cli.stop' }
+              });
+            } catch (error) {
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'instance_registry_update_failed',
+                  port: resolvedPort,
+                  error: error instanceof Error ? error.message : String(error)
+                }
+              });
+            }
           } catch {
             /* ignore */
           }

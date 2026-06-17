@@ -1,6 +1,7 @@
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import {
   backfillAdapterContextSessionIdentifiersFromEntryOriginRequest,
   syncStoplessGoalStateFromCapturedRequest
@@ -19,6 +20,48 @@ function readNonEmptyString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function readRequestTruthSessionId(metadataBag: Record<string, unknown>): string | undefined {
+  const rt = asFlatRecord(metadataBag.__rt);
+  return (
+    readNonEmptyString(metadataBag.requestSessionId)
+    ?? readNonEmptyString(metadataBag.request_session_id)
+    ?? readNonEmptyString(rt?.requestSessionId)
+    ?? readNonEmptyString(rt?.request_session_id)
+  );
+}
+
+function readRequestTruthConversationId(metadataBag: Record<string, unknown>): string | undefined {
+  const rt = asFlatRecord(metadataBag.__rt);
+  return (
+    readNonEmptyString(metadataBag.requestConversationId)
+    ?? readNonEmptyString(metadataBag.request_conversation_id)
+    ?? readNonEmptyString(rt?.requestConversationId)
+    ?? readNonEmptyString(rt?.request_conversation_id)
+  );
+}
+
+function readRequestTruthSessionIdFromEntryOrigin(entryOriginRequest: unknown): string | undefined {
+  const entryOrigin = asFlatRecord(entryOriginRequest);
+  const requestMetadata = asFlatRecord(entryOrigin?.metadata);
+  return (
+    readNonEmptyString(entryOrigin?.sessionId)
+    ?? readNonEmptyString(entryOrigin?.session_id)
+    ?? readNonEmptyString(requestMetadata?.sessionId)
+    ?? readNonEmptyString(requestMetadata?.session_id)
+  );
+}
+
+function readRequestTruthConversationIdFromEntryOrigin(entryOriginRequest: unknown): string | undefined {
+  const entryOrigin = asFlatRecord(entryOriginRequest);
+  const requestMetadata = asFlatRecord(entryOrigin?.metadata);
+  return (
+    readNonEmptyString(entryOrigin?.conversationId)
+    ?? readNonEmptyString(entryOrigin?.conversation_id)
+    ?? readNonEmptyString(requestMetadata?.conversationId)
+    ?? readNonEmptyString(requestMetadata?.conversation_id)
+  );
 }
 
 function hasRccFenceInRequestPayload(payload: unknown): boolean {
@@ -83,7 +126,29 @@ export function buildServerToolAdapterContext(args: {
     baseContext.capturedChatRequest = originRecord;
   }
 
-  backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(baseContext, originRequest);
+  if (originRecord) {
+    backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(baseContext, originRequest);
+  }
+  const metadataCenter = MetadataCenter.read(metadataBag);
+  const centerRequestTruth = metadataCenter?.readRequestTruth();
+  const requestTruthSessionId =
+    readRequestTruthSessionIdFromEntryOrigin(originRequest)
+    ?? centerRequestTruth?.sessionId
+    ?? readRequestTruthSessionId(metadataBag);
+  const requestTruthConversationId =
+    readRequestTruthConversationIdFromEntryOrigin(originRequest)
+    ?? centerRequestTruth?.conversationId
+    ?? readRequestTruthConversationId(metadataBag);
+  if (requestTruthSessionId) {
+    baseContext.sessionId = requestTruthSessionId;
+  } else {
+    delete baseContext.sessionId;
+  }
+  if (requestTruthConversationId) {
+    baseContext.conversationId = requestTruthConversationId;
+  } else {
+    delete baseContext.conversationId;
+  }
   preferEntryOriginRequestForStoplessGoalSync(baseContext, originRequest);
   syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
 

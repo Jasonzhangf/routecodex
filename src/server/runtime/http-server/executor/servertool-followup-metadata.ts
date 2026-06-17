@@ -189,14 +189,7 @@ function readResponsesRequestContextIdentifiers(
   sessionId?: string;
   conversationId?: string;
 } {
-  const responsesRequestContext =
-    asRecord(metadata?.responsesRequestContext)
-    ?? asRecord(asRecord(metadata?.__rt)?.responsesRequestContext);
-  const sessionId = readNonEmptyString(responsesRequestContext?.sessionId);
-  const conversationId = readNonEmptyString(responsesRequestContext?.conversationId);
   return {
-    ...(sessionId ? { sessionId } : {}),
-    ...(conversationId ? { conversationId } : {})
   };
 }
 
@@ -250,17 +243,6 @@ export function buildServerToolNestedRequestMetadata(args: {
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);
-  }
-
-  const responseContextIds = {
-    ...readResponsesRequestContextIdentifiers(baseMetadata),
-    ...readResponsesRequestContextIdentifiers(extraMetadata)
-  };
-  if (responseContextIds.sessionId && !readNonEmptyString(out.sessionId)) {
-    out.sessionId = responseContextIds.sessionId;
-  }
-  if (responseContextIds.conversationId && !readNonEmptyString(out.conversationId)) {
-    out.conversationId = responseContextIds.conversationId;
   }
 
   const runtimeMeta = asRecord((out as Record<string, unknown>).__rt);

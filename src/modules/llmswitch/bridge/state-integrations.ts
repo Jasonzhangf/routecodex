@@ -124,9 +124,7 @@ export function extractSessionIdentifiersFromMetadata(meta: Record<string, unkno
   try {
     const sessionId = readNormalizedMetadataToken(meta, [
       'sessionId',
-      'session_id',
-      'tmuxSessionId',
-      'clientTmuxSessionId'
+      'session_id'
     ]);
     const conversationId = readNormalizedMetadataToken(meta, [
       'conversationId',
@@ -138,6 +136,27 @@ export function extractSessionIdentifiersFromMetadata(meta: Record<string, unkno
     };
   } catch (error) {
     throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
+  }
+}
+
+export function extractContinuationContextSessionIdentifiersFromMetadata(
+  meta: Record<string, unknown> | undefined
+): SessionIdentifiers {
+  try {
+    const responsesRequestContext = meta && typeof meta === 'object'
+      ? (meta.responsesRequestContext as Record<string, unknown> | undefined)
+      : undefined;
+    if (!responsesRequestContext || typeof responsesRequestContext !== 'object') {
+      return {};
+    }
+    const sessionId = readNormalizedMetadataToken(responsesRequestContext, ['sessionId', 'session_id']);
+    const conversationId = readNormalizedMetadataToken(responsesRequestContext, ['conversationId', 'conversation_id']);
+    return {
+      ...(sessionId ? { sessionId } : {}),
+      ...(conversationId ? { conversationId } : {})
+    };
+  } catch (error) {
+    throw buildStateIntegrationFailure('session_identifiers.extract_continuation.invoke', error);
   }
 }
 

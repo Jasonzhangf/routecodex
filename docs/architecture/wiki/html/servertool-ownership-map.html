@@ -460,6 +460,7 @@
           <li>Model side must stay unaware of stopless identity; stopless CLI command and CLI stdout no longer require <code>sessionId/requestId/sessionDir</code>, and persisted writeback must stay absent.</li>
           <li>TS <code>engine.ts</code> may only call <code>planStoplessOrchestrationActionWithNative</code> and <code>buildServertoolCliProjectionForAutoFlow</code>; it must not reenter for stopless CLI flows.</li>
           <li>Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.</li>
+          <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation-only context for <code>/v1/responses</code>; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.</li>
         </ul>
         <h2>hub.servertool_flow_presentation</h2>
         <p>Summary: servertool progress log tool-name and highlight presentation policy</p>

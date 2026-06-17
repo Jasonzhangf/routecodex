@@ -41,6 +41,37 @@ describe('executor-metadata binding fallback', () => {
     expect(metadata.routeHint).toBe('longcontext');
   });
 
+  it('does not materialize request session truth from responsesRequestContext carried in request metadata', async () => {
+    jest.resetModules();
+    const { buildRequestMetadata } = await import('../../../../src/server/runtime/http-server/executor-metadata.js');
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-rrc-session-poison-1',
+      headers: {},
+      query: {},
+      body: {
+        input: [],
+        metadata: {
+          responsesRequestContext: {
+            sessionId: 'sess-relay-body-only',
+            conversationId: 'conv-relay-body-only'
+          }
+        }
+      },
+      metadata: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-meta-only',
+          conversationId: 'conv-relay-meta-only'
+        }
+      }
+    } as any);
+
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+  });
+
   it('restores client inject scope from conversation binding when api-key carries session scope only', async () => {
     jest.resetModules();
     await jest.unstable_mockModule('../../../../src/server/runtime/http-server/tmux-session-probe.js', () => ({

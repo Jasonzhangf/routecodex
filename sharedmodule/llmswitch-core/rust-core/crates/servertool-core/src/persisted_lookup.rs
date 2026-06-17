@@ -343,17 +343,44 @@ fn resolve_stopless_cli_result_snapshot_from_request(
     adapter_context: &Value,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
     let record = adapter_context.as_object()?;
-    let request = get_captured_request(adapter_context)
-        .or_else(|| record.get("__raw_request_body").cloned())?;
-    read_stopless_cli_result_snapshot_from_request(&request)
+    if let Some(raw_request) = record.get("__raw_request_body") {
+        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_request(raw_request) {
+            return Some(snapshot);
+        }
+    }
+    if let Some(captured_request) = get_captured_request(adapter_context) {
+        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_request(&captured_request) {
+            return Some(snapshot);
+        }
+    }
+    None
 }
 
 fn read_stopless_cli_result_snapshot_from_request(
     request: &Value,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
     let request_obj = request.as_object()?;
-    let tool_outputs = request_obj.get("tool_outputs")?.as_array()?;
-    for output in tool_outputs {
+    let mut candidate_outputs: Vec<&Value> = Vec::new();
+    if let Some(tool_outputs) = request_obj.get("tool_outputs").and_then(Value::as_array) {
+        candidate_outputs.extend(tool_outputs.iter());
+    }
+    if let Some(input_items) = request_obj.get("input").and_then(Value::as_array) {
+        for item in input_items {
+            let Some(row) = item.as_object() else {
+                continue;
+            };
+            let item_type = read_trimmed_string(row.get("type"))
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default();
+            if matches!(
+                item_type.as_str(),
+                "function_call_output" | "tool_result" | "tool_message"
+            ) {
+                candidate_outputs.push(item);
+            }
+        }
+    }
+    for output in candidate_outputs {
         let output_record = output.as_object()?;
         let raw_output = read_trimmed_string(output_record.get("output"))?;
         let parsed: Value = serde_json::from_str(&raw_output).ok()?;
@@ -438,8 +465,6 @@ pub fn plan_stop_message_routing_state_apply(
     let source =
         read_trimmed_string(record.get("source")).unwrap_or_else(|| "explicit".to_string());
     let stage_mode = normalize_stop_message_stage_mode(record.get("stageMode"));
-    let ai_mode =
-        normalize_stop_message_ai_mode(record.get("aiMode")).unwrap_or_else(|| "on".to_string());
     let ai_seed_prompt = read_trimmed_string(record.get("aiSeedPrompt"));
     let ai_history = record
         .get("aiHistory")
@@ -454,7 +479,7 @@ pub fn plan_stop_message_routing_state_apply(
         updated_at: read_finite_number(record.get("updatedAt")),
         last_used_at: read_finite_number(record.get("lastUsedAt")),
         stage_mode,
-        ai_mode,
+        ai_mode: "off".to_string(),
         ai_seed_prompt,
         ai_history,
     })
@@ -605,7 +630,6 @@ pub fn plan_persist_stop_message_state(
         && read_finite_number(state.get("stopMessageMaxRepeats")).is_none()
         && read_finite_number(state.get("stopMessageUsed")).is_none()
         && read_trimmed_string(state.get("stopMessageStageMode")).is_none()
-        && read_trimmed_string(state.get("stopMessageAiMode")).is_none()
         && !has_lifecycle_stamp
         && !has_non_stop_message_state;
 
@@ -694,8 +718,6 @@ fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessa
     if stage_mode.as_deref() == Some("off") {
         return None;
     }
-    let ai_mode = normalize_stop_message_ai_mode(record.get("stopMessageAiMode"))
-        .unwrap_or_else(|| "on".to_string());
     let max_repeats = resolve_stop_message_max_repeats(
         record.get("stopMessageMaxRepeats"),
         stage_mode.as_deref(),
@@ -721,7 +743,7 @@ fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessa
         updated_at,
         last_used_at,
         stage_mode,
-        ai_mode: Some(ai_mode),
+        ai_mode: None,
     })
 }
 
@@ -1071,10 +1093,6 @@ fn normalize_stop_message_stage_mode(value: Option<&Value>) -> Option<String> {
     normalize_one_of(value, &["on", "off", "auto"])
 }
 
-fn normalize_stop_message_ai_mode(value: Option<&Value>) -> Option<String> {
-    normalize_one_of(value, &["on", "off"])
-}
-
 fn normalize_one_of(value: Option<&Value>, allowed: &[&str]) -> Option<String> {
     let normalized = read_trimmed_string(value)?.to_lowercase();
     if allowed.iter().any(|item| *item == normalized) {
@@ -1351,7 +1369,6 @@ mod tests {
                 "stopMessageText": " continue ",
                 "stopMessageStageMode": " AUTO ",
                 "stopMessageUsed": 2.9,
-                "stopMessageAiMode": " OFF "
             }),
         })
         .expect("snapshot");
@@ -1360,7 +1377,7 @@ mod tests {
         assert_eq!(snapshot.max_repeats, DEFAULT_STOP_MESSAGE_MAX_REPEATS);
         assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.stage_mode.as_deref(), Some("auto"));
-        assert_eq!(snapshot.ai_mode.as_deref(), Some("off"));
+        assert_eq!(snapshot.ai_mode, None);
     }
 
     #[test]
@@ -1689,7 +1706,7 @@ mod tests {
                 updated_at: Some(1234.0),
                 last_used_at: None,
                 stage_mode: Some("auto".to_string()),
-                ai_mode: Some("on".to_string()),
+                ai_mode: None,
             }
         );
     }
@@ -2021,6 +2038,55 @@ mod tests {
     }
 
     #[test]
+    fn adapter_context_restores_stopless_cli_result_from_responses_input_only() {
+        let input = RuntimeStopMessageStateFromAdapterContextInput {
+            runtime_metadata: None,
+            adapter_context: json!({
+                "__raw_request_body": {
+                    "input": [{
+                        "type": "function_call_output",
+                        "call_id": "call_servertool_cli",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from responses input\",\"repeatCount\":2,\"maxRepeats\":3}"
+                    }]
+                }
+            }),
+        };
+
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("responses input stopless cli result snapshot");
+        assert_eq!(snapshot.text, "continue from responses input");
+        assert_eq!(snapshot.max_repeats, 3);
+        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+    }
+
+    #[test]
+    fn adapter_context_prefers_raw_request_tool_output_over_captured_chat_request() {
+        let input = RuntimeStopMessageStateFromAdapterContextInput {
+            runtime_metadata: None,
+            adapter_context: json!({
+                "capturedChatRequest": {
+                    "messages": [{ "role": "user", "content": "stale captured request" }]
+                },
+                "__raw_request_body": {
+                    "input": [{
+                        "type": "function_call_output",
+                        "call_id": "call_servertool_cli",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from raw request\",\"repeatCount\":3,\"maxRepeats\":3}"
+                    }]
+                }
+            }),
+        };
+
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("raw request stopless cli result snapshot");
+        assert_eq!(snapshot.text, "continue from raw request");
+        assert_eq!(snapshot.max_repeats, 3);
+        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+    }
+
+    #[test]
     fn adapter_context_ignores_stopless_command_seed_with_plain_exec_text() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
@@ -2073,7 +2139,6 @@ mod tests {
                 "disabledModels": [],
                 "stopMessageText": " ",
                 "stopMessageStageMode": " ",
-                "stopMessageAiMode": " ",
                 "preCommandScriptPath": " "
             }),
         })

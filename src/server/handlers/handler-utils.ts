@@ -19,6 +19,7 @@ import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
+import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
 export { hasSsePayload, sendPipelineResponse, type SsePayloadShape } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 
@@ -691,27 +692,13 @@ export function mergePipelineMetadata(
   if (!sanitizedRequestMetadata || Object.keys(sanitizedRequestMetadata).length === 0) {
     return internalMetadata;
   }
-  const merged: Record<string, unknown> = {
+  const merged = {
     ...sanitizedRequestMetadata,
     ...internalMetadata
   };
-  const requestRt =
-    sanitizedRequestMetadata.__rt &&
-    typeof sanitizedRequestMetadata.__rt === 'object' &&
-    !Array.isArray(sanitizedRequestMetadata.__rt)
-      ? (sanitizedRequestMetadata.__rt as Record<string, unknown>)
-      : undefined;
-  const internalRt =
-    internalMetadata.__rt &&
-    typeof internalMetadata.__rt === 'object' &&
-    !Array.isArray(internalMetadata.__rt)
-      ? (internalMetadata.__rt as Record<string, unknown>)
-      : undefined;
-  if (requestRt || internalRt) {
-    merged.__rt = {
-      ...(requestRt ?? {}),
-      ...(internalRt ?? {})
-    };
+  const metadataCenter = MetadataCenter.read(internalMetadata);
+  if (metadataCenter) {
+    MetadataCenter.bind(merged, metadataCenter);
   }
   return merged;
 }

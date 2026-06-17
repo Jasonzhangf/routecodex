@@ -1,6 +1,10 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
-import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
+import {
+  extractContinuationContextSessionIdentifiersFromMetadata,
+  extractSessionIdentifiersFromMetadata
+} from '../../../modules/llmswitch/bridge.js';
+import { MetadataCenter } from './metadata-center/metadata-center.js';
 import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
 import {
   shouldTraceSessionScopeByContext
@@ -157,6 +161,49 @@ function extractWorkdir(
     }
   }
 
+  return undefined;
+}
+
+function extractRequestSessionIdFromHeaders(
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): string | undefined {
+  const sources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
+  ];
+  for (const source of sources) {
+    const sessionId =
+      extractHeaderValue(source, 'session_id')
+      || extractHeaderValue(source, 'session-id')
+      || extractHeaderValue(source, 'x-session-id')
+      || extractHeaderValue(source, 'x-routecodex-session-id')
+      || extractHeaderValue(source, 'x-rcc-session-id');
+    if (sessionId) {
+      return sessionId;
+    }
+  }
+  return undefined;
+}
+
+function extractRequestConversationIdFromHeaders(
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): string | undefined {
+  const sources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
+  ];
+  for (const source of sources) {
+    const conversationId =
+      extractHeaderValue(source, 'conversation_id')
+      || extractHeaderValue(source, 'conversation-id')
+      || extractHeaderValue(source, 'x-conversation-id')
+      || extractHeaderValue(source, 'x-routecodex-conversation-id');
+    if (conversationId) {
+      return conversationId;
+    }
+  }
   return undefined;
 }
 
@@ -415,10 +462,40 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
       ? userMeta.clientOriginator.trim()
       : inboundOriginator;
+  const requestHeaderSessionId = extractRequestSessionIdFromHeaders(headers, normalizedClientHeaders);
+  const requestHeaderConversationId = extractRequestConversationIdFromHeaders(headers, normalizedClientHeaders);
   const routeHint = extractRouteHint(input);
   const processMode = (userMeta.processMode as string) || 'chat';
   let resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
   const inferredClientType = inferSessionClientType(userMeta);
+  const directWorkdir = extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders);
+  const requestScopeIdForBinding =
+    requestHeaderSessionId
+    || requestHeaderConversationId
+    || normalizeToken(userMeta.sessionId)
+    || normalizeToken(userMeta.conversationId)
+    || normalizeToken(bodyMeta.sessionId)
+    || normalizeToken(bodyMeta.conversationId);
+
+  if (requestScopeIdForBinding && directWorkdir) {
+    try {
+      const registry = getSessionClientRegistry();
+      if (!registry.resolveBoundTmuxSession(requestScopeIdForBinding)) {
+        registry.bindConversationSession({
+          conversationSessionId: requestScopeIdForBinding,
+          ...(resolvedSessionDaemonId ? { daemonId: resolvedSessionDaemonId } : {}),
+          ...(inferredClientType ? { clientType: inferredClientType } : {}),
+          workdir: directWorkdir
+        });
+      }
+    } catch (bindError) {
+      logExecutorMetadataNonBlocking('buildRequestMetadata.bindConversationSession', bindError, {
+        requestScopeId: requestScopeIdForBinding,
+        workdir: directWorkdir
+      });
+    }
+  }
+
   const resolvedTmuxTarget =
     normalizeToken(userMeta.clientTmuxTarget)
     || normalizeToken(userMeta.client_tmux_target)
@@ -441,9 +518,13 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     resolvedSessionDaemonId = resolveSessionDaemonIdFromTmuxSession(tmuxResolution.tmuxSessionId);
   }
   const resolvedWorkdir =
-    extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
-    || resolveWorkdirFromTmuxSessionId(tmuxResolution.tmuxSessionId)
-    || resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId);
+    directWorkdir
+    || (tmuxResolution.source === 'registry_by_binding'
+      ? undefined
+      : resolveWorkdirFromTmuxSessionId(tmuxResolution.tmuxSessionId))
+    || (tmuxResolution.source === 'registry_by_binding'
+      ? undefined
+      : resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId));
   let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
   let tmuxSource = tmuxResolution.source;
   const explicitClientInjectReady =
@@ -456,7 +537,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   let clientInjectReason =
     explicitClientInjectReason || (clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing');
   let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
-  if (resolvedTmuxSessionId && evaluateTmuxScopeCleanup({
+  if (resolvedTmuxSessionId && tmuxSource === 'registry_by_daemon' && evaluateTmuxScopeCleanup({
     mode: 'request_guard',
     tmuxSessionId: resolvedTmuxSessionId,
     reason: 'request_guard',
@@ -532,16 +613,81 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     metadata.clientHeaders = normalizedClientHeaders;
   }
 
-  const sessionIdentifierSource: Record<string, unknown> = {
+  const center = MetadataCenter.attach(metadata);
+
+  const requestTruthSource: Record<string, unknown> = {
     ...bodyMeta,
     ...metadata
   };
-  const sessionIdentifiers = extractSessionIdentifiersFromMetadata(sessionIdentifierSource);
+  if (requestHeaderSessionId) {
+    requestTruthSource.sessionId = requestHeaderSessionId;
+    if (!requestTruthSource.conversationId) {
+      requestTruthSource.conversationId = requestHeaderSessionId;
+    }
+  }
+  if (requestHeaderConversationId) {
+    requestTruthSource.conversationId = requestHeaderConversationId;
+  }
+  delete requestTruthSource.responsesRequestContext;
+  if (requestTruthSource.__rt && typeof requestTruthSource.__rt === 'object' && !Array.isArray(requestTruthSource.__rt)) {
+    const rt = { ...(requestTruthSource.__rt as Record<string, unknown>) };
+    delete rt.responsesRequestContext;
+    requestTruthSource.__rt = rt;
+  }
+  const sessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
   if (sessionIdentifiers.sessionId) {
+    center.writeRequestTruth(
+      'sessionId',
+      sessionIdentifiers.sessionId,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      }
+    );
     metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId) {
+    center.writeRequestTruth(
+      'conversationId',
+      sessionIdentifiers.conversationId,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      }
+    );
     metadata.conversationId = sessionIdentifiers.conversationId;
+  }
+  const continuationIdentifiers = extractContinuationContextSessionIdentifiersFromMetadata({
+    ...bodyMeta,
+    ...metadata
+  });
+  if (
+    continuationIdentifiers.sessionId
+    && !metadata.responsesRequestContext
+    && !metadata.sessionId
+  ) {
+    center.writeContinuationContext(
+      'responsesRequestContext',
+      {
+        sessionId: continuationIdentifiers.sessionId,
+        ...(continuationIdentifiers.conversationId
+          ? { conversationId: continuationIdentifiers.conversationId }
+          : {})
+      },
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'HubReqInbound02Standardized'
+      }
+    );
+    metadata.responsesRequestContext = {
+      sessionId: continuationIdentifiers.sessionId,
+      ...(continuationIdentifiers.conversationId
+        ? { conversationId: continuationIdentifiers.conversationId }
+        : {})
+    };
   }
 
   if (shouldTraceSessionScopeMetadata({

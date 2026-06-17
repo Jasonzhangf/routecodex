@@ -878,12 +878,6 @@ fn serialize_routing_instruction_for_napi(
                 Value::String(value.clone()),
             );
         }
-        if let Some(value) = &stop.ai_mode {
-            out.insert(
-                "stopMessageAiMode".to_string(),
-                Value::String(value.clone()),
-            );
-        }
         if let Some(value) = &stop.source {
             out.insert(
                 "stopMessageSource".to_string(),
@@ -957,10 +951,6 @@ fn deserialize_routing_instruction_for_napi(
                 max_repeats: obj.get("stopMessageMaxRepeats").and_then(|v| v.as_i64()),
                 stage_mode: obj
                     .get("stopMessageStageMode")
-                    .and_then(|v| v.as_str())
-                    .map(|v| v.to_string()),
-                ai_mode: obj
-                    .get("stopMessageAiMode")
                     .and_then(|v| v.as_str())
                     .map(|v| v.to_string()),
                 source: obj

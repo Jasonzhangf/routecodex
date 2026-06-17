@@ -19,6 +19,7 @@
 | Servertool ownership map | `docs/architecture/wiki/servertool-ownership-map.md` | done | 自动生成，按 `hub.servertool_*` 聚合 |
 | Virtual Router ownership map | `docs/architecture/wiki/virtual-router-ownership-map.md` | done | 自动生成，按 `vr.* / virtual_router.*` 聚合 |
 | Stopless runtime metadata source | `docs/architecture/wiki/stopless-session-mainline-source.md` | done | stopless 当前请求闭环主线、CLI stdout 恢复、无 file/tmux/sessionDir 依赖专题页 |
+| Metadata center mainline source | `docs/architecture/wiki/metadata-center-mainline-source.md` | done | metadata family 分层、写入阶段 owner、未来 request-scoped center 主线 review 面 |
 | Pipeline topology | `docs/design/pipeline-type-topology-and-module-boundaries.md` | done | 结构真源，不放在 wiki 重复写 |
 
 ## Missing Wiki Pages

@@ -5,6 +5,8 @@ import {
   buildRequestMetadata,
   decorateMetadataForAttempt
 } from '../../../src/server/runtime/http-server/executor-metadata.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { finalizeRequestExecutorAttemptMetadata } from '../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
 import { getSessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
 import {
   getClientConnectionAbortSignal,
@@ -216,6 +218,104 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.tmuxSessionId).toBe('tmux_turn_meta_1');
     expect(metadata.clientInjectReady).toBe(true);
     expect(metadata.clientInjectReason).toBe('tmux_session_ready');
+  });
+
+  it('does not synthesize request sessionId from tmux-only metadata', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-tmux-no-session-1',
+      headers: {},
+      query: {},
+      body: { input: [] },
+      metadata: {
+        tmuxSessionId: 'tmux_only_scope_1',
+        clientTmuxSessionId: 'tmux_only_scope_1'
+      }
+    } as any);
+
+    expect(metadata.clientTmuxSessionId).toBe('tmux_only_scope_1');
+    expect(metadata.tmuxSessionId).toBe('tmux_only_scope_1');
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+  });
+
+  it('attaches request-scoped metadata center with request truth provenance', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-center-1',
+      headers: {},
+      query: {},
+      body: {
+        input: [],
+        metadata: {
+          sessionId: 'sess-meta-center-1',
+          conversationId: 'conv-meta-center-1'
+        }
+      },
+      metadata: {}
+    } as any);
+
+    const center = MetadataCenter.read(metadata);
+    expect(center).toBeDefined();
+    const requestTruth = center?.readRequestTruth();
+    expect(requestTruth?.sessionId).toBe('sess-meta-center-1');
+    expect(requestTruth?.conversationId).toBe('conv-meta-center-1');
+
+    const snapshot = center?.snapshot();
+    expect(snapshot?.requestTruth.sessionId?.writtenBy.module).toContain('executor-metadata.ts');
+    expect(snapshot?.requestTruth.sessionId?.writtenBy.stage).toBe('ServerReqInbound01ClientRaw');
+    expect(Array.isArray(snapshot?.requestTruth.sessionId?.history)).toBe(true);
+    expect(snapshot?.requestTruth.sessionId?.history.length).toBeGreaterThan(0);
+  });
+
+  it('finalizeRequestExecutorAttemptMetadata keeps request truth from metadata center instead of relay pipeline metadata', () => {
+    const metadataForAttempt = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-finalize-meta-center-1',
+      headers: {},
+      query: {},
+      body: {
+        input: [],
+        metadata: {
+          sessionId: 'sess-request-truth-1',
+          conversationId: 'conv-request-truth-1'
+        }
+      },
+      metadata: {}
+    } as any);
+
+    const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-finalize-meta-center-1',
+      metadataForAttempt,
+      pipelineResult: {
+        metadata: {
+          sessionId: 'sess-relay-should-not-win',
+          conversationId: 'conv-relay-should-not-win',
+          responsesRequestContext: {
+            sessionId: 'sess-relay-ctx',
+            conversationId: 'conv-relay-ctx'
+          }
+        }
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-finalize-meta-center-1'
+    });
+
+    expect(mergedMetadata.sessionId).toBe('sess-request-truth-1');
+    expect(mergedMetadata.conversationId).toBe('conv-request-truth-1');
+    expect(mergedMetadata.responsesRequestContext).toMatchObject({
+      sessionId: 'sess-relay-ctx',
+      conversationId: 'conv-relay-ctx'
+    });
+
+    const center = MetadataCenter.read(mergedMetadata);
+    expect(center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-request-truth-1',
+      conversationId: 'conv-request-truth-1'
+    });
   });
 
   it('extracts tmux session id from URL-encoded base64 turn metadata in client headers', () => {

@@ -99,6 +99,21 @@ export const MANUAL_WIKI_PAGES = [
     ],
   },
   {
+    path: `${WIKI_ROOT}/metadata-center-mainline-source.md`,
+    title: '# Metadata Center Mainline Source',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Metadata Center Mainline',
+      '## Stage Owners and Target Families',
+      '## Family Definitions',
+      '## Provenance Contract',
+      '## Current Structural Problems This Page Is Meant To Eliminate',
+      '## Migration Order',
+      '## Review Checklist',
+    ],
+  },
+  {
     path: `${WIKI_ROOT}/chat-process-protocol-mapping.md`,
     title: '# Chat Process Protocol Mapping',
     minMermaidBlocks: 3,

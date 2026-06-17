@@ -33,7 +33,28 @@ describe('stop_message_auto continuation routing state key', () => {
     expect(key).toBe('req_chain_from_continuation');
   });
 
-  test('does not restore stopless state from client-visible exec_command output', () => {
+  test('does not upgrade responsesRequestContext session into request session state key', () => {
+    const key = resolveStateKey({
+      providerProtocol: 'openai-responses',
+      requestId: 'req_rrc_only',
+      metadata: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-only',
+          conversationId: 'conv-relay-only'
+        }
+      },
+      __rt: {
+        responsesRequestContext: {
+          sessionId: 'sess-relay-only-rt',
+          conversationId: 'conv-relay-only-rt'
+        }
+      }
+    } as any);
+
+    expect(key).toBe('req_rrc_only');
+  });
+
+  test('restores stopless state only from current request tool output, not from exec_command shell text alone', () => {
     const command = "routecodex hook run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
     const state = resolveRuntimeStopMessageStateFromAdapterContext({
       __raw_request_body: {
@@ -51,7 +72,13 @@ describe('stop_message_auto continuation routing state key', () => {
       }
     });
 
-    expect(state).toBeNull();
+    expect(state).toEqual({
+      text: 'continue from output',
+      maxRepeats: 4,
+      used: 1,
+      source: 'client_exec_result',
+      stageMode: 'on'
+    });
   });
 
   test('uses Rust-owned bd working directory resolver', () => {

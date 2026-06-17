@@ -66,9 +66,11 @@ flowchart LR
 - stopless CLI command and CLI stdout no longer require `sessionId/requestId`.
 - next-turn restoration is now locked to current request `tool_outputs` / runtime metadata.
 - stopless is not treated as protocol-independent continuation; it must stay out of persisted continuation/file-state owners.
+- `responsesRequestContext.sessionId/conversationId` is continuation context only for `/v1/responses` owner flows; it must not be upgraded into request session truth, stopless activation input, stop-message scope, or state-key material.
 
 ## Review Checklist
 
 - stopless does not depend on tmux, file state, or `sessionDir`.
 - CLI projection stays in the stopless owner.
 - the next turn is materialized from current request CLI truth / runtime metadata, not from a second fallback path.
+- `responsesRequestContext` remains a continuation carrier only and never materializes request `sessionId/conversationId`.

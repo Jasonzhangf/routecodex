@@ -20,6 +20,7 @@ import { flushProcessLifecycleLogQueue, logProcessLifecycle, logProcessLifecycle
 import { getShutdownCallerContext } from './utils/shutdown-caller-context.js';
 import { listManagedServerPidsByPort } from './utils/managed-server-pids.js';
 import { writeServerPidCache } from './utils/server-runtime-pid.js';
+import { writeRuntimeInstance, updateRuntimeInstanceStatus } from './utils/runtime-instance-registry.js';
 import {
   inferUngracefulPreviousExit,
   resolveRuntimeLifecyclePath,
@@ -966,10 +967,23 @@ class RouteCodexApp {
             origin: 'start',
             routeCodexHomeDir: resolveRccPath()
           });
-        } catch (error) {
-          logNonBlockingError('write_server_pid_file', error);
-        }
-      })();
+         } catch (error) {
+           logNonBlockingError('write_server_pid_file', error);
+         }
+         try {
+           writeRuntimeInstance({
+             port: bindPort,
+             host: LOCAL_HOSTS.IPV4,
+             command: String(process.argv[1] || 'routecodex').trim(),
+             configPath: '',
+             ownerScope: 'index.start',
+             status: 'declared',
+             routeCodexHomeDir: resolveRccPath(),
+           });
+         } catch (error) {
+           logNonBlockingError('write_runtime_instance', error);
+         }
+       })();
 
       this._isRunning = true;
 

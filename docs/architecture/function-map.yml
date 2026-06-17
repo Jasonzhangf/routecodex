@@ -263,6 +263,7 @@ owners:
       - "Model side must stay unaware of stopless identity; stopless CLI command and CLI stdout no longer require `sessionId/requestId/sessionDir`, and persisted writeback must stay absent."
       - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter."
+      - "`responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material."
 
   - feature_id: hub.servertool_flow_presentation
     status: active
@@ -777,6 +778,49 @@ owners:
       - "Retired zero-consumer request-governance public bridge (`resolveGovernanceContext*`, `applyGovernedControlOperations*`, `applyGovernedMergeRequest*`, `mergeGovernanceSummaryIntoMetadata*`, `finalizeGovernedRequest*`, plus `chat_governance_context.rs` / `chat_governance_finalize.rs`) is physically deleted; request governance must stay in active Rust Hub mainline / `req_process_stage1_tool_governance*` owners, not standalone NAPI surfaces."
       - "Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath."
       - "Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage."
+
+  - feature_id: hub.metadata_center_mainline
+    status: proposed
+    summary: "request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout"
+    owner_kind: transitional
+    owner_scope: "request-scoped metadata truth/provenance registry for request and response lifecycle; current implementation owner is TS host/bridge runtime while migration target remains Rust"
+    owner_module: src/server/runtime/http-server
+    canonical_types:
+      - MetaReq01InboundSeeded
+      - MetaReq02TruthMaterialized
+      - MetaReq03ContinuationAttached
+      - MetaReq04RuntimeControlBound
+      - MetaReq05ProviderObservationProjected
+      - MetaResp06ResponseObserved
+      - MetaResp07ServertoolContextProjected
+      - MetaResp08CloseoutReleased
+    canonical_builders:
+      - buildRequestMetadata
+      - finalizeRequestExecutorAttemptMetadata
+      - buildServerToolAdapterContext
+    allowed_paths:
+      - src/server/handlers
+      - src/server/runtime/http-server
+      - src/modules/llmswitch/bridge
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - docs
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+      - src/providers/core/runtime
+    required_tests:
+      - tests/server/handlers/handler-metadata-boundary.spec.ts
+      - tests/server/http-server/executor-metadata.spec.ts
+      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
+      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "This feature is documentation/index-only for now; implementation not started."
+      - "Current repeated merge/backfill surfaces (`mergePipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`, adapter-context session backfill) are explicit migration sources, not desired end-state."
+      - "`request_truth.sessionId/conversationId` must remain distinct from `continuation_context.responsesRequestContext.*` and from tmux/client attachment scope."
+      - "Future center must store provenance: writer module, symbol, stage, status, overwrite history."
       - "Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports."
       - "Retired zero-consumer SSE stats/timeout public wrappers (`extractDecodeStatsWithNative`, `resolveSseTimeoutOptionsWithNative`, `extractDecodeStatsJson`, `resolveSseTimeoutOptionsJson`) are physically deleted; live SSE public bridges remain parser/stream/error descriptor/context diagnostics surfaces, not standalone stats/timeout helpers."
       - "Retired zero-consumer chat node-result public builders (`buildChatProcessContextMetadata*`, `applyChatProcessedRequest*`, `buildChatProcessedDescriptor*`, `buildChatNodeResultMetadata*`, `buildChatNodeResultObservation*`, `buildProcessedRequestFromChatResponse*`, `restoreResponseContinuationSemantics*`) and the stale `coverage-hub-chat-process-node-result.mjs` script are physically deleted; live request/response contract bridges remain only for request-executor and finish/empty response classification."
@@ -1923,15 +1967,20 @@ owners:
     allowed_paths:
       - src/utils/runtime-instance-registry.ts
       - tests/utils/runtime-instance-registry.spec.ts
+      - src/cli/commands/start.ts
+      - src/cli/commands/stop.ts
     forbidden_paths:
       - src/providers
     required_tests:
       - tests/utils/runtime-instance-registry.spec.ts
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
     migration_target: rust
     notes:
       - "Authoritative description of the instance, not the pid cache."
+      - "Wired from start.ts (daemon supervisor / daemon restart / direct spawn / shutdown-intent) and stop.ts (shutdown-intent); pid cache remains the transient hint, instance.json is the authoritative description."
   - feature_id: runtime.tmux_client_binding
     status: active
     summary: "tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json"

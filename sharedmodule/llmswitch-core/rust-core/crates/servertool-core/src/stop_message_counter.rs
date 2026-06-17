@@ -176,16 +176,6 @@ pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpd
                 ),
             );
         }
-        if !state.contains_key("stopMessageAiMode") {
-            state.insert(
-                "stopMessageAiMode".to_string(),
-                Value::String(
-                    snapshot
-                        .and_then(|snapshot| normalize_mode(&snapshot.ai_mode, &["on", "off"]))
-                        .unwrap_or_else(|| "off".to_string()),
-                ),
-            );
-        }
         return BudgetStateUpdatePlan {
             observed: false,
             stop_eligible: false,
@@ -249,17 +239,11 @@ pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpd
     let stage_mode = snapshot
         .and_then(|snapshot| normalize_mode(&snapshot.stage_mode, &["on", "off", "auto"]))
         .unwrap_or_else(|| "on".to_string());
-    let ai_mode = snapshot
-        .and_then(|snapshot| normalize_mode(&snapshot.ai_mode, &["on", "off"]))
-        .unwrap_or_else(|| "off".to_string());
     if !state.contains_key("stopMessageStageMode") {
         state.insert(
             "stopMessageStageMode".to_string(),
             Value::String(stage_mode),
         );
-    }
-    if !state.contains_key("stopMessageAiMode") {
-        state.insert("stopMessageAiMode".to_string(), Value::String(ai_mode));
     }
 
     BudgetStateUpdatePlan {

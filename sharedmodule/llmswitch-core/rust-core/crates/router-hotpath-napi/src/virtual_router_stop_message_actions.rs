@@ -80,11 +80,6 @@ fn apply_stop_message_set(
         Some(mode) => mode.to_string(),
     });
 
-    let incoming_ai_mode = normalize_on_off_mode(instruction.get("stopMessageAiMode"));
-    let current_ai_mode =
-        normalize_on_off_mode(state.get("stopMessageAiMode")).unwrap_or_else(|| "off".to_string());
-    let target_ai_mode = incoming_ai_mode.unwrap_or_else(|| "off".to_string());
-
     let same_text = read_trimmed_string(state.get("stopMessageText"))
         .map(|v| v == text_value)
         .unwrap_or(false);
@@ -92,8 +87,7 @@ fn apply_stop_message_set(
         .map(|v| to_i64_floor(v) == max_repeats)
         .unwrap_or(false);
     let same_mode = current_mode.as_deref() == Some(target_mode.as_str());
-    let same_ai_mode = current_ai_mode == target_ai_mode;
-    let is_same_instruction = same_text && same_max && same_mode && same_ai_mode;
+    let is_same_instruction = same_text && same_max && same_mode;
 
     let used = read_finite_f64(state.get("stopMessageUsed"))
         .map(|v| to_i64_floor(v).max(0))
@@ -133,7 +127,6 @@ fn apply_stop_message_set(
     set_i64(&mut set, "stopMessageMaxRepeats", max_repeats);
     set_string(&mut set, "stopMessageSource", explicit_source);
     set_string(&mut set, "stopMessageStageMode", target_mode);
-    set_string(&mut set, "stopMessageAiMode", target_ai_mode);
 
     if should_rearm_for_source {
         set_i64(&mut set, "stopMessageUsed", 0);
@@ -204,7 +197,6 @@ fn apply_stop_message_clear(now_ms: i64) -> NapiResult<String> {
     push_unset(&mut unset, "stopMessageUsed");
     push_unset(&mut unset, "stopMessageSource");
     push_unset(&mut unset, "stopMessageStageMode");
-    push_unset(&mut unset, "stopMessageAiMode");
     push_unset(&mut unset, "stopMessageAiSeedPrompt");
     push_unset(&mut unset, "stopMessageAiHistory");
 
@@ -228,8 +220,7 @@ mod tests {
             "stopMessageText": "继续执行",
             "stopMessageMaxRepeats": 2,
             "stopMessageUsed": 2,
-            "stopMessageStageMode": "on",
-            "stopMessageAiMode": "off"
+            "stopMessageStageMode": "on"
         });
         let output =
             apply_stop_message_instruction_json(instruction.to_string(), state.to_string(), 12345)

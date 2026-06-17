@@ -135,6 +135,7 @@ export {
   persistStoplessGoalStateSnapshot,
   readStoplessGoalState,
   extractSessionIdentifiersFromMetadata,
+  extractContinuationContextSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot
 } from './bridge/state-integrations.js';

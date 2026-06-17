@@ -218,13 +218,11 @@ function buildServertoolRoutingMetadata(
   const sessionId =
     readNonEmptyString(record.sessionId)
     ?? readNonEmptyString(metadata?.sessionId)
-    ?? readNonEmptyString(runtime?.sessionId)
-    ?? readNonEmptyString(responsesRequestContext?.sessionId);
+    ?? readNonEmptyString(runtime?.sessionId);
   const conversationId =
     readNonEmptyString(record.conversationId)
     ?? readNonEmptyString(metadata?.conversationId)
-    ?? readNonEmptyString(runtime?.conversationId)
-    ?? readNonEmptyString(responsesRequestContext?.conversationId);
+    ?? readNonEmptyString(runtime?.conversationId);
   return {
     ...(metadata ?? {}),
     ...(runtime ?? {}),
