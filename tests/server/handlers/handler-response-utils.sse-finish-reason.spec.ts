@@ -274,9 +274,12 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
     expect(output).toContain('event: error');
     expect(output).toContain('"code":"upstream_stream_incomplete"');
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse.stream][req-stream-incomplete-log-guard] error'));
+    expect(logOutput).toContain('"lastRawFrame":{"event":"response.output_text.delta","type":"response.output_text.delta"}');
+    expect(logOutput).toContain('"probe":{"id":"resp_incomplete_log_guard","status":"in_progress","outputCount":0');
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('request req-stream-incomplete-log-guard completed (status=200'));
   });
 

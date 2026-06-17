@@ -100,6 +100,55 @@ type ResponsesSseClientProjectionState = {
   emittedApplyPatchDoneCallIds: string[];
 };
 
+function summarizeResponsesProbeForLog(
+  probe: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!probe) {
+    return undefined;
+  }
+  const output = Array.isArray(probe.output) ? probe.output : [];
+  const outputTypes = output
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return undefined;
+      }
+      const row = item as Record<string, unknown>;
+      return typeof row.type === 'string' && row.type.trim() ? row.type.trim() : undefined;
+    })
+    .filter((value): value is string => Boolean(value));
+  const statuses = output
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return undefined;
+      }
+      const row = item as Record<string, unknown>;
+      return typeof row.status === 'string' && row.status.trim() ? row.status.trim() : undefined;
+    })
+    .filter((value): value is string => Boolean(value));
+  const requiredAction =
+    probe.required_action && typeof probe.required_action === 'object' && !Array.isArray(probe.required_action)
+      ? probe.required_action as Record<string, unknown>
+      : undefined;
+  const submitToolOutputs =
+    requiredAction?.submit_tool_outputs && typeof requiredAction.submit_tool_outputs === 'object' && !Array.isArray(requiredAction.submit_tool_outputs)
+      ? requiredAction.submit_tool_outputs as Record<string, unknown>
+      : undefined;
+  const requiredToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls.length : 0;
+  return {
+    id: typeof probe.id === 'string' ? probe.id : undefined,
+    status: typeof probe.status === 'string' ? probe.status : undefined,
+    outputCount: output.length,
+    outputTypes: outputTypes.length > 0 ? outputTypes : undefined,
+    outputStatuses: statuses.length > 0 ? statuses : undefined,
+    hasRequiredAction: Boolean(requiredAction),
+    requiredActionType: typeof requiredAction?.type === 'string' ? requiredAction.type : undefined,
+    requiredToolCallCount: requiredToolCalls > 0 ? requiredToolCalls : undefined,
+    sawResponseCompleted: probe.__seen_response_completed === true,
+    sawResponseDone: probe.__seen_response_done === true,
+    sawResponseRequiredAction: probe.__seen_response_required_action === true,
+  };
+}
+
 type SendSsePipelineResponseArgs = {
   res: Response;
   result: PipelineExecutionResult;
@@ -685,7 +734,7 @@ async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): P
   });
 }
 
-export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean> {
+export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
   const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint, requestLogContext } = args;
   if (forceSSE && !expectsStream) {
     const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
@@ -900,6 +949,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (options?.recordSnapshot !== false) {
       clientSseSnapshotRecorder?.record(frame);
     }
+    if (!isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
+      clientSemanticFrameWritten = true;
+    }
     logSseFrameProjection(requestLabel, 'response.sse.write_frame', frame);
     try {
       res.write(frame);
@@ -912,6 +964,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   const completionLogState: StreamCompletionLogState = { logged: false };
   let cleanupLogged = false;
   let streamEnded = false;
+  let clientSemanticFrameWritten = false;
   const finishTracker: SseFinishReasonTracker = {
     finishReason:
       typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
@@ -1719,7 +1772,15 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
             typeof incompleteError.code === 'string' ? incompleteError.code : 'HTTP_HANDLER_ERROR';
           logPipelineStage('response.sse.stream.error', requestLabel, {
             message: incompleteMessage,
-            code: incompleteCode
+            code: incompleteCode,
+            lastRawFrame: lastRawClientFrameSummary ?? undefined,
+            lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+            probe: summarizeResponsesProbeForLog(contractProbe.probe),
+            pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
+            terminalSource: terminalWatch.terminalSource,
+            sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
+            sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+            finishReason: resolvedStreamFinishReason,
           });
           writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, incompleteCode, {
             status: 502,
@@ -1745,6 +1806,40 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
               onNonBlockingError: logResponseNonBlockingError,
             });
           }
+          // G6: upstream_stream_incomplete without emitted semantic frames must
+          // surface as Error so executor catch-chain enters decideDirectRouterRetry
+          // -> provider-switch. Already-emitted frames = fail-fast, no reroute.
+          const hasEmittedSemanticFrames = clientSemanticFrameWritten === true
+            || terminalWatch.sawResponsesCompletedChunk === true
+            || terminalWatch.sawResponsesDoneEvent === true
+            || contractProbe.emitted === true;
+          if (!hasEmittedSemanticFrames) {
+            const upstreamError = new Error(`upstream stream incomplete: ${incompleteMessage}`);
+            (upstreamError as Error & Record<string, unknown>).code = 'UPSTREAM_STREAM_INCOMPLETE';
+            (upstreamError as Error & Record<string, unknown>).statusCode = 502;
+            (upstreamError as Error & Record<string, unknown>).providerKey = result.usageLogInfo?.providerKey;
+            (upstreamError as Error & Record<string, unknown>).requestId = requestLabel;
+            throw upstreamError;
+          }
+          // G4: started-stream with partial semantic frames must still surface
+          // the upstream_stream_incomplete error to the client via an explicit
+          // `event: error` frame, then close the stream. We re-use the same
+          // payload builder used for the non-emitted path so the client-visible
+          // code and message stay identical to the throw path.
+          if (!res.writableEnded && !res.destroyed) {
+            try {
+              const errorFramePayload = buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel);
+              writeClientSseFrame(
+                `event: error\ndata: ${JSON.stringify(errorFramePayload)}\n\n`,
+                'response.sse.stream_incomplete.write_error_event'
+              );
+            } catch (writeError) {
+              logResponseNonBlockingError(
+                `response.sse.stream_incomplete.write_error_event:${requestLabel}`,
+                writeError
+              );
+            }
+          }
           args.logResponseCompleted({
             status: 502,
             mode: 'sse',
@@ -1755,7 +1850,15 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           logPipelineStage('response.sse.stream.incomplete_internal_error', requestLabel, {
             message: incompleteMessage,
             code: incompleteCode,
-            clientErrorSuppressed: true
+            clientErrorSuppressed: true,
+            lastRawFrame: lastRawClientFrameSummary ?? undefined,
+            lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
+            probe: summarizeResponsesProbeForLog(contractProbe.probe),
+            pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
+            terminalSource: terminalWatch.terminalSource,
+            sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
+            sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
+            finishReason: resolvedStreamFinishReason,
           });
         } else {
           logStreamRequestCompleteOnce(
