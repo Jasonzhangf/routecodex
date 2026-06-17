@@ -83,19 +83,19 @@ pub fn calculate_budget(
     snapshot: Option<&BudgetSnapshot>,
     default_config: Option<&DefaultBudgetConfig>,
 ) -> BudgetDecision {
+    let max_repeats = snapshot
+        .map(|s| s.max_repeats)
+        .or_else(|| default_config.map(|c| c.max_repeats))
+        .unwrap_or(3);
+
     if !observed {
         return BudgetDecision {
             observed: false,
             stop_eligible: false,
             next_used: 0,
-            max_repeats: 0,
+            max_repeats,
         };
     }
-
-    let max_repeats = snapshot
-        .map(|s| s.max_repeats)
-        .or_else(|| default_config.map(|c| c.max_repeats))
-        .unwrap_or(3);
 
     if !stop_eligible {
         return BudgetDecision {
@@ -119,13 +119,80 @@ pub fn calculate_budget(
 
 pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpdatePlan {
     if !input.stop_signal.observed {
+        let snapshot = input.snapshot.as_ref();
+        let decision = calculate_budget(
+            false,
+            false,
+            snapshot,
+            input.default_config.as_ref(),
+        );
+        let existing_state = input.existing_state.clone();
+        let has_existing_budget_state = existing_state
+            .as_ref()
+            .and_then(Value::as_object)
+            .is_some_and(|row| {
+                row.contains_key("stopMessageUsed")
+                    || row.contains_key("stopMessageText")
+                    || row.contains_key("stopMessageMaxRepeats")
+            });
+        let should_persist_reset = snapshot.is_some() || has_existing_budget_state;
+        if !should_persist_reset {
+            return BudgetStateUpdatePlan {
+                observed: false,
+                stop_eligible: false,
+                used: None,
+                max_repeats: None,
+                should_persist: false,
+                next_state: input.existing_state,
+            };
+        }
+
+        let (text, source) = resolve_budget_text_and_source(snapshot, input.default_config.as_ref());
+        let mut state = existing_state
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        state.insert("stopMessageSource".to_string(), Value::String(source));
+        state.insert("stopMessageText".to_string(), Value::String(text));
+        state.insert(
+            "stopMessageMaxRepeats".to_string(),
+            Value::Number(serde_json::Number::from(decision.max_repeats)),
+        );
+        state.insert(
+            "stopMessageUsed".to_string(),
+            Value::Number(serde_json::Number::from(0)),
+        );
+        state.insert(
+            "stopMessageUpdatedAt".to_string(),
+            Value::Number(serde_json::Number::from(input.now_ms)),
+        );
+        state.remove("stopMessageLastUsedAt");
+        if !state.contains_key("stopMessageStageMode") {
+            state.insert(
+                "stopMessageStageMode".to_string(),
+                Value::String(
+                    snapshot
+                        .and_then(|snapshot| normalize_mode(&snapshot.stage_mode, &["on", "off", "auto"]))
+                        .unwrap_or_else(|| "on".to_string()),
+                ),
+            );
+        }
+        if !state.contains_key("stopMessageAiMode") {
+            state.insert(
+                "stopMessageAiMode".to_string(),
+                Value::String(
+                    snapshot
+                        .and_then(|snapshot| normalize_mode(&snapshot.ai_mode, &["on", "off"]))
+                        .unwrap_or_else(|| "off".to_string()),
+                ),
+            );
+        }
         return BudgetStateUpdatePlan {
             observed: false,
             stop_eligible: false,
-            used: None,
-            max_repeats: None,
-            should_persist: false,
-            next_state: input.existing_state,
+            used: Some(0),
+            max_repeats: Some(decision.max_repeats),
+            should_persist: true,
+            next_state: Some(Value::Object(state)),
         };
     }
 
@@ -273,6 +340,8 @@ mod tests {
     fn not_observed_no_update() {
         let result = calculate_budget(false, false, None, None);
         assert!(!result.observed);
+        assert_eq!(result.next_used, 0);
+        assert_eq!(result.max_repeats, 3);
     }
 
     #[test]
@@ -484,5 +553,40 @@ mod tests {
         assert_eq!(result.max_repeats, Some(5));
         assert_eq!(state["stopMessageText"], "keep going");
         assert_eq!(state["stopMessageMaxRepeats"], 5);
+    }
+
+    #[test]
+    fn plan_resets_when_followup_is_non_stop_after_prior_stop_chain() {
+        let result = plan_budget_state_update(BudgetStateUpdateInput {
+            stop_signal: StopGatewayBudgetContext {
+                observed: false,
+                eligible: false,
+                reason: "followup_finished_without_stop".into(),
+            },
+            existing_state: Some(serde_json::json!({
+                "stopMessageText": "继续执行",
+                "stopMessageUsed": 2,
+                "stopMessageMaxRepeats": 3,
+                "stopMessageLastUsedAt": 999
+            })),
+            snapshot: Some(BudgetSnapshot {
+                text: "继续执行".into(),
+                max_repeats: 3,
+                used: 2,
+                source: "persisted".into(),
+                stage_mode: Some("on".into()),
+                ai_mode: Some("off".into()),
+            }),
+            default_config: None,
+            now_ms: 5000,
+        });
+
+        assert!(result.should_persist);
+        assert_eq!(result.used, Some(0));
+        let state = result.next_state.unwrap();
+        assert_eq!(state["stopMessageUsed"], 0);
+        assert_eq!(state["stopMessageMaxRepeats"], 3);
+        assert_eq!(state["stopMessageUpdatedAt"], 5000);
+        assert!(state.get("stopMessageLastUsedAt").is_none());
     }
 }

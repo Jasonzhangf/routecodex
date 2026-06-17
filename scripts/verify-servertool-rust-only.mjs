@@ -307,6 +307,13 @@ function assertStoplessSessionIdLock() {
       `${CLI_PROJECTION} must not keep dead stopless session identity readers`
     );
   }
+  const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
+  if (orchestration.includes('_raw_followup_text_ignored')) {
+    fail(
+      'stopless-schema-feedback-lock',
+      `${CHAT_SERVERTOOL_ORCHESTRATION} must not discard schema followup text before the next-turn prompt`
+    );
+  }
 
   const rustCliContract = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`

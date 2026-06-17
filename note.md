@@ -1,4 +1,31 @@
+## 2026-06-17 stopless closed-loop fix (counter + schema feedback gate)
+
+- 新发现的闭环断点分两处：
+  - 计数器语义错：之前 `observed=false` 不落 reset，导致“非连续 stop”后旧计数会挂着；用户要求是真正的“连续 stop 才累计，不连续立即清零”。
+  - schema 反馈链断：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs` 明明读到了 `decision.followupText/followup_text`，却用 `_raw_followup_text_ignored` 丢掉，再改写成 generic prompt，导致“缺什么引导什么”根本到不了下一轮。
+- 本轮收口方向：
+  - Rust `stop_message_counter` 保持“非 stop 也 reset persisted used=0”的唯一真源。
+  - Rust `chat_servertool_orchestration` 改成：schema/invalid-schema/non-terminal-schema/budget-exhausted 触发时，优先把 `decision.followup_text` 原样发到 client-visible next-turn prompt；只有普通 stop 才走 generic natural prompt。
+  - `stopless_prompt.rs` 撤回“固定模板字段提示”这条错误方向，generic prompt 只保留自然语言；字段级纠错只来自 schema gate 真正的失败反馈。
+  - gate 增补：`scripts/verify-servertool-rust-only.mjs` 现在禁止 `chat_servertool_orchestration.rs` 再出现 `_raw_followup_text_ignored` 这种“读到又丢”的实现。
+
 ## 2026-06-17 stopless sessionId contract drift cleanup
+
+## 2026-06-17 install-global + restart 5555 unblock
+
+- 用户要求直接编译 / 全局安装 / 重启 `5555` 验证 live 是否切到新 stopless 契约。
+- 实际阻塞点不是 `install-global.sh` 后半段，而是工作树编译错误：
+  - `src/modules/llmswitch/bridge/state-integrations.ts` 直连 core dist JS 时把 native routing-state 参数推成 `unknown`，`tsc` 报 `TS2345`
+  - `src/server/runtime/http-server/index.ts` 缺 `node:path` import，`tsc` 报 `TS2304`
+- 最小修复：
+  - 给 `state-integrations.ts` 补 `RoutingInstructionState` 类型签名并用 typed native aliases 调用
+  - 给 `http-server/index.ts` 补 `import path from 'node:path'`
+- 验证证据：
+  - `npx tsc --pretty false --noEmit` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_INPLACE_BUILD=1 npm run install:global` 已完成全局安装，并把 `~/.rcc/install/current` 切到 `releases/routecodex-0.90.3075-2026-06-17T043357Z`
+  - `routecodex --version` = `0.90.3075`
+  - `routecodex restart --port 5555` PASS
+  - `curl http://127.0.0.1:5555/health` 返回 `{\"status\":\"ok\",\"ready\":true,\"pipelineReady\":true,\"server\":\"routecodex\",\"version\":\"0.90.3075\"}`
 
 - 新发现的仓库残留不是生产代码 throw，而是 docs/gate 漂移：
   - `docs/design/servertool-stopmessage-lifecycle.md` 还写 stopless 是 session-scoped CLI continuation，并声称缺 `sessionId/requestId` 时 runtime 自动补。
@@ -10,6 +37,16 @@
 - 处理策略：
   - 更新 stopless lifecycle 设计文档为 runtime-metadata closed loop
   - 把 verify gate 从“必须存在 sessionId lock”改成“禁止复活 sessionId requirement / env fallback”
+
+## 2026-06-17 runtime-session-dir owner trim follow-up
+
+- 本轮又确认两处与 goal 冲突的残留：
+  - `SessionClientRegistry` 虽已支持 bootstrap 显式注入 `bindingsStorePath`，但类内仍保留 `ROUTECODEX_SESSION_DIR -> session-bindings.json` 推断。
+  - Rust `virtual_router_engine/napi_proxy.rs` 的 runtime path override 仍允许从 metadata 顶层读取 `sessionDir/rccUserDir`，不是只认 `__rt.*` carrier。
+- 收口动作：
+  - 删除 `SessionClientRegistry` 的 env 推断，只保留显式 `bindingsStorePath`
+  - `napi_proxy.rs` 改成只读 `metadata.__rt.{sessionDir,rccUserDir}`
+  - 补回归测试，锁 `ROUTECODEX_SESSION_DIR` 和 metadata 顶层字段都不能再充当功能链 fallback
 
 ## 2026-06-16 mainline call map mermaid/wiki/gate closure
 
@@ -3128,3 +3165,7 @@ cleanup-stale-server-pids.mjs 存在但引用 ~/.routecodex（老目录），不
 - 代码定位：client-visible `upstream_stream_incomplete` 由 `src/server/handlers/handler-response-sse.ts` stream end 收尾逻辑投影；具体 payload builder 在 `src/modules/llmswitch/bridge/responses-response-bridge.ts::buildResponsesStreamIncompleteErrorPayloadForHttp`。
 - 当前判定条件：`planResponsesStreamEndRepairForHttp()` 仅在“未见 terminal event 且 probe 无法修复 continuation/completion”时走 incomplete；不是 headers timeout，也不是 router-direct request builder。
 - 已排除假因：补的 custom_tool_call continuation 样本证明 bridge 对 `response.output_item.{added,done}` 的 custom tool 断流会补 `response.completed/response.done`，不会触发 `upstream_stream_incomplete`；因此当前 live 样本更像 upstream 在仅有 `response.created` / `response.in_progress` 等非 terminal 语义时就断流。
+- 2026-06-17 followup：`mainline-call-map` 显示 `ServerRespOutbound05ClientFrame` 的唯一 caller/callee 是 `sendPipelineResponse -> sendSsePipelineResponse`；`function-map` 对应 owner 为 `server.responses_sse_bridge_surface` / `server.responses_response_handler_bridge_surface`。已在 `handler-response-sse.ts` 增加 incomplete 诊断字段（`lastRawFrame` / `lastProjectedFrame` / `probe` 摘要等），并修正 focused 日志断言后验证通过：
+  - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts`
+  - `tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts`
+  - `npx tsc --noEmit --pretty false`

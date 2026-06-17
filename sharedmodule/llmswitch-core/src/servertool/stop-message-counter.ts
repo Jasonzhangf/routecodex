@@ -118,10 +118,6 @@ export function applyStopMessageFinishReasonBudget(args: {
   adapterContext: AdapterContext;
 }): { observed: boolean; stopEligible: boolean; used?: number; maxRepeats?: number } {
   const stopSignal = inspectStopGatewaySignal(args.payload);
-  if (!stopSignal.observed) {
-    return { observed: false, stopEligible: false };
-  }
-
   const record = args.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(record) ?? {};
   const lookup = planStopMessagePersistedLookup(record, rt, {
@@ -139,7 +135,7 @@ export function applyStopMessageFinishReasonBudget(args: {
 
   return applyNativeBudgetPlan({
     stopSignal: {
-      observed: true,
+      observed: stopSignal.observed,
       eligible: stopSignal.eligible,
       reason: stopSignal.reason,
     },

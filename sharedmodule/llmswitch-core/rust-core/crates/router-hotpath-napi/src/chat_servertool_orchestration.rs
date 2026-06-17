@@ -2173,12 +2173,14 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .and_then(|v| v.as_u64())
         .or_else(|| input.decision.get("max_repeats").and_then(|v| v.as_u64()))
         .unwrap_or(0) as u32;
-    let trigger = input
+    let trigger_hint = input
         .decision
         .get("reason_code")
         .and_then(|v| v.as_str())
+        .or_else(|| input.decision.get("stopSchemaTriggerHint").and_then(|v| v.as_str()))
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.is_empty());
+    let trigger = trigger_hint
         .map(|reason_code| match reason_code {
             "stop_schema_missing" => StoplessContinuationTrigger::NoSchema,
             "stop_schema_reason_missing"
@@ -2198,24 +2200,35 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             _ => StoplessContinuationTrigger::NoSchema,
         })
         .unwrap_or(StoplessContinuationTrigger::NoSchema);
-    // Client-visible stopless followup must always go through the natural-user owner.
-    // stop-message-core's internal schema guidance must not reach the model as plain text.
-    let _raw_followup_text_ignored = input
+    // Preserve exact schema validation feedback in the next-turn prompt when the schema gate already
+    // produced it. Only plain stop continuations should fall back to the natural-user prompt owner.
+    let decision_followup_text = input
         .decision
         .get("followupText")
         .and_then(|v| v.as_str())
         .or_else(|| input.decision.get("followup_text").and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map(str::to_string)
-        .unwrap_or_default();
-    let followup_text = resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+        .map(str::to_string);
+    let natural_followup_text = resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
         used,
         max_repeats,
         trigger,
     })
     .map(|resolved| resolved.client_visible_text)
     .unwrap_or_default();
+    let followup_text = if matches!(
+        trigger,
+        StoplessContinuationTrigger::NoSchema
+            | StoplessContinuationTrigger::InvalidSchema
+            | StoplessContinuationTrigger::NonTerminalSchema
+            | StoplessContinuationTrigger::BudgetExhausted
+    ) && trigger_hint.is_some()
+    {
+        decision_followup_text.unwrap_or_else(|| natural_followup_text.clone())
+    } else {
+        natural_followup_text
+    };
     // 3. Extract runtime metadata and metadata for field lookups
     let runtime = extract_runtime(&input.adapter_context);
     let metadata = extract_metadata(&input.adapter_context);
@@ -3001,6 +3014,40 @@ mod tests {
         assert!(!text.contains("servertool"));
         assert!(!text.contains("第一轮"));
         assert_ne!(text, "继续执行");
+    }
+
+    #[test]
+    fn test_stop_message_auto_schema_followup_text_keeps_exact_validation_feedback() {
+        let input = json!({
+            "base": {
+                "choices": [{"message": {"role": "assistant", "content": "阶段完成"}, "finish_reason": "stop"}]
+            },
+            "decision": {
+                "action": "trigger",
+                "used": 0,
+                "maxRepeats": 3,
+                "stopSchemaTriggerHint": "stop_schema_missing",
+                "followupText": "缺 schema：请补 stopreason、reason、evidence、next_step"
+            },
+            "adapterContext": {
+                "routeId": "tools",
+                "routecodexPortMode": "router"
+            },
+            "candidateKeys": [],
+            "stickyKey": null,
+            "strictSessionScope": null
+        });
+
+        let output: Value = serde_json::from_str(
+            &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
+        )
+        .expect("json output");
+        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        assert!(text.contains("stopreason"), "text={text}");
+        assert!(text.contains("next_step"), "text={text}");
+        assert!(text.contains("evidence"), "text={text}");
+        assert!(text.contains("缺 schema"), "text={text}");
+        assert!(!text.contains("继续做下一步"), "text={text}");
     }
 
     #[test]
