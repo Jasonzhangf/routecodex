@@ -39,6 +39,7 @@ const RUST_SERVERTOOL_CLI = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crate
 const RUST_SERVERTOOL_CLI_BLACKBOX = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/tests/cli_blackbox.rs`;
 const RUST_FOLLOWUP_CORE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs`;
 const RUST_ROUTER_HOTPATH_NAPI_LIB = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`;
+const RUST_ROUTER_HOTPATH_NAPI_PROXY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`;
 const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
 const RUST_SERVERTOOL_STOP_GATEWAY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_gateway_context.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_COMPARE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_compare_context.rs`;
@@ -372,6 +373,132 @@ function assertStoplessSessionIdLock() {
       if (content.includes(forbidden)) {
         fail('stopless-session-lock', `${file} must not revive fallback token ${forbidden}`);
       }
+    }
+  }
+}
+
+function assertStoplessSchemaFeedbackLock() {
+  const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
+  assertContains(
+    'stopless-schema-feedback-lock',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'decision_followup_text = input'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'followup_text = if matches!'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'decision_followup_text.unwrap_or_else(|| natural_followup_text.clone())'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    CHAT_SERVERTOOL_ORCHESTRATION,
+    orchestration,
+    'test_stop_message_auto_schema_followup_text_keeps_exact_validation_feedback'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/cli/servertool-command.spec.ts`,
+    readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`),
+    'payload.schemaGuidance.requiredFields).toContain(\'stopreason\')'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/cli/servertool-command.spec.ts`,
+    readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`),
+    'payload.schemaGuidance.requiredFields).toContain(\'next_step\')'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
+    'schemaGuidance.requiredFields).toContain(\'stopreason\')'
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
+    'schemaGuidance.requiredFields).toContain(\'next_step\')'
+  );
+
+  const loopState = readRequired(`${ROOT}/tests/servertool/loop-state-block.spec.ts`);
+  assertContains(
+    'stopless-repeat-reset-lock',
+    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
+    loopState,
+    'plans repeat state through native policy'
+  );
+  assertContains(
+    'stopless-repeat-reset-lock',
+    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
+    loopState,
+    'repeatCount: 2'
+  );
+  assertContains(
+    'stopless-repeat-reset-lock',
+    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
+    loopState,
+    'repeatCount: 1'
+  );
+}
+
+function assertRuntimeMetadataSessionDirLock() {
+  const proxy = readRequired(RUST_ROUTER_HOTPATH_NAPI_PROXY);
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'resolve_runtime_path_overrides(metadata: &Value)'
+  );
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'read_runtime_string(metadata, &["rccUserDir", "rcc_user_dir"])'
+  );
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'read_runtime_string(metadata, &["sessionDir", "session_dir"])'
+  );
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'let rt = metadata.get("__rt");'
+  );
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'runtime_path_overrides_read_only_from_rt_namespace'
+  );
+  assertContains(
+    'runtime-metadata-session-dir-lock',
+    RUST_ROUTER_HOTPATH_NAPI_PROXY,
+    proxy,
+    'runtime_path_overrides_do_not_fallback_to_top_level_metadata'
+  );
+  const runtimeSource = proxy.split('#[cfg(test)]')[0];
+  for (const forbidden of [
+    'metadata.get("sessionDir")',
+    'metadata.get("rccUserDir")',
+    'metadata.get("session_dir")',
+    'metadata.get("rcc_user_dir")',
+  ]) {
+    if (runtimeSource.includes(forbidden)) {
+      fail(
+        'runtime-metadata-session-dir-lock',
+        `${RUST_ROUTER_HOTPATH_NAPI_PROXY.replace(`${ROOT}/`, '')} runtime source must not read top-level metadata fallback token ${forbidden}`
+      );
     }
   }
 }
@@ -4638,6 +4765,8 @@ checkNoBakFiles();
 checkNoTSHandlerRuntimeImport();
 checkNoDuplicateSemantics();
 assertStoplessSessionIdLock();
+assertStoplessSchemaFeedbackLock();
+assertRuntimeMetadataSessionDirLock();
 checkServertoolCliProjectionMap();
 checkServertoolRustificationVerificationRegistry();
 checkBuildIncludesServertoolGate();
