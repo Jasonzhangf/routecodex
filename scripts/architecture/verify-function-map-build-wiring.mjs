@@ -12,6 +12,7 @@ const requiredNodeIdConsistencyScript = 'verify:architecture-mainline-node-id-co
 const requiredReviewSurfaceScript = 'verify:architecture-review-surface';
 const requiredLongtailScript = 'verify:architecture-ci-longtail';
 const requiredBuildTieringScript = 'verify:build-script-tiering';
+const requiredCustomPayloadContainmentScript = 'verify:architecture-custom-payload-carrier-containment';
 const compileGate = scripts[requiredScript] || '';
 const requiredGateParts = [
   'verify:architecture-feature-id-anchors',
@@ -68,6 +69,9 @@ const architectureCiLongtail = scripts[requiredLongtailScript] || '';
 if (!architectureCiLongtail.includes(`npm run ${requiredBuildTieringScript}`)) {
   failures.push(`${requiredLongtailScript} must run ${requiredBuildTieringScript}`);
 }
+if (!architectureCiLongtail.includes(`npm run ${requiredCustomPayloadContainmentScript}`)) {
+  failures.push(`${requiredLongtailScript} must run ${requiredCustomPayloadContainmentScript}`);
+}
 
 const architectureCi = scripts['verify:architecture-ci'] || '';
 if (!architectureCi.includes(`npm run ${requiredReviewSurfaceScript}`)) {
@@ -90,3 +94,4 @@ console.log('[verify:function-map-build-wiring] ok');
 console.log(`- build scripts require ${requiredScript}`);
 console.log(`- build scripts require ${requiredReviewSurfaceLightScript}`);
 console.log(`- ${requiredLongtailScript} requires ${requiredBuildTieringScript}`);
+console.log(`- ${requiredLongtailScript} requires ${requiredCustomPayloadContainmentScript}`);
