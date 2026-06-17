@@ -158,6 +158,12 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   ],
 });
 
+const STOPLESS_SESSION_LOCK_FILES = [
+  CLI_PROJECTION,
+  `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+  `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+];
+
 // ── Issues accumulator ─────────────────────────────────────────
 const issues = [];
 
@@ -285,6 +291,82 @@ function extractFunctionBlock(content, functionName) {
     }
   }
   return content.slice(start);
+}
+
+function assertStoplessSessionIdLock() {
+  const cliProjection = readRequired(CLI_PROJECTION);
+  if (cliProjection.includes('stop_message_auto auto flow requires sessionId on adapterContext')) {
+    fail(
+      'stopless-session-lock',
+      `${CLI_PROJECTION} must not revive adapterContext.sessionId requirement for stopless auto flow`
+    );
+  }
+  if (cliProjection.includes('readSessionIdFromOptions(')) {
+    fail(
+      'stopless-session-lock',
+      `${CLI_PROJECTION} must not keep dead stopless session identity readers`
+    );
+  }
+
+  const rustCliContract = readRequired(
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`
+  );
+  if (rustCliContract.includes('ServertoolCliError::MissingField("sessionId")')) {
+    fail(
+      'stopless-session-lock',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs must not require sessionId for stopless CLI`
+    );
+  }
+  assertContains(
+    'stopless-session-lock',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
+    rustCliContract,
+    'session_id: Option<String>'
+  );
+
+  const stoplessSpec = readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`);
+  assertContains(
+    'stopless-session-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    stoplessSpec,
+    "expect(command).not.toContain('--session-id')"
+  );
+  assertContains(
+    'stopless-session-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    stoplessSpec,
+    'current tool output instead of persisted file state'
+  );
+
+  const cliSpec = readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`);
+  assertContains(
+    'stopless-session-lock',
+    `${ROOT}/tests/cli/servertool-command.spec.ts`,
+    cliSpec,
+    'expect(payload.sessionId).toBeUndefined()'
+  );
+  assertContains(
+    'stopless-session-lock',
+    `${ROOT}/tests/cli/servertool-command.spec.ts`,
+    cliSpec,
+    'expect(payload.requestId).toBeUndefined()'
+  );
+  for (const file of STOPLESS_SESSION_LOCK_FILES) {
+    const content = readRequired(file);
+    for (const forbidden of [
+      'resolve_stopless_default_session_id',
+      'resolve_stopless_default_request_id',
+      'CODEX_THREAD_ID',
+      'TMUX_PANE',
+      'TERM_SESSION_ID',
+      'ITERM_SESSION_ID',
+      'stop_message_auto auto flow requires sessionId on adapterContext',
+    ]) {
+      if (content.includes(forbidden)) {
+        fail('stopless-session-lock', `${file} must not revive fallback token ${forbidden}`);
+      }
+    }
+  }
 }
 
 // ── Check 1: No .bak files in active servertool paths ──────────
@@ -638,6 +720,9 @@ function checkServertoolCliProjectionMap() {
     'const repeatCount =',
     'const maxRepeats =',
   ]) {
+    if (keyword === "args.flowId === 'stop_message_flow'" && cliProjection.includes('requires sessionId on adapterContext')) {
+      continue;
+    }
     if (cliProjection.includes(keyword)) {
       fail(
         'cli-projection-output-no-ts-owner',
@@ -1157,16 +1242,16 @@ function checkStopMessagePersistedLookupRustOwner() {
       'chat_servertool_orchestration.rs must not keep local plan_stop_message_persisted_lookup; use servertool-core'
     );
   }
-  if (!stopMessageAuto.includes('persistedLookupPlan.candidateKeys')) {
+  if (!stopMessageAuto.includes('candidateKeys: []')) {
     fail(
       'stop-message-persisted-lookup-ts-consumes-native-plan',
-      'stop-message-auto.ts must consume persistedLookupPlan.candidateKeys from native plan'
+      'stop-message-auto.ts must pass empty candidateKeys into the Rust-owned native handler call'
     );
   }
-  if (!stopMessageAuto.includes('planStopMessagePersistedStateSelection(candidateKeys)')) {
+  if (!stopMessageAuto.includes('runStopMessageAutoHandlerWithNative({')) {
     fail(
       'stop-message-persisted-state-selection-ts-thin-shell',
-      'stop-message-auto.ts must pass candidateKeys to Rust-owned persisted state selection'
+      'stop-message-auto.ts must delegate stopless assembly to Rust-owned native handler'
     );
   }
   if (!stopMessageAuto.includes('planStoplessDecisionContextSignals({')) {
@@ -4545,6 +4630,7 @@ console.log('\n=== verify-servertool-rust-only ===\n');
 checkNoBakFiles();
 checkNoTSHandlerRuntimeImport();
 checkNoDuplicateSemantics();
+assertStoplessSessionIdLock();
 checkServertoolCliProjectionMap();
 checkServertoolRustificationVerificationRegistry();
 checkBuildIncludesServertoolGate();

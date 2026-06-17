@@ -2,12 +2,13 @@
 
 ## Scope
 
-This document defines the current stopless lifecycle. Stopless is a session-scoped CLI continuation flow and must not use transparent reenter.
+This document defines the current stopless lifecycle. Stopless is a request-closed-loop runtime-metadata flow and must not use transparent reenter, file persistence, or transparent reenter.
 
 ## Contract
 
-- State matching is strictly `session:<sessionId>`.
-- If the caller omits `sessionId/requestId`, the CLI/runtime must auto-supply them; the missing caller fields must not fail the tool, but auto-generated identity is only execution-local unless a stable sessionId is injected by runtime metadata.
+- Stopless does not persist by `session:<sessionId>` and does not own a file-backed continuation scope.
+- Stopless CLI command / CLI stdout must not require `sessionId`, `requestId`, or `sessionDir`.
+- If runtime metadata already carries `sessionId`, it may still participate in broader stop-message / pending-session scope decisions, but stopless CLI progression itself must only depend on current request tool output + runtime metadata truth.
 - `tmuxSessionId`, `conversationId`, `default`, and `stopMessageClientInject*` are forbidden as stopless state fallback keys.
 - req_chatprocess must always inject the same stop hook contract for stopless-managed turns; if the hook is not injected, the model cannot be expected to call it.
 - Stopless must emit a client-visible `exec_command` CLI projection for non-terminal stop flows.
@@ -80,6 +81,16 @@ budget guard
 
 `StoplessOrchestrationAction` has only two valid actions: `terminal_final` and `cli_projection`. Any `followup_mainline` stopless action is invalid.
 
+The closed loop is:
+
+1. response-side stop detection projects client-visible `exec_command`
+2. client runs `routecodex hook run reasoning_stop` with status-only input
+3. CLI stdout returns schema guidance only
+4. next request brings that stdout back as ordinary tool output
+5. req-side rewrite materializes guidance from current request tool output/runtime metadata
+
+No stopless step in this loop may depend on tmux, `ROUTECODEX_SESSION_DIR`, file-backed writeback, or server-side reenter.
+
 ## Owners
 
 - Scope / persisted lookup: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
@@ -103,6 +114,7 @@ Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` ca
 
 - `cargo test -p servertool-core stopless --lib -- --nocapture`
 - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`
+- `cargo test -p servertool-cli --test cli_blackbox -- --nocapture`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts --runInBand`
 - `npm run verify:servertool-rust-only`
 - `npm run verify:function-map-compile-gate`
