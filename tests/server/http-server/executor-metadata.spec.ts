@@ -98,8 +98,12 @@ describe('executor metadata session daemon extraction', () => {
 
     expect(metadata.clientDaemonId).toBe('sessiond_header_2');
     expect(metadata.sessionDaemonId).toBe('sessiond_header_2');
-    expect(metadata.sessionId).toBe('conv_from_body_meta');
-    expect(metadata.conversationId).toBe('conv_from_body_meta');
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      sessionId: 'conv_from_body_meta',
+      conversationId: 'conv_from_body_meta'
+    });
   });
 
   it('resolves workdir from session daemon registry without inferring tmux scope', () => {
@@ -270,6 +274,33 @@ describe('executor metadata session daemon extraction', () => {
     expect(snapshot?.requestTruth.sessionId?.history.length).toBeGreaterThan(0);
   });
 
+  it('materializes request truth from factual Codex session headers', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-codex-header-truth-1',
+      headers: {
+        'user-agent': 'codex-tui/0.128.0',
+        originator: 'codex-tui',
+        session_id: 'sess-codex-header-truth-1',
+        conversation_id: 'conv-codex-header-truth-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-codex-header-truth-1',
+      conversationId: 'conv-codex-header-truth-1'
+    });
+  });
+
   it('finalizeRequestExecutorAttemptMetadata keeps request truth from metadata center instead of relay pipeline metadata', () => {
     const metadataForAttempt = buildRequestMetadata({
       entryEndpoint: '/v1/responses',
@@ -286,36 +317,247 @@ describe('executor metadata session daemon extraction', () => {
       },
       metadata: {}
     } as any);
+    const relayPipelineMetadata: Record<string, unknown> = {
+      sessionId: 'sess-relay-should-not-win',
+      conversationId: 'conv-relay-should-not-win',
+    };
+    const relayCenter = MetadataCenter.attach(relayPipelineMetadata);
+    relayCenter.writeContinuationContext(
+      'responsesRequestContext',
+      {
+        sessionId: 'sess-relay-ctx',
+        conversationId: 'conv-relay-ctx'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'finalizeRequestExecutorAttemptMetadata keeps request truth from metadata center instead of relay pipeline metadata',
+        stage: 'test'
+      }
+    );
 
     const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
       requestId: 'req-finalize-meta-center-1',
       metadataForAttempt,
       pipelineResult: {
-        metadata: {
-          sessionId: 'sess-relay-should-not-win',
-          conversationId: 'conv-relay-should-not-win',
-          responsesRequestContext: {
-            sessionId: 'sess-relay-ctx',
-            conversationId: 'conv-relay-ctx'
-          }
-        }
+        metadata: relayPipelineMetadata
       } as any,
       clientHeadersForAttempt: undefined,
       clientRequestId: 'client-req-finalize-meta-center-1'
     });
 
-    expect(mergedMetadata.sessionId).toBe('sess-request-truth-1');
-    expect(mergedMetadata.conversationId).toBe('conv-request-truth-1');
-    expect(mergedMetadata.responsesRequestContext).toMatchObject({
+    expect(mergedMetadata.sessionId).toBeUndefined();
+    expect(mergedMetadata.conversationId).toBeUndefined();
+    expect(mergedMetadata.responsesRequestContext).toBeUndefined();
+
+    const center = MetadataCenter.read(mergedMetadata);
+    expect(center?.readContinuationContext().responsesRequestContext).toMatchObject({
       sessionId: 'sess-relay-ctx',
       conversationId: 'conv-relay-ctx'
     });
-
-    const center = MetadataCenter.read(mergedMetadata);
     expect(center?.readRequestTruth()).toMatchObject({
       sessionId: 'sess-request-truth-1',
       conversationId: 'conv-request-truth-1'
     });
+  });
+
+  it('preserves metadata center binding across metadata merges', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-merge-1',
+      headers: {
+        session_id: 'sess-center-merge-1',
+        conversation_id: 'conv-center-merge-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-center-merge-1',
+      conversationId: 'conv-center-merge-1'
+    });
+
+    const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-center-merge-1',
+      metadataForAttempt: metadata,
+      pipelineResult: {
+        metadata: {
+          routeName: 'thinking'
+        }
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-center-merge-1'
+    });
+
+    const mergedCenter = MetadataCenter.read(mergedMetadata);
+    expect(mergedCenter?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-center-merge-1',
+      conversationId: 'conv-center-merge-1'
+    });
+  });
+
+  it('merges provider observation from pipeline metadata center without reviving flat target fields', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-provider-observation-merge-1',
+      headers: {
+        session_id: 'sess-center-provider-observation-merge-1',
+        conversation_id: 'conv-center-provider-observation-merge-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    const pipelineMetadata: Record<string, unknown> = {};
+    const pipelineCenter = MetadataCenter.attach(pipelineMetadata);
+    pipelineCenter.writeProviderObservation(
+      'target',
+      {
+        providerKey: 'minimax.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7',
+        compatibilityProfile: 'openai-responses'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'merges provider observation from pipeline metadata center without reviving flat target fields',
+        stage: 'test'
+      }
+    );
+    pipelineCenter.writeProviderObservation(
+      'compatibilityProfile',
+      'openai-responses',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'merges provider observation from pipeline metadata center without reviving flat target fields',
+        stage: 'test'
+      }
+    );
+
+    const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-center-provider-observation-merge-1',
+      metadataForAttempt: metadata,
+      pipelineResult: {
+        metadata: pipelineMetadata
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-center-provider-observation-merge-1'
+    });
+
+    expect(mergedMetadata.target).toBeUndefined();
+    expect(mergedMetadata.compatibilityProfile).toBeUndefined();
+    expect(MetadataCenter.read(mergedMetadata)?.readProviderObservation()).toMatchObject({
+      compatibilityProfile: 'openai-responses',
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7',
+        compatibilityProfile: 'openai-responses'
+      }
+    });
+  });
+
+  it('preserves request truth metadata center across attempt decoration clones', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-attempt-clone-1',
+      headers: {
+        session_id: 'sess-center-attempt-clone-1',
+        conversation_id: 'conv-center-attempt-clone-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    const decorated = decorateMetadataForAttempt(metadata, 1, new Set<string>());
+    const decoratedCenter = MetadataCenter.read(decorated);
+
+    expect(decoratedCenter?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-center-attempt-clone-1',
+      conversationId: 'conv-center-attempt-clone-1'
+    });
+
+    const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-center-attempt-clone-1',
+      metadataForAttempt: decorated,
+      pipelineResult: {
+        metadata: {
+          routeName: 'search'
+        }
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-center-attempt-clone-1'
+    });
+
+    expect(mergedMetadata.sessionId).toBeUndefined();
+    expect(mergedMetadata.conversationId).toBeUndefined();
+    expect(MetadataCenter.read(mergedMetadata)?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-center-attempt-clone-1',
+      conversationId: 'conv-center-attempt-clone-1'
+    });
+  });
+
+  it('preserves request truth in metadata center even if legacy top-level session field is later overwritten', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-stale-top-level-1',
+      headers: {
+        session_id: 'sess-center-stale-1',
+        conversation_id: 'conv-center-stale-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    metadata.sessionId = 'unknown';
+
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-center-stale-1',
+      conversationId: 'conv-center-stale-1'
+    });
+  });
+
+  it('enforces request truth write-once in metadata center', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'sessionId',
+      'sess-write-once-1',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'enforces request truth write-once in metadata center',
+        stage: 'test'
+      }
+    );
+
+    expect(() => {
+      center.writeRequestTruth(
+        'sessionId',
+        'sess-write-once-2',
+        {
+          module: 'tests/server/http-server/executor-metadata.spec.ts',
+          symbol: 'enforces request truth write-once in metadata center',
+          stage: 'test'
+        }
+      );
+    }).toThrow(/write-once/);
+    expect(center.readRequestTruth().sessionId).toBe('sess-write-once-1');
   });
 
   it('extracts tmux session id from URL-encoded base64 turn metadata in client headers', () => {
@@ -412,8 +654,12 @@ describe('executor metadata session daemon extraction', () => {
       }
     } as any);
 
-    expect(metadata.sessionId).toBe(conversationSessionId);
-    expect(metadata.conversationId).toBe(conversationSessionId);
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      sessionId: conversationSessionId,
+      conversationId: conversationSessionId
+    });
     expect(metadata.workdir).toBe(workdir);
     expect(metadata.clientTmuxSessionId).toBe(tmuxSessionId);
     expect(metadata.tmuxSessionId).toBe(tmuxSessionId);

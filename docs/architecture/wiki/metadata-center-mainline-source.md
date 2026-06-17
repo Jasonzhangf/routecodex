@@ -52,7 +52,7 @@ flowchart LR
 | `mtc-02` | request truth fixed -> continuation attached | `HubReqChatProcess03Governed` | `continuation_context` | responses/chat continuation semantics |
 | `mtc-02-result` | request truth fixed -> result continuation attached | `HubReqChatProcess03Governed` / host result bridge | `continuation_context` | `attachResponsesRequestContextToResultForHttp -> MetadataCenter.writeContinuationContext`; result metadata 现在也只把 `responsesRequestContext` 写进 center continuation family |
 | `mtc-03` | continuation attached -> runtime control bound | `HubReqChatProcess03Governed` / `VrRoute04SelectedTarget` | `runtime_control` | route hint / stream / servertool followup / stop-message controls |
-| `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts` currently projects `target` + `compatibilityProfile` onto flat metadata while keeping request truth center-bound |
+| `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -> MetadataCenter.writeProviderObservation`; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat `metadata.target` |
 | `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `responses-response-bridge.ts` currently derives `finishReason` and persists lifecycle using MetadataCenter-backed request truth |
 | `mtc-06` | response observed -> servertool context projection | `HubRespChatProcess03Governed` | read-only projection from center; no new request truth | `servertool-adapter-context.ts` now reads request truth from `MetadataCenter.readRequestTruth()` for session/conversation projection |
 | `mtc-07` | projected -> closeout released | `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame` | `status/provenance` closeout only | `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`; JSON closeout、SSE finish/close、SSE bridge-error 现已共用真实 handler closeout owner |
@@ -173,7 +173,7 @@ Request truth itself no longer lacks a single write ledger:
 - `src/modules/llmswitch/bridge/responses-request-bridge.ts` owns continuation context attachment
 - `src/server/runtime/http-server/executor/servertool-adapter-context.ts` now reads request truth only from `MetadataCenter`
 
-The remaining problem is that some broader runtime fields are still projected through flat metadata merge surfaces.
+The remaining problem is now narrower: broader runtime families still pass through flat metadata containers, but provider observation no longer relies on flat `target` / `compatibilityProfile` revival.
 
 ### 2. Multi-source Session Backfill Residue
 
@@ -223,7 +223,7 @@ Completed:
 Still open:
 
 1. delete remaining scattered flat merge/projection surfaces
-2. promote `provider_observation` / `response_observation` from flat projection to explicit center-backed families so `mtc-04` / `mtc-05` / `mtc-06` can move from `partial` toward fully anchored family ownership
+2. promote `response_observation` and remaining adapter projections so `mtc-05` / `mtc-06` can move from `partial` toward fully anchored family ownership
 3. continue replay closeout for the remaining upstream `/v1/messages` `HTTP_400` that is no longer a session-truth bug
 
 ## Migration Order

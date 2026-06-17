@@ -152,6 +152,11 @@ Canonical references:
 1. `src/server/handlers/handler-utils.ts::buildHandlerPipelineMetadata`
 2. `src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata`
 
+已完成的收口：
+
+- `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts` 不再把 `target` / `compatibilityProfile` 写回 flat metadata，改为写入 `MetadataCenter.provider_observation`
+- `servertool-adapter-context.ts`、`provider-request-context.ts`、`provider-response-utils.ts` 的 provider model / compatibility 读取已转成 center-backed 读取
+
 结果：
 
 - 写入来源不透明

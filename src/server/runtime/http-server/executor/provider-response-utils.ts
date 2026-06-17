@@ -21,8 +21,9 @@ export function normalizeProviderResponse(response: unknown): PipelineExecutionR
   const headers = normalizeProviderResponseHeaders(
     response && typeof response === 'object' ? (response as Record<string, unknown>).headers : undefined
   );
+  const sseStream = extractProviderResponseSseStream(response);
   const body = normalizeProviderResponseBody(response);
-  return { status, headers, body, metadata };
+  return { status, headers, body, metadata, ...(sseStream !== undefined ? { sseStream } : {}) };
 }
 
 function normalizeProviderResponseBody(response: unknown): unknown {
@@ -31,7 +32,7 @@ function normalizeProviderResponseBody(response: unknown): unknown {
   }
   const record = response as Record<string, unknown>;
   if (Object.prototype.hasOwnProperty.call(record, 'data')) {
-    return record.data;
+    return stripProviderResponseSideChannels(record.data);
   }
   if (
     Object.prototype.hasOwnProperty.call(record, 'body')
@@ -39,11 +40,53 @@ function normalizeProviderResponseBody(response: unknown): unknown {
       Object.prototype.hasOwnProperty.call(record, 'status')
       || Object.prototype.hasOwnProperty.call(record, 'headers')
       || Object.prototype.hasOwnProperty.call(record, 'metadata')
+      || Object.prototype.hasOwnProperty.call(record, 'sseStream')
     )
   ) {
-    return record.body;
+    return stripProviderResponseSideChannels(record.body);
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'sseStream')) {
+    const { sseStream: _sseStream, status: _status, statusText: _statusText, headers: _headers, metadata: _metadata, ...rest } = record;
+    return Object.keys(rest).length ? rest : undefined;
   }
   return response;
+}
+
+function extractProviderResponseSseStream(response: unknown): unknown {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return undefined;
+  }
+  const record = response as Record<string, unknown>;
+  if (record.sseStream !== undefined) {
+    return record.sseStream;
+  }
+  const data = record.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    if (nested.sseStream !== undefined) {
+      return nested.sseStream;
+    }
+  }
+  const body = record.body;
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const nested = body as Record<string, unknown>;
+    if (nested.sseStream !== undefined) {
+      return nested.sseStream;
+    }
+  }
+  return undefined;
+}
+
+function stripProviderResponseSideChannels(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, 'sseStream')) {
+    return value;
+  }
+  const { sseStream: _sseStream, ...rest } = record;
+  return Object.keys(rest).length ? rest : undefined;
 }
 
 function normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
@@ -63,12 +106,23 @@ export function extractClientModelId(
   metadata: Record<string, unknown>,
   originalRequest?: Record<string, unknown>
 ): string | undefined {
+  const metadataCenter = MetadataCenter.read(metadata);
+  const centerObservation = metadataCenter?.readProviderObservation();
+  const centerModelId =
+    typeof centerObservation?.clientModelId === 'string' && centerObservation.clientModelId.trim()
+      ? centerObservation.clientModelId.trim()
+      : typeof centerObservation?.modelId === 'string' && centerObservation.modelId.trim()
+        ? centerObservation.modelId.trim()
+        : undefined;
+  if (centerModelId) {
+    return centerModelId;
+  }
   const candidates = [
     metadata.clientModelId,
     metadata.originalModelId,
-    (metadata.target && typeof metadata.target === 'object'
-      ? (metadata.target as Record<string, unknown>).clientModelId
-      : undefined),
+    centerObservation?.target && typeof centerObservation.target === 'object'
+      ? (centerObservation.target as Record<string, unknown>).clientModelId
+      : undefined,
     originalRequest && typeof originalRequest === 'object'
       ? (originalRequest as Record<string, unknown>).model
       : undefined,
@@ -190,3 +244,4 @@ export function describeRequestSemanticsResolution(
     resolved: summarizeSemanticsNode(resolved)
   };
 }
+import { MetadataCenter } from '../metadata-center/metadata-center.js';

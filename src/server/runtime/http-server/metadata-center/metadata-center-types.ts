@@ -64,7 +64,19 @@ export type MetadataCenterContinuationContext = {
   stickyScope?: string;
 };
 
+export type MetadataCenterProviderObservation = {
+  target?: Record<string, unknown>;
+  providerKey?: string;
+  assignedModelId?: string;
+  modelId?: string;
+  clientModelId?: string;
+  compatibilityProfile?: string;
+  responseSemantics?: Record<string, unknown>;
+  finishReason?: string;
+};
+
 export type MetadataCenterState = {
   requestTruth: Partial<Record<keyof MetadataCenterRequestTruth, MetadataCenterSlot>>;
   continuationContext: Partial<Record<keyof MetadataCenterContinuationContext, MetadataCenterSlot>>;
+  providerObservation: Partial<Record<keyof MetadataCenterProviderObservation, MetadataCenterSlot>>;
 };

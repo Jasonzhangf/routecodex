@@ -1,6 +1,7 @@
 import type {
   MetadataCenterContinuationContext,
   MetadataCenterFamily,
+  MetadataCenterProviderObservation,
   MetadataCenterRequestTruth,
   MetadataCenterSlot,
   MetadataCenterState,
@@ -46,13 +47,54 @@ function buildSlot<T>(args: {
   };
 }
 
+const METADATA_CENTER_STATUS_ORDER: Readonly<Record<MetadataCenterStatus, number>> = {
+  active: 0,
+  consumed: 1,
+  finalized: 2,
+  released: 3,
+};
+
+const HTTP_RESPONSE_METADATA_RELEASE_WRITER: MetadataCenterWriter = {
+  module: 'src/server/runtime/http-server/metadata-center/metadata-center.ts',
+  symbol: 'releaseMetadataCenterForHttpResponse',
+  stage: 'ServerRespOutbound05ClientFrame',
+};
+
+function transitionSlotStatus<T>(args: {
+  previous: MetadataCenterSlot<T>;
+  status: MetadataCenterStatus;
+  changedBy: MetadataCenterWriter;
+  reason?: string;
+}): MetadataCenterSlot<T> {
+  if (METADATA_CENTER_STATUS_ORDER[args.previous.status] >= METADATA_CENTER_STATUS_ORDER[args.status]) {
+    return args.previous;
+  }
+  return {
+    ...args.previous,
+    status: args.status,
+    version: args.previous.version + 1,
+    history: [
+      ...args.previous.history,
+      {
+        value: args.previous.value,
+        module: args.changedBy.module,
+        symbol: args.changedBy.symbol,
+        stage: args.changedBy.stage,
+        at: now(),
+        reason: args.reason ?? `status:${args.status}`,
+      },
+    ],
+  };
+}
+
 export class MetadataCenter {
   private readonly state: MetadataCenterState;
 
   constructor() {
     this.state = {
       requestTruth: {},
-      continuationContext: {}
+      continuationContext: {},
+      providerObservation: {}
     };
   }
 
@@ -88,6 +130,9 @@ export class MetadataCenter {
       return;
     }
     const previous = this.state.requestTruth[key] as MetadataCenterSlot<MetadataCenterRequestTruth[K]> | undefined;
+    if (previous) {
+      throw new Error(`MetadataCenter request_truth.${String(key)} is write-once and already set`);
+    }
     this.state.requestTruth[key] = buildSlot({
       value,
       family: 'request_truth',
@@ -144,9 +189,89 @@ export class MetadataCenter {
     };
   }
 
+  writeProviderObservation<K extends keyof MetadataCenterProviderObservation>(
+    key: K,
+    value: MetadataCenterProviderObservation[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.providerObservation[key] as MetadataCenterSlot<MetadataCenterProviderObservation[K]> | undefined;
+    this.state.providerObservation[key] = buildSlot({
+      value,
+      family: 'provider_observation',
+      writtenBy,
+      writePolicy: 'replaceable',
+      previous,
+      reason
+    });
+  }
+
+  readProviderObservation(): MetadataCenterProviderObservation {
+    return {
+      target: this.state.providerObservation.target?.value as Record<string, unknown> | undefined,
+      providerKey: this.state.providerObservation.providerKey?.value as string | undefined,
+      assignedModelId: this.state.providerObservation.assignedModelId?.value as string | undefined,
+      modelId: this.state.providerObservation.modelId?.value as string | undefined,
+      clientModelId: this.state.providerObservation.clientModelId?.value as string | undefined,
+      compatibilityProfile: this.state.providerObservation.compatibilityProfile?.value as string | undefined,
+      responseSemantics: this.state.providerObservation.responseSemantics?.value as Record<string, unknown> | undefined,
+      finishReason: this.state.providerObservation.finishReason?.value as string | undefined
+    };
+  }
+
+  markReleased(writtenBy: MetadataCenterWriter, reason?: string): void {
+    for (const key of Object.keys(this.state.requestTruth) as Array<keyof MetadataCenterRequestTruth>) {
+      const slot = this.state.requestTruth[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.requestTruth[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.continuationContext) as Array<keyof MetadataCenterContinuationContext>) {
+      const slot = this.state.continuationContext[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.continuationContext[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.providerObservation) as Array<keyof MetadataCenterProviderObservation>) {
+      const slot = this.state.providerObservation[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.providerObservation[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+  }
+
   snapshot(): MetadataCenterState {
     return this.state;
   }
 }
 
 export const METADATA_CENTER_RUNTIME_SYMBOL = METADATA_CENTER_SYMBOL;
+
+export function releaseMetadataCenterForHttpResponse(metadata: unknown, reason?: string): void {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return;
+  }
+  MetadataCenter.read(metadata as Record<string, unknown>)
+    ?.markReleased(HTTP_RESPONSE_METADATA_RELEASE_WRITER, reason);
+}

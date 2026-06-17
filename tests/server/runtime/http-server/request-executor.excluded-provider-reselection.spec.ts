@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { __requestExecutorTestables } from '../../../../src/server/runtime/http-server/request-executor';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('request-executor excluded provider reselection plan', () => {
   it('keeps excluded provider excluded when alternative candidates still exist', () => {
@@ -88,6 +89,62 @@ describe('request-executor excluded provider reselection plan', () => {
         'openai.key2.gpt-5.4-medium',
         'openai.key3.gpt-5.4-medium',
       ]
+    });
+  });
+
+  it('writes provider observation into MetadataCenter instead of reviving flat target metadata', () => {
+    const metadataForAttempt: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadataForAttempt);
+
+    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-provider-observation-center-1',
+      providerRequestId: 'req-provider-observation-center-1',
+      attempt: 1,
+      metadataForAttempt,
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'search',
+          routePool: ['minimax.key1.MiniMax-M2.7']
+        },
+        providerPayload: { model: 'MiniMax-M2.7' },
+        target: {
+          providerKey: 'minimax.key1.MiniMax-M2.7',
+          runtimeKey: 'minimax.key1',
+          compatibilityProfile: 'openai-responses',
+          modelId: 'MiniMax-M2.7'
+        },
+        metadata: {}
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'req-provider-observation-center-1',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set<string>(),
+      lastError: null,
+      blockingRecoverableRouteHoldState: null,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
+      hubStartedAtMs: Date.now() - 10,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved.kind).toBe('resolved');
+    if (resolved.kind !== 'resolved') {
+      return;
+    }
+    expect(resolved.mergedMetadata.target).toBeUndefined();
+    expect(resolved.mergedMetadata.compatibilityProfile).toBeUndefined();
+    expect(center.readProviderObservation()).toMatchObject({
+      providerKey: 'minimax.key1.MiniMax-M2.7',
+      modelId: 'MiniMax-M2.7',
+      assignedModelId: 'MiniMax-M2.7',
+      compatibilityProfile: 'openai-responses',
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M2.7',
+        modelId: 'MiniMax-M2.7',
+        compatibilityProfile: 'openai-responses'
+      }
     });
   });
 

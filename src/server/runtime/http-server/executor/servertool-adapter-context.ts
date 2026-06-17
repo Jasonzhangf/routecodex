@@ -1,11 +1,9 @@
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
+// feature_id: hub.metadata_center_servertool_context
+import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
-import {
-  backfillAdapterContextSessionIdentifiersFromEntryOriginRequest,
-  syncStoplessGoalStateFromCapturedRequest
-} from './servertool-request-normalizer.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -22,46 +20,12 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function readRequestTruthSessionId(metadataBag: Record<string, unknown>): string | undefined {
-  const rt = asFlatRecord(metadataBag.__rt);
-  return (
-    readNonEmptyString(metadataBag.requestSessionId)
-    ?? readNonEmptyString(metadataBag.request_session_id)
-    ?? readNonEmptyString(rt?.requestSessionId)
-    ?? readNonEmptyString(rt?.request_session_id)
-  );
-}
-
-function readRequestTruthConversationId(metadataBag: Record<string, unknown>): string | undefined {
-  const rt = asFlatRecord(metadataBag.__rt);
-  return (
-    readNonEmptyString(metadataBag.requestConversationId)
-    ?? readNonEmptyString(metadataBag.request_conversation_id)
-    ?? readNonEmptyString(rt?.requestConversationId)
-    ?? readNonEmptyString(rt?.request_conversation_id)
-  );
-}
-
-function readRequestTruthSessionIdFromEntryOrigin(entryOriginRequest: unknown): string | undefined {
-  const entryOrigin = asFlatRecord(entryOriginRequest);
-  const requestMetadata = asFlatRecord(entryOrigin?.metadata);
-  return (
-    readNonEmptyString(entryOrigin?.sessionId)
-    ?? readNonEmptyString(entryOrigin?.session_id)
-    ?? readNonEmptyString(requestMetadata?.sessionId)
-    ?? readNonEmptyString(requestMetadata?.session_id)
-  );
-}
-
-function readRequestTruthConversationIdFromEntryOrigin(entryOriginRequest: unknown): string | undefined {
-  const entryOrigin = asFlatRecord(entryOriginRequest);
-  const requestMetadata = asFlatRecord(entryOrigin?.metadata);
-  return (
-    readNonEmptyString(entryOrigin?.conversationId)
-    ?? readNonEmptyString(entryOrigin?.conversation_id)
-    ?? readNonEmptyString(requestMetadata?.conversationId)
-    ?? readNonEmptyString(requestMetadata?.conversation_id)
-  );
+function readProviderObservation(metadataBag?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const providerObservation = metadataBag ? MetadataCenter.read(metadataBag)?.readProviderObservation() : undefined;
+  if (!providerObservation) {
+    return undefined;
+  }
+  return providerObservation as unknown as Record<string, unknown>;
 }
 
 function hasRccFenceInRequestPayload(payload: unknown): boolean {
@@ -72,6 +36,26 @@ function hasRccFenceInRequestPayload(payload: unknown): boolean {
     return JSON.stringify(payload).includes('<**rcc**>');
   } catch {
     return false;
+  }
+}
+
+function syncStoplessGoalStateFromCapturedRequest(
+  baseContext: Record<string, unknown>,
+  onError?: (error: unknown) => void
+): void {
+  const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
+  const capturedEntryRequest = asFlatRecord(baseContext.capturedEntryRequest);
+  if (
+    capturedEntryRequest
+    && hasRccFenceInRequestPayload(capturedEntryRequest)
+    && (!capturedChatRequest || !hasRccFenceInRequestPayload(capturedChatRequest))
+  ) {
+    baseContext.capturedChatRequest = capturedEntryRequest;
+  }
+  try {
+    syncStoplessGoalStateFromRequest(baseContext);
+  } catch (error) {
+    onError?.(error);
   }
 }
 
@@ -92,14 +76,17 @@ function preferEntryOriginRequestForStoplessGoalSync(
 }
 
 function resolveAssignedModelId(metadataBag?: Record<string, unknown>): string | undefined {
-  return readNonEmptyString(metadataBag?.assignedModelId)
-    ?? readNonEmptyString(asFlatRecord(metadataBag?.target)?.modelId)
+  const providerObservation = readProviderObservation(metadataBag);
+  return readNonEmptyString(providerObservation?.assignedModelId)
+    ?? readNonEmptyString(providerObservation?.modelId)
+    ?? readNonEmptyString(asFlatRecord(providerObservation?.target)?.modelId)
     ?? readNonEmptyString(metadataBag?.modelId);
 }
 
 function resolveCompatProfile(metadataBag?: Record<string, unknown>): string | undefined {
-  return readNonEmptyString(asFlatRecord(metadataBag?.target)?.compatibilityProfile)
-    ?? readNonEmptyString(metadataBag?.compatibilityProfile);
+  const providerObservation = readProviderObservation(metadataBag);
+  return readNonEmptyString(providerObservation?.compatibilityProfile)
+    ?? readNonEmptyString(asFlatRecord(providerObservation?.target)?.compatibilityProfile);
 }
 
 export function buildServerToolAdapterContext(args: {
@@ -125,27 +112,15 @@ export function buildServerToolAdapterContext(args: {
   if (originRecord && (!existingCapturedChatRequest || hasRccFenceInRequestPayload(originRecord))) {
     baseContext.capturedChatRequest = originRecord;
   }
-
-  if (originRecord) {
-    backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(baseContext, originRequest);
-  }
   const metadataCenter = MetadataCenter.read(metadataBag);
   const centerRequestTruth = metadataCenter?.readRequestTruth();
-  const requestTruthSessionId =
-    readRequestTruthSessionIdFromEntryOrigin(originRequest)
-    ?? centerRequestTruth?.sessionId
-    ?? readRequestTruthSessionId(metadataBag);
-  const requestTruthConversationId =
-    readRequestTruthConversationIdFromEntryOrigin(originRequest)
-    ?? centerRequestTruth?.conversationId
-    ?? readRequestTruthConversationId(metadataBag);
-  if (requestTruthSessionId) {
-    baseContext.sessionId = requestTruthSessionId;
+  if (centerRequestTruth?.sessionId) {
+    baseContext.sessionId = centerRequestTruth.sessionId;
   } else {
     delete baseContext.sessionId;
   }
-  if (requestTruthConversationId) {
-    baseContext.conversationId = requestTruthConversationId;
+  if (centerRequestTruth?.conversationId) {
+    baseContext.conversationId = centerRequestTruth.conversationId;
   } else {
     delete baseContext.conversationId;
   }

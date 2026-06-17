@@ -31,25 +31,44 @@ describe('servertool adapter context builder', () => {
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
     );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
 
     const entryOriginRequest = {
       model: 'client-model',
       messages: [{ role: 'user', content: '继续' }]
     };
+    const metadata: Record<string, unknown> = {
+      routeName: 'thinking-primary',
+      sessionId: 'sess-1',
+      clientTmuxSessionId: 'tmux-1',
+      __rt: {
+        existing: true
+      }
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeProviderObservation(
+      'assignedModelId',
+      'kimi-k2.5',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'builds shared adapter context from entry origin request and metadata',
+        stage: 'test'
+      }
+    );
+    center.writeProviderObservation(
+      'compatibilityProfile',
+      'anthropic-claude',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'builds shared adapter context from entry origin request and metadata',
+        stage: 'test'
+      }
+    );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
-        routeName: 'thinking-primary',
-        assignedModelId: 'kimi-k2.5',
-        sessionId: 'sess-1',
-        clientTmuxSessionId: 'tmux-1',
-        target: {
-          compatibilityProfile: 'anthropic-claude'
-        },
-        __rt: {
-          existing: true
-        }
-      },
+      metadata,
       entryOriginRequest,
       requestSemantics: {
         tools: {
@@ -125,8 +144,104 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(context.sessionId).toBe('sess-origin');
-    expect(context.conversationId).toBe('conv-origin');
+    expect(context.sessionId).toBeUndefined();
+    expect(context.conversationId).toBeUndefined();
+  });
+
+  it('reads request session and conversation identifiers only from metadata center request truth', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'sessionId',
+      'sess-center-truth',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'reads request session and conversation identifiers only from metadata center request truth',
+        stage: 'test'
+      }
+    );
+    center.writeRequestTruth(
+      'conversationId',
+      'conv-center-truth',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'reads request session and conversation identifiers only from metadata center request truth',
+        stage: 'test'
+      }
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        metadata: {
+          sessionId: 'sess-origin-should-not-win',
+          conversationId: 'conv-origin-should-not-win'
+        },
+        input: 'continue'
+      },
+      requestId: 'req-session-center-truth',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBe('sess-center-truth');
+    expect(context.conversationId).toBe('conv-center-truth');
+  });
+
+  it('reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeProviderObservation(
+      'assignedModelId',
+      'MiniMax-M2.7',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent',
+        stage: 'test'
+      }
+    );
+    center.writeProviderObservation(
+      'compatibilityProfile',
+      'anthropic-claude',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent',
+        stage: 'test'
+      }
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        model: 'client-model'
+      },
+      requestId: 'req-provider-observation-center',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.modelId).toBe('MiniMax-M2.7');
+    expect(context.compatibilityProfile).toBe('anthropic-claude');
   });
 
   it('does not synthesize request session and conversation identifiers from relay responsesRequestContext metadata', async () => {

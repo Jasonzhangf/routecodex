@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { resolveProviderRequestContext } from '../../../../../src/server/runtime/http-server/executor/provider-request-context.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('resolveProviderRequestContext', () => {
   it('prefers runtime handle protocol over routed target outboundProfile when they conflict', () => {
@@ -62,5 +63,38 @@ describe('resolveProviderRequestContext', () => {
     expect(result.providerModel).toBe('gpt-5.3-codex');
     expect(typeof result.requestId).toBe('string');
     expect(result.requestId.length).toBeGreaterThan(0);
+  });
+
+  it('reads provider model from MetadataCenter provider observation when flat target metadata is absent', () => {
+    const mergedMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(mergedMetadata);
+    center.writeProviderObservation(
+      'modelId',
+      'gpt-5.4',
+      {
+        module: 'tests/server/runtime/http-server/executor/provider-request-context.spec.ts',
+        symbol: 'reads provider model from MetadataCenter provider observation when flat target metadata is absent',
+        stage: 'test'
+      }
+    );
+
+    const result = resolveProviderRequestContext({
+      providerRequestId: 'req-provider-ctx-center-model',
+      entryEndpoint: '/v1/responses',
+      target: {
+        providerKey: 'XL.key1.gpt-5.4',
+        outboundProfile: 'openai-responses'
+      },
+      handle: {
+        providerProtocol: 'openai-responses',
+        providerId: 'XL'
+      } as any,
+      runtimeKey: 'XL',
+      providerPayload: {},
+      mergedMetadata
+    });
+
+    expect(result.providerModel).toBe('gpt-5.4');
+    expect(result.providerLabel).toBe('XL.key1.gpt-5.4');
   });
 });

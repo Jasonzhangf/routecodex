@@ -5,8 +5,15 @@ import { applyRetryExclusionForCurrentProvider } from './request-executor-retry-
 import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
+
+const PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER = {
+  module: 'src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts',
+  symbol: 'resolveRequestExecutorPipelineAttempt',
+  stage: 'VrRoute04SelectedTarget',
+} as const;
 
 function normalizeExplicitRoutePool(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -190,11 +197,55 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     }
   }
 
-  mergedMetadata.target = target;
-  if (typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
-    mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
-  } else if (Object.prototype.hasOwnProperty.call(mergedMetadata, 'compatibilityProfile')) {
-    delete mergedMetadata.compatibilityProfile;
+  const metadataCenter = MetadataCenter.read(mergedMetadata);
+  if (metadataCenter) {
+    const targetRecord = target as Record<string, unknown>;
+    const modelId =
+      typeof targetRecord.modelId === 'string' && targetRecord.modelId.trim()
+        ? targetRecord.modelId.trim()
+        : undefined;
+    const clientModelId =
+      typeof targetRecord.clientModelId === 'string' && targetRecord.clientModelId.trim()
+        ? targetRecord.clientModelId.trim()
+        : undefined;
+    metadataCenter.writeProviderObservation(
+      'target',
+      { ...(target as Record<string, unknown>) },
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
+    metadataCenter.writeProviderObservation(
+      'providerKey',
+      target.providerKey,
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
+    metadataCenter.writeProviderObservation(
+      'assignedModelId',
+      modelId,
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
+    metadataCenter.writeProviderObservation(
+      'modelId',
+      modelId,
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
+    metadataCenter.writeProviderObservation(
+      'clientModelId',
+      clientModelId,
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
+    metadataCenter.writeProviderObservation(
+      'compatibilityProfile',
+      typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()
+        ? target.compatibilityProfile.trim()
+        : undefined,
+      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+      'selected pipeline target'
+    );
   }
 
   return {

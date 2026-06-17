@@ -1,4 +1,5 @@
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
+// feature_id: hub.metadata_center_attempt_merge
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import type { RetryPayloadSeed } from './retry-payload-snapshot.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
@@ -7,6 +8,7 @@ import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 
 export type PreparedRequestExecutorAttemptState = {
   metadataForAttempt: Record<string, unknown>;
@@ -92,20 +94,42 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
 } {
   const pipelineMetadata = args.pipelineResult.metadata ?? {};
   const mergedMetadata = mergeMetadataPreservingDefined(args.metadataForAttempt, pipelineMetadata);
-  const metadataCenter = MetadataCenter.read(args.metadataForAttempt);
+  const requestMetadataCenter = MetadataCenter.read(args.metadataForAttempt);
+  const pipelineMetadataCenter =
+    pipelineMetadata && typeof pipelineMetadata === 'object' && !Array.isArray(pipelineMetadata)
+      ? MetadataCenter.read(pipelineMetadata as Record<string, unknown>)
+      : undefined;
+  const metadataCenter = requestMetadataCenter ?? pipelineMetadataCenter;
   if (metadataCenter) {
     MetadataCenter.bind(mergedMetadata, metadataCenter);
+    if (requestMetadataCenter && pipelineMetadataCenter && requestMetadataCenter !== pipelineMetadataCenter) {
+      const mergedCenter = MetadataCenter.read(mergedMetadata);
+      const continuationSnapshot = pipelineMetadataCenter.snapshot().continuationContext;
+      for (const [key, slot] of Object.entries(continuationSnapshot)) {
+        if (!slot) {
+          continue;
+        }
+        mergedCenter?.writeContinuationContext(
+          key as keyof ReturnType<typeof pipelineMetadataCenter.readContinuationContext>,
+          slot.value as Record<string, unknown> | unknown[] | string | undefined,
+          slot.writtenBy,
+          'merged from pipeline result metadata center'
+        );
+      }
+      const providerObservationSnapshot = pipelineMetadataCenter.snapshot().providerObservation;
+      for (const [key, slot] of Object.entries(providerObservationSnapshot)) {
+        if (!slot) {
+          continue;
+        }
+        mergedCenter?.writeProviderObservation(
+          key as keyof ReturnType<typeof pipelineMetadataCenter.readProviderObservation>,
+          slot.value as Record<string, unknown> | string | undefined,
+          slot.writtenBy,
+          'merged from pipeline result metadata center'
+        );
+      }
+    }
     const requestTruth = metadataCenter.readRequestTruth();
-    if (requestTruth.sessionId) {
-      mergedMetadata.sessionId = requestTruth.sessionId;
-    } else {
-      delete mergedMetadata.sessionId;
-    }
-    if (requestTruth.conversationId) {
-      mergedMetadata.conversationId = requestTruth.conversationId;
-    } else {
-      delete mergedMetadata.conversationId;
-    }
     if (requestTruth.requestId) {
       mergedMetadata.requestId = requestTruth.requestId;
     }
@@ -113,16 +137,21 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
       mergedMetadata.clientRequestId = requestTruth.clientRequestId;
     }
   }
+  delete mergedMetadata.sessionId;
+  delete mergedMetadata.session_id;
+  delete mergedMetadata.conversationId;
+  delete mergedMetadata.conversation_id;
+  const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
   registerRequestLogContext(args.requestId, {
     logSessionColorKey: mergedMetadata.logSessionColorKey,
     clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
     client_tmux_session_id: mergedMetadata.client_tmux_session_id,
     tmuxSessionId: mergedMetadata.tmuxSessionId,
     tmux_session_id: mergedMetadata.tmux_session_id,
-    sessionId: mergedMetadata.sessionId,
-    session_id: mergedMetadata.session_id,
-    conversationId: mergedMetadata.conversationId,
-    conversation_id: mergedMetadata.conversation_id
+    sessionId: requestTruth.sessionId,
+    session_id: requestTruth.sessionId,
+    conversationId: requestTruth.conversationId,
+    conversation_id: requestTruth.conversationId
   });
   const mergedClientHeaders =
     cloneClientHeaders(mergedMetadata?.clientHeaders) || args.clientHeadersForAttempt;

@@ -1,6 +1,7 @@
 import type { ProviderHandle, ProviderProtocol } from '../types.js';
 import { enhanceProviderRequestId } from '../../../utils/request-id-manager.js';
 import { buildProviderLabel, extractProviderModel } from './provider-response-utils.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 
 type ProviderTargetLike = {
   providerKey: string;
@@ -31,15 +32,20 @@ export function resolveProviderRequestContext(options: {
     mergedMetadata
   } = options;
   const providerProtocol = handle.providerProtocol || (target.outboundProfile as ProviderProtocol);
+  const providerObservation = mergedMetadata ? MetadataCenter.read(mergedMetadata)?.readProviderObservation() : undefined;
   const targetMetadata =
-    mergedMetadata?.target && typeof mergedMetadata.target === 'object'
-      ? (mergedMetadata.target as Record<string, unknown>)
+    providerObservation?.target && typeof providerObservation.target === 'object'
+      ? (providerObservation.target as Record<string, unknown>)
       : undefined;
   const metadataModel =
-    typeof targetMetadata?.modelId === 'string' && targetMetadata.modelId.trim()
-      ? targetMetadata.modelId.trim()
-      : typeof targetMetadata?.clientModelId === 'string' && targetMetadata.clientModelId.trim()
-        ? targetMetadata.clientModelId.trim()
+    typeof providerObservation?.modelId === 'string' && providerObservation.modelId.trim()
+      ? providerObservation.modelId.trim()
+      : typeof providerObservation?.clientModelId === 'string' && providerObservation.clientModelId.trim()
+        ? providerObservation.clientModelId.trim()
+        : typeof targetMetadata?.modelId === 'string' && targetMetadata.modelId.trim()
+          ? targetMetadata.modelId.trim()
+          : typeof targetMetadata?.clientModelId === 'string' && targetMetadata.clientModelId.trim()
+            ? targetMetadata.clientModelId.trim()
         : undefined;
   const payloadRecord =
     providerPayload && typeof providerPayload === 'object'
