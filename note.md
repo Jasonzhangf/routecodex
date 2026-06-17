@@ -1,5 +1,27 @@
 ## 2026-06-18 architecture/build gate rerun + doc drift closeout
 
+## 2026-06-18 install/build tiering gate closeout
+
+- 为了把“本地 build/install 与 CI 都能阻断 review-surface 漂移”从间接事实收成机器锁，本轮只补了调用层级 gate，不接手 Jason 正在做的 `__routecodex_*` / SSE custom 字段清理。
+- 新增：
+  - `scripts/architecture/verify-build-script-tiering.mjs`
+  - 校验 `build:dev` / `build:dev:full` 只能经 `npm run build`
+  - 校验 `install:global` / `install:release` 只能经各自 installer shell
+  - 校验 `scripts/install-global.sh` / `scripts/install-release.sh` 内部必须走 `npm run build:min`
+- 接线：
+  - `package.json` 新增 `verify:build-script-tiering`
+  - `verify:architecture-ci-longtail` 现强制执行该 gate
+  - `scripts/architecture/verify-function-map-build-wiring.mjs` 新增反向检查：若 longtail 移除 `verify:build-script-tiering` 直接 fail
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-build-script-tiering.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-function-map-build-wiring.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `git diff --check` PASS
+- 结论：
+  - review-surface 漂移现在不只会被 `build` / `build:min` 挡住，install shell 也被静态 gate 锁到必须经过 `build:min`
+  - 这次补的是“防绕过 gate”，不是新的 `install:global` / `install:release` 实机 smoke；当前无权把它表述成一次新的安装运行验证
+
 - 重新按当前 worktree 取了完整硬证据，不再沿用 earlier shell 采样不稳定的旧结论：
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface-light` PASS
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS

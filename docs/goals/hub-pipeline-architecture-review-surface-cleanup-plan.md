@@ -21,8 +21,13 @@
 - `verify:architecture-review-surface-light` 已接入 `build` / `build:min`，位置在 `tsc` 前。
 - `verify:architecture-review-surface` 已接入 `verify:architecture-ci`。
 - `verify:architecture-ci-longtail` 已接入 `verify:architecture-ci`。
+- `verify:build-script-tiering` 已接入 `verify:architecture-ci-longtail`，静态锁定：
+  - `build:dev` / `build:dev:full` 只能通过 `npm run build` 进入 canonical build 链；
+  - `install:global` / `install:release` 只能通过各自 shell installer；
+  - `scripts/install-global.sh` / `scripts/install-release.sh` 内部必须走 `npm run build:min`，不得绕开 review-surface/function-map 轻量前置链。
 - `verify:function-map-build-wiring` 已加锁：后续若移除 build/min 的 review surface light，或移除 architecture-ci 的 review surface / longtail，会直接失败。
 - `verify:architecture-mainline-node-id-consistency` 已接入 `verify:architecture-review-surface-light`，且 `verify:function-map-build-wiring` 已加锁：若 review surface light 移除此 gate，会直接失败。
+- `verify:function-map-build-wiring` 已继续加锁：若 `verify:architecture-ci-longtail` 移除 `verify:build-script-tiering`，会直接失败。
 
 已验证：
 
@@ -57,14 +62,20 @@
     - `mtc-06` 已落到 `buildServerToolAdapterContext -> MetadataCenter.readRequestTruth()` 的真实 partial binding，锁住 servertool session/conversation 只读 center；
     - `mtc-07` 已落到 `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased` 的真实 anchored binding；JSON closeout、SSE finish/close、SSE bridge-error cleanup 已共用这条 closeout/release owner。
   - 当前 worktree 重新取证：
-    - `npm run verify:architecture-review-surface-light` PASS。
-    - `npm run verify:architecture-ci` PASS。
-    - `npm run build:min` PASS。
+  - `npm run verify:architecture-review-surface-light` PASS。
+  - `npm run verify:architecture-ci` PASS。
+  - `npm run build:min` PASS。
+  - `node scripts/architecture/verify-build-script-tiering.mjs` PASS。
+  - `node scripts/architecture/verify-function-map-build-wiring.mjs` PASS。
 
 新增审计发现（未在本轮 gate 栈内收口）：
 
 - `tests/red-tests/server_sse_guard_e2e.test.ts` 当前显示 `assertClientResponseHasNoInternalCarriers(...)` 对顶层 `metadata` 字段仍非一律 fail-fast；现实现只在 `metadata` 内含内部控制键时才报错。
 - 这与“非协议标准字段不得混入请求/响应 payload”新规则不完全一致，应在 Jason 的内部字段清理线完成后，统一收口为 payload 层直接禁止 `metadata` 进入 client-visible body/SSE data。
+
+当前剩余非 blocker 缺口：
+
+- 本轮补的是“install/build 调用层级防漂移 gate”，不是一次新的 release/global install 实机 smoke；也就是说，当前已经有静态机器锁保证安装链不会绕开 `build:min`，但没有在这条 slice 里重新执行 `install:global` / `install:release` 端到端安装验证。
 
 ## 范围与边界
 
