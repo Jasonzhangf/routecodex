@@ -6,7 +6,6 @@ import {
 } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
 import type { SseProtocol } from "../../../sse/index.js";
 import { defaultSseCodecRegistry } from "../../../sse/index.js";
-import { executeChatProcessEntryPipeline } from "./hub-pipeline-execute-chat-process-entry.js";
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";
 import { clearHubStageTiming } from "./hub-stage-timing.js";
 import {
@@ -244,7 +243,12 @@ async function executeHubPipelineRequest(args: {
   clearHubStageTiming(normalized.id);
   try {
     if (normalized.direction === "request" && normalized.hubEntryMode === "chat_process") {
-      return await executeChatProcessEntryPipeline({ normalized, routerEngine: args.routerEngine, config: args.config });
+      return await executeRequestStagePipeline({
+        normalized,
+        routerEngine: args.routerEngine,
+        config: args.config,
+        entryMode: "chat_process",
+      });
     }
     return await executeRequestStagePipeline({
       normalized,

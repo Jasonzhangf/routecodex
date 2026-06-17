@@ -10,11 +10,12 @@ import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
-  hooks?: TContext;
   routerEngine: VirtualRouterRuntime;
   config: HubPipelineConfig;
+  entryMode?: "request_stage" | "chat_process";
 }): Promise<HubPipelineResult> {
   const { normalized, config, routerEngine } = args;
+  const entryMode = args.entryMode ?? "request_stage";
   const route = normalized.metadata.__routecodexPreselectedRoute
     ?? routerEngine.route(normalized.payload as never, normalized.metadata as never);
   const metadata = {
@@ -42,7 +43,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
   });
   if (nativePlan.success !== true) {
-    const error = new Error(nativePlan.error?.message ?? 'Rust HubPipeline request path failed') as Error & {
+    const fallbackMessage = entryMode === "chat_process"
+      ? "Rust HubPipeline chat_process path failed"
+      : "Rust HubPipeline request path failed";
+    const error = new Error(nativePlan.error?.message ?? fallbackMessage) as Error & {
       code?: string;
       status?: number;
       statusCode?: number;
@@ -59,7 +63,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   const outputMetadata = nativePlan.metadata ?? {};
   const providerPayload = nativePlan.payload;
   if (!providerPayload || typeof providerPayload !== 'object' || Array.isArray(providerPayload)) {
-    throw new Error('Rust HubPipeline request path returned invalid provider payload');
+    const fallbackMessage = entryMode === "chat_process"
+      ? "Rust HubPipeline chat_process path returned invalid provider payload"
+      : "Rust HubPipeline request path returned invalid provider payload";
+    throw new Error(fallbackMessage);
   }
 
   attachHubStageTopSummary({
@@ -67,15 +74,18 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     metadata: outputMetadata,
   });
 
-  return {
+  const result: HubPipelineResult = {
     requestId: normalized.id,
     providerPayload,
-    standardizedRequest: nativePlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'],
-    entryOriginRequest: nativePlan.entryOriginRequest as HubPipelineResult['entryOriginRequest'],
     target: outputMetadata.target as HubPipelineResult['target'],
     routingDecision: outputMetadata.routingDecision as HubPipelineResult['routingDecision'],
     routingDiagnostics: outputMetadata.routingDiagnostics as HubPipelineResult['routingDiagnostics'],
     metadata: outputMetadata,
     nodeResults: nativePlan.diagnostics as unknown as HubPipelineNodeResult[],
   };
+  if (entryMode !== "chat_process") {
+    result.standardizedRequest = nativePlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'];
+    result.entryOriginRequest = nativePlan.entryOriginRequest as HubPipelineResult['entryOriginRequest'];
+  }
+  return result;
 }

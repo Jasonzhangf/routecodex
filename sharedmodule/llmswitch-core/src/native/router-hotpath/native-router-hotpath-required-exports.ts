@@ -45,6 +45,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildProviderProtocolErrorJson",
   "deriveFinishReasonJson",
   "isToolCallContinuationResponseJson",
+  "isProviderNativeResumeContinuationJson",
   "isEmptyClientResponsePayloadJson",
   "classifyEmptyResponseSignalJson",
   "detectToolExecutionFailuresJson",

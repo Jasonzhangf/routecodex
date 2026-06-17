@@ -3236,3 +3236,35 @@ cleanup-stale-server-pids.mjs 存在但引用 ~/.routecodex（老目录），不
 - architecture function-map/mainline-call-map/wiki 全量更新
 
 Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-only PASS, focused Jest 44/44 PASS。
+
+## 2026-06-17 hub pipeline slimming execution closeout
+
+- 本轮已把 `request-executor-request-semantics.ts` 的 provider-native continuation 判定改成 Rust/native owner，host TS 不再本地解析 `previous_response_id` / `submit_tool_outputs`.
+- 本轮已把 `src/server/utils/finish-reason.ts` 的“visible success / tool_calls fallback”残留删掉，`deriveFinishReasonWithVisibleSuccessFallback(...)` 现在只委托 `deriveFinishReason(...)`.
+- residue gate 漂移已同步到当前 owner：
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 不再盯 `handler-response-utils.ts` 里的旧内联函数，改成检查 `responses-response-bridge.ts` / `handler-response-sse.ts` / `handler-response-utils.ts` 的现行 bridge surface。
+  - `package.json:test:routing-instructions` 已把不存在的 `tests/servertool/stop-message-auto.spec.ts` 替换为现存拆分用例：`stop-message-auto-no-reenter.red` / `goal-default` / `config-precedence`.
+- `sharedmodule/llmswitch-core/src/**` 下 50 个 ignored side-by-side emit artifacts（`.js/.d.ts/.map`）已物理删除；每个文件都已确认存在对应 `.ts` 真源。
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-chat-process-entry.ts` 已物理删除；chat_process request mainline 现在复用 `hub-pipeline-execute-request-stage.ts`，通过 `entryMode: "chat_process"` 保持错误文案与结果投影差异，不再保留同构壳。
+- `src/modules/llmswitch/bridge/responses-response-bridge.ts` 再删一处 zero-consumer residue：`rebindResponsesConversationRequestIdsToResponseIdForHttp`.
+- 验证证据：
+  - `node scripts/build-core.mjs` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts --runInBand` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS
+
+## 2026-06-17 hub pipeline slimming audit report update
+
+- 本轮按 `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 重新扫描 `responses-response-bridge.ts` / `responses-sse-bridge.ts` exported surface。
+- 新增结论：
+  - `responses-response-bridge.ts` 当前 exported helpers 都有 source/test/script consumer，不再出现新的 0-consumer export。
+  - `responses-sse-bridge.ts` 虽是 98 行 re-export facade，但 function-map / verification-map 明确把它作为 `server.responses_sse_bridge_surface` owner module；不能按死文件删除。
+  - `responses-response-bridge.ts` 的 SSE terminal/probe/persist helper 属于高风险状态机/生命周期语义，当前应暂缓大拆；后续只能先找更小 zero-consumer/internal helper 或设计 native-downshift 红测。
+- 已把完整候选项处置表、删除策略、修改策略、暂缓原因补入 `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`。
+- 验证证据：
+  - `git diff --check` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS

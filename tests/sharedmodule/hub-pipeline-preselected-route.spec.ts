@@ -12,9 +12,6 @@ jest.unstable_mockModule(
 const { executeRequestStagePipeline } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js'
 );
-const { executeChatProcessEntryPipeline } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-chat-process-entry.js'
-);
 
 const preselectedRoute = {
   target: {
@@ -95,10 +92,11 @@ describe('HubPipeline preselected route ownership', () => {
   it('chat process entry reuses preselected route without routing again', async () => {
     const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
 
-    await executeChatProcessEntryPipeline({
+    await executeRequestStagePipeline({
       normalized: createNormalized({ hubEntryMode: 'chat_process' }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+      entryMode: 'chat_process',
     });
 
     expect(routerEngine.route).not.toHaveBeenCalled();

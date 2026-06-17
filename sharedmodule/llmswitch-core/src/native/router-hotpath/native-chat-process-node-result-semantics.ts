@@ -62,6 +62,10 @@ export function isToolResultFollowupTurnWithNative(requestSemantics?: Record<str
   return invokeBooleanCapability('isToolResultFollowupTurnJson', requestSemantics ?? null);
 }
 
+export function isProviderNativeResumeContinuationWithNative(requestSemantics?: Record<string, unknown>): boolean {
+  return invokeBooleanCapability('isProviderNativeResumeContinuationJson', requestSemantics ?? null);
+}
+
 export function detectRetryableEmptyAssistantResponseWithNative(
   body: unknown,
   requestSemantics?: Record<string, unknown>

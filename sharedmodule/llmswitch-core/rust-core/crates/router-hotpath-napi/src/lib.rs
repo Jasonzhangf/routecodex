@@ -1938,6 +1938,13 @@ pub fn is_tool_call_continuation_response_json_bridge(body_json: String) -> Napi
     chat_node_result_semantics::is_tool_call_continuation_response_json(body_json)
 }
 
+#[napi(js_name = "isProviderNativeResumeContinuationJson")]
+pub fn is_provider_native_resume_continuation_json_bridge(
+    request_semantics_json: String,
+) -> NapiResult<bool> {
+    chat_node_result_semantics::is_provider_native_resume_continuation_json(request_semantics_json)
+}
+
 #[napi(js_name = "isEmptyClientResponsePayloadJson")]
 pub fn is_empty_client_response_payload_json_bridge(body_json: String) -> NapiResult<bool> {
     chat_node_result_semantics::is_empty_client_response_payload_json(body_json)

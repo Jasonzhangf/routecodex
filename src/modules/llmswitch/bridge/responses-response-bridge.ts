@@ -1224,33 +1224,6 @@ export async function persistResponsesConversationLifecycleForHttp(
   }
 }
 
-export async function rebindResponsesConversationRequestIdsToResponseIdForHttp(args: {
-  requestLabel: string;
-  timingRequestIds?: string[];
-  responseId?: string;
-  onNonBlockingError?: (operation: string, error: unknown) => void;
-}): Promise<void> {
-  if (!args.responseId) {
-    return;
-  }
-  const sourceIds: string[] = [];
-  const add = (value: unknown): void => {
-    if (typeof value !== 'string') return;
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === args.responseId || sourceIds.includes(trimmed)) return;
-    sourceIds.push(trimmed);
-  };
-  add(args.requestLabel);
-  if (Array.isArray(args.timingRequestIds)) {
-    for (const id of args.timingRequestIds) add(id);
-  }
-  for (const requestId of sourceIds) {
-    await rebindResponsesConversationRequestIdForHttp(requestId, args.responseId).catch((error) => {
-      args.onNonBlockingError?.(`responses-conversation-rebind:${requestId}->${args.responseId}`, error);
-    });
-  }
-}
-
 export async function clearResponsesConversationRequestIdsForHttp(args: {
   requestLabel: string;
   timingRequestIds?: string[];

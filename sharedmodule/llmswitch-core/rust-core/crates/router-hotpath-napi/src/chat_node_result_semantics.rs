@@ -445,6 +445,37 @@ fn is_tool_call_continuation_response_value(body: &Value) -> bool {
         .is_some_and(|reason| reason == "tool_calls")
 }
 
+fn is_provider_native_resume_continuation_value(request_semantics: &Value) -> bool {
+    let Some(continuation) = request_semantics
+        .as_object()
+        .and_then(|row| row.get("continuation"))
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let resume_from = continuation
+        .get("resumeFrom")
+        .or_else(|| continuation.get("resume_from"))
+        .and_then(Value::as_object);
+    if resume_from
+        .and_then(|row| {
+            read_string(row.get("previousResponseId"))
+                .or_else(|| read_string(row.get("previous_response_id")))
+        })
+        .is_some()
+        || read_string(continuation.get("previousResponseId")).is_some()
+        || read_string(continuation.get("previous_response_id")).is_some()
+    {
+        return true;
+    }
+    let mode = read_string(continuation.get("mode"))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    mode == "submit_tool_outputs"
+        && (read_string(continuation.get("responseId")).is_some()
+            || read_string(continuation.get("response_id")).is_some())
+}
+
 fn has_servertool_followup_tool_bearing_payload(record: &Map<String, Value>) -> bool {
     if record.get("required_action").is_some_and(Value::is_object) {
         return true;
@@ -828,6 +859,14 @@ pub fn is_tool_result_followup_turn_json(request_semantics_json: String) -> Napi
     Ok(is_tool_result_followup_turn_value(Some(&request_semantics)))
 }
 
+pub fn is_provider_native_resume_continuation_json(
+    request_semantics_json: String,
+) -> NapiResult<bool> {
+    let request_semantics: Value = serde_json::from_str(&request_semantics_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(is_provider_native_resume_continuation_value(&request_semantics))
+}
+
 pub fn detect_retryable_empty_assistant_response_json(
     body_json: String,
     request_semantics_json: String,
@@ -907,6 +946,37 @@ mod request_semantics_tests {
         });
         assert!(is_tool_result_followup_turn_value(Some(&semantics)));
         assert!(!is_required_tool_call_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn classifies_provider_native_previous_response_resume_in_rust() {
+        let semantics = json!({
+            "continuation": {
+                "resumeFrom": {
+                    "previousResponseId": "resp_1"
+                }
+            }
+        });
+        assert!(is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn classifies_provider_native_submit_tool_outputs_resume_in_rust() {
+        let semantics = json!({
+            "continuation": {
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_1"
+            }
+        });
+        assert!(is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn does_not_classify_inline_tool_outputs_as_provider_native_resume() {
+        let semantics = json!({
+            "toolOutputs": [{ "call_id": "call_1", "output": "ok", "type": "function_call_output" }]
+        });
+        assert!(!is_provider_native_resume_continuation_value(&semantics));
     }
 
     #[test]

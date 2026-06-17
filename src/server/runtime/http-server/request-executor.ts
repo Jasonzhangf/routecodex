@@ -939,7 +939,7 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
           mergedMetadata
         );
-        const providerOwnedContinuationForAttempt = isProviderNativeResumeContinuation(requestSemanticsForAttempt);
+        const providerOwnedContinuationForAttempt = await isProviderNativeResumeContinuation(requestSemanticsForAttempt);
         const providerTransportBackoffKey = buildProviderTransportBackoffKey({
           providerKey: target.providerKey,
           runtimeKey

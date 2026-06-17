@@ -1479,9 +1479,9 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('server response handler must not classify response tool continuation in TS', () => {
-    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('function isToolCallContinuationResponse');
+    const bodyStart = source.indexOf('export function isToolCallContinuationResponseForHttp');
     expect(bodyStart).toBeGreaterThanOrEqual(0);
     const body = source.slice(bodyStart, source.indexOf('\n}', bodyStart) + 2);
     const findings = collectMatches(body, [
@@ -1494,11 +1494,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('server response handler SSE contract probe must not classify response tool semantics in TS', () => {
-    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-sse.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const bodyStart = source.indexOf('function updateContractProbeFromSseChunk');
     expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const bodyEnd = source.indexOf('\nfunction buildResponsesTerminalSseFramesFromProbe', bodyStart);
+    const bodyEnd = source.indexOf('\nfunction assertClientSseFrameHasNoInternalCarriers', bodyStart);
     expect(bodyEnd).toBeGreaterThan(bodyStart);
     const body = source.slice(bodyStart, bodyEnd);
     const findings = collectMatches(body, [
@@ -1506,24 +1506,16 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'maps output call_id in TS SSE probe', pattern: /call_id|output_item/ },
       { label: 'deduplicates output items in TS SSE probe', pattern: /alreadyExists|existingCallId|existingId/ },
     ]);
-    expect(body).toContain('updateResponsesContractProbeFromSseChunkNative(chunk, contractProbe.probe)');
+    expect(body).toContain('updateResponsesContractProbeFromSseChunkForHttp(chunk, contractProbe.probe)');
     expect(findings).toEqual([]);
   });
 
   it('server response handler terminal probe frames must be built by native', () => {
-    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-sse.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('function buildResponsesTerminalSseFramesFromProbe');
-    expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const nextFunction = source.indexOf('\nfunction ', bodyStart + 1);
-    const body = source.slice(bodyStart, nextFunction > bodyStart ? nextFunction : undefined);
-    const findings = collectMatches(body, [
-      { label: 'checks required_action in TS terminal frames', pattern: /required_action|response\.required_action/ },
-      { label: 'checks output in TS terminal frames', pattern: /probe\.output|hasCompletedOutput/ },
-      { label: 'serializes response.done frames in TS terminal frames', pattern: /response\.done|response\.required_action/ },
-    ]);
-    expect(body).toContain('buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel)');
-    expect(findings).toEqual([]);
+    expect(source).not.toContain('function buildResponsesTerminalSseFramesFromProbe');
+    expect(source).toContain('buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel)');
+    expect(source).not.toContain('buildResponsesTerminalSseFramesFromProbeNative(');
   });
 
   it('server response handler Responses apply_patch client projection must stay native-owned', () => {
@@ -1537,8 +1529,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts SSE projection fallback writes original frame', pattern: /catch[\s\S]{0,260}writeClientSseFrame\(frame,\s*errorLabel/ },
       { label: 'ts frame heuristic decides projection necessity', pattern: /frame\.includes\(['"]apply_patch['"]\)|frame\.includes\(['"]function_call['"]\)|frame\.includes\(['"]required_action['"]\)/ },
     ]);
-    expect(source).toContain('projectResponsesClientPayloadForClientWithNative');
-    expect(source).toContain('projectResponsesSseFrameForClientWithNative');
+    expect(source).toContain('prepareResponsesJsonClientDispatchPlanForHttp');
     expect(findings).toEqual([]);
   });
 
@@ -1552,7 +1543,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts extracts client model for response restore', pattern: /extractClientModelId/ },
       { label: 'ts restores reasoning effort in client response', pattern: /reasoningEffort|reasoning\.effort|currentReasoning\.effort/ },
     ]);
-    expect(source).toContain('projectResponsesClientPayloadForClientWithNative');
+    expect(source).toContain('prepareResponsesJsonClientDispatchPlanForHttp');
     expect(findings).toEqual([]);
   });
 
@@ -2019,7 +2010,9 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
     );
-    const mainlineSource = fs.readFileSync(path.join(pipelineRoot, 'hub-pipeline-execute-chat-process-entry.ts'), 'utf8');
+    const retiredEntry = path.join(pipelineRoot, 'hub-pipeline-execute-chat-process-entry.ts');
+    expect(fs.existsSync(retiredEntry)).toBe(false);
+    const mainlineSource = fs.readFileSync(path.join(pipelineRoot, 'hub-pipeline-execute-request-stage.ts'), 'utf8');
 
     expect(mainlineSource).toContain('runHubPipelineLibWithNative');
     const findings = [
@@ -2029,7 +2022,7 @@ describe('hub pipeline stage residue audit', () => {
         { label: 'runs TS governance phase', pattern: /executeChatProcessGovernancePhase/ },
         { label: 'creates TS semantic mapper', pattern: /createSemanticMapper/ },
         { label: 'imports TS route outbound file', pattern: /hub-pipeline-route-and-outbound\.js/ },
-      ]).map((match) => `hub-pipeline-execute-chat-process-entry.ts:${match}`),
+      ]).map((match) => `hub-pipeline-execute-request-stage.ts:${match}`),
     ];
 
     expect(findings).toEqual([]);
