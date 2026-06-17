@@ -38,6 +38,11 @@
   - 从 `mainline-call-map.yml` + `function-map.yml` 自动生成的 Mermaid review 面
   - 只负责可视化和 review，不是第二份 SSOT；禁止手改
 
+- `wiki/html/*.html`
+  - 从 `wiki/*.md` 自动生成的正式 HTML render 文档
+  - 给人直接浏览 Mermaid 图、表格、说明；属于 repo 内正式文档，不允许再依赖 `/tmp/*.html` 临时页充当正式 review 面
+  - 内容必须与对应 Markdown wiki 同源，不允许手写第二份 HTML 真相
+
 - `wiki/README.md`
   - 记录“当你要找架构真源时先看哪、后看哪”
   - 不是第二份设计文档，只做路径索引和使用顺序
@@ -57,6 +62,10 @@
 - `wiki/metadata-boundary-map.md`
   - metadata / continuation scope 的 request/response 闭环 review 面
   - 用于审计 `sessionId / requestId / pipelineId / continuationOwner` 如何传递、哪里必须断开
+
+- `wiki/stopless-session-mainline-source.md`
+  - stopless 的 runtime metadata / current-turn `tool_outputs` 主线 review 面
+  - 用于审计 stopless 真源是否仍只来自当前请求闭环，而不是 file persistence / tmux / `ROUTECODEX_SESSION_DIR`
 
 - `wiki/chat-process-protocol-mapping.md`
   - 三协议 `openai-chat / openai-responses / anthropic-messages` 进入统一 chat process 的字段映射 review 面
@@ -86,6 +95,12 @@
 
 - `scripts/architecture/verify-architecture-wiki-sync.mjs`
   - 检查所有自动生成 wiki 页面是否与真源同步
+
+- `scripts/architecture/render-architecture-wiki-html.mjs`
+  - 自动生成 `docs/architecture/wiki/html/*.html` 正式渲染文档
+
+- `scripts/architecture/verify-architecture-wiki-html-sync.mjs`
+  - 检查 HTML render artifact 是否与 Markdown wiki 同步
 
 - `scripts/architecture/verify-function-map-coverage.mjs`
   - 检查 function-map 与 verification-map 的 feature 覆盖关系
@@ -179,3 +194,4 @@
 6. 若某功能跨越多个 facade / wrapper / runtime shell，除 `function-map.yml` 外还应同步补 `mainline-call-map.yml`。
 7. `mainline-call-map.yml` 变更后，必须同步运行 `npm run render:architecture-mainline-mermaid` 并让 `wiki/mainline-call-graph.md` 保持同步。
 8. 自动生成 wiki 页变更后，必须同步运行 `node scripts/architecture/render-architecture-wiki-pages.mjs` 并通过 `node scripts/architecture/verify-architecture-wiki-sync.mjs`。
+9. 需要正式 HTML review 面时，必须生成到 `docs/architecture/wiki/html/*.html` 并通过 `npm run verify:architecture-wiki-html-sync`；浏览器验证也必须针对 repo 内 HTML 文档，而不是 `/tmp` 临时文件。

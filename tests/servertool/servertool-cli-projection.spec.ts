@@ -1,24 +1,44 @@
 import {
-  afterEach,
   beforeAll,
-  beforeEach,
   describe,
   expect,
   it,
   jest
 } from '@jest/globals';
 
-const ORIGINAL_SESSION_DIR = process.env.ROUTECODEX_SESSION_DIR;
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js', () => ({
+  readRuntimeMetadata: (carrier: unknown) => (
+    carrier && typeof carrier === 'object' && !Array.isArray(carrier)
+      ? (carrier as Record<string, unknown>).__rt as Record<string, unknown> | undefined
+      : undefined
+  ),
+  ensureRuntimeMetadata: (carrier: Record<string, unknown>) => carrier,
+  cloneRuntimeMetadata: () => ({})
+}));
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.ts', () => ({
+  readRuntimeMetadata: (carrier: unknown) => (
+    carrier && typeof carrier === 'object' && !Array.isArray(carrier)
+      ? (carrier as Record<string, unknown>).__rt as Record<string, unknown> | undefined
+      : undefined
+  ),
+  ensureRuntimeMetadata: (carrier: Record<string, unknown>) => carrier,
+  cloneRuntimeMetadata: () => ({})
+}));
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js', () => ({
+  readRuntimeMetadataWithNative: (carrier: unknown) => (carrier && typeof carrier === 'object' && '__rt' in (carrier as Record<string, unknown>)) ? (carrier as Record<string, unknown>).__rt : undefined,
+  ensureRuntimeMetadataCarrierWithNative: (carrier: Record<string, unknown>) => carrier,
+  cloneRuntimeMetadataWithNative: () => ({}),
+
   buildClientExecCliProjectionOutputWithNative: (input: any) => {
     if (input.flowId === 'stop_message_flow') {
       return {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}'",
+        execCommand: `routecodex hook run reasoning_stop --input-json '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}' --repeat-count '2' --max-repeats '3'`,
         repeatCount: 2,
-        maxRepeats: 3,
+        maxRepeats: 3
       };
     }
     if (input.toolName === 'servertool_fixture' && input.input?.value === "can't stop") {
@@ -87,18 +107,6 @@ beforeAll(async () => {
   } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'));
 });
 
-beforeEach(() => {
-  delete process.env.ROUTECODEX_SESSION_DIR;
-});
-
-afterEach(() => {
-  if (ORIGINAL_SESSION_DIR === undefined) {
-    delete process.env.ROUTECODEX_SESSION_DIR;
-  } else {
-    process.env.ROUTECODEX_SESSION_DIR = ORIGINAL_SESSION_DIR;
-  }
-});
-
 describe('servertool CLI projection', () => {
   it('projects stopless auto flow to exec_command with reasoning and direct CLI input', () => {
     const projection = buildServertoolCliProjectionForAutoFlow({
@@ -131,13 +139,16 @@ describe('servertool CLI projection', () => {
     expect(message.reasoning.summary[0].text).toBe('full stop summary');
     expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toMatch(/^ROUTECODEX_SESSION_DIR='\/tmp\/rcc-stopless-port-5555' routecodex hook run reasoning_stop --input-json '/);
-    const inputJson = command.match(/--input-json '(.+)'$/)?.[1];
+    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).not.toContain('--session-dir');
+    const inputJson = command.match(/--input-json '([^']+)'(?=\s--repeat-count|\s--max-repeats|$)/)?.[1];
     expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
       flowId: 'stop_message_flow',
       repeatCount: 2,
       maxRepeats: 3
     });
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
     expect(command).not.toContain('continuationPrompt');
     expect(command).not.toContain('继续执行原任务');
     expect(command).not.toContain('stdoutPreview');
@@ -146,6 +157,79 @@ describe('servertool CLI projection', () => {
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));
     expect((projection as any)[['tick', 'et'].join('')]).toBeUndefined();
+  });
+
+  it('ignores metadata.sessionId for stopless auto flow projection', () => {
+    const projection = buildServertoolCliProjectionForAutoFlow({
+      options: {
+        chatResponse: {},
+        adapterContext: {
+          metadata: {
+            sessionId: 'sess-meta-1'
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_stop_meta_1',
+        providerProtocol: 'openai-responses'
+      },
+      flowId: 'stop_message_flow',
+      reasoningText: 'meta session',
+      input: {
+        repeatCount: 2,
+        maxRepeats: 3
+      }
+    });
+    const command = JSON.parse((projection.chatResponse as any).choices[0].message.tool_calls[0].function.arguments).cmd;
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
+  });
+
+  it('ignores responsesRequestContext.sessionId for stopless auto flow projection', () => {
+    const projection = buildServertoolCliProjectionForAutoFlow({
+      options: {
+        chatResponse: {},
+        adapterContext: {
+          __rt: {
+            responsesRequestContext: {
+              sessionId: 'sess-rrc-1'
+            }
+          }
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_stop_rrc_1',
+        providerProtocol: 'openai-responses'
+      },
+      flowId: 'stop_message_flow',
+      reasoningText: 'rrc session',
+      input: {
+        repeatCount: 2,
+        maxRepeats: 3
+      }
+    });
+    const command = JSON.parse((projection.chatResponse as any).choices[0].message.tool_calls[0].function.arguments).cmd;
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
+  });
+
+  it('does not require request-scoped session truth for stop_message_flow auto projection', () => {
+    const projection = buildServertoolCliProjectionForAutoFlow({
+      options: {
+        chatResponse: {},
+        adapterContext: {} as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_stop_missing_session',
+        providerProtocol: 'openai-responses'
+      },
+      flowId: 'stop_message_flow',
+      reasoningText: 'missing session',
+      input: {
+        repeatCount: 1,
+        maxRepeats: 3
+      }
+    });
+    const command = JSON.parse((projection.chatResponse as any).choices[0].message.tool_calls[0].function.arguments).cmd;
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
   });
 
   it('projects basic servertool tool call without executing handler or restoring model identity', () => {

@@ -10,7 +10,12 @@
  * - The entry payload shape is passed through unchanged.
  * - Observable fields are recorded for snapshot/log traceability.
  * - Response is passed through without outbound rewriting.
- * - Fail-fast: no fallback, no silent compensation.
+ * - Contract: payload passthrough is preserved, but error policy passthrough is
+ *   explicitly NOT preserved. All router-direct failures must surface as
+ *   normal ErrorErr05 plan and go through the unified decision consumer
+ *   (`decideDirectRouterRetry` in ./direct-decision.ts) before any client
+ *   projection. The "no fallback" rule applies to error handling (no silent
+ *   swallowing, no synthetic rethrow) and not to error passthrough itself.
  */
 
 import type { PortConfig } from './port-config-types.js';

@@ -98,14 +98,6 @@ export interface BudgetStateUpdatePlanOutput {
   nextState?: Record<string, unknown> | null;
 }
 
-export interface PersistStopMessageStatePlanInput {
-  state: Record<string, unknown>;
-}
-
-export interface PersistStopMessageStatePlanOutput {
-  action: 'save' | 'clear';
-}
-
 export interface PendingServerToolInjectionPlan {
   version: 1;
   sessionId: string;
@@ -203,6 +195,7 @@ export interface ClientExecCliProjectionInput {
   repeatCount?: number;
   maxRepeats?: number;
   stdoutPreview?: string;
+  sessionDir?: string;
   sessionId?: string;
   requestId?: string;
 }
@@ -477,15 +470,6 @@ export interface RuntimeStopMessageStateSnapshot {
   lastUsedAt?: number;
   stageMode?: 'on' | 'off' | 'auto';
   aiMode?: 'on' | 'off';
-}
-
-export interface StopMessagePersistedStateSelectionPlan {
-  snapshot?: RuntimeStopMessageStateSnapshot;
-  stageMode?: 'on' | 'off' | 'auto';
-  tombstone: {
-    exhaustedDefault: boolean;
-    cleared: boolean;
-  };
 }
 
 export interface StopMessageRoutingStateApplyPlan {
@@ -1052,24 +1036,6 @@ export function planStopMessageRoutingSnapshotWithNative(
   return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
 }
 
-export function planStopMessagePersistedStateSelectionWithNative(input: {
-  states: Array<{
-    key?: string | null;
-    state: unknown;
-  }>;
-}): StopMessagePersistedStateSelectionPlan {
-  const capability = 'planStopMessagePersistedStateSelectionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessagePersistedStateSelectionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessagePersistedStateSelectionJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseStopMessagePersistedStateSelectionPayload(resultJson, capability);
-}
-
 export function planStopMessageRoutingStateApplyWithNative(
   snapshot: unknown,
 ): StopMessageRoutingStateApplyPlan {
@@ -1290,37 +1256,6 @@ function readStopMessageAiModeField(value: unknown, source: string): 'on' | 'off
   throw new Error(`${source} returned invalid stop-message ai mode`);
 }
 
-function parseStopMessagePersistedStateSelectionPayload(
-  resultJson: string,
-  capability: string,
-): StopMessagePersistedStateSelectionPlan {
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  const snapshot = record.snapshot === undefined || record.snapshot === null
-    ? undefined
-    : parseRuntimeStopMessageStateSnapshotPayload(JSON.stringify(record.snapshot), `${capability} snapshot`) ?? undefined;
-  const stageMode = readStopMessageStageModeField(record.stageMode, `${capability} stageMode`);
-  const tombstone = record.tombstone;
-  if (!tombstone || typeof tombstone !== 'object' || Array.isArray(tombstone)) {
-    throw new Error(`${capability} native returned invalid tombstone`);
-  }
-  const tombstoneRecord = tombstone as Record<string, unknown>;
-  if (typeof tombstoneRecord.exhaustedDefault !== 'boolean' || typeof tombstoneRecord.cleared !== 'boolean') {
-    throw new Error(`${capability} native returned invalid tombstone fields`);
-  }
-  return {
-    ...(snapshot ? { snapshot } : {}),
-    ...(stageMode ? { stageMode } : {}),
-    tombstone: {
-      exhaustedDefault: tombstoneRecord.exhaustedDefault,
-      cleared: tombstoneRecord.cleared,
-    }
-  };
-}
-
 function parseStopMessageRoutingStateApplyPayload(
   resultJson: string,
   capability: string,
@@ -1410,79 +1345,6 @@ export function buildClientExecCliProjectionOutputWithNative(
     throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson);
-}
-
-export interface StoplessContinuationPersistPlan {
-  key: string;
-  action: 'save' | 'clear';
-  state: Record<string, unknown> | null;
-  used: number;
-  maxRepeats: number;
-}
-
-export interface PersistedRuntimeStopMessageStateSaveResult {
-  filepath: string;
-}
-
-export function recordStoplessContinuationStateWithNative(input: {
-  sessionId: string;
-  requestId: string;
-  text: string;
-  nextUsed: number;
-  maxRepeats: number;
-  nowMs?: number;
-}): StoplessContinuationPersistPlan {
-  const capability = 'recordStoplessContinuationStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('recordStoplessContinuationStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`recordStoplessContinuationStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as Record<string, unknown>;
-  if (!parsed || typeof parsed !== 'string' && typeof parsed !== 'object') {
-    throw new Error('recordStoplessContinuationStateJson native returned invalid payload');
-  }
-  const record = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
-  const action = record.action;
-  if (action !== 'save' && action !== 'clear') {
-    throw new Error(`recordStoplessContinuationStateJson native returned invalid action: ${String(action)}`);
-  }
-  return {
-    key: String(record.key ?? ''),
-    action,
-    state: (record.state && typeof record.state === 'object' && !Array.isArray(record.state))
-      ? (record.state as Record<string, unknown>)
-      : null,
-    used: Number(record.used ?? 0),
-    maxRepeats: Number(record.maxRepeats ?? 0)
-  };
-}
-
-export function savePersistedRuntimeStopMessageStateWithNative(input: {
-  sessionId: string;
-  payload: StoplessContinuationPersistPlan;
-}): PersistedRuntimeStopMessageStateSaveResult {
-  const capability = 'savePersistedRuntimeStopMessageStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('savePersistedRuntimeStopMessageStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`savePersistedRuntimeStopMessageStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('savePersistedRuntimeStopMessageStateJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.filepath !== 'string' || !record.filepath.trim()) {
-    throw new Error('savePersistedRuntimeStopMessageStateJson native returned invalid filepath');
-  }
-  return { filepath: record.filepath };
 }
 
 export function planStoplessOrchestrationActionWithNative(
@@ -1750,29 +1612,6 @@ export function resolveStopMessageFollowupToolContentMaxCharsWithNative(input: {
   }
   const parsed = JSON.parse(resultJson) as unknown;
   return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : undefined;
-}
-
-export function planPersistStopMessageStateWithNative(
-  input: PersistStopMessageStatePlanInput,
-): PersistStopMessageStatePlanOutput {
-  const capability = 'planPersistStopMessageStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planPersistStopMessageStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planPersistStopMessageStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planPersistStopMessageStateJson native returned invalid payload');
-  }
-  const action = (parsed as Record<string, unknown>).action;
-  if (action !== 'save' && action !== 'clear') {
-    throw new Error('planPersistStopMessageStateJson native returned invalid action');
-  }
-  return { action };
 }
 
 export function resolvePendingSessionFileNameWithNative(sessionId: string): string | undefined {

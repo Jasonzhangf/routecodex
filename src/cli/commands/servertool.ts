@@ -29,9 +29,10 @@ export function createServertoolCommand(
     .option('--flow <flowId>', 'servertool flow id')
     .option('--repeat-count <count>', 'stopless repeat count')
     .option('--max-repeats <count>', 'stopless max repeats')
+    .option('--session-dir <sessionDir>', 'runtime session workdir root')
     .option('--session-id <sessionId>', 'stopless session id')
     .option('--request-id <requestId>', 'stopless request id')
-    .action(async (toolName: string, options: { inputJson: string; flow?: string; repeatCount?: string; maxRepeats?: string; sessionId?: string; requestId?: string }) => {
+    .action(async (toolName: string, options: { inputJson: string; flow?: string; repeatCount?: string; maxRepeats?: string; sessionDir?: string; sessionId?: string; requestId?: string }) => {
       try {
         const args = ['run', toolName, '--input-json', options.inputJson];
         if (typeof options.flow === 'string') {
@@ -42,6 +43,9 @@ export function createServertoolCommand(
         }
         if (typeof options.maxRepeats === 'string') {
           args.push('--max-repeats', options.maxRepeats);
+        }
+        if (typeof options.sessionDir === 'string') {
+          args.push('--session-dir', options.sessionDir);
         }
         if (typeof options.sessionId === 'string') {
           args.push('--session-id', options.sessionId);
@@ -61,11 +65,11 @@ export function createServertoolCommand(
         const trimmed = result.trimEnd();
         if (toolName === STOPLESS_INTERNAL_TOOL_NAME || toolName === STOPLESS_PUBLIC_TOOL_NAME) {
           const payload = JSON.parse(trimmed) as Record<string, unknown>;
-          if (typeof payload.sessionId !== 'string' || !payload.sessionId.trim()) {
-            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing sessionId');
+          if (typeof payload.repeatCount !== 'number' || !Number.isFinite(payload.repeatCount)) {
+            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing repeatCount');
           }
-          if (typeof payload.requestId !== 'string' || !payload.requestId.trim()) {
-            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing requestId');
+          if (typeof payload.maxRepeats !== 'number' || !Number.isFinite(payload.maxRepeats)) {
+            throw new Error('SERVERTOOL_CLI_INVALID_OUTPUT: missing maxRepeats');
           }
         }
         deps.log(trimmed);

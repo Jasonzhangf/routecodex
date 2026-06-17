@@ -36,7 +36,6 @@ export function createStopMessageState(snapshot: {
   updatedAt?: number;
   lastUsedAt?: number;
   stageMode?: 'on' | 'off' | 'auto';
-  aiMode?: 'on' | 'off';
   aiSeedPrompt?: string;
   aiHistory?: Array<Record<string, unknown>>;
 }): RoutingInstructionState {
@@ -74,7 +73,6 @@ export function applyStopMessageSnapshotToState(
     stopMessageUpdatedAt: undefined,
     stopMessageLastUsedAt: undefined,
     stopMessageStageMode: undefined,
-    stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
     preCommandSource: undefined,
@@ -90,7 +88,6 @@ export function applyStopMessageSnapshotToState(
   next.stopMessageUpdatedAt = plan.updatedAt;
   next.stopMessageLastUsedAt = plan.lastUsedAt;
   next.stopMessageStageMode = plan.stageMode;
-  next.stopMessageAiMode = plan.aiMode;
   next.stopMessageAiSeedPrompt = plan.aiSeedPrompt;
   next.stopMessageAiHistory = plan.aiHistory;
   return next;
@@ -104,7 +101,6 @@ export function clearStopMessageState(state: RoutingInstructionState, now: numbe
   state.stopMessageUsed = undefined;
   state.stopMessageSource = undefined;
   state.stopMessageStageMode = undefined;
-  state.stopMessageAiMode = undefined;
   state.stopMessageUpdatedAt = plan.timestamp;
   state.stopMessageLastUsedAt = plan.timestamp;
   state.stopMessageAiSeedPrompt = undefined;

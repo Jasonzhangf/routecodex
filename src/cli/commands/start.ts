@@ -17,6 +17,7 @@ import {
   clearDaemonStopIntent,
   consumeDaemonStopIntent
 } from '../../utils/daemon-stop-intent.js';
+import { writeServerPidCache } from '../../utils/server-runtime-pid.js';
 import {
   resolveRuntimeLifecyclePath,
   safeReadRuntimeLifecycle
@@ -474,9 +475,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         }
         const writePidFile = (pid: number | undefined): void => {
           try {
-            fsImpl.mkdirSync(routeCodexHome, { recursive: true });
-            const pidFile = pathImpl.join(routeCodexHome, `server-${resolvedPort}.pid`);
-            fsImpl.writeFileSync(pidFile, String(pid ?? ''), 'utf8');
+            writeServerPidCache({
+              port: resolvedPort,
+              pid: pid ?? 0,
+              origin: 'start',
+              routeCodexHomeDir: routeCodexHome
+            });
           } catch (error) {
             logStartNonBlocking(ctx, 'write_pid_file', error, {
               port: resolvedPort,

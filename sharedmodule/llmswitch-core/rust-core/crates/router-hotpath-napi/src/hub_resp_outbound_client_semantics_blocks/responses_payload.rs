@@ -8,6 +8,7 @@ use crate::hub_reasoning_tool_normalizer::{
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
     build_client_tool_index, normalize_call_args,
     normalize_responses_tool_call_arguments_for_client, resolve_client_tool_name,
+    sanitize_responses_client_payload_for_replay_safety,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::resolve_client_protocol_for_response_entry;
 use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
@@ -612,7 +613,9 @@ pub(crate) fn build_responses_payload_from_chat_core(
             .and_then(|v| v.as_array())
             .is_some()
     {
-        return Ok(Value::Object(response_row.clone()));
+        return Ok(sanitize_responses_client_payload_for_replay_safety(
+            &Value::Object(response_row.clone()),
+        ));
     }
 
     if response_row
@@ -732,9 +735,6 @@ pub(crate) fn build_responses_payload_from_chat_core(
         if let Some(mut summary) = summary_value {
             normalize_reasoning_summary_for_codex_display(&mut summary);
             reasoning_item.insert("summary".to_string(), summary);
-        }
-        if let Some(content) = reasoning_payload.get("content") {
-            reasoning_item.insert("content".to_string(), content.clone());
         }
         reasoning_item.insert(
             "encrypted_content".to_string(),

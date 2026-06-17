@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Servertool Followup Call Graph</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Servertool Followup Call Graph</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/servertool-followup-call-graph.md</code></p>
+      </header>
+      <article>
+        <h1>Servertool Followup Call Graph</h1>
+        <h2>Purpose</h2>
+        <p>这页只回答两件事：</p>
+        <p>1. servertool followup 主链到底怎么从 <code>HubRespChatProcess03Governed</code> 回到正常请求/响应主线。 2. followup、CLI projection、stopless 三条分支分别由谁 owning，哪里绝对不能长出第二份语义。</p>
+        <p>它是 review surface，不是第二份 SSOT。</p>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/verification-map.yml</code></li>
+          <li><code>docs/architecture/mainline-call-map.yml</code></li>
+          <li><code>docs/design/servertool-rust-only-architecture.md</code></li>
+          <li><code>docs/design/servertool-cli-lifecycle.md</code></li>
+          <li><code>docs/design/servertool-cli-projection-migration.md</code></li>
+          <li><code>docs/design/responses-continuation-storage-ownership.md</code></li>
+          <li><code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></li>
+        </ul>
+        <p>Key owners:</p>
+        <ul>
+          <li><code>hub.servertool_followup</code></li>
+          <li><code>hub.servertool_cli_projection</code></li>
+          <li><code>hub.servertool_stopless_cli_continuation</code></li>
+          <li><code>hub.servertool_backend_route_runtime</code></li>
+          <li><code>hub.servertool_orchestration_policy</code></li>
+        </ul>
+        <h2>Main Rule</h2>
+        <ul>
+          <li>servertool 是 <code>HubRespChatProcess03Governed</code> 内部子链，不是独立 pipeline。</li>
+          <li>followup 只能从 origin snapshot 构造，不能从当前污染 payload 猜。</li>
+          <li>TS 只能做 runtime IO / bridge / reenter shell，不得重写工具语义。</li>
+          <li>stopless CLI 不走 server-side followup/reenter；它走 client-visible <code>exec_command</code>。</li>
+        </ul>
+        <h2>Mainline</h2>
+        <pre class="mermaid">flowchart TD
+          A[&quot;ProviderRespInbound01Raw&quot;] --&gt; B[&quot;HubRespInbound02Parsed&quot;]
+          B --&gt; C[&quot;HubRespChatProcess03Governed&quot;]
+          C --&gt; D[&quot;ServertoolResp03RuntimeAction&quot;]
+          D --&gt; E[&quot;ServertoolReq04FollowupBuilt&quot;]
+          E --&gt; F[&quot;HubReqInbound02Standardized&quot;]
+          F --&gt; G[&quot;HubReqChatProcess03Governed&quot;]
+          G --&gt; H[&quot;VrRoute04SelectedTarget&quot;]
+          H --&gt; I[&quot;HubReqOutbound05ProviderSemantic&quot;]
+          I --&gt; J[&quot;ProviderReqOutbound06WirePayload&quot;]
+          J --&gt; K[&quot;ProviderRespInbound01Raw&quot;]
+          K --&gt; L[&quot;HubRespInbound02Parsed&quot;]
+          L --&gt; M[&quot;HubRespChatProcess03Governed&quot;]
+          M --&gt; N[&quot;ServertoolResp03FollowupResult&quot;]
+          N --&gt; O[&quot;HubRespOutbound04ClientSemantic&quot;]
+          O --&gt; P[&quot;ServerRespOutbound05ClientFrame&quot;]</pre>
+        <h2>Node Boundary</h2>
+        <table>
+        <thead><tr><th>Node</th><th>What it owns</th><th>Must not do</th><th>Anchor</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>HubRespChatProcess03Governed</code></td><td>servertool/tool governance 唯一响应标准态</td><td>直接写 client frame，或从 provider raw 旁路判定</td><td>topology doc §4.1.1</td></tr>
+        <tr><td><code>ServertoolResp03RuntimeAction</code></td><td>Rust effect plan，决定 followup / client-inject / CLI projection</td><td>用 client payload 或 SSE frame 反推语义</td><td><code>run_servertool_response_stage_json</code></td></tr>
+        <tr><td><code>ServertoolReq04FollowupBuilt</code></td><td>从 origin snapshot 构造 followup 请求</td><td>从当前污染 payload 猜工具列表/上下文</td><td><code>plan_servertool_outcome_json</code></td></tr>
+        <tr><td>reenter request chain</td><td>正常 Hub 请求主线</td><td>servertool 私有旁路协议</td><td>pipeline topology</td></tr>
+        <tr><td><code>ServertoolResp03FollowupResult</code></td><td>选定 followup governed truth</td><td>被 pre-followup client payload 覆盖</td><td>Rust-only architecture</td></tr>
+        <tr><td><code>HubRespOutbound04ClientSemantic</code></td><td>client protocol projection 唯一出口</td><td>servertool 专用第二投影器</td><td><code>project_hub_resp_outbound_04_from_hub_resp_chatprocess_03</code></td></tr>
+        </tbody>
+        </table>
+        <h2>Branch Split</h2>
+        <pre class="mermaid">flowchart LR
+          A[&quot;HubRespChatProcess03Governed&quot;] --&gt; B{&quot;servertool outcome&quot;}
+          B --&gt;|followup runtime| C[&quot;ServertoolResp03RuntimeAction&quot;]
+          C --&gt; D[&quot;ServertoolReq04FollowupBuilt&quot;]
+          D --&gt; E[&quot;normal Hub reenter chain&quot;]
+
+          B --&gt;|generic CLI projection| F[&quot;ServertoolCliProjection01Planned&quot;]
+          F --&gt; G[&quot;HubRespOutbound04ClientSemantic&quot;]
+          G --&gt; H[&quot;client-visible exec_command&quot;]
+
+          B --&gt;|stopless CLI continuation| I[&quot;StoplessOrchestrationPlan&quot;]
+          I --&gt; J[&quot;ServertoolCliProjection01Planned&quot;]
+          J --&gt; G</pre>
+        <h2>Owner Matrix</h2>
+        <table>
+        <thead><tr><th>Feature</th><th>Owns</th><th>Canonical builders</th><th>Must not grow in</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>hub.servertool_followup</code></td><td>followup orchestration + post-followup governed truth</td><td><code>run_servertool_response_stage_json</code>, <code>plan_servertool_outcome_json</code>, <code>project_hub_resp_outbound_04_from_hub_resp_chatprocess_03</code></td><td><code>src/providers</code>, <code>src/server</code></td></tr>
+        <tr><td><code>hub.servertool_cli_projection</code></td><td>generic servertool -&gt; client <code>exec_command</code> projection</td><td><code>build_servertool_cli_projection_01_from_hub_resp_chatprocess_03</code></td><td>provider runtime / executor local projection</td></tr>
+        <tr><td><code>hub.servertool_stopless_cli_continuation</code></td><td>stopless runtime-metadata + current-turn tool-output continuation planning</td><td><code>plan_stopless_orchestration_action</code>, <code>resolve_runtime_stop_message_state_from_adapter_context</code>, <code>plan_client_exec_cli_projection_output</code></td><td>handler-local stopless logic / TS reenter</td></tr>
+        <tr><td><code>hub.servertool_backend_route_runtime</code></td><td>backend-route runtime target / transport shell</td><td>see function-map owner</td><td>provider/client layer second runtime owner</td></tr>
+        <tr><td><code>hub.servertool_orchestration_policy</code></td><td>timeout, disconnect, provider pin, followup error policy</td><td><code>resolve_adapter_context_provider_key</code>, <code>compact_followup_error_reason</code></td><td>scattered handler/executor policy</td></tr>
+        </tbody>
+        </table>
+        <h2>Followup vs CLI</h2>
+        <table>
+        <thead><tr><th>Path</th><th>Trigger</th><th>Who executes</th><th>Next step</th><th>Hard boundary</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>followup runtime</td><td>internal servertool needs local execution + reenter</td><td>server-side runtime shell under Rust plan</td><td>rebuild standard request and reenter Hub request chain</td><td>只能 relay 复入完整 Hub Pipeline</td></tr>
+        <tr><td>generic CLI projection</td><td>tool should run through normal client tool loop</td><td>client executes <code>exec_command</code></td><td>client returns ordinary tool result next turn</td><td>不得 server-side reenter</td></tr>
+        <tr><td>stopless CLI continuation</td><td><code>stop_message_auto</code> / <code>reasoning_stop</code> loop</td><td>client executes <code>exec_command</code></td><td>next turn model consumes current request <code>tool_outputs</code> / runtime metadata truth</td><td>不得再触发 server-side followup，也不得依赖 file writeback</td></tr>
+        </tbody>
+        </table>
+        <h2>Stopless Branch</h2>
+        <pre class="mermaid">flowchart TD
+          A[&quot;finish_reason=stop or stop hook condition&quot;] --&gt; B[&quot;hub.servertool_stopless_cli_continuation&quot;]
+          B --&gt; C[&quot;ServertoolCliProjection01Planned&lt;br/&gt;tool=exec_command&quot;]
+          C --&gt; D[&quot;Client executes routecodex hook run reasoning_stop ...&quot;]
+          D --&gt; E[&quot;stdout JSON tool result&quot;]
+          E --&gt; F[&quot;HubReqInbound02Standardized&quot;]
+          F --&gt; G[&quot;next normal model turn&quot;]
+
+          H[&quot;server-side followup/reenter&quot;] --&gt; I[&quot;forbidden for stopless CLI&quot;]</pre>
+        <h2>Illegal Growth</h2>
+        <table>
+        <thead><tr><th>Forbidden pattern</th><th>Why</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td></tr>
+        <tr><td>handler/executor 直接决定 servertool tool 语义</td><td>破坏 Rust-only orchestration owner</td></tr>
+        <tr><td>followup 从当前响应 payload 猜上下文</td><td>会把污染 payload 当真相</td></tr>
+        <tr><td>pre-followup <code>clientPayload</code> / <code>streamPipe.payload</code> 覆盖 post-followup truth</td><td>会丢失真实 followup 结果</td></tr>
+        <tr><td>stopless CLI 再走 server-side followup/reenter</td><td>与 CLI 生命周期冲突</td></tr>
+        <tr><td>direct/provider passthrough 进入 followup orchestration</td><td>违反“followup 只能 relay 复入完整 Hub Pipeline”</td></tr>
+        <tr><td>provider/client payload 暴露内部 followup metadata</td><td>违反 metadata 闭环边界</td></tr>
+        </tbody>
+        </table>
+        <h2>Review Findings</h2>
+        <table>
+        <thead><tr><th>Gap ID</th><th>Area</th><th>Current signal</th><th>Why it matters</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>followup-gap-01</code></td><td>Dedicated wiki</td><td>此前没有 followup/CLI/stopless 合并 review 图面</td><td>servertool 分支很多，易改错层</td></tr>
+        <tr><td><code>followup-gap-02</code></td><td>Split visibility</td><td>function-map 有 owner，但 followup 与 CLI 的分流边界未在单页显式对比</td><td>容易把 CLI 路径误补成 followup</td></tr>
+        <tr><td><code>followup-gap-03</code></td><td>Stopless isolation</td><td>文档已写 stopless 不可 server-side reenter，但 wiki 之前没有单独标红</td><td>旧 stopless/followup 语义容易复活</td></tr>
+        <tr><td><code>followup-gap-04</code></td><td>Post-followup truth</td><td>之前缺一张图强调 <code>ServertoolResp03FollowupResult -&gt; HubRespOutbound04ClientSemantic</code> 的唯一出口</td><td>容易重新用 pre-followup payload 投影 SSE/JSON</td></tr>
+        <tr><td><code>followup-gap-05</code></td><td>Backend/runtime boundary</td><td>backend-route/runtime 只应是 transport shell，但专题 review 面还不够集中</td><td>handler/runtime 最容易重新长逻辑</td></tr>
+        </tbody>
+        </table>
+        <h2>Verification Anchors</h2>
+        <ul>
+          <li><code>tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts</code></li>
+          <li><code>tests/sharedmodule/servertool-pending-session.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-projection.spec.ts</code></li>
+          <li><code>tests/servertool/stopless-cli-continuation.spec.ts</code></li>
+          <li><code>tests/servertool/followup-runtime-provider-pin.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts</code></li>
+          <li><code>tests/sharedmodule/apply-patch-chat-process-contract.spec.ts</code></li>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+        </ul>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>当前改动是在 <code>hub.servertool_*</code> owner 或允许路径里，而不是 handler/provider/executor 本地补语义。</li>
+          <li>followup 请求是否只从 origin snapshot 构造。</li>
+          <li>followup 是否仍然走正常 Hub request/reenter chain，而不是私有旁路。</li>
+          <li>stopless CLI 是否仍是 client-visible <code>exec_command</code>，且不走 server-side followup。</li>
+          <li>post-followup governed truth 是否仍是 <code>HubRespOutbound04ClientSemantic</code> 的唯一输入。</li>
+          <li>provider pin / timeout / disconnect / error policy 是否仍只由 <code>hub.servertool_orchestration_policy</code> 收口。</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

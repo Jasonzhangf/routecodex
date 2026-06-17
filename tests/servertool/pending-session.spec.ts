@@ -41,8 +41,8 @@ describe('servertool pending-session', () => {
 
   afterEach(async () => {
     process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
-    await clearPendingServerToolInjection('sess-valid');
-    await clearPendingServerToolInjection('sess-synthetic');
+    await clearPendingServerToolInjection('sess-valid', sessionDir);
+    await clearPendingServerToolInjection('sess-synthetic', sessionDir);
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
@@ -72,9 +72,9 @@ describe('servertool pending-session', () => {
           content: '{"items":[]}'
         }
       ]
-    });
+    }, sessionDir);
 
-    const loaded = await loadPendingServerToolInjection('sess-valid');
+    const loaded = await loadPendingServerToolInjection('sess-valid', sessionDir);
     expect(loaded).not.toBeNull();
     expect(loaded?.afterToolCallIds).toEqual(['call_client_1']);
     expect((loaded?.messages?.[0] as any)?.tool_calls?.[0]?.id).toBe('call_servertool_clock_req_1');
@@ -106,9 +106,9 @@ describe('servertool pending-session', () => {
           content: '{"stdout":"/tmp"}'
         }
       ]
-    });
+    }, sessionDir);
 
-    const loaded = await loadPendingServerToolInjection('sess-synthetic');
+    const loaded = await loadPendingServerToolInjection('sess-synthetic', sessionDir);
     expect(loaded).not.toBeNull();
     expect(loaded?.afterToolCallIds).toEqual(['call_servertool_fallback_1777378574502_510']);
 

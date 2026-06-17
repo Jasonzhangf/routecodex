@@ -9,6 +9,7 @@ import {
 } from './native-shared-conversion-semantics-core.js';
 
 export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
+const NO_SESSION_DIR_OVERRIDE = '__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__';
 
 export interface StoplessGoalStateSnapshot {
   status: 'idle' | 'active' | 'paused' | 'stopped' | 'completed';
@@ -52,7 +53,6 @@ export interface RoutingInstruction {
   stopMessageText?: string;
   stopMessageMaxRepeats?: number;
   stopMessageStageMode?: 'on' | 'off' | 'auto';
-  stopMessageAiMode?: 'on' | 'off';
   stopMessageSource?: string;
   fromHistoricalUserMessage?: boolean;
   preCommandScriptPath?: string;
@@ -88,7 +88,6 @@ export interface RoutingInstructionState {
   stopMessageUpdatedAt?: number;
   stopMessageLastUsedAt?: number;
   stopMessageStageMode?: 'on' | 'off' | 'auto';
-  stopMessageAiMode?: 'on' | 'off';
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
   preCommandSource?: string;
@@ -156,6 +155,14 @@ function plainState(state: RoutingInstructionState | Record<string, unknown>): R
   return out;
 }
 
+function normalizeSessionDirOverride(sessionDir?: string): string {
+  if (typeof sessionDir !== 'string') {
+    return NO_SESSION_DIR_OVERRIDE;
+  }
+  const trimmed = sessionDir.trim();
+  return trimmed || NO_SESSION_DIR_OVERRIDE;
+}
+
 function hydrateState(raw: Record<string, unknown>): RoutingInstructionState {
   const disabledKeys = new Map<string, Set<string | number>>();
   if (Array.isArray(raw.disabledKeys)) {
@@ -209,7 +216,6 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
     state.stopMessageMaxRepeats === undefined &&
     state.stopMessageUsed === undefined &&
     state.stopMessageStageMode === undefined &&
-    state.stopMessageAiMode === undefined &&
     !preCommand &&
     state.preCommandUpdatedAt === undefined
   );
@@ -243,12 +249,16 @@ export function resolveStopMessageScope(metadata: RouterMetadataInput | Record<s
     : failNativeRequired<string | undefined>(capability, 'invalid payload');
 }
 
-export function loadRoutingInstructionStateSync(key: string | undefined): RoutingInstructionState | null {
+export function loadRoutingInstructionStateSync(
+  key: string | undefined,
+  sessionDir?: string
+): RoutingInstructionState | null {
   if (!isPersistentScopeKey(key)) {
     throw new RoutingStateKeyMissingError(key, 'Routing state key missing or invalid; failing fast per no-fallback policy');
   }
+  const resolvedSessionDir = normalizeSessionDirOverride(sessionDir);
   const capability = 'loadRoutingInstructionStateJson';
-  const raw = invokeNativeString(capability, [key, process.env.ROUTECODEX_SESSION_DIR]);
+  const raw = invokeNativeString(capability, [key, resolvedSessionDir]);
   const parsed = parseJson(raw);
   if (parsed === null) return null;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -257,17 +267,26 @@ export function loadRoutingInstructionStateSync(key: string | undefined): Routin
   return hydrateState(parsed as Record<string, unknown>);
 }
 
-export function saveRoutingInstructionStateSync(key: string | undefined, state: RoutingInstructionState | null): void {
+export function saveRoutingInstructionStateSync(
+  key: string | undefined,
+  state: RoutingInstructionState | null,
+  sessionDir?: string
+): void {
   if (!isPersistentScopeKey(key)) {
     return;
   }
+  const resolvedSessionDir = normalizeSessionDirOverride(sessionDir);
   const capability = 'saveRoutingInstructionStateJson';
   const payload = state ? serializeRoutingInstructionState(state) : null;
-  invokeNativeString(capability, [key, stringifyForNative(capability, payload), process.env.ROUTECODEX_SESSION_DIR]);
+  invokeNativeString(capability, [key, stringifyForNative(capability, payload), resolvedSessionDir]);
 }
 
-export function saveRoutingInstructionStateAsync(key: string | undefined, state: RoutingInstructionState | null): void {
-  saveRoutingInstructionStateSync(key, state);
+export function saveRoutingInstructionStateAsync(
+  key: string | undefined,
+  state: RoutingInstructionState | null,
+  sessionDir?: string
+): void {
+  saveRoutingInstructionStateSync(key, state, sessionDir);
 }
 
 export function mergeStopMessageFromPersisted(

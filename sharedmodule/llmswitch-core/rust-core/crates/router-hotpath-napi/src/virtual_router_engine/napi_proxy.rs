@@ -273,14 +273,6 @@ fn read_runtime_string(metadata: &Value, keys: &[&str]) -> Option<String> {
         {
             return Some(value.to_string());
         }
-        if let Some(value) = metadata
-            .get(*key)
-            .and_then(|entry| entry.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(value.to_string());
-        }
     }
     None
 }
@@ -293,3 +285,36 @@ fn is_js_null_or_undefined(value: &JsUnknown) -> bool {
 }
 
 impl VirtualRouterEngineProxy {}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_runtime_string, resolve_runtime_path_overrides};
+    use serde_json::json;
+
+    #[test]
+    fn runtime_path_overrides_read_only_from_rt_namespace() {
+        let metadata = json!({
+            "__rt": {
+                "sessionDir": "/tmp/rt-session",
+                "rccUserDir": "/tmp/rt-rcc"
+            },
+            "sessionDir": "/tmp/top-level-session",
+            "rccUserDir": "/tmp/top-level-rcc"
+        });
+        let overrides = resolve_runtime_path_overrides(&metadata);
+        assert_eq!(overrides.session_dir.as_deref(), Some("/tmp/rt-session"));
+        assert_eq!(overrides.rcc_user_dir.as_deref(), Some("/tmp/rt-rcc"));
+    }
+
+    #[test]
+    fn runtime_path_overrides_do_not_fallback_to_top_level_metadata() {
+        let metadata = json!({
+            "sessionDir": "/tmp/top-level-session",
+            "rccUserDir": "/tmp/top-level-rcc"
+        });
+        let overrides = resolve_runtime_path_overrides(&metadata);
+        assert_eq!(overrides.session_dir, None);
+        assert_eq!(overrides.rcc_user_dir, None);
+        assert_eq!(read_runtime_string(&metadata, &["sessionDir", "session_dir"]), None);
+    }
+}

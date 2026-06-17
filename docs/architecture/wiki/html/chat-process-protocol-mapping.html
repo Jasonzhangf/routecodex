@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chat Process Protocol Mapping</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Chat Process Protocol Mapping</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/chat-process-protocol-mapping.md</code></p>
+      </header>
+      <article>
+        <h1>Chat Process Protocol Mapping</h1>
+        <h2>Purpose</h2>
+        <p>这页只解决两件事：</p>
+        <p>1. 三种入口协议在进入 <code>chat process</code> 时，哪些语义字段要映射到统一 chat 语义。 2. 当前有哪些映射漏洞、哪些字段仍停留在 legacy metadata / transitional surface。</p>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md</code></li>
+          <li><code>docs/chat-process-continuation-state-contract.md</code></li>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/verification-map.yml</code></li>
+          <li><code>docs/audits/2026-05-17-conversion-matrix-full-audit.md</code></li>
+          <li><code>docs/design/responses-continuation-storage-ownership.md</code></li>
+        </ul>
+        <p>Target protocols in this page:</p>
+        <ul>
+          <li><code>openai-chat</code></li>
+          <li><code>openai-responses</code></li>
+          <li><code>anthropic-messages</code></li>
+        </ul>
+        <h2>Main Rule</h2>
+        <ul>
+          <li>inbound 在进入 <code>HubReqChatProcess03Governed</code> 前，必须把“可映射语义”提升为统一 chat 语义。</li>
+          <li>response 在进入 <code>HubRespChatProcess03Governed</code> 前，必须先 canonicalize 到 chat completion-like 语义。</li>
+          <li>metadata 只留不可映射的 runtime control；可映射语义不得滞留 metadata。</li>
+        </ul>
+        <h2>Inbound Mapping Flow</h2>
+        <pre class="mermaid">flowchart LR
+          A[&quot;openai-chat&quot;] --&gt; D[&quot;HubReqInbound02Standardized&quot;]
+          B[&quot;openai-responses&quot;] --&gt; D
+          C[&quot;anthropic-messages&quot;] --&gt; D
+          D --&gt; E[&quot;semantic lift&lt;br/&gt;messages/tools/toolOutputs/system/continuation&quot;]
+          E --&gt; F[&quot;ChatEnvelope / unified semantics&quot;]
+          F --&gt; G[&quot;HubReqChatProcess03Governed&quot;]
+
+          H[&quot;legacy metadata keys&quot;] -.fail-fast.-&gt; G
+
+          classDef safe fill:#edf7ed,stroke:#2e7d32,color:#1b1f23;
+          classDef guard fill:#fff7e6,stroke:#b26a00,color:#1b1f23;
+          classDef deny fill:#fdecec,stroke:#c62828,color:#1b1f23;
+          class A,B,C,D,E,F,G safe;
+          class H deny;</pre>
+        <h2>Request-Side Semantic Mapping</h2>
+        <table>
+        <thead><tr><th>Semantic concept</th><th><code>openai-chat</code></th><th><code>openai-responses</code></th><th><code>anthropic-messages</code></th><th>Unified chat-process target</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>user/assistant turn history</td><td><code>messages[]</code></td><td><code>input[]</code> / restored full input</td><td><code>messages[]</code></td><td><code>ChatEnvelope.messages</code></td></tr>
+        <tr><td>system instruction</td><td>system role message</td><td><code>instructions</code> and/or system <code>input_text</code></td><td>top-level <code>system</code></td><td><code>semantics.system.textBlocks</code> plus canonical message/system lift</td></tr>
+        <tr><td>client tool declarations</td><td><code>tools[]</code></td><td><code>tools[]</code></td><td><code>tools[]</code></td><td><code>semantics.tools.clientToolsRaw</code></td></tr>
+        <tr><td>explicit empty tools</td><td>empty <code>tools</code> intent</td><td>empty <code>tools</code> intent</td><td>empty <code>tools</code> intent</td><td><code>semantics.tools.explicitEmpty</code></td></tr>
+        <tr><td>tool call output back to model</td><td><code>role=tool</code> with <code>tool_call_id</code></td><td><code>function_call_output</code> / <code>submit_tool_outputs</code></td><td><code>tool_result</code></td><td><code>chat.toolOutputs</code> + <code>semantics.continuation.toolContinuation.resumeOutputs</code></td></tr>
+        <tr><td>continuation anchor</td><td>mostly none / local session logic</td><td><code>previous_response_id</code>, <code>response_id</code>, <code>responsesResume</code></td><td>message-level continuity only</td><td><code>semantics.continuation.*</code></td></tr>
+        <tr><td>response format / output schema hints</td><td>response format style fields</td><td><code>response_format</code> family</td><td>tool/schema guidance</td><td>protocol-specific semantic supplement under <code>semantics.*</code>, not metadata</td></tr>
+        <tr><td>anthropic tool aliasing</td><td>n/a</td><td>n/a</td><td><code>tool_use.name</code> alias mapping</td><td><code>semantics.tools.toolNameAliasMap</code></td></tr>
+        </tbody>
+        </table>
+        <h2>Response-Side Semantic Mapping</h2>
+        <pre class="mermaid">flowchart LR
+          A[&quot;ProviderRespInbound01Raw&quot;] --&gt; B[&quot;HubRespInbound02Parsed&quot;]
+          B --&gt; C[&quot;canonical chat-like response&quot;]
+          C --&gt; D[&quot;HubRespChatProcess03Governed&quot;]
+          D --&gt; E[&quot;HubRespOutbound04ClientSemantic&quot;]
+          E --&gt; F[&quot;openai-chat client payload&quot;]
+          E --&gt; G[&quot;openai-responses client payload&quot;]
+          E --&gt; H[&quot;anthropic-messages client payload&quot;]</pre>
+        <h2>Response Projection Matrix</h2>
+        <table>
+        <thead><tr><th>Unified response semantic</th><th>To <code>openai-chat</code> client</th><th>To <code>openai-responses</code> client</th><th>To <code>anthropic-messages</code> client</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>plain assistant text</td><td><code>choices[].message.content</code></td><td><code>output_text</code> / <code>output[]</code> text item</td><td>assistant text block</td></tr>
+        <tr><td>tool call request</td><td><code>assistant.tool_calls[]</code> + <code>finish_reason=tool_calls</code></td><td><code>output.function_call</code> + <code>required_action.submit_tool_outputs.tool_calls[]</code></td><td><code>content[].tool_use</code></td></tr>
+        <tr><td>tool call id continuity</td><td><code>tool_calls[].id</code> / <code>tool_call_id</code></td><td><code>call_id</code> / <code>id</code> / <code>required_action</code> linkage</td><td><code>tool_use.id</code> / <code>tool_result.tool_use_id</code></td></tr>
+        <tr><td>tool result backfill</td><td><code>role=tool</code> / restored next-turn tool message</td><td><code>function_call_output</code> / resumed input item</td><td><code>tool_result</code> block</td></tr>
+        <tr><td>continuation owner/restore truth</td><td>internal only</td><td>internal only, explicit protocol fields rebuilt from semantics</td><td>internal only</td></tr>
+        <tr><td>hidden reasoning retention</td><td>protocol-dependent internal carrier</td><td>protocol-dependent internal carrier</td><td>anthropic/native carrier and projection owner</td></tr>
+        </tbody>
+        </table>
+        <h2>Field-Level Mapping Matrix</h2>
+        <h3>Request Fields</h3>
+        <table>
+        <thead><tr><th>Unified meaning</th><th><code>openai-chat</code> request field</th><th><code>openai-responses</code> request field</th><th><code>anthropic-messages</code> request field</th><th>Unified target</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>user / assistant history</td><td><code>messages[]</code></td><td><code>input[]</code> / restored <code>fullInput</code></td><td><code>messages[]</code></td><td><code>ChatEnvelope.messages</code></td></tr>
+        <tr><td>system instruction</td><td>system role message</td><td><code>instructions</code> or leading system <code>input_text</code></td><td>top-level <code>system</code></td><td><code>semantics.system.textBlocks</code></td></tr>
+        <tr><td>tool declaration list</td><td><code>tools[]</code></td><td><code>tools[]</code></td><td><code>tools[]</code></td><td><code>semantics.tools.clientToolsRaw</code></td></tr>
+        <tr><td>explicit no-tools intent</td><td>empty <code>tools[]</code> / tool policy hints</td><td>empty <code>tools[]</code></td><td>empty <code>tools[]</code></td><td><code>semantics.tools.explicitEmpty</code></td></tr>
+        <tr><td>tool result submission</td><td><code>role=tool</code> + <code>tool_call_id</code></td><td><code>function_call_output</code> / <code>submit_tool_outputs</code></td><td><code>tool_result</code> + <code>tool_use_id</code></td><td><code>chat.toolOutputs</code></td></tr>
+        <tr><td>continuation anchor</td><td>session/conversation continuity</td><td><code>previous_response_id</code> / <code>response_id</code> / <code>responsesResume.*</code></td><td>message-level continuity hints</td><td><code>semantics.continuation.*</code></td></tr>
+        <tr><td>response schema / format hint</td><td>response format style fields</td><td><code>response_format</code> family</td><td>schema guidance / tool guidance</td><td>protocol supplement under <code>semantics.*</code></td></tr>
+        <tr><td>anthropic alias map</td><td>n/a</td><td>n/a</td><td>tool name aliasing</td><td><code>semantics.tools.toolNameAliasMap</code></td></tr>
+        </tbody>
+        </table>
+        <h3>Response Fields</h3>
+        <table>
+        <thead><tr><th>Unified meaning</th><th><code>openai-chat</code> response field</th><th><code>openai-responses</code> response field</th><th><code>anthropic-messages</code> response field</th><th>Unified source</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>assistant text</td><td><code>choices[].message.content</code></td><td><code>output_text</code> / <code>output[].content[].text</code></td><td>assistant text block</td><td>governed plain text response</td></tr>
+        <tr><td>tool call request</td><td><code>assistant.tool_calls[]</code></td><td><code>output.function_call</code> + <code>required_action.submit_tool_outputs.tool_calls[]</code></td><td><code>content[].tool_use</code></td><td>governed tool-call response</td></tr>
+        <tr><td>tool-call id</td><td><code>tool_calls[].id</code></td><td><code>call_id</code> / <code>id</code></td><td><code>tool_use.id</code></td><td>same semantic tool-call identity</td></tr>
+        <tr><td>tool result linkage</td><td><code>tool_call_id</code> in next request</td><td><code>function_call_output.call_id</code></td><td><code>tool_result.tool_use_id</code></td><td>same semantic linkage id</td></tr>
+        <tr><td>terminal marker</td><td><code>finish_reason</code></td><td><code>response.completed</code> / <code>response.done</code></td><td>content-block terminal / final completion</td><td>unified terminal response state</td></tr>
+        <tr><td>continuation resume truth</td><td>internal only</td><td>rebuilt protocol fields only</td><td>internal only</td><td><code>semantics.continuation</code></td></tr>
+        <tr><td>hidden reasoning</td><td>hidden/internal</td><td>replay-safe retained subset only</td><td>hidden/internal native carrier</td><td>internal carrier only</td></tr>
+        </tbody>
+        </table>
+        <h2>JSON / SSE Equality Surface</h2>
+        <table>
+        <thead><tr><th>Semantic</th><th>JSON surface</th><th>SSE surface</th><th>Must hold</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>terminal completion</td><td>final JSON body</td><td><code>response.completed</code> / <code>response.done</code></td><td>same terminal truth</td></tr>
+        <tr><td>tool call availability</td><td>final <code>assistant.tool_calls</code> or <code>required_action</code></td><td>completed event / final SSE frame</td><td>same consumer-visible tool call set</td></tr>
+        <tr><td>tool-call ids</td><td>final body ids</td><td>terminal SSE frame ids</td><td>ids must match exactly</td></tr>
+        <tr><td>plain text output</td><td>final text field</td><td>accumulated SSE visible output</td><td>semantic equality, not necessarily byte-for-byte chunking</td></tr>
+        <tr><td>error projection</td><td>JSON error body</td><td><code>event:error</code> or terminal error frame</td><td>same error class, no success-wrapped error</td></tr>
+        </tbody>
+        </table>
+        <h2>Legacy Metadata Keys That Must Not Reach Chat Process</h2>
+        <p>来自 <code>CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md</code> 的 fail-fast 清单：</p>
+        <ul>
+          <li><code>responsesResume</code></li>
+          <li><code>clientToolsRaw</code></li>
+          <li><code>anthropicToolNameMap</code></li>
+          <li><code>responsesContext</code></li>
+          <li><code>responseFormat</code></li>
+          <li><code>systemInstructions</code></li>
+          <li><code>toolsFieldPresent</code></li>
+          <li><code>extraFields</code></li>
+        </ul>
+        <p>这些键若仍以 metadata 形式进入 <code>HubReqChatProcess03Governed</code>，说明 semantic lift 还不彻底。</p>
+        <h2>Owner Anchors</h2>
+        <table>
+        <thead><tr><th>Feature</th><th>What it owns</th><th>Canonical builder / evidence</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>hub.metadata_boundary</code></td><td>metadata 只能做 control carrier，不能留在 normal payload</td><td><code>assert_no_inline_metadata</code>, <code>ensure_runtime_metadata_json</code>, <code>read_runtime_metadata_json</code></td></tr>
+        <tr><td><code>responses.instructions_to_input_normalization</code></td><td><code>instructions -&gt; leading system input_text</code> Rust-only</td><td><code>apply_responses_instructions_to_input</code></td></tr>
+        <tr><td><code>responses.tool_parameters_normalization</code></td><td>Responses <code>tools[].parameters</code> normalize to wire object schema</td><td><code>normalize_responses_tool_parameters</code></td></tr>
+        <tr><td><code>hub.response_responses_chat_projection</code></td><td>Responses provider payload -&gt; chat semantic projection</td><td>response mainline owner + Rust response projection</td></tr>
+        <tr><td><code>hub.response_anthropic_client_projection</code></td><td>Anthropic message -&gt; OpenAI chat/Responses client semantic projection</td><td><code>build_openai_chat_from_anthropic_message_full</code>, <code>build_openai_chat_response_from_anthropic_message</code></td></tr>
+        </tbody>
+        </table>
+        <h2>Three-Protocol Mapping Graph</h2>
+        <pre class="mermaid">flowchart TD
+          subgraph Inbound
+            A1[&quot;openai-chat.messages/tools&quot;] --&gt; U1[&quot;Unified chat messages + semantics.tools&quot;]
+            A2[&quot;openai-responses.input/instructions/tools/previous_response_id&quot;] --&gt; U1
+            A3[&quot;anthropic-messages.messages/system/tools&quot;] --&gt; U1
+          end
+
+          U1 --&gt; U2[&quot;HubReqChatProcess03Governed&quot;]
+          U2 --&gt; U3[&quot;HubRespChatProcess03Governed&quot;]
+
+          subgraph Outbound
+            U3 --&gt; B1[&quot;openai-chat&lt;br/&gt;assistant.tool_calls / role=tool&quot;]
+            U3 --&gt; B2[&quot;openai-responses&lt;br/&gt;output.function_call / function_call_output / required_action&quot;]
+            U3 --&gt; B3[&quot;anthropic-messages&lt;br/&gt;tool_use / tool_result&quot;]
+          end</pre>
+        <h2>Mapping Gaps / Review Findings</h2>
+        <table>
+        <thead><tr><th>Gap ID</th><th>Area</th><th>Current signal</th><th>Why it matters</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>map-gap-01</code></td><td>Legacy metadata residue</td><td><code>responsesResume / responsesContext / responseFormat / anthropicToolNameMap / clientToolsRaw</code> 仍在代码与旧类型里大量出现</td><td>说明还有过渡面没有完全缩到 <code>semantics.*</code></td></tr>
+        <tr><td><code>map-gap-02</code></td><td>Coverage asymmetry</td><td>旧 conversion audit 已指出 tool-call 映射矩阵不完整，尤其跨协议 required_action/tool_use/tool_result 组合</td><td>容易出现“一个协议绿，另一个协议 silently lossy”</td></tr>
+        <tr><td><code>map-gap-03</code></td><td>Queryability</td><td>之前缺专门的三协议 chat-process 映射图</td><td>审计时要在 req/resp 多文档跳转，难以一次看出缺口</td></tr>
+        <tr><td><code>map-gap-04</code></td><td>Continuation semantics</td><td><code>previous_response_id</code>、<code>responsesResume</code>、relay store、direct ownership 分别在不同文档/代码点出现</td><td>若不统一看，容易把协议字段误当路由真源</td></tr>
+        <tr><td><code>map-gap-05</code></td><td>Audit surface</td><td><code>protocolMapping.preserved/lossy/dropped/unsupported</code> 有 contract 文档，但还没有对应 wiki review 面把三协议放一起</td><td>后续难补齐“哪些字段是有损，哪些字段是完全缺失”</td></tr>
+        </tbody>
+        </table>
+        <h2>Suggested Next Gate Additions</h2>
+        <p>这部分是后续建议，不是本次已实现 gate。</p>
+        <table>
+        <thead><tr><th>Gate idea</th><th>Purpose</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td></tr>
+        <tr><td><code>verify:chat-process-protocol-mappable-semantics</code></td><td>扫描 fail-fast metadata key 是否还在进入 <code>HubReqChatProcess03Governed</code> 前存活</td></tr>
+        <tr><td><code>verify:protocol-mapping-audit-coverage</code></td><td>断言三协议对 <code>preserved/lossy/dropped/unsupported</code> 都有显式 audit</td></tr>
+        <tr><td><code>verify:tool-call-id-roundtrip-three-protocols</code></td><td>锁住 <code>tool_call_id / call_id / tool_use_id</code> roundtrip 一致性</td></tr>
+        <tr><td><code>verify:continuation-owner-three-protocols</code></td><td>锁住 <code>entryKind + continuationOwner + scope</code> 不被协议特判绕回去</td></tr>
+        <tr><td><code>verify:responses-sse-json-equality</code></td><td>锁住 JSON 与 SSE 对同一响应语义等价，尤其 tool call / required_action / terminal</td></tr>
+        <tr><td><code>verify:server-responses-sse-bridge-surface</code></td><td>锁住 server 只有单一 SSE bridge surface，不把协议语义散回 handler</td></tr>
+        </tbody>
+        </table>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>进入 <code>chat process</code> 前，所有可映射语义是否都已落到 chat fields 或 <code>semantics.*</code>。</li>
+          <li>metadata 是否还残留 <code>responsesResume / responsesContext / anthropicToolNameMap / clientToolsRaw</code> 等 legacy 键。</li>
+          <li><code>instructions/system/tools/tool outputs/continuation anchors</code> 是否三协议都能映射到统一语义。</li>
+          <li>response projection 是否同时覆盖 <code>openai-chat</code>、<code>openai-responses</code>、<code>anthropic-messages</code>。</li>
+          <li><code>tool_call_id / call_id / tool_use_id</code> 是否保持可追溯一致。</li>
+          <li>有损或不支持字段是否进入 <code>protocolMapping</code> audit，而不是静默丢失。</li>
+          <li>JSON 与 SSE 是否对同一响应语义等价。</li>
+          <li>server SSE bridge 是否仍是 facade-only 单一出口，而不是重新长出第二份协议语义。</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

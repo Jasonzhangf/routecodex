@@ -220,6 +220,46 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     res.status(200).json({ ok: true, records: registry.list() });
   });
 
+  app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
+      return;
+    }
+    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const text = parseString(body.text);
+    if (!text) {
+      res.status(400).json({ error: { message: 'text is required', code: 'bad_request' } });
+      return;
+    }
+
+    const result = await registry.inject({
+      text,
+      tmuxSessionId: parseString(body.tmuxSessionId),
+      tmuxTarget: parseString(body.tmuxTarget),
+      sessionId: parseString(body.sessionId),
+      workdir: normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory)),
+      clientType: parseString(body.clientType),
+      tmuxOnly: parseBoolean(body.tmuxOnly),
+      requestId: parseString(body.requestId),
+      source: parseString(body.source)
+    });
+
+    if (result.ok) {
+      res.status(200).json(result);
+      return;
+    }
+
+    const reason = typeof result.reason === 'string' ? result.reason : 'inject_failed';
+    if (reason === 'tmux_session_required') {
+      res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
+      return;
+    }
+    if (reason === 'no_matching_tmux_session_daemon' || reason === 'workdir_mismatch') {
+      res.status(503).json({ error: { message: reason, code: 'service_unavailable' } });
+      return;
+    }
+    res.status(502).json({ error: { message: reason, code: 'bad_gateway' } });
+  });
+
   app.post('/daemon/session/cleanup', async (req: Request, res: Response) => {
     if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
@@ -241,12 +281,19 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       const unbound = normalizedSessionScope.startsWith('sessiond.') || normalizedSessionScope.startsWith('tmux:')
         ? registry.unbindSessionScope(normalizedSessionScope)
         : registry.unbindConversationSession(normalizedSessionScope);
-      const clearedStopMessage = normalizedSessionScope.startsWith('tmux:')
-        ? clearStopMessageTmuxScope({
-          tmuxSessionId: normalizedSessionScope.slice('tmux:'.length),
-          reason: 'session_unbind'
-        })
-        : undefined;
+      let clearedStopMessage: ReturnType<typeof clearStopMessageTmuxScope> | undefined;
+      if (normalizedSessionScope.startsWith('tmux:')) {
+        try {
+          clearedStopMessage = clearStopMessageTmuxScope({
+            tmuxSessionId: normalizedSessionScope.slice('tmux:'.length),
+            reason: 'session_unbind'
+          });
+        } catch (error) {
+          logSessionClientRoutesNonBlockingError('session_unbind.clearStopMessageTmuxScope', error, {
+            sessionScope: normalizedSessionScope
+          });
+        }
+      }
       res.status(200).json({ ok: true, mode, sessionScope: normalizedSessionScope, unbound, clearedStopMessage });
       return;
     }
@@ -271,12 +318,19 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     let clearedStopMessageScopes = 0;
     const removedTmuxIds = Array.from(new Set(cleanup.removedTmuxSessionIds));
     for (const tmuxSessionId of removedTmuxIds) {
-      const cleared = clearStopMessageTmuxScope({
-        tmuxSessionId,
-        reason: modeSafe === 'stale_heartbeat' ? 'session_cleanup_stale' : 'session_cleanup_dead_tmux'
-      });
-      if (cleared.cleared) {
-        clearedStopMessageScopes += 1;
+      try {
+        const cleared = clearStopMessageTmuxScope({
+          tmuxSessionId,
+          reason: modeSafe === 'stale_heartbeat' ? 'session_cleanup_stale' : 'session_cleanup_dead_tmux'
+        });
+        if (cleared.cleared) {
+          clearedStopMessageScopes += 1;
+        }
+      } catch (error) {
+        logSessionClientRoutesNonBlockingError('session_cleanup.clearStopMessageTmuxScope', error, {
+          tmuxSessionId,
+          mode: modeSafe
+        });
       }
     }
 
@@ -286,7 +340,8 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       terminateManaged: allowManagedTermination,
       terminateManagedRequested: requestedTerminateManaged,
       cleanup,
-      clearedStopMessageScopes
+      clearedStopMessageScopes,
+      clearedTaskSessions: cleanupSessionIds.length
     });
   });
 }

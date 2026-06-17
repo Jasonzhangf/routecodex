@@ -43,7 +43,7 @@ verification:
     build:
       - npm run build:min
     notes:
-      - "servertool-core owns pending-session and pending-injection persist planning; TS may only execute env/file/save IO from native plans."
+      - "servertool-core owns pending-session and pending-injection persist planning; TS may only execute explicit runtime-workdir file IO from native plans and must not infer session identity from env/top-level fallback."
 
   - feature_id: hub.servertool_pre_command_hooks
     change_risk: medium
@@ -131,14 +131,14 @@ verification:
     build:
       - npm run build:min
     notes:
-      - "stopless is a Rust-owned CLI continuation: state key is strictly sessionId (no tmux/conversation/inject fallback), and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
+      - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoning_stop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
       - "Command input must not contain continuationPrompt/schemaGuidance/raw prompt text; CLI stdout must carry continuationPrompt/schemaGuidance for the next model turn."
       - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
-      - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while same-session CLI wrapper progression advances repeatCount 1 -> 2 -> 3."
-      - "Validation must prove omitted caller `sessionId/requestId` is auto-filled by the Rust CLI/runtime instead of failing fast, while strict persisted matching still remains `session:<sessionId>` only."
+      - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
+      - "Validation must prove omitted caller `sessionId/requestId/sessionDir` no longer blocks stopless CLI projection or CLI execution, and that no persisted writeback path is required."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
@@ -1343,6 +1343,80 @@ verification:
       - npm run build:min
     notes:
       - "Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy."
+
+  - feature_id: runtime.lifecycle.pid_cache
+    change_risk: medium
+    unit:
+      - src/utils/server-runtime-pid.ts
+    contract:
+      - tests/red-tests/runtime_pids_moved_out_of_rcc_home_root.test.ts
+    integration:
+      - tests/utils/server-runtime-pid.spec.ts
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    build:
+      - npm run build:min
+    notes:
+      - "PID cache is only a runtime-lifecycle cache file; verification must prove writes moved under state/runtime-lifecycle and legacy root pid files stay deleted."
+
+  - feature_id: runtime.lifecycle.stop_intent
+    change_risk: medium
+    unit:
+      - src/utils/server-runtime-stop-intent.ts
+      - src/utils/daemon-stop-intent.ts
+    contract:
+      - tests/utils/daemon-stop-intent.spec.ts
+    integration:
+      - tests/utils/managed-server-pids.spec.ts
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    build:
+      - npm run build:min
+    notes:
+      - "Stop intent remains best-effort cross-process signaling; verification must prove runtime-lifecycle pathing and stale intent cleanup."
+
+  - feature_id: runtime.lifecycle.instance_registry
+    change_risk: medium
+    unit:
+      - src/utils/runtime-instance-registry.ts
+    contract:
+      - tests/utils/runtime-instance-registry.spec.ts
+    integration:
+      - tests/utils/runtime-instance-registry.spec.ts
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+    build:
+      - npm run build:min
+    notes:
+      - "Instance registry is the authoritative local declaration of managed runtime state; verification must prove instance.json write/read/update/remove under runtime-lifecycle path."
+
+  - feature_id: runtime.tmux_client_binding
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/session-client-registry.ts
+      - src/server/runtime/http-server/session-client-registry-utils.ts
+      - src/server/runtime/http-server/session-client-routes.ts
+      - src/server/runtime/http-server/session-storage-cleanup.ts
+      - src/server/runtime/http-server/executor-metadata.ts
+      - src/server/runtime/http-server/executor/client-injection-flow.ts
+      - src/server/runtime/http-server/executor/request-retry-helpers.ts
+    contract:
+      - tests/server/http-server/session-client-registry.spec.ts
+      - tests/server/http-server/session-client-registry.inject-tmux-only.spec.ts
+      - tests/server/http-server/session-client-routes.spec.ts
+      - tests/server/http-server/session-storage-cleanup.spec.ts
+    integration:
+      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
+      - tests/server/http-server/executor-metadata.spec.ts
+      - tests/server/runtime/http-server/executor/request-retry-helpers.session-binding.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Validation must prove tmux/client binding persists under its own owner, not as request session or continuation truth."
+      - "Validation must prove conversation->tmux mapping and workdir narrowing survive reload, cleanup, and executor binding lookups."
+      - "Validation must prove request-local stopless/session metadata changes do not require changes in session-client binding owner."
 
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium

@@ -232,6 +232,172 @@ describe('responses conversation store plain continuation restore', () => {
     expect(JSON.stringify(materialized)).not.toContain('"commentary"');
   });
 
+  it('records reasoning history without replaying illegal reasoning.content back into next request', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-reasoning-1'),
+      sessionId: 'sess-reasoning',
+      conversationId: 'conv-reasoning',
+      providerKey: 'crs.direct.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true,
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-reasoning-1'),
+      providerKey: 'crs.direct.gpt-5.4',
+      response: {
+        id: 'resp-reasoning-1',
+        output: [
+          {
+            type: 'reasoning',
+            id: 'reasoning-1',
+            summary: [{ type: 'summary_text', text: 'thinking step 1' }],
+            content: [{ type: 'reasoning_text', text: 'historical reasoning leak' }],
+            encrypted_content: 'opaque-sig-abc'
+          }
+        ]
+      }
+    });
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-reasoning-2'),
+      sessionId: 'sess-reasoning',
+      payload: {
+        model: 'gpt-5.4',
+        stream: true,
+        metadata: { conversation_id: 'conv-reasoning' },
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next turn' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'hello' }]
+      },
+      {
+        type: 'reasoning',
+        id: 'reasoning-1',
+        summary: [{ type: 'summary_text', text: 'thinking step 1' }],
+        encrypted_content: 'opaque-sig-abc'
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next turn' }]
+      }
+    ]);
+    const serialized = JSON.stringify(materialized);
+    expect(serialized).not.toContain('"reasoning_text"');
+    expect(serialized).not.toContain('historical reasoning leak');
+  });
+
+  it('submit_tool_outputs resume keeps function_call history without replaying response-only status fields', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-fc-status-1'),
+      sessionId: 'sess-fc-status',
+      conversationId: 'conv-fc-status',
+      providerKey: 'minimax.key1.MiniMax-M3',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        stream: true,
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'run the command' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-fc-status-1'),
+      providerKey: 'minimax.key1.MiniMax-M3',
+      response: {
+        id: 'resp-fc-status-1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_status_1',
+            call_id: 'call_status_1',
+            name: 'exec_command',
+            status: 'in_progress',
+            arguments: '{"cmd":"pwd"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_status_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation(
+      'resp-fc-status-1',
+      {
+        tool_outputs: [{ tool_call_id: 'call_status_1', output: '/tmp/project\n' }],
+        stream: false
+      },
+      { requestId: track('req-resp-store-fc-status-2') }
+    );
+
+    expect(resumed.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'run the command' }]
+      },
+      {
+        type: 'function_call',
+        id: 'fc_status_1',
+        call_id: 'call_status_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"pwd"}'
+      },
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_status_1',
+        output: '/tmp/project\n'
+      })
+    ]);
+    expect(JSON.stringify(resumed.payload.input)).not.toContain('"status":"in_progress"');
+  });
+
   it('RED: submit_tool_outputs resume must preserve direct providerKey pin for same-provider remote continuation ownership', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-direct-pin-1'),
@@ -565,7 +731,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'output_text', text: 'done' }]
+        content: [{ type: 'input_text', text: 'done' }]
       },
       {
         type: 'message',
@@ -1797,9 +1963,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         type: 'reasoning',
         id: 'rs_reasoning_keep_1',
-        status: 'completed',
-        summary: [{ type: 'summary_text', text: 'plan tools' }],
-        content: [{ type: 'reasoning_text', text: 'Need to inspect cwd before editing.' }]
+        summary: [{ type: 'summary_text', text: 'plan tools' }]
       },
       {
         type: 'function_call',
@@ -2855,7 +3019,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'output_text', text: '先打补丁' }]
+        content: [{ type: 'input_text', text: '先打补丁' }]
       },
       expect.objectContaining({
         type: 'function_call',
@@ -2870,7 +3034,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'output_text', text: '再跑命令确认' }]
+        content: [{ type: 'input_text', text: '再跑命令确认' }]
       },
       expect.objectContaining({
         type: 'function_call',
@@ -2885,7 +3049,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'output_text', text: '继续第二个补丁' }]
+        content: [{ type: 'input_text', text: '继续第二个补丁' }]
       },
       expect.objectContaining({
         type: 'function_call',

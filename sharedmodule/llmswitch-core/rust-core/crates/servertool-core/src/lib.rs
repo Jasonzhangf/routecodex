@@ -18,7 +18,6 @@ pub mod outcome_contract;
 pub mod pending_session_contract;
 pub mod persisted_lookup;
 pub mod persisted_state_fs;
-pub mod persisted_state_fs_write;
 pub mod pre_command_hook_contract;
 pub mod stop_gateway_context;
 pub mod stop_message_compare_context;

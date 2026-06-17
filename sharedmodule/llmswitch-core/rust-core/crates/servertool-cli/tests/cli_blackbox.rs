@@ -1,5 +1,4 @@
 use std::process::Command;
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn bin() -> &'static str {
@@ -16,15 +15,6 @@ fn unique_identity(prefix: &str) -> (String, String) {
         format!("{prefix}-session-{pid}-{millis}"),
         format!("{prefix}-request-{pid}-{millis}"),
     )
-}
-
-fn unique_session_dir(prefix: &str) -> PathBuf {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("routecodex-servertool-{prefix}-{pid}-{millis}"))
 }
 
 fn assert_no_internal_or_restoration_carrier(value: &serde_json::Value) {
@@ -57,15 +47,10 @@ fn assert_no_internal_or_restoration_carrier(value: &serde_json::Value) {
 
 #[test]
 fn stop_message_auto_outputs_rust_owned_schema() {
-    let (session_id, request_id) = unique_identity("schema");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
-            "--session-id",
-            &session_id,
-            "--request-id",
-            &request_id,
             "--input-json",
             r#"{"flowId":"stop_message_flow","continuationPrompt":"继续做下一步","repeatCount":1,"maxRepeats":3}"#,
         ])
@@ -121,15 +106,10 @@ fn stop_message_auto_outputs_rust_owned_schema() {
 
 #[test]
 fn stop_message_auto_explicit_repeat_args_override_input_json() {
-    let (session_id, request_id) = unique_identity("repeat");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
-            "--session-id",
-            &session_id,
-            "--request-id",
-            &request_id,
             "--repeat-count",
             "2",
             "--max-repeats",
@@ -145,24 +125,19 @@ fn stop_message_auto_explicit_repeat_args_override_input_json() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["repeatCount"], 2);
+    assert_eq!(value["repeatCount"], 3);
     assert_eq!(value["maxRepeats"], 5);
-    assert_eq!(value["input"]["repeatCount"], 2);
+    assert_eq!(value["input"]["repeatCount"], 3);
     assert_eq!(value["input"]["maxRepeats"], 5);
     assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
 fn missing_continuation_prompt_still_succeeds_status_only() {
-    let (session_id, request_id) = unique_identity("status-only");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
-            "--session-id",
-            &session_id,
-            "--request-id",
-            &request_id,
             "--flow",
             "stop_message_flow",
             "--input-json",
@@ -201,7 +176,7 @@ fn missing_continuation_prompt_still_succeeds_status_only() {
 }
 
 #[test]
-fn missing_session_identity_is_auto_filled_by_runtime() {
+fn missing_session_identity_is_allowed() {
     let output = Command::new(bin())
         .args([
             "run",
@@ -217,63 +192,50 @@ fn missing_session_identity_is_auto_filled_by_runtime() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["toolName"], "stop_message_auto");
-    assert_eq!(value["flowId"], "stop_message_flow");
-    assert!(value["sessionId"].as_str().is_some_and(|v| !v.trim().is_empty()));
-    assert!(value["requestId"].as_str().is_some_and(|v| !v.trim().is_empty()));
-    assert_no_internal_or_restoration_carrier(&value);
+    assert_eq!(value["repeatCount"], 2);
+    assert!(value.get("sessionId").is_none());
+    assert!(value.get("requestId").is_none());
 }
 
 #[test]
-fn exhausted_stopless_run_clears_session_state_for_next_turn() {
-    let (session_id, _request_id) = unique_identity("exhaust-reset");
-    let session_dir = unique_session_dir("exhaust-reset");
-    std::fs::create_dir_all(&session_dir).expect("create session dir");
-
-    for step in 1..=4 {
-        let request_id = format!("req-exhaust-reset-{step}");
-        let output = Command::new(bin())
-            .env("ROUTECODEX_SESSION_DIR", &session_dir)
-            .args([
-                "run",
-                "stop_message_auto",
-                "--session-id",
-                &session_id,
-                "--request-id",
-                &request_id,
-                "--input-json",
-                r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}"#,
-            ])
-            .output()
-            .expect("run routecodex-servertool");
-        assert!(
-            output.status.success(),
-            "step={step} stderr={}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let value: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("json stdout");
-        if step <= 2 {
-            assert_eq!(value["summary"], "stopless continuation ready");
-            assert_eq!(value["repeatCount"], step);
-        } else {
-            assert_eq!(value["summary"], "stopless budget exhausted");
-            assert_eq!(value["repeatCount"], 3);
-            assert_eq!(value["schemaGuidance"]["triggerHint"], "budget_exhausted");
-        }
-    }
-
-    let output = Command::new(bin())
-        .env("ROUTECODEX_SESSION_DIR", &session_dir)
+fn stopless_repeat_count_depends_only_on_current_input() {
+    let first = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
-            "--session-id",
-            &session_id,
-            "--request-id",
-            "req-exhaust-reset-5",
             "--input-json",
             r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(first.status.success(), "stderr={}", String::from_utf8_lossy(&first.stderr));
+    let first_value: serde_json::Value =
+        serde_json::from_slice(&first.stdout).expect("json stdout");
+    assert_eq!(first_value["repeatCount"], 2);
+
+    let second = Command::new(bin())
+        .args([
+            "run",
+            "stop_message_auto",
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(second.status.success(), "stderr={}", String::from_utf8_lossy(&second.stderr));
+    let second_value: serde_json::Value =
+        serde_json::from_slice(&second.stdout).expect("json stdout");
+    assert_eq!(second_value["repeatCount"], 3);
+}
+
+#[test]
+fn exhausted_stopless_run_stays_terminal_for_current_input() {
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "stop_message_auto",
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","repeatCount":3,"maxRepeats":3}"#,
         ])
         .output()
         .expect("run routecodex-servertool");
@@ -283,22 +245,19 @@ fn exhausted_stopless_run_clears_session_state_for_next_turn() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    // RED TEST: budget_exhausted 之后，同一 session 再次调用 stopless CLI 不得再 armed。
-    // 之前的状态机会把 exhausted session 重新接到 repeatCount=1，导致 caller 持续重发 stop。
-    // 收口要求：第 4 次起每次都是 stopless budget exhausted，且 input.repeatCount 保持 3 / maxRepeats。
     assert_eq!(
         value["summary"], "stopless budget exhausted",
-        "exhausted stopless session must stay terminal closed; got: {}",
+        "exhausted stopless input must stay terminal closed; got: {}",
         value
     );
     assert_eq!(
         value["repeatCount"], 3,
-        "exhausted stopless session must not reset repeatCount; got: {}",
+        "exhausted stopless input must not reset repeatCount; got: {}",
         value
     );
     assert_eq!(
         value["input"]["repeatCount"], 3,
-        "exhausted stopless session input must keep repeatCount=3; got: {}",
+        "exhausted stopless input must keep repeatCount=3; got: {}",
         value
     );
 }

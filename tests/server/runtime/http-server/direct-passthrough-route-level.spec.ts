@@ -1001,6 +1001,97 @@ describe('direct passthrough route-level', () => {
     expect(executePipelineSpy).not.toHaveBeenCalled();
   });
 
+  it('router same-protocol direct with stop finish_reason does not project stopless cli/tool call', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => ({ status: 200, body: { relayed: true }, metadata: {} })),
+      getVirtualRouter: jest.fn(() => ({
+        route: jest.fn(() => ({
+          target: {
+            providerKey: 'direct.key1.gpt-test',
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: 'direct.key1.gpt-test',
+            modelId: 'gpt-test',
+          },
+          decision: { routeName: 'coding', pool: ['direct.key1.gpt-test'] },
+          diagnostics: {},
+        })),
+      })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline],
+    ]);
+    (server as any).providerHandles = new Map([[
+      'direct.key1.gpt-test',
+      {
+        providerProtocol: 'openai-chat',
+        instance: {
+          processIncomingDirect: jest.fn(async () => ({
+            status: 200,
+            data: {
+              id: 'chatcmpl_direct_stop_finish_passthrough',
+              object: 'chat.completion',
+              choices: [{
+                index: 0,
+                message: { role: 'assistant', content: 'direct stop reply' },
+                finish_reason: 'stop'
+              }],
+            },
+          })),
+        },
+      },
+    ]]);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline');
+    const directSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort');
+
+    const result = await (server as any).executePortAwarePipeline(5520, {
+      requestId: 'req_router_direct_stop_finish_passthrough',
+      entryEndpoint: '/v1/chat/completions',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+      metadata: {
+        stoplessMode: 'on',
+        stoplessArmed: true,
+        sessionId: 'direct-stopless-must-not-activate',
+      },
+    });
+
+    expect(result.body?.id).toBe('chatcmpl_direct_stop_finish_passthrough');
+    expect(result.body?.choices?.[0]?.message?.content).toBe('direct stop reply');
+    expect(JSON.stringify(result.body)).not.toContain('routecodex servertool run stop_message_auto');
+    expect(JSON.stringify(result.body)).not.toContain('tool_calls');
+    expect(directSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy).not.toHaveBeenCalled();
+  });
+
   it('HTTP BLACKBOX: router-direct passes provider response body through without model rewrite', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

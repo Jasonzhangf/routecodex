@@ -129,7 +129,6 @@ export {
 } from './bridge/runtime-integrations.js';
 export {
   loadRoutingInstructionStateSync,
-  recordStoplessContinuationState,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
   syncStoplessGoalStateFromRequest,

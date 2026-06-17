@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Error Mainline Call Graph</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Error Mainline Call Graph</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/error-mainline-call-graph.md</code></p>
+      </header>
+      <article>
+        <h1>Error Mainline Call Graph</h1>
+        <p>Source of truth:</p>
+        <ul>
+          <li><code>docs/architecture/mainline-call-map.yml</code> defines adjacent edges for this chain</li>
+          <li><code>docs/architecture/function-map.yml</code> enriches owner summary and owner module context</li>
+        </ul>
+        <p>Render rules:</p>
+        <ul>
+          <li>This page is a filtered render artifact, not a second architecture truth source.</li>
+          <li><code>anchored</code> = verified caller/callee binding</li>
+          <li><code>partial</code> = edge is bound, but only part of the transition is concretely anchored</li>
+          <li><code>binding pending</code> = edge intentionally left unresolved until code audit pins the real bridge</li>
+        </ul>
+        <h2>error.mainline</h2>
+        <p>Provider/runtime/direct failures enter unified ErrorErr chain and only then project to client-visible error.</p>
+        <p>Entry contract: <code>ErrorErr01SourceRaised</code> via <code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ErrorErr06ClientProjected[&quot;ErrorErr06ClientProjected&quot;]
+          ErrorErr05ExecutionDecision[&quot;ErrorErr05ExecutionDecision&quot;]
+          ErrorErr03RuntimeClassified[&quot;ErrorErr03RuntimeClassified&quot;]
+          ErrorErr02HostCaptured[&quot;ErrorErr02HostCaptured&quot;]
+          ErrorErr01SourceRaised[&quot;ErrorErr01SourceRaised&quot;]
+          ErrorErr01SourceRaised --&gt;|err-01| ErrorErr02HostCaptured
+          ErrorErr02HostCaptured --&gt;|err-02| ErrorErr03RuntimeClassified
+          ErrorErr03RuntimeClassified -.-&gt;|err-03| ErrorErr05ExecutionDecision
+          ErrorErr05ExecutionDecision --&gt;|err-04| ErrorErr06ClientProjected
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class ErrorErr01SourceRaised anchored;
+          class ErrorErr02HostCaptured anchored;
+          class ErrorErr03RuntimeClassified partial;
+          class ErrorErr05ExecutionDecision partial;
+          class ErrorErr06ClientProjected anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>err-01</td><td><code>ErrorErr01SourceRaised -&gt; ErrorErr02HostCaptured</code></td><td>anchored</td><td><code>reportProviderErrorToRouterPolicy -&gt; reportProviderErrorToRouterPolicy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
+        <tr><td>err-02</td><td><code>ErrorErr02HostCaptured -&gt; ErrorErr03RuntimeClassified</code></td><td>anchored</td><td><code>classifyProviderFailure -&gt; classifyProviderFailure</code></td><td></td><td><code>error.provider_failure_policy</code>&lt;br/&gt;provider error cataloging, runtime classification, router policy application, client-disconnect and upstream-stream-incomplete routing</td></tr>
+        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>resolveProviderRetryExecutionPlan -&gt; consume_error_err_05_execution_decision_from_error_err_04_router_policy</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        <tr><td>err-04</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
+        </tbody>
+        </table>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

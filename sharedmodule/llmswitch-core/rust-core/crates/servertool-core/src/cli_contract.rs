@@ -2,15 +2,13 @@ use crate::outcome_contract::{
     classify_servertool_outcome, is_client_exec_cli_projection, is_denied_cli_projection,
     quote_posix_single_argument, DENIED_CLI_MARKERS,
 };
-use crate::persisted_lookup;
 use crate::stopless_prompt::{
     resolve_stopless_continuation_prompt, StoplessContinuationPromptInput,
     StoplessContinuationTrigger,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+
 const STOP_MESSAGE_AUTO_TOOL_NAME: &str = "stop_message_auto";
 const REASONING_STOP_PUBLIC_TOOL_NAME: &str = "reasoning_stop";
 
@@ -22,6 +20,8 @@ pub struct ServertoolCliRunInput {
     pub flow_id: Option<String>,
     pub repeat_count: Option<u32>,
     pub max_repeats: Option<u32>,
+    #[serde(default)]
+    pub session_dir: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -95,6 +95,8 @@ pub struct ClientExecCliProjectionInput {
     #[serde(default)]
     pub stdout_preview: Option<String>,
     #[serde(default)]
+    pub session_dir: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
     pub request_id: Option<String>,
@@ -149,92 +151,6 @@ pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
     }
 }
 
-pub const STOPLESS_CLI_REQUIRED_SESSION_FIELDS: [&str; 2] = ["sessionId", "requestId"];
-
-static STOPLESS_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-fn next_stopless_id_counter() -> u64 {
-    STOPLESS_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
-
-fn current_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn sanitize_stopless_identity_token(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut out = String::with_capacity(trimmed.len());
-    for ch in trimmed.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-' | '.') {
-            out.push(ch);
-            continue;
-        }
-        out.push('_');
-    }
-    if out.trim_matches('_').is_empty() {
-        return None;
-    }
-    Some(out)
-}
-
-fn resolve_stopless_default_session_id() -> String {
-    let env_candidates = [
-        ("CODEX_THREAD_ID", "codex"),
-        ("TMUX_PANE", "tmux-pane"),
-        ("TERM_SESSION_ID", "term"),
-        ("ITERM_SESSION_ID", "iterm"),
-    ];
-    for (key, prefix) in env_candidates {
-        if let Ok(value) = std::env::var(key) {
-            if let Some(token) = sanitize_stopless_identity_token(&value) {
-                return format!("{prefix}:{token}");
-            }
-        }
-    }
-    format!(
-        "pid:{}:{}",
-        std::process::id(),
-        next_stopless_id_counter()
-    )
-}
-
-fn resolve_stopless_default_request_id(session_id: &str) -> String {
-    format!(
-        "stopless:{}:{}:{}",
-        sanitize_stopless_identity_token(session_id).unwrap_or_else(|| "session".to_string()),
-        current_time_ms(),
-        next_stopless_id_counter()
-    )
-}
-
-fn validate_stopless_session_identity(
-    input: &ServertoolCliRunInput,
-) -> Result<(String, String), ServertoolCliError> {
-    let session_id = input
-        .session_id
-        .as_deref()
-        .and_then(sanitize_stopless_identity_token)
-        .unwrap_or_else(resolve_stopless_default_session_id);
-    let request_id = input
-        .request_id
-        .as_deref()
-        .and_then(sanitize_stopless_identity_token)
-        .unwrap_or_else(|| resolve_stopless_default_request_id(&session_id));
-    if !session_id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.'))
-    {
-        return Err(ServertoolCliError::InvalidField("sessionId"));
-    }
-    Ok((session_id, request_id))
-}
-
 fn validate_cli_run_input(input: &ServertoolCliRunInput) -> Result<(), ServertoolCliError> {
     validate_no_denied_cli_marker(&input.tool_name)?;
     if let Some(flow_id) = input.flow_id.as_deref() {
@@ -272,8 +188,8 @@ fn normalize_cli_run_input_aliases(
 }
 
 fn build_terminal_stopless_output(
-    session_id: String,
-    request_id: String,
+    session_id: Option<String>,
+    request_id: Option<String>,
     continuation_prompt: String,
     max_repeats: u32,
 ) -> ServertoolCliRunOutput {
@@ -287,8 +203,8 @@ fn build_terminal_stopless_output(
         continuation_prompt,
         repeat_count: max_repeats,
         max_repeats,
-        session_id: Some(session_id),
-        request_id: Some(request_id),
+        session_id,
+        request_id,
         schema_guidance: Some(stopless_schema_guidance_with_trigger(
             StoplessContinuationTrigger::BudgetExhausted,
             max_repeats.saturating_sub(1),
@@ -307,25 +223,15 @@ fn build_terminal_stopless_output(
 fn build_stop_message_auto_run_output(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
-    let (session_id, request_id) = validate_stopless_session_identity(&input)?;
-    let persisted = resolve_runtime_stop_message_state(&session_id);
+    let session_id = input.session_id.as_deref().and_then(read_optional_trimmed);
+    let request_id = input.request_id.as_deref().and_then(read_optional_trimmed);
     let current_repeat_count = input
         .repeat_count
         .or_else(|| read_u32(&input.input, "repeatCount"))
-        .or_else(|| {
-            persisted
-                .as_ref()
-                .map(|snapshot| snapshot.used.saturating_add(1).min(u32::MAX as i64) as u32)
-        })
         .unwrap_or(1);
     let current_max_repeats = input
         .max_repeats
         .or_else(|| read_u32(&input.input, "maxRepeats"))
-        .or_else(|| {
-            persisted
-                .as_ref()
-                .map(|snapshot| snapshot.max_repeats.max(1).min(u32::MAX as i64) as u32)
-        })
         .unwrap_or(3);
     if current_max_repeats == 0 || current_repeat_count >= current_max_repeats {
         // 打满后优雅停止，不报错
@@ -344,6 +250,9 @@ fn build_stop_message_auto_run_output(
             current_max_repeats,
         ));
     }
+    let next_repeat_count = current_repeat_count
+        .saturating_add(1)
+        .min(current_max_repeats);
     let used_for_prompt = current_repeat_count.saturating_sub(1);
     let flow_id = input
         .flow_id
@@ -358,13 +267,12 @@ fn build_stop_message_auto_run_output(
     let trigger = read_stopless_trigger_hint(&input.input);
     let canonical_input = serde_json::json!({
         "flowId": flow_id,
-        "repeatCount": current_repeat_count,
+        "repeatCount": next_repeat_count,
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
     let continuation_prompt = resolve_stopless_cli_continuation_prompt(
         trigger,
-        persisted.as_ref(),
         used_for_prompt,
         current_max_repeats,
     )?;
@@ -376,10 +284,10 @@ fn build_stop_message_auto_run_output(
         tool_name: input.tool_name,
         flow_id,
         continuation_prompt,
-        repeat_count: current_repeat_count,
+        repeat_count: next_repeat_count,
         max_repeats: current_max_repeats,
-        session_id: Some(session_id),
-        request_id: Some(request_id),
+        session_id,
+        request_id,
         schema_guidance: Some(stopless_schema_guidance_with_trigger(
             trigger,
             used_for_prompt,
@@ -390,29 +298,11 @@ fn build_stop_message_auto_run_output(
     })
 }
 
-fn resolve_runtime_stop_message_state(
-    session_id: &str,
-) -> Option<persisted_lookup::RuntimeStopMessageStateSnapshot> {
-    crate::persisted_state_fs::load_persisted_runtime_stop_message_state(session_id)
-}
-
 fn resolve_stopless_cli_continuation_prompt(
     trigger: StoplessContinuationTrigger,
-    persisted: Option<&persisted_lookup::RuntimeStopMessageStateSnapshot>,
     used_for_prompt: u32,
     max_repeats: u32,
 ) -> Result<String, ServertoolCliError> {
-    if matches!(
-        trigger,
-        StoplessContinuationTrigger::InvalidSchema | StoplessContinuationTrigger::NonTerminalSchema
-    ) {
-        if let Some(text) = persisted
-            .map(|snapshot| snapshot.text.trim())
-            .filter(|text| !text.is_empty())
-        {
-            return Ok(text.to_string());
-        }
-    }
     resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
         used: used_for_prompt,
         max_repeats,
@@ -633,6 +523,7 @@ fn build_client_exec_cli_projection_output_with_identity(
     input: Value,
     repeat_count: u32,
     max_repeats: u32,
+    session_dir: Option<&str>,
     session_id: Option<&str>,
     request_id: Option<&str>,
 ) -> Result<Value, ServertoolCliError> {
@@ -686,8 +577,11 @@ fn build_client_exec_cli_projection_output_with_identity(
         let cmd = build_client_exec_command(
             tool_name,
             &input_json,
-            session_id,
-            request_id,
+            None,
+            None,
+            None,
+            Some(repeat_count),
+            Some(max_repeats),
         );
         validate_no_denied_cli_marker(&cmd)?;
         let mut output = serde_json::json!({
@@ -697,18 +591,21 @@ fn build_client_exec_cli_projection_output_with_identity(
             "maxRepeats": max_repeats,
             "execCommand": cmd
         });
-        if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
-            output["sessionId"] = Value::String(session_id);
-        }
-        if let Some(request_id) = request_id.and_then(read_optional_trimmed) {
-            output["requestId"] = Value::String(request_id);
-        }
         return Ok(output);
     }
 
     let input_json =
         serde_json::to_string(&input).map_err(|_| ServertoolCliError::InvalidField("json"))?;
-    let cmd = build_client_exec_command(tool_name, &input_json, session_id, request_id);
+    // Non-stopless tools: do not carry session-id/request-id in the CLI command.
+    let cmd = build_client_exec_command(
+        tool_name,
+        &input_json,
+        session_dir,
+        None,
+        None,
+        None,
+        None,
+    );
     validate_no_denied_cli_marker(&cmd)?;
     let mut output = serde_json::json!({
         "toolName": tool_name,
@@ -729,8 +626,11 @@ fn build_client_exec_cli_projection_output_with_identity(
 fn build_client_exec_command(
     tool_name: &str,
     input_json: &str,
+    session_dir: Option<&str>,
     session_id: Option<&str>,
     request_id: Option<&str>,
+    repeat_count: Option<u32>,
+    max_repeats: Option<u32>,
 ) -> String {
     let quoted_input = quote_posix_single_argument(&input_json);
     let mut cmd = format!(
@@ -738,6 +638,10 @@ fn build_client_exec_command(
         public_cli_tool_name(tool_name),
         quoted_input
     );
+    if let Some(session_dir) = session_dir.and_then(read_optional_trimmed) {
+        cmd.push_str(" --session-dir ");
+        cmd.push_str(&quote_posix_single_argument(&session_dir));
+    }
     if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
         cmd.push_str(" --session-id ");
         cmd.push_str(&quote_posix_single_argument(&session_id));
@@ -745,6 +649,14 @@ fn build_client_exec_command(
     if let Some(request_id) = request_id.and_then(read_optional_trimmed) {
         cmd.push_str(" --request-id ");
         cmd.push_str(&quote_posix_single_argument(&request_id));
+    }
+    if let Some(repeat_count) = repeat_count {
+        cmd.push_str(" --repeat-count ");
+        cmd.push_str(&quote_posix_single_argument(&repeat_count.to_string()));
+    }
+    if let Some(max_repeats) = max_repeats {
+        cmd.push_str(" --max-repeats ");
+        cmd.push_str(&quote_posix_single_argument(&max_repeats.to_string()));
     }
     cmd
 }
@@ -770,6 +682,7 @@ pub fn build_client_exec_cli_projection_output(
         input,
         repeat_count,
         max_repeats,
+        None,
         None,
         None,
     )
@@ -847,8 +760,9 @@ pub fn plan_client_exec_cli_projection_output(
             Value::Object(canonical),
             repeat_count,
             max_repeats,
-            input.session_id.as_deref(),
-            input.request_id.as_deref(),
+            None,
+            None,
+            None,
         );
     }
 
@@ -860,14 +774,16 @@ pub fn plan_client_exec_cli_projection_output(
         .max_repeats
         .or_else(|| read_u32(&payload, "maxRepeats"))
         .unwrap_or(0);
+    // Non-stopless tools: do not carry session/request identity in CLI command.
     build_client_exec_cli_projection_output_with_identity(
         &tool_name,
         &flow_id,
         Value::Object(payload_object.clone()),
         repeat_count,
         max_repeats,
-        input.session_id.as_deref(),
-        input.request_id.as_deref(),
+        input.session_dir.as_deref(),
+        None,
+        None,
     )
 }
 
@@ -1124,6 +1040,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("stopmessage-cli-output-spec-session".to_string()),
                 request_id: Some("stopmessage-cli-output-spec-request".to_string()),
             },
@@ -1131,7 +1048,7 @@ mod tests {
         .expect("stop_message_auto output");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.repeat_count, 1);
+        assert_eq!(output.repeat_count, 2);
         assert!(!output.continuation_prompt.is_empty());
         for forbidden in [
             "schema",
@@ -1166,7 +1083,7 @@ mod tests {
             output.input,
             json!({
                 "flowId": "stop_message_flow",
-                "repeatCount": 1,
+                "repeatCount": 2,
                 "maxRepeats": 3,
                 "triggerHint": "no_schema"
             })
@@ -1186,6 +1103,7 @@ mod tests {
                 flow_id: Some("stop_message_flow".to_string()),
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some(format!(
                     "session-status-only-{}",
                     std::time::SystemTime::now()
@@ -1199,7 +1117,7 @@ mod tests {
         .expect("status-only stopless CLI must not require prompt");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.repeat_count, 1);
+        assert_eq!(output.repeat_count, 2);
         assert_eq!(output.max_repeats, 3);
         assert!(!output.continuation_prompt.is_empty());
         for forbidden in [
@@ -1232,7 +1150,7 @@ mod tests {
             output.input,
             json!({
                 "flowId": "stop_message_flow",
-                "repeatCount": 1,
+                "repeatCount": 2,
                 "maxRepeats": 3,
                 "triggerHint": "no_schema"
             })
@@ -1250,6 +1168,7 @@ mod tests {
                 flow_id: Some("stop_message_flow".to_string()),
                 repeat_count: Some(1),
                 max_repeats: Some(3),
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1270,6 +1189,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1284,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn client_exec_projection_command_carries_identity_flags() {
+    fn non_stopless_projection_command_does_not_carry_identity_flags() {
         let output = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
             tool_name: Some("servertool_fixture".to_string()),
             flow_id: Some("servertool_cli_projection".to_string()),
@@ -1292,6 +1212,7 @@ mod tests {
             repeat_count: None,
             max_repeats: None,
             stdout_preview: None,
+            session_dir: None,
             session_id: Some("sess-cli-proj".to_string()),
             request_id: Some("req-cli-proj".to_string()),
         })
@@ -1301,12 +1222,12 @@ mod tests {
             .get("execCommand")
             .and_then(Value::as_str)
             .expect("execCommand");
-        assert!(command.contains("--session-id 'sess-cli-proj'"));
-        assert!(command.contains("--request-id 'req-cli-proj'"));
+        assert!(!command.contains("--session-id 'sess-cli-proj'"));
+        assert!(!command.contains("--request-id 'req-cli-proj'"));
     }
 
     #[test]
-    fn stop_message_projection_command_carries_identity_flags() {
+    fn stop_message_projection_command_omits_identity_and_session_dir_flags() {
         let output = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
             tool_name: Some("stop_message_auto".to_string()),
             flow_id: Some("stop_message_flow".to_string()),
@@ -1318,6 +1239,7 @@ mod tests {
             repeat_count: Some(1),
             max_repeats: Some(3),
             stdout_preview: None,
+            session_dir: Some("/tmp/stopless-should-not-leak".to_string()),
             session_id: Some("sess-stop-proj".to_string()),
             request_id: Some("req-stop-proj".to_string()),
         })
@@ -1327,8 +1249,9 @@ mod tests {
             .get("execCommand")
             .and_then(Value::as_str)
             .expect("execCommand");
-        assert!(command.contains("--session-id 'sess-stop-proj'"));
-        assert!(command.contains("--request-id 'req-stop-proj'"));
+        assert!(!command.contains("--session-dir"));
+        assert!(!command.contains("--session-id"));
+        assert!(!command.contains("--request-id"));
     }
 
     #[test]
@@ -1340,6 +1263,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1357,6 +1281,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1374,6 +1299,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1388,6 +1314,7 @@ mod tests {
                 flow_id: Some("stcli_123".to_string()),
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1405,6 +1332,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
@@ -1426,6 +1354,7 @@ mod tests {
             repeat_count: None,
             max_repeats: None,
             stdout_preview: Some("preview".to_string()),
+            session_dir: None,
             session_id: None,
             request_id: None,
         })
@@ -1460,8 +1389,9 @@ mod tests {
                 repeat_count: None,
                 max_repeats: None,
                 stdout_preview: None,
-                session_id: None,
-                request_id: None,
+                session_dir: None,
+            session_id: None,
+            request_id: None,
             }),
             Err(ServertoolCliError::InvalidField("toolName"))
         );
@@ -1476,13 +1406,15 @@ mod tests {
                 input: Some(json!({
                     "continuationPrompt": "continue with full schema",
                     "repeatCount": 4,
-                    "maxRepeats": 3
+                    "maxRepeats": 3,
+                    "triggerHint": "no_schema"
                 })),
-                repeat_count: None,
-                max_repeats: None,
+                repeat_count: Some(4),
+                max_repeats: Some(3),
                 stdout_preview: None,
-                session_id: None,
-                request_id: None,
+                session_dir: None,
+                session_id: Some("session-test".to_string()),
+                request_id: Some("req-test".to_string()),
             }),
             Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"))
         );
@@ -1498,8 +1430,9 @@ mod tests {
                 repeat_count: None,
                 max_repeats: None,
                 stdout_preview: None,
-                session_id: None,
-                request_id: None,
+                session_dir: None,
+                session_id: Some("session-test".to_string()),
+                request_id: Some("req-test".to_string()),
             }),
             Err(ServertoolCliError::DeniedMarker("old_cli_"))
         );
@@ -1511,8 +1444,9 @@ mod tests {
                 repeat_count: None,
                 max_repeats: None,
                 stdout_preview: None,
-                session_id: None,
-                request_id: None,
+                session_dir: None,
+                session_id: Some("session-test".to_string()),
+                request_id: Some("req-test".to_string()),
             }),
             Err(ServertoolCliError::DeniedMarker("rcc_cli_"))
         );
@@ -1527,6 +1461,7 @@ mod tests {
             repeat_count: None,
             max_repeats: None,
             stdout_preview: None,
+            session_dir: None,
             session_id: None,
             request_id: None,
         })
@@ -1552,6 +1487,7 @@ mod tests {
             repeat_count: None,
             max_repeats: None,
             stdout_preview: None,
+            session_dir: None,
             session_id: None,
             request_id: None,
         })
@@ -1561,8 +1497,8 @@ mod tests {
         assert!(command.starts_with(prefix));
         let input_start = prefix.len();
         let input_json = if let Some(input_end) = command[input_start..]
-            .find("' --session-id")
-            .or_else(|| command[input_start..].find("' --request-id"))
+            .find("' --repeat-count")
+            .or_else(|| command[input_start..].find("' --max-repeats"))
         {
             &command[input_start..input_start + input_end]
         } else {
@@ -1865,6 +1801,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some(format!(
                     "session-over-budget-{}",
                     std::time::SystemTime::now()
@@ -1893,6 +1830,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some(format!(
                     "session-missing-flow-{}",
                     std::time::SystemTime::now()
@@ -1913,6 +1851,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-denied-tool".to_string()),
                 request_id: Some("req-denied-tool".to_string()),
             },
@@ -2017,6 +1956,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-trigger-test".to_string()),
                 request_id: Some("req-trigger-test".to_string()),
             },
@@ -2033,36 +1973,7 @@ mod tests {
     }
 
     #[test]
-    fn stopless_cli_invalid_schema_reuses_persisted_detail_text() {
-        let session_id = format!(
-            "session-invalid-schema-detail-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos() as u64)
-                .unwrap_or(0)
-        );
-        let request_id = "req-invalid-schema-detail";
-        let session_dir = std::env::temp_dir().join(format!(
-            "routecodex-stopless-invalid-schema-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&session_dir).expect("session dir");
-        std::env::set_var("ROUTECODEX_SESSION_DIR", &session_dir);
-        let persisted = crate::persisted_lookup::record_stopless_continuation_state(
-            &session_id,
-            request_id,
-            "Stop schema 校验未通过：你声明 finished/blocked，但没有给 reason。请只补 reason，不要重写其它已通过字段。",
-            1,
-            3,
-            1,
-        )
-        .expect("persist plan");
-        crate::persisted_state_fs_write::save_persisted_runtime_stop_message_state(
-            &session_id,
-            &persisted,
-        )
-        .expect("persist state");
-
+    fn stopless_cli_invalid_schema_uses_current_trigger_prompt() {
         let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
@@ -2075,14 +1986,14 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
-                session_id: Some(session_id),
-                request_id: Some(request_id.to_string()),
+                session_dir: None,
+                session_id: None,
+                request_id: None,
             },
         )
         .expect("stop_message_auto output");
 
-        assert!(output.continuation_prompt.contains("没有给 reason"));
-        assert!(output.continuation_prompt.contains("请只补 reason"));
+        assert!(!output.continuation_prompt.is_empty());
         let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
         assert_eq!(schema_guidance.trigger_hint, "invalid_schema");
     }
@@ -2101,6 +2012,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-trigger-test".to_string()),
                 request_id: Some("req-trigger-test".to_string()),
             },
@@ -2129,6 +2041,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-trigger-test".to_string()),
                 request_id: Some("req-trigger-test".to_string()),
             },
@@ -2157,6 +2070,7 @@ mod tests {
                 flow_id: None,
                 repeat_count: None,
                 max_repeats: None,
+                session_dir: None,
                 session_id: Some("session-trigger-test".to_string()),
                 request_id: Some("req-trigger-test".to_string()),
             },
@@ -2182,6 +2096,7 @@ mod tests {
             repeat_count: None,
             max_repeats: None,
             stdout_preview: None,
+            session_dir: None,
             session_id: None,
             request_id: None,
         })

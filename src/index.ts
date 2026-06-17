@@ -19,6 +19,7 @@ import { reportRouteError } from './error-handling/route-error-hub.js';
 import { flushProcessLifecycleLogQueue, logProcessLifecycle, logProcessLifecycleSync } from './utils/process-lifecycle-logger.js';
 import { getShutdownCallerContext } from './utils/shutdown-caller-context.js';
 import { listManagedServerPidsByPort } from './utils/managed-server-pids.js';
+import { writeServerPidCache } from './utils/server-runtime-pid.js';
 import {
   inferUngracefulPreviousExit,
   resolveRuntimeLifecyclePath,
@@ -956,12 +957,15 @@ class RouteCodexApp {
       // 6. 在服务已监听的前提下初始化运行时（包括 Hub Pipeline 和 Provider OAuth）
       await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
 
-      // 异步写入 PID 文件，不阻塞启动流程
+      // 异步写入 PID cache，不阻塞启动流程
       void (async () => {
         try {
-          const routeCodexHome = resolveRccPath();
-          await fs.mkdir(routeCodexHome, { recursive: true });
-          await fs.writeFile(path.join(routeCodexHome, `server-${bindPort}.pid`), String(process.pid), 'utf8');
+          writeServerPidCache({
+            port: bindPort,
+            pid: process.pid,
+            origin: 'start',
+            routeCodexHomeDir: resolveRccPath()
+          });
         } catch (error) {
           logNonBlockingError('write_server_pid_file', error);
         }

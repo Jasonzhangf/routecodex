@@ -9,6 +9,22 @@
   - `stopless_prompt.rs` 撤回“固定模板字段提示”这条错误方向，generic prompt 只保留自然语言；字段级纠错只来自 schema gate 真正的失败反馈。
   - gate 增补：`scripts/verify-servertool-rust-only.mjs` 现在禁止 `chat_servertool_orchestration.rs` 再出现 `_raw_followup_text_ignored` 这种“读到又丢”的实现。
 
+## 2026-06-17 runtime-session-dir ssot closeout audit
+
+- 当前工作树复核结果：
+  - `ROUTECODEX_SESSION_DIR` 的生产 env 读法已收敛到 runtime bootstrap owner（`src/server/runtime/http-server/session-dir.ts`）；功能链 stopless / pending-session / routing-state 不再自己从 env 猜目录。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs` 只从 `metadata.__rt.{sessionDir,rccUserDir}` 读取 runtime path override，顶层 `metadata.sessionDir/rccUserDir` 不再是合法 fallback。
+  - `SessionClientRegistry` 现在只认显式注入的 bindings store path；`conversationSessionId -> tmuxSessionId` 绑定不再反向定义 request `sessionId` 或 workdir 身份。
+- 文档/正式 review 面同步完成：
+  - `docs/design/server-runtime-lifecycle-ssot.md`
+  - `docs/architecture/wiki/metadata-boundary-map.md`
+  - `docs/architecture/wiki/runtime-lifecycle-call-graph.md`
+  - `docs/architecture/wiki/html/runtime-lifecycle-call-graph.html`
+  - `docs/architecture/wiki/html/metadata-boundary-map.html`
+- 仍保留的结构性风险：
+  - `ROUTECODEX_SESSION_DIR` 物理上仍混放 routing state、session bindings、provider health、servertool pending 等多类 runtime state。
+  - 这已经不再是“身份语义混用”问题，而是“目录物理分层”问题；建议后续单独做 subdir split，不作为当前 ssot 收口 blocker。
+
 ## 2026-06-17 stopless sessionId contract drift cleanup
 
 ## 2026-06-17 install-global + restart 5555 unblock
@@ -3169,3 +3185,39 @@ cleanup-stale-server-pids.mjs 存在但引用 ~/.routecodex（老目录），不
   - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts`
   - `tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts`
   - `npx tsc --noEmit --pretty false`
+
+## 2026-06-17 stopless/schema/runtime-path gate lock
+
+- 本轮没有再动 stopless 主实现，只补 gate，防止后续回归。
+- `scripts/verify-servertool-rust-only.mjs` 新增三类硬门禁：
+  - `stopless-schema-feedback-lock`：要求 Rust orchestration 保留 `decision.followup_text`，并且 `chat_servertool_orchestration.rs` 保持 `test_stop_message_auto_schema_followup_text_keeps_exact_validation_feedback`。
+  - `stopless-repeat-reset-lock`：要求 focused tests 继续覆盖 repeat 递增/重置语义，避免“非连续 stop 还沿用旧计数”复活。
+  - `runtime-metadata-session-dir-lock`：要求 `virtual_router_engine/napi_proxy.rs` 只从 `metadata.__rt.*` 读取 `sessionDir/rccUserDir`，禁止恢复 top-level metadata fallback，并保留对应 Rust 单测。
+- 定向验证已过：
+  - `node scripts/verify-servertool-rust-only.mjs`
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/cli/servertool-command.spec.ts tests/servertool/loop-state-block.spec.ts --runInBand`
+  - `git diff --check scripts/verify-servertool-rust-only.mjs`
+
+## 2026-06-17 hub pipeline slimming audit
+
+- 本轮目标不是修 bug，而是审计“瘦身不减功能”可落点；证据来自静态 owner/map/code 面 + focused Jest。
+- focused 验证结果：
+  - `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` PASS
+  - `tests/sharedmodule/chat-semantics-stage1.spec.ts` PASS
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` FAIL
+- residue audit 当前红点分两类：
+  - 真残留：
+    - `src/server/runtime/http-server/executor/request-executor-request-semantics.ts` 仍在 TS 本地解析 `submit_tool_outputs` / provider-native continuation 语义。
+    - `src/server/utils/finish-reason.ts` 仍在 TS 本地扫描 `tool_calls` / `required_action` / `output.function_call`，并把空结果回填成 `tool_calls` / `stop`。
+    - `src/modules/llmswitch/bridge/responses-response-bridge.ts` 仍是超大 TS 语义中心：本地做 SSE terminal/finish-reason/probe/persist 决策，不只是薄壳。
+  - gate / hygiene 漂移：
+    - `package.json` 的 `test:routing-instructions` 仍引用已不存在的 `tests/servertool/stop-message-auto.spec.ts`。
+    - `sharedmodule/llmswitch-core/src/**` 仍存在 side-by-side TS emit artifacts（`.js/.d.ts/.map`），residue audit 已把它们识别为应清除面。
+- 额外代码面发现：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` 与 `hub-pipeline-execute-chat-process-entry.ts` 基本是同构壳：同样的 preselected-route、同样的 `runHubPipelineLibWithNative(...)`、同样的 error/summary/result 包装，只差少量字段。
+  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 把 resp_inbound SSE materialization、servertool runtime effect 执行、runtime-state write、resp_outbound SSE codec 四段职责叠在一个 TS 文件里，收口空间很大。
+- 推荐瘦身顺序：
+  1. 先删 host 侧 TS 语义残留：`request-executor-request-semantics.ts`、`src/server/utils/finish-reason.ts`
+  2. 再把 `responses-response-bridge.ts` 继续向 native owner 收口，TS 只留 IO/persist glue
+  3. 合并 `hub-pipeline-execute-request-stage.ts` / `hub-pipeline-execute-chat-process-entry.ts`
+  4. 清掉 stale script path 与 checked-in TS emit artifacts

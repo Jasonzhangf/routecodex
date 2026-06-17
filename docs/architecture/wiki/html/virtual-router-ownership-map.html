@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Virtual Router Ownership Map</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Virtual Router Ownership Map</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/virtual-router-ownership-map.md</code></p>
+      </header>
+      <article>
+        <h1>Virtual Router Ownership Map</h1>
+        <p>把 Virtual Router 相关 owner、选择边界、forwarder/runtime 入口、验证栈集中成一页，避免把 VR 语义误改到 executor/provider/handler。</p>
+        <p>Source of truth:</p>
+        <ul>
+          <li><code>docs/architecture/function-map.yml</code> defines owner, builders, paths, and gates</li>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/verification-map.yml</code></li>
+          <li><code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></li>
+        </ul>
+        <p>Feature scope: <code>vr.* / virtual_router.*</code></p>
+        <table>
+        <thead><tr><th>feature_id</th><th>summary</th><th>owner kind</th><th>owner module</th><th>required gates</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code></td></tr>
+        <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run build:min</code></td></tr>
+        <tr><td><code>vr.route_availability_floor</code></td><td>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code></td></tr>
+        <tr><td><code>vr.provider_forwarder_runtime</code></td><td>ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run verify:vr-forwarder-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        </tbody>
+        </table>
+        <h2>vr.route_selection</h2>
+        <p>Summary: virtual router route classification and selected target truth</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code> Owner scope: virtual router route classification and selected target truth</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>VrRoute04SelectedTarget</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>apply_route_selection</code></li>
+          <li><code>build_vr_route_04_from_hub_req_chatprocess_03</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></li>
+          <li><code>src/modules/llmswitch/bridge</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/client</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts</code></li>
+          <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+          <li><code>npm run verify:llmswitch-rustification-audit</code></li>
+          <li><code>npm run verify:repo-sanity</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
+        </ul>
+        <h2>virtual_router.primary_exhausted_to_default_pool</h2>
+        <p>Summary: primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code> Owner scope: primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>PrimaryExhaustedPlanInput</code></li>
+          <li><code>PrimaryExhaustedToDefaultPoolPlan</code></li>
+          <li><code>PrimaryExhaustedPlanStatus</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_primary_exhausted_to_default_pool</code></li>
+          <li><code>plan_primary_exhausted_to_default_pool_json</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></li>
+          <li><code>src/server/runtime/http-server/http-server-bootstrap.ts</code></li>
+          <li><code>src/server/runtime/http-server/index.ts</code></li>
+          <li><code>src/server/runtime/http-server/request-executor.ts</code></li>
+          <li><code>src/server/runtime/http-server/executor/request-executor-core-utils.ts</code></li>
+          <li><code>tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/server/handlers</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run build:min</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Host must consume Rust plan only; no local synthesis of default-pool chain.</li>
+          <li>Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership.</li>
+          <li>Unknown target and empty default-pool are explicit contract states, never fallback.</li>
+          <li>Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list.</li>
+        </ul>
+        <h2>vr.route_availability_floor</h2>
+        <p>Summary: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code> Owner scope: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>VrRoute04SelectedTarget</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>build_unavailable_providers_details</code></li>
+          <li><code>collect_recoverable_cooldown_for_key</code></li>
+          <li><code>evaluate_singleton_route_pool_exhaustion</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath</code></li>
+          <li><code>src/modules/llmswitch/bridge/native-exports.ts</code></li>
+          <li><code>src/server/runtime/http-server/executor/request-executor-core-utils.ts</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+          <li><code>src/server/runtime/http-server/daemon-admin</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/manager/modules/quota</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.routing-empty-pool.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+          <li><code>npm run verify:architecture-ci</code></li>
+          <li><code>npm run verify:llmswitch-rustification-audit</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>non-empty routing invariant belongs to Rust Virtual Router selection only.</li>
+          <li>singleton/default hold decision and cooldown-hint parsing belong to Rust Virtual Router; TS executor may only consume native output and perform wait/log IO.</li>
+          <li>do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code.</li>
+          <li>route order is requested route -&gt; inserted tools route when required -&gt; default; search/tool path must stay <code>search -&gt; tools -&gt; default</code>, and if default pool has providers routing must not return empty.</li>
+        </ul>
+        <h2>vr.provider_forwarder_runtime</h2>
+        <p>Summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code> Owner scope: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ForwarderRegistry</code></li>
+          <li><code>ForwarderEntry</code></li>
+          <li><code>ForwarderTarget</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>build_forwarder_weights</code></li>
+          <li><code>select_with_forwarder_resolution</code></li>
+          <li><code>resolve_forwarder_candidate_for_pool</code></li>
+          <li><code>forwarder_status_snapshot</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath</code></li>
+          <li><code>src/server/runtime/http-server/routes.ts</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/manager/modules/quota</code></li>
+          <li><code>src/client</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:vr-forwarder-runtime</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Config routes may name <code>fwd.*</code>, but host/executor must receive only resolved real provider keys.</li>
+          <li>Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.</li>
+          <li>HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

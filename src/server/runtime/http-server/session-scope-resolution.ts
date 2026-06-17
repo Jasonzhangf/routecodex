@@ -324,6 +324,16 @@ export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs):
       || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined)
   );
   if (tmuxFromHeaders) {
+    if (
+      typeof args.resolveTmuxSessionIdFromBinding === 'function'
+      && typeof args.isTmuxSessionAlive === 'function'
+      && !args.isTmuxSessionAlive(tmuxFromHeaders)
+    ) {
+      const tmuxFromBinding = readToken(args.resolveTmuxSessionIdFromBinding(tmuxFromHeaders));
+      if (tmuxFromBinding) {
+        return { tmuxSessionId: tmuxFromBinding, source: 'registry_by_binding' };
+      }
+    }
     return { tmuxSessionId: tmuxFromHeaders, source: 'headers_or_api_key' };
   }
 
@@ -344,6 +354,13 @@ export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs):
       if (tmuxFromBinding) {
         return { tmuxSessionId: tmuxFromBinding, source: 'registry_by_binding' };
       }
+    }
+  }
+
+  if (typeof args.resolveTmuxSessionIdFromDaemon === 'function') {
+    const tmuxFromDaemon = readToken(args.resolveTmuxSessionIdFromDaemon(args.daemonId));
+    if (tmuxFromDaemon) {
+      return { tmuxSessionId: tmuxFromDaemon, source: 'registry_by_daemon' };
     }
   }
 

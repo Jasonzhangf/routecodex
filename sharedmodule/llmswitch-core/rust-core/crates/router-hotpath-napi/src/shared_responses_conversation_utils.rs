@@ -219,9 +219,6 @@ fn normalize_responses_history_item(value: Value) -> Value {
         }) {
             out.insert("arguments".to_string(), arguments);
         }
-        if let Some(status) = row.get("status").cloned() {
-            out.insert("status".to_string(), status);
-        }
         return Value::Object(out);
     }
 
@@ -239,9 +236,6 @@ fn normalize_responses_history_item(value: Value) -> Value {
         }
         if let Some(output) = row.get("output").cloned() {
             out.insert("output".to_string(), output);
-        }
-        if let Some(status) = row.get("status").cloned() {
-            out.insert("status".to_string(), status);
         }
         return Value::Object(out);
     }
@@ -332,14 +326,8 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
         if let Some(id) = read_trimmed_string(row.get("id")) {
             out.insert("id".to_string(), Value::String(id));
         }
-        if let Some(status) = row.get("status").cloned() {
-            out.insert("status".to_string(), status);
-        }
         if let Some(summary) = row.get("summary").cloned() {
             out.insert("summary".to_string(), summary);
-        }
-        if let Some(content) = row.get("content").cloned() {
-            out.insert("content".to_string(), content);
         }
         if let Some(encrypted_content) = row.get("encrypted_content").cloned() {
             out.insert("encrypted_content".to_string(), encrypted_content);
@@ -1911,6 +1899,7 @@ mod tests {
                         "type": "function_call",
                         "id": "fc_1",
                         "call_id": "call_1",
+                        "status": "in_progress",
                         "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
                         "content": [{ "type": "output_text", "text": "illegal" }],
                         "role": "assistant"
@@ -1919,6 +1908,7 @@ mod tests {
                         "type": "function_call_output",
                         "id": "fc_1",
                         "call_id": "call_1",
+                        "status": "completed",
                         "output": "ok",
                         "content": [{ "type": "output_text", "text": "illegal" }]
                     }
@@ -1934,9 +1924,11 @@ mod tests {
         assert!(entry["input"][0].get("function").is_none());
         assert!(entry["input"][0].get("content").is_none());
         assert!(entry["input"][0].get("role").is_none());
+        assert!(entry["input"][0].get("status").is_none());
         assert_eq!(entry["input"][1]["type"], json!("function_call_output"));
         assert_eq!(entry["input"][1]["output"], json!("ok"));
         assert!(entry["input"][1].get("content").is_none());
+        assert!(entry["input"][1].get("status").is_none());
     }
 
     #[test]
@@ -2555,11 +2547,10 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["type"], "reasoning");
         assert_eq!(items[0]["id"], "reasoning-1");
-        assert_eq!(items[0]["status"], "completed");
+        assert!(items[0].get("status").is_none());
         assert_eq!(items[0]["summary"][0]["type"], "summary_text");
         assert_eq!(items[0]["summary"][0]["text"], "thinking step 1");
-        assert_eq!(items[0]["content"][0]["type"], "reasoning_text");
-        assert_eq!(items[0]["content"][0]["text"], "detailed reasoning here");
+        assert!(items[0].get("content").is_none());
         assert_eq!(items[0]["encrypted_content"], "opaque-sig-abc");
     }
 
@@ -2589,9 +2580,76 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0]["type"], "reasoning");
         assert_eq!(items[0]["id"], "reasoning-1");
-        assert_eq!(items[0]["content"][0]["type"], "reasoning_text");
-        assert_eq!(items[0]["content"][0]["text"], "Need to inspect cwd before editing.");
+        assert!(items[0].get("status").is_none());
+        assert!(items[0].get("content").is_none());
         assert_eq!(items[1]["type"], "function_call");
+    }
+
+    #[test]
+    fn restore_never_replays_reasoning_content_from_persisted_history() {
+        let restored = restore_responses_continuation_payload(
+            &serde_json::json!({
+                "requestId": "req_prev",
+                "lastResponseId": "resp_prev",
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "id": "reasoning-1",
+                        "summary": [{ "type": "summary_text", "text": "thinking step 1" }],
+                        "content": [{ "type": "reasoning_text", "text": "historical reasoning leak" }],
+                        "encrypted_content": "opaque-sig-abc"
+                    }
+                ]
+            }),
+            &serde_json::json!({
+                "model": "gpt-5.4",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "id": "reasoning-1",
+                        "summary": [{ "type": "summary_text", "text": "thinking step 1" }],
+                        "content": [{ "type": "reasoning_text", "text": "historical reasoning leak" }],
+                        "encrypted_content": "opaque-sig-abc"
+                    },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "next turn" }] }
+                ]
+            }),
+            Some("req_now"),
+            Some("session:sess-1"),
+        );
+
+        let payload = restored.get("payload").and_then(Value::as_object).unwrap();
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        let serialized = serde_json::to_string(payload).unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], serde_json::json!("message"));
+        assert!(!serialized.contains("historical reasoning leak"));
+        assert!(!serialized.contains("\"reasoning_text\""));
+    }
+
+    #[test]
+    fn convert_responses_output_to_input_items_strips_response_only_status_fields() {
+        let response = serde_json::json!({
+            "id": "resp_status_strip_1",
+            "status": "requires_action",
+            "output": [{
+                "type": "function_call",
+                "id": "fc_status_1",
+                "call_id": "call_status_1",
+                "name": "exec_command",
+                "status": "in_progress",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            }]
+        });
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["type"], "function_call");
+        assert_eq!(items[0]["call_id"], "call_status_1");
+        assert!(items[0].get("status").is_none());
     }
 
     #[test]
@@ -2611,7 +2669,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["type"], "reasoning");
         assert_eq!(items[0]["id"], "reasoning-enc-1");
-        assert_eq!(items[0]["status"], "completed");
+        assert!(items[0].get("status").is_none());
         assert_eq!(items[0]["encrypted_content"], "encrypted-opaque-value");
     }
 }

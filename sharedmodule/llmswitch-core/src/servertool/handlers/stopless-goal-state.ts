@@ -61,7 +61,6 @@ function createEmptyRoutingInstructionState(): LegacyReasoningStopRoutingState {
     stopMessageUpdatedAt: undefined,
     stopMessageLastUsedAt: undefined,
     stopMessageStageMode: undefined,
-    stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
     reasoningStopMode: undefined,

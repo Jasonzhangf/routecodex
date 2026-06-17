@@ -55,9 +55,9 @@ describe('servertool pending session store', () => {
       afterToolCallIds: ['call-1'],
       messages: [{ role: 'assistant' } as any],
       sourceRequestId: 'req-1'
-    });
+    }, tempRoot);
 
-    const loaded = await loadPendingServerToolInjection(sessionId);
+    const loaded = await loadPendingServerToolInjection(sessionId, tempRoot);
     expect(loaded).not.toBeNull();
     expect(loaded?.sessionId).toBe(sessionId);
     expect(loaded?.afterToolCallIds).toEqual(['call-1']);
@@ -71,9 +71,9 @@ describe('servertool pending session store', () => {
       afterToolCallIds: ['call-1'],
       messages: [{ role: 'assistant' } as any],
       sourceRequestId: 'req-old'
-    });
+    }, tempRoot);
 
-    const loaded = await loadPendingServerToolInjection(sessionId);
+    const loaded = await loadPendingServerToolInjection(sessionId, tempRoot);
     expect(loaded).toBeNull();
 
     const pendingFile = path.join(tempRoot, 'servertool-pending', `${sessionId}.json`);
@@ -86,9 +86,9 @@ describe('servertool pending session store', () => {
       createdAtMs: Date.now(),
       afterToolCallIds: ['call-2'],
       messages: [{ role: 'assistant' } as any]
-    });
-    await clearPendingServerToolInjection(sessionId);
-    const loaded = await loadPendingServerToolInjection(sessionId);
+    }, tempRoot);
+    await clearPendingServerToolInjection(sessionId, tempRoot);
+    const loaded = await loadPendingServerToolInjection(sessionId, tempRoot);
     expect(loaded).toBeNull();
   });
 });

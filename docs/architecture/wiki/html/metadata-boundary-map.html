@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Metadata Boundary Map</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Metadata Boundary Map</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/metadata-boundary-map.md</code></p>
+      </header>
+      <article>
+        <h1>Metadata Boundary Map</h1>
+        <h2>Purpose</h2>
+        <p>这页只回答两件事：</p>
+        <p>1. <code>sessionId / conversationId / requestId / pipelineId / entryEndpoint / continuationOwner</code> 等 metadata 在请求闭环里怎么传。 2. 哪些地方允许读，哪些地方绝对不能泄漏到 provider wire / client payload。</p>
+        <p>它是 review surface，不是第二份 SSOT。</p>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/architecture/function-map.yml</code> -&gt; <code>feature_id: hub.metadata_boundary</code></li>
+          <li><code>docs/architecture/verification-map.yml</code> -&gt; <code>feature_id: hub.metadata_boundary</code></li>
+          <li><code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></li>
+          <li><code>docs/goals/metadata-request-isolation-plan.md</code></li>
+          <li><code>docs/design/responses-continuation-storage-ownership.md</code></li>
+          <li><code>docs/chat-process-continuation-state-contract.md</code></li>
+        </ul>
+        <h2>Main Rule</h2>
+        <ul>
+          <li>metadata 只允许作为 side-channel control carrier。</li>
+          <li>请求链、响应链都可以读当前闭环 metadata。</li>
+          <li>provider 出站 body / SDK options / direct passthrough body 不得出现内部 metadata。</li>
+          <li>client JSON / SSE payload 不得出现内部 metadata。</li>
+          <li>闭环结束必须释放；不得跨 <code>requestId / pipelineId / port / session / conversation / continuationOwner</code> 复用。</li>
+        </ul>
+        <h2>Scope Keys</h2>
+        <table>
+        <thead><tr><th>Key</th><th>Role</th><th>Where it is valid</th><th>Must not become</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>requestId</code></td><td>当前请求闭环主键</td><td>request + response 当前闭环</td><td>provider body field / client response field</td></tr>
+        <tr><td><code>pipelineId</code></td><td>当前 pipeline 实例主键</td><td>request + response 当前闭环</td><td>provider body field / client response field</td></tr>
+        <tr><td><code>sessionId</code></td><td>当前 session 控制索引</td><td>metadata carrier / continuation scope / stopless scope</td><td>provider payload semantic shortcut</td></tr>
+        <tr><td><code>conversationId</code></td><td>当前 conversation 控制索引</td><td>metadata carrier / continuation scope</td><td>provider payload semantic shortcut</td></tr>
+        <tr><td><code>entryEndpoint</code></td><td>入口协议边界</td><td>req_inbound / req_chatprocess / resp_outbound</td><td>provider metadata fallback</td></tr>
+        <tr><td><code>continuationOwner</code></td><td><code>direct</code> vs <code>relay</code> 恢复归属</td><td>continuation store / restore / route pin</td><td>普通 create 自动续接条件</td></tr>
+        <tr><td><code>port</code> / <code>serverId</code> / <code>group</code></td><td>端口与实例隔离</td><td>runtime metadata / snapshot root / restore scope</td><td>cross-port shared metadata</td></tr>
+        <tr><td><code>routeHint</code> / <code>streamIntent</code> / <code>servertool*</code></td><td>内部控制语义</td><td>Hub / VR / runtime / servertool</td><td>client-visible protocol field</td></tr>
+        </tbody>
+        </table>
+        <h2>Session Dir Clarification</h2>
+        <p><code>ROUTECODEX_SESSION_DIR</code> is not a semantic session id. It is a runtime filesystem root that may host several unrelated state families at once:</p>
+        <ul>
+          <li>routing state snapshots (<code>session:*</code>, <code>conversation:*</code>, <code>tmux:*</code>)</li>
+          <li><code>session-bindings.json</code></li>
+          <li><code>provider-health.json</code></li>
+          <li><code>servertool-pending/*</code></li>
+        </ul>
+        <p>This means <code>sessionId</code> / <code>tmuxSessionId</code> / <code>conversationId</code> are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.</p>
+        <p>Persistence rule now stays explicit:</p>
+        <ul>
+          <li>protocol-independent continuation state may be persisted/file-backed, because it must survive protocol boundaries and later restore with owner/scope validation;</li>
+          <li>request-local stopless / current-turn CLI projection state must not be upgraded into persisted session truth just because it has a <code>sessionId</code>;</li>
+          <li><code>ROUTECODEX_SESSION_DIR</code> can host both categories physically, but the persistence decision comes from lifecycle contract, not from the directory existing.</li>
+        </ul>
+        <p>Namespace rule is now explicit:</p>
+        <ul>
+          <li><code>tmuxSessionId</code>: client attachment / injection runtime scope only</li>
+          <li><code>conversationId</code> / <code>conversationSessionId</code>: conversation-level narrowing key only</li>
+          <li>request <code>sessionId</code>: request/continuation scope only</li>
+          <li><code>session-bindings.json</code> may bind <code>conversationSessionId -&gt; tmuxSessionId</code> for runtime injection lookup, but it must not redefine any of these namespaces as one identity</li>
+          <li><code>session-bindings.json</code> production path is now runtime-bootstrap-owned: the HTTP server injects the bindings store path into <code>SessionClientRegistry</code>; the registry must not infer current-instance scope from feature-chain metadata, session ids, or <code>ROUTECODEX_SESSION_DIR</code>.</li>
+        </ul>
+        <h2>State Family Matrix</h2>
+        <table>
+        <thead><tr><th>State family</th><th>Current owner</th><th>Lifetime</th><th>Persist/file?</th><th>Why</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>Responses / protocol-independent continuation</td><td>responses continuation store + owner restore path</td><td>cross-request / cross-tool-turn / protocol restore</td><td>yes, required</td><td>continuation 恢复权必须显式保存，不能只靠 scope 命中</td></tr>
+        <tr><td>stopless <code>stop_message_auto</code> loop state</td><td>stopless runtime metadata + current request <code>tool_outputs</code></td><td>current request + next tool roundtrip</td><td>no</td><td>不是 protocol-independent continuation，不应升级成 persisted session truth</td></tr>
+        <tr><td>servertool pending injection</td><td><code>hub.servertool_pending_session</code></td><td>cross-request followup bridge</td><td>pending review</td><td>目前仍是文件态，但是否属于“必须持久化 continuation”需继续按 owner 收口审计</td></tr>
+        <tr><td>tmux / client bindings</td><td><code>SessionClientRegistry</code></td><td>client/tmux attachment lifecycle</td><td>yes, but separate namespace</td><td>这是 client binding，不是 request session 或 continuation</td></tr>
+        <tr><td>runtime lifecycle pid/stop-intent/instance registry</td><td>runtime lifecycle owners</td><td>cross-process runtime control</td><td>yes</td><td>这是 runtime control plane，不是业务 continuation</td></tr>
+        <tr><td>provider health / cooldown</td><td>provider runtime health owners</td><td>cross-request runtime heuristics</td><td>yes, if policy requires restart survival</td><td>属于 runtime policy，不是 session 身份</td></tr>
+        </tbody>
+        </table>
+        <p>As of 2026-06-17, two implementation contracts are now explicit:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/pending-session.ts</code> no longer reads <code>ROUTECODEX_SESSION_DIR</code> or top-level fallback fields. Caller must pass explicit <code>sessionDir</code> from runtime metadata.</li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.{ts,js}</code> now passes an explicit &quot;no override&quot; sentinel when caller does not provide <code>sessionDir</code>, and <code>router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs</code> no longer reads <code>ROUTECODEX_SESSION_DIR</code> as a storage override. Persistent routing-state owner now accepts only explicit override input or canonical <code>~/.rcc</code> roots.</li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs</code> now reads runtime path overrides only from <code>metadata.__rt.*</code>; top-level <code>metadata.sessionDir/rccUserDir</code> no longer count as legal fallback.</li>
+        </ul>
+        <h2>Request / Response Flow</h2>
+        <pre class="mermaid">flowchart LR
+          A[&quot;Client HTTP Body&lt;br/&gt;may contain client metadata input&quot;] --&gt; B[&quot;ServerReqInbound01ClientRaw&lt;br/&gt;capture current request facts&quot;]
+          B --&gt; C[&quot;MetaCarrier&lt;br/&gt;requestId/pipelineId/sessionId/conversationId/entryEndpoint/port&quot;]
+          B --&gt; D[&quot;HubReqInbound02Standardized&lt;br/&gt;strip inline metadata from normal payload&quot;]
+          C --&gt; D
+          D --&gt; E[&quot;HubReqChatProcess03Governed&lt;br/&gt;read metadata only as control semantics&quot;]
+          C --&gt; E
+          E --&gt; F[&quot;VrRoute04SelectedTarget&lt;br/&gt;read continuation/route scope only&quot;]
+          C --&gt; F
+          F --&gt; G[&quot;HubReqOutbound05ProviderSemantic&lt;br/&gt;metadata isolated from semantic payload&quot;]
+          C --&gt; G
+          G --&gt; H[&quot;ProviderReqOutbound06WirePayload&lt;br/&gt;assert no inline metadata&quot;]
+          H --&gt; I[&quot;Upstream Provider&quot;]
+          I --&gt; J[&quot;ProviderRespInbound01Raw&quot;]
+          J --&gt; K[&quot;HubRespInbound02Parsed&lt;br/&gt;same requestId/pipelineId metadata only&quot;]
+          C --&gt; K
+          K --&gt; L[&quot;HubRespChatProcess03Governed&lt;br/&gt;servertool/followup/continuation read current carrier&quot;]
+          C --&gt; L
+          L --&gt; M[&quot;HubRespOutbound04ClientSemantic&lt;br/&gt;project client payload without metadata&quot;]
+          C --&gt; M
+          M --&gt; N[&quot;ServerRespOutbound05ClientFrame&lt;br/&gt;JSON/SSE no internal metadata&quot;]
+          N --&gt; O[&quot;Client&quot;]
+
+          classDef safe fill:#edf7ed,stroke:#2e7d32,color:#1b1f23;
+          classDef guard fill:#fff7e6,stroke:#b26a00,color:#1b1f23;
+          classDef deny fill:#fdecec,stroke:#c62828,color:#1b1f23;
+          class B,C,D,E,F,G,J,K,L,M,N safe;
+          class H guard;
+          class I,O deny;</pre>
+        <h2>Node-by-Node Boundary</h2>
+        <table>
+        <thead><tr><th>Node</th><th>Allowed metadata action</th><th>Forbidden action</th><th>Evidence anchor</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>ServerReqInbound01ClientRaw</code></td><td>读取 client metadata，生成当前闭环 carrier</td><td>把 metadata 留在 pipeline normal body</td><td><code>docs/goals/metadata-request-isolation-plan.md</code> §2026-06-01 handler 收口</td></tr>
+        <tr><td><code>HubReqInbound02Standardized</code></td><td>标准化 payload，并断言 normal payload 无 inline metadata</td><td>用 metadata 继续承载可映射业务语义</td><td><code>assert_no_inline_metadata</code> / <code>HubReqInbound02Standardized</code></td></tr>
+        <tr><td><code>HubReqChatProcess03Governed</code></td><td>读取当前 carrier 控制语义，如 continuation / tool governance / route hints</td><td>让 <code>responsesResume / clientToolsRaw / responseFormat</code> 等继续滞留 metadata</td><td><code>hub_pipeline_blocks/process_mode.rs</code> fail-fast keys</td></tr>
+        <tr><td><code>VrRoute04SelectedTarget</code></td><td>只消费 continuation / route scope</td><td>读取 payload 修语义，或跨 port/session 恢复别的 metadata</td><td><code>docs/chat-process-continuation-state-contract.md</code></td></tr>
+        <tr><td><code>HubReqOutbound05ProviderSemantic</code></td><td>保留 provider-neutral 业务语义</td><td>从 <code>payload.metadata.context</code> 回填 provider semantic</td><td><code>docs/goals/metadata-request-isolation-plan.md</code> P0/P1</td></tr>
+        <tr><td><code>ProviderReqOutbound06WirePayload</code></td><td>最终 wire build 前断言无 inline metadata</td><td>provider body / SDK options 带内部 metadata</td><td><code>assert_no_inline_metadata</code> / metadata leak boundary gates</td></tr>
+        <tr><td><code>HubRespInbound02Parsed</code></td><td>只读取同一 <code>requestId/pipelineId</code> 的当前闭环 carrier</td><td>从别的请求/端口恢复 metadata</td><td>topology doc §4.1</td></tr>
+        <tr><td><code>HubRespChatProcess03Governed</code></td><td>读取当前闭环 continuation/servertool metadata</td><td>把 metadata 注入 followup payload 或 client payload</td><td>metadata isolation plan + continuation ownership doc</td></tr>
+        <tr><td><code>HubRespOutbound04ClientSemantic</code></td><td>只做 client protocol projection</td><td>输出 <code>response.metadata</code> / internal <code>__rt</code> / side-channel fields</td><td><code>tests/sharedmodule/responses-sse-metadata-boundary.spec.ts</code></td></tr>
+        <tr><td><code>ServerRespOutbound05ClientFrame</code></td><td>写 JSON/SSE frame</td><td>输出 internal metadata 到 client body / SSE event body</td><td>handler-utils / response boundary tests</td></tr>
+        </tbody>
+        </table>
+        <h2>Continuation / Ownership Binding</h2>
+        <pre class="mermaid">flowchart TD
+          A[&quot;entryEndpoint&quot;] --&gt; B[&quot;continuation legality&quot;]
+          C[&quot;continuationOwner&quot;] --&gt; B
+          D[&quot;sessionId / conversationId&quot;] --&gt; E[&quot;scope narrowing only&quot;]
+          F[&quot;port / group / serverId&quot;] --&gt; E
+          B --&gt; G[&quot;direct&quot;]
+          B --&gt; H[&quot;relay&quot;]
+          G --&gt; I[&quot;same provider remote state only&quot;]
+          H --&gt; J[&quot;local responses conversation store only&quot;]
+          E --&gt; G
+          E --&gt; H
+
+          K[&quot;ordinary /v1/responses create&quot;] --&gt; L[&quot;must not auto-continue&quot;]
+          M[&quot;/v1/chat/completions or /v1/messages&quot;] --&gt; L
+          N[&quot;submit_tool_outputs / explicit previous_response_id / followup reentry&quot;] --&gt; B</pre>
+        <h2>Metadata Consumers</h2>
+        <table>
+        <thead><tr><th>Consumer</th><th>Reads</th><th>Why</th><th>Must not do</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>req_inbound</td><td><code>entryEndpoint</code>, request scope ids, client metadata</td><td>capture current request context</td><td>leave metadata in normal payload</td></tr>
+        <tr><td>req_chatprocess</td><td><code>responsesResume</code>, continuation hints, tools presence, stopless control</td><td>unify continuation / chat semantics</td><td>keep mappable semantics in metadata</td></tr>
+        <tr><td>virtual_router</td><td><code>chainId</code>, <code>stickyScope</code>, <code>resumeFrom</code>, route hints</td><td>continuity and route decision</td><td>direct-read protocol-specific scattered keys forever</td></tr>
+        <tr><td>req_outbound / provider runtime</td><td>runtime carrier only</td><td>auth/transport/runtime observability</td><td>rebuild provider payload from metadata</td></tr>
+        <tr><td>resp_chatprocess</td><td>same closed-loop ids + continuation/servertool hints</td><td>followup / tool governance / result restore</td><td>inject metadata to client semantic payload</td></tr>
+        <tr><td>snapshot / diagnostics</td><td>metadata root field</td><td>observability only</td><td>replay into normal live path without replay scope</td></tr>
+        </tbody>
+        </table>
+        <h2>Leak Gates</h2>
+        <p>Current explicit gates and tests already referenced by owner map:</p>
+        <ul>
+          <li><code>tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts</code></li>
+          <li><code>tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts</code></li>
+          <li><code>tests/red-tests/hub_pipeline_type_topology_contract.test.ts</code></li>
+          <li><code>tests/sharedmodule/responses-sse-metadata-boundary.spec.ts</code></li>
+          <li><code>tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts</code></li>
+          <li><code>tests/providers/core/runtime/provider-runtime-metadata.isolation.spec.ts</code></li>
+          <li><code>tests/server/handlers/handler-metadata-boundary.spec.ts</code></li>
+          <li><code>scripts/architecture/verify-architecture-metadata-leak-boundary.mjs</code></li>
+        </ul>
+        <h2>Mapping Gaps / Review Findings</h2>
+        <p>这部分不是在宣称 bug 已修，只是把当前 review 面能看见的缺口列出来，方便后续补 gate 或补实现。</p>
+        <table>
+        <thead><tr><th>Gap ID</th><th>Area</th><th>Current signal</th><th>Why it is a gap</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>meta-gap-01</code></td><td>Wiki coverage</td><td>当前之前没有专门 metadata boundary wiki 页</td><td>review 时难把 request/response/continuation/snapshot 边界放到一张图上</td></tr>
+        <tr><td><code>meta-gap-02</code></td><td>Queryability</td><td><code>hub.metadata_boundary</code> 有 owner 和 tests，但没有按 <code>sessionId/requestId/continuationOwner</code> 拆开的 review 面</td><td>改 stopless / continuation / direct-relay 时仍可能改错层</td></tr>
+        <tr><td><code>meta-gap-03</code></td><td>Continuation isolation</td><td>文档已要求 <code>entryKind + continuationOwner + scope</code> 三重隔离，但 wiki 层此前没有把 direct/relay 恢复权显式画出</td><td>容易误把 <code>sessionId</code> 当恢复权真源</td></tr>
+        <tr><td><code>meta-gap-04</code></td><td>Chat-process handoff</td><td><code>responsesResume / responsesContext / responseFormat / anthropicToolNameMap</code> 仍在代码和旧类型声明中出现</td><td>需要继续审计哪些是过渡字段，哪些应继续收缩到 <code>semantics.*</code></td></tr>
+        <tr><td><code>meta-gap-05</code></td><td>Snapshot/replay boundary</td><td>计划文档已要求 snapshot metadata 不回流 live path，但 wiki 之前没有把 replay 例外单独标红</td><td>容易把 debug root metadata 当 runtime metadata 复用</td></tr>
+        <tr><td><code>meta-gap-06</code></td><td>Session dir overloading</td><td><code>ROUTECODEX_SESSION_DIR</code> 仍同时承载 routing state、bindings、health、pending files</td><td>stopless/pending-session 已收口到 metadata-only caller contract，但 runtime workdir root 仍混放多类状态，长期仍建议物理拆分</td></tr>
+        </tbody>
+        </table>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>当前改动是否只在 metadata owner 或允许路径内完成。</li>
+          <li>是否把 <code>requestId/pipelineId/sessionId/conversationId/entryEndpoint/continuationOwner</code> 绑定到当前闭环，而不是全局 cache。</li>
+          <li>provider body / SDK options / direct passthrough body 是否仍完全不含内部 metadata。</li>
+          <li>client JSON / SSE payload 是否完全不含内部 metadata。</li>
+          <li>continuation 恢复是否同时校验 <code>entryKind + continuationOwner + scope</code>。</li>
+          <li>replay/snapshot 路径是否显式标记为 replay，而不是 live path 自动恢复。</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

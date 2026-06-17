@@ -59,6 +59,14 @@ pub fn plan_stopless_orchestration_action(
             session_id: input.session_id,
         };
     }
+    if is_stop_message_budget_exhausted(&input.execution) {
+        return StoplessOrchestrationPlan {
+            action: StoplessOrchestrationAction::TerminalFinal,
+            is_stop_message_flow: true,
+            reason: "stop_message_budget_exhausted".to_string(),
+            session_id: input.session_id,
+        };
+    }
     StoplessOrchestrationPlan {
         action: StoplessOrchestrationAction::CliProjection,
         is_stop_message_flow: true,
@@ -74,6 +82,24 @@ fn is_stop_message_terminal_final(execution: &Value) -> bool {
         .and_then(|context| context.get("stopMessageTerminalFinal"))
         .and_then(Value::as_bool)
         == Some(true)
+}
+
+fn is_stop_message_budget_exhausted(execution: &Value) -> bool {
+    let Some(context) = execution.get("context").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(loop_state) = context.get("serverToolLoopState").and_then(Value::as_object) else {
+        return false;
+    };
+    let repeat_count = loop_state
+        .get("repeatCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let max_repeats = loop_state
+        .get("maxRepeats")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    max_repeats > 0 && repeat_count >= max_repeats
 }
 
 #[cfg(test)]
@@ -146,5 +172,86 @@ mod tests {
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert!(plan.is_stop_message_flow);
         assert_eq!(plan.session_id.as_deref(), Some("sess-final"));
+    }
+
+    #[test]
+    fn stop_message_budget_exhausted_forces_terminal_final() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "serverToolLoopState": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 3,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            session_id: Some("sess-budget".to_string()),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_budget_exhausted");
+        assert_eq!(plan.session_id.as_deref(), Some("sess-budget"));
+    }
+
+    #[test]
+    fn stop_message_budget_not_yet_exhausted_stays_cli_projection() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "serverToolLoopState": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 2,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            session_id: Some("sess-still-arming".to_string()),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_cli_projection");
+        assert_eq!(plan.session_id.as_deref(), Some("sess-still-arming"));
+    }
+
+    #[test]
+    fn stop_message_budget_exhausted_takes_precedence_over_cli_projection() {
+        // Even without an explicit stopMessageTerminalFinal, the plan must
+        // turn terminal as soon as the session's persisted budget is gone.
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "serverToolLoopState": {
+                        "repeatCount": 4,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            session_id: None,
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert_eq!(plan.reason, "stop_message_budget_exhausted");
+    }
+
+    #[test]
+    fn stop_message_budget_exhausted_missing_loop_state_stays_cli_projection() {
+        // Defensive: a malformed loop state must not silently bypass the
+        // budget check. We require a positive maxRepeats before we trust
+        // the comparison.
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {}
+            }),
+            session_id: None,
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
     }
 }

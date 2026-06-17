@@ -1550,9 +1550,6 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   metadata?: Record<string, unknown>;
   hasSsePayload: (value: unknown) => boolean;
 }): Promise<unknown> {
-  if (args.metadata?.__routecodexDirectPassthrough === true) {
-    return args.payload;
-  }
   if (
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'

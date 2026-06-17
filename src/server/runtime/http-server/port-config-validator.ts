@@ -13,6 +13,8 @@ import type { PortConfig, ProtocolBehavior } from './port-config-types.js';
 import type { SameProtocolBehavior } from './port-config-types.js';
 import type { ProviderProtocol } from './types.js';
 
+// feature_id: server.port_config_provider_failure_exemption
+
 export interface PortValidationError {
   port: number;
   field: string;
@@ -29,6 +31,7 @@ const VALID_PORT_MAX = 65535;
 const VALID_MODES: ReadonlySet<string> = new Set(['router', 'provider']);
 const VALID_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay', 'auto']);
 const VALID_SAME_PROTOCOL_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay']);
+const VALID_PROVIDER_FAILURE_EXEMPTIONS: ReadonlySet<string> = new Set(['single_binding_rethrow']);
 
 function validateStopMessageConfig(config: PortConfig, errors: PortValidationError[]): void {
   const stopMessage = config.stopMessage;
@@ -112,6 +115,13 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         });
       }
     }
+    if (config.providerFailureExemption !== undefined && config.providerFailureExemption !== null) {
+      errors.push({
+        port,
+        field: 'providerFailureExemption',
+        message: 'Router mode does not support providerFailureExemption'
+      });
+    }
     return errors;
   }
 
@@ -135,6 +145,17 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         port,
         field: 'sameProtocolBehavior',
         message: 'Provider mode does not support sameProtocolBehavior'
+      });
+    }
+    if (
+      config.providerFailureExemption !== undefined
+      && config.providerFailureExemption !== null
+      && !VALID_PROVIDER_FAILURE_EXEMPTIONS.has(config.providerFailureExemption)
+    ) {
+      errors.push({
+        port,
+        field: 'providerFailureExemption',
+        message: `Provider mode providerFailureExemption must be "single_binding_rethrow", got: "${config.providerFailureExemption}"`
       });
     }
   }

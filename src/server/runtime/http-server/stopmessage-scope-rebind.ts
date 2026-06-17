@@ -17,7 +17,6 @@ type MutableRoutingState = {
   stopMessageUpdatedAt?: number;
   stopMessageLastUsedAt?: number;
   stopMessageStageMode?: string;
-  stopMessageAiMode?: string;
   stopMessageAiSeedPrompt?: string;
   stopMessageAiHistory?: Array<Record<string, unknown>>;
   preCommandSource?: string;
@@ -77,7 +76,6 @@ function normalizeRoutingState(raw: unknown): MutableRoutingState | null {
     stopMessageUpdatedAt: isFiniteNumber(record.stopMessageUpdatedAt) ? record.stopMessageUpdatedAt : undefined,
     stopMessageLastUsedAt: isFiniteNumber(record.stopMessageLastUsedAt) ? record.stopMessageLastUsedAt : undefined,
     stopMessageStageMode: readToken(record.stopMessageStageMode),
-    stopMessageAiMode: readToken(record.stopMessageAiMode),
     stopMessageAiSeedPrompt: readToken(record.stopMessageAiSeedPrompt),
     stopMessageAiHistory: Array.isArray(record.stopMessageAiHistory)
       ? (record.stopMessageAiHistory as Array<Record<string, unknown>>).map((entry) => ({ ...entry }))
@@ -94,11 +92,10 @@ function hasActiveStopMessage(state: MutableRoutingState | null): boolean {
     return false;
   }
   return Boolean(
-    readToken(state.stopMessageText) ||
+      readToken(state.stopMessageText) ||
       isFiniteNumber(state.stopMessageMaxRepeats) ||
       isFiniteNumber(state.stopMessageUsed) ||
       readToken(state.stopMessageStageMode) ||
-      readToken(state.stopMessageAiMode) ||
       readToken(state.stopMessageAiSeedPrompt) ||
       (Array.isArray(state.stopMessageAiHistory) && state.stopMessageAiHistory.length > 0)
   );
@@ -124,7 +121,6 @@ function applyStopMessage(source: MutableRoutingState, target: MutableRoutingSta
   target.stopMessageUpdatedAt = source.stopMessageUpdatedAt;
   target.stopMessageLastUsedAt = source.stopMessageLastUsedAt;
   target.stopMessageStageMode = source.stopMessageStageMode;
-  target.stopMessageAiMode = source.stopMessageAiMode;
   target.stopMessageAiSeedPrompt = source.stopMessageAiSeedPrompt;
   target.stopMessageAiHistory = Array.isArray(source.stopMessageAiHistory)
     ? source.stopMessageAiHistory.map((entry) => ({ ...entry }))
@@ -139,7 +135,6 @@ function clearStopMessage(state: MutableRoutingState): void {
   state.stopMessageUpdatedAt = undefined;
   state.stopMessageLastUsedAt = undefined;
   state.stopMessageStageMode = undefined;
-  state.stopMessageAiMode = undefined;
   state.stopMessageAiSeedPrompt = undefined;
   state.stopMessageAiHistory = undefined;
 }
@@ -174,7 +169,6 @@ function createEmptyRoutingState(): MutableRoutingState {
     stopMessageUpdatedAt: undefined,
     stopMessageLastUsedAt: undefined,
     stopMessageStageMode: undefined,
-    stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
     preCommandSource: undefined,

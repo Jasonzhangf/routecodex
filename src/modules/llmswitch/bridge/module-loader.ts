@@ -103,6 +103,12 @@ function shouldPreferSourceInJest(subpath: string, impl: LlmsImpl): boolean {
   if (impl !== 'ts' || !isJestRuntime()) {
     return false;
   }
+  const jestDistOnlyPrefixes = [
+    'native/router-hotpath/native-virtual-router-routing-state'
+  ];
+  if (matchesPrefix(subpath, jestDistOnlyPrefixes)) {
+    return false;
+  }
   return true;
 }
 

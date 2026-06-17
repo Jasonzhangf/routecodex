@@ -241,6 +241,44 @@ fn build_responses_payload_from_chat_fails_fast_when_choices_missing() {
 }
 
 #[test]
+fn build_responses_payload_from_chat_sanitizes_existing_response_shape_before_emitting() {
+    let payload = serde_json::json!({
+        "id": "resp_existing_shape",
+        "object": "response",
+        "status": "completed",
+        "output": [{
+            "id": "rs_existing_1",
+            "type": "reasoning",
+            "status": "completed",
+            "summary": [{ "type": "summary_text", "text": "plan" }],
+            "content": [{ "type": "reasoning_text", "text": "private reasoning" }],
+            "encrypted_content": "opaque"
+        },{
+            "id": "fc_existing_1",
+            "type": "function_call",
+            "status": "in_progress",
+            "name": "exec_command",
+            "call_id": "call_existing_1",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }]
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_existing_response"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    let output_items = output["output"].as_array().expect("output array");
+    let serialized = serde_json::to_string(output_items).expect("serialize");
+    assert!(!serialized.contains("\"content\""));
+    assert!(!serialized.contains("\"status\":\"in_progress\""));
+    assert!(!serialized.contains("\"status\":\"completed\""));
+    assert!(serialized.contains("\"encrypted_content\":\"opaque\""));
+}
+
+#[test]
 fn build_responses_payload_from_chat_preserves_client_model_over_upstream_provider_model() {
     let payload = serde_json::json!({
         "id": "chatcmpl_minimax_provider_model",
@@ -1046,6 +1084,55 @@ fn project_responses_client_payload_for_client_keeps_completed_when_tool_output_
 }
 
 #[test]
+fn project_responses_client_payload_for_client_strips_replay_unsafe_reasoning_content_and_status_fields()
+{
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_replay_unsafe_fields",
+            "object": "response",
+            "status": "completed",
+            "model": "provider-internal-model",
+            "output": [
+                {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [{ "type": "summary_text", "text": "thinking..." }],
+                    "content": [{ "type": "reasoning_text", "text": "private reasoning" }],
+                    "encrypted_content": "opaque"
+                },
+                {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "status": "in_progress",
+                    "name": "exec_command",
+                    "call_id": "call_1",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                },
+                {
+                    "id": "fco_1",
+                    "type": "function_call_output",
+                    "status": "completed",
+                    "call_id": "call_1",
+                    "output": "/tmp"
+                }
+            ]
+        }
+    });
+
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+    let response = output["response"].as_object().expect("response object");
+    let items = response["output"].as_array().expect("output array");
+    let serialized = serde_json::to_string(items).expect("serialize");
+
+    assert!(!serialized.contains("\"content\""));
+    assert!(!serialized.contains("\"status\":\"completed\""));
+    assert!(!serialized.contains("\"status\":\"in_progress\""));
+    assert!(serialized.contains("\"encrypted_content\":\"opaque\""));
+}
+
+#[test]
 fn project_responses_client_payload_for_client_mixed_message_and_function_calls_uses_standard_requires_action(
 ) {
     let payload = json!({
@@ -1107,6 +1194,78 @@ fn project_responses_client_payload_for_client_mixed_message_and_function_calls_
     assert!(output_items
         .iter()
         .all(|item| item["type"] != Value::String("message".to_string())));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_strips_replay_unsafe_fields_from_response_completed_frame()
+{
+    let frame = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_sse_replay_unsafe",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "rs_sse_1",
+                        "type": "reasoning",
+                        "status": "completed",
+                        "summary": [{ "type": "summary_text", "text": "plan" }],
+                        "content": [{ "type": "reasoning_text", "text": "private reasoning" }]
+                    },
+                    {
+                        "id": "fc_sse_1",
+                        "type": "function_call",
+                        "status": "in_progress",
+                        "name": "exec_command",
+                        "call_id": "call_sse_1",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                ]
+            }
+        }))
+        .unwrap()
+    );
+
+    let output = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.completed"),
+        &json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_sse_replay_unsafe",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "rs_sse_1",
+                        "type": "reasoning",
+                        "status": "completed",
+                        "summary": [{ "type": "summary_text", "text": "plan" }],
+                        "content": [{ "type": "reasoning_text", "text": "private reasoning" }]
+                    },
+                    {
+                        "id": "fc_sse_1",
+                        "type": "function_call",
+                        "status": "in_progress",
+                        "name": "exec_command",
+                        "call_id": "call_sse_1",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                ]
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    let output_frame = output["frame"].as_str().expect("frame");
+    assert!(!output_frame.contains("\"content\":[{\"type\":\"reasoning_text\""));
+    assert!(!output_frame.contains("\"status\":\"in_progress\""));
+    assert!(!output_frame.contains("\"type\":\"reasoning\",\"status\""));
 }
 
 #[test]
@@ -2048,14 +2207,7 @@ fn build_responses_payload_from_chat_preserves_structured_message_reasoning() {
         reasoning_item["summary"][0]["text"],
         Value::String("**Thinking** summary-1".to_string())
     );
-    assert_eq!(
-        reasoning_item["content"][0]["text"],
-        Value::String("raw-1".to_string())
-    );
-    assert_eq!(
-        reasoning_item["content"][1]["text"],
-        Value::String("raw-2".to_string())
-    );
+    assert!(reasoning_item.get("content").is_none());
     assert_eq!(
         reasoning_item["encrypted_content"],
         Value::String("enc-1".to_string())
@@ -2101,9 +2253,10 @@ fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_ca
         output_items[0]["type"],
         Value::String("reasoning".to_string())
     );
+    assert!(output_items[0].get("content").is_none());
     assert_eq!(
-        output_items[0]["content"][0]["text"],
-        Value::String("Need original upstream reasoning before calling pwd.".to_string())
+        output_items[0]["summary"][0]["text"],
+        Value::String("**Thinking** Need original upstream reasoning before calling pwd.".to_string())
     );
     assert_eq!(
         output_items[1]["type"],
@@ -2160,14 +2313,7 @@ fn build_responses_payload_from_chat_backfills_reasoning_summary_from_content() 
         reasoning_item["summary"][1]["text"],
         Value::String("raw-only-2".to_string())
     );
-    assert_eq!(
-        reasoning_item["content"][0]["text"],
-        Value::String("raw-only-1".to_string())
-    );
-    assert_eq!(
-        reasoning_item["content"][1]["text"],
-        Value::String("raw-only-2".to_string())
-    );
+    assert!(reasoning_item.get("content").is_none());
     assert_eq!(reasoning_item["encrypted_content"], Value::Null);
 }
 
@@ -2679,6 +2825,10 @@ fn build_responses_payload_emits_both_when_reasoning_and_content_differ() {
     let messages: Vec<_> = items.iter().filter(|i| i["type"] == "message").collect();
     assert_eq!(reasoning.len(), 1, "should emit reasoning");
     assert_eq!(messages.len(), 1, "should emit message");
+    assert!(
+        reasoning[0].get("content").is_none(),
+        "responses client payload must not leak reasoning.content back to client history"
+    );
 }
 
 // P0: reasoning-only with text summary -> reasoning item only, no empty message
@@ -2711,6 +2861,10 @@ fn build_responses_payload_only_reasoning_with_summary_emits_both() {
         messages.len(),
         0,
         "reasoning-only should not emit an empty message"
+    );
+    assert!(
+        reasoning[0].get("content").is_none(),
+        "responses client payload must keep reasoning summary only"
     );
 }
 
@@ -2745,6 +2899,44 @@ fn build_responses_payload_deduplicates_reasoning_and_message_when_text_matches(
         0,
         "matching reasoning+content should dedup reasoning"
     );
+}
+
+#[test]
+fn build_responses_payload_from_chat_never_emits_reasoning_content_in_client_payload() {
+    let payload = serde_json::json!({
+        "id": "resp-no-reasoning-content",
+        "model": "gpt-5.4",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "final"}],
+                "reasoning": {
+                    "summary": [{"type": "summary_text", "text": "plan"}],
+                    "content": [{"type": "reasoning_text", "text": "private reasoning"}],
+                    "encrypted_content": "opaque"
+                }
+            }
+        }]
+    });
+
+    let result = build_responses_payload_from_chat_core(
+        &payload,
+        Some("test_req"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("payload");
+
+    let reasoning_item = result["output"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["type"] == "reasoning"))
+        .cloned()
+        .expect("reasoning output item");
+    assert!(reasoning_item.get("content").is_none());
+    assert_eq!(
+        reasoning_item["summary"][0]["text"],
+        Value::String("**Thinking** plan".to_string())
+    );
+    assert_eq!(reasoning_item["encrypted_content"], Value::String("opaque".to_string()));
 }
 
 #[test]

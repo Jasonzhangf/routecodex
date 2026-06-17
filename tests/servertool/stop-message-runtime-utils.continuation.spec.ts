@@ -3,7 +3,6 @@ import { describe, expect, test } from '@jest/globals';
 import {
   getCapturedRequest,
   hasCompactionFlag,
-  persistStopMessageState,
   resolveBdWorkingDirectoryForRecord,
   resolveClientConnectionState,
   resolveDefaultStopMessageSnapshot,
@@ -119,25 +118,6 @@ describe('stop_message_auto continuation routing state key', () => {
         process.env.ROUTECODEX_STOPMESSAGE_FOLLOWUP_TOOL_CONTENT_MAX_CHARS = previous;
       }
     }
-  });
-
-  test('uses Rust-owned persist stop-message state plan without sticky key IO', () => {
-    const emptyState: RoutingInstructionState = {
-      allowedProviders: new Set(),
-      disabledProviders: new Set(),
-      disabledKeys: new Map(),
-      disabledModels: new Map(),
-      stopMessageText: ' '
-    };
-    expect(() => persistStopMessageState(undefined, emptyState)).not.toThrow();
-
-    const nonEmptyState: RoutingInstructionState = {
-      allowedProviders: new Set(['provider.a']),
-      disabledProviders: new Set(),
-      disabledKeys: new Map(),
-      disabledModels: new Map()
-    };
-    expect(() => persistStopMessageState(undefined, nonEmptyState)).not.toThrow();
   });
 
   test('uses Rust-owned default stop-message snapshot resolver', () => {

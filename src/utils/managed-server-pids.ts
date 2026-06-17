@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
 import { resolveRccUserDir } from '../config/user-data-paths.js';
+import { resolveServerPidCachePath } from './server-runtime-pid.js';
 
 type SpawnSyncLike = typeof nodeSpawnSync;
 
@@ -15,6 +16,7 @@ export type ManagedZombieProcess = {
 export function resolveManagedServerPidFiles(port: number, routeCodexHomeDir?: string): string[] {
   const home = routeCodexHomeDir || resolveRccUserDir();
   return [
+    resolveServerPidCachePath(port, routeCodexHomeDir),
     path.join(home, `server-${port}.pid`)
   ];
 }
@@ -25,8 +27,18 @@ function tryReadPid(filePath: string): number | null {
       return null;
     }
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = Number(String(raw || '').trim());
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    const trimmed = String(raw || '').trim();
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Partial<{ pid: number }>;
+      const pid = Number(parsed?.pid);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }

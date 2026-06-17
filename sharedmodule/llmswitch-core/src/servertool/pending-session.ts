@@ -8,7 +8,6 @@ import {
   resolvePendingSessionFileNameWithNative,
   resolvePendingSessionMaxAgeMsWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 export const SERVERTOOL_PENDING_SESSION_FEATURE_ID = 'feature_id: hub.servertool_pending_session';
 
@@ -39,20 +38,12 @@ async function writeJsonFileAtomic(file: string, payload: unknown): Promise<void
   await fs.rename(tmp, file);
 }
 
-function readSessionDirEnv(): string {
-  const envValue = String(
-    process.env.ROUTECODEX_SESSION_DIR
-    || process.env.RCC_SESSION_DIR
-    || ''
-  ).trim();
-  if (envValue) {
-    return envValue;
+function requireSessionDir(sessionDir: string | undefined): string {
+  const value = typeof sessionDir === 'string' ? sessionDir.trim() : '';
+  if (!value) {
+    throw new Error('[servertool-pending] sessionDir missing; runtime metadata workdir root is required');
   }
-  try {
-    return resolveRccPath('sessions');
-  } catch {
-    return '';
-  }
+  return value;
 }
 
 function resolvePendingMaxAgeMs(): number {
@@ -88,10 +79,10 @@ async function dropPendingFile(file: string, message: string): Promise<void> {
 
 export async function savePendingServerToolInjection(
   sessionId: string,
-  pending: Omit<PendingServerToolInjection, 'version' | 'sessionId'>
+  pending: Omit<PendingServerToolInjection, 'version' | 'sessionId'>,
+  sessionDir: string
 ): Promise<void> {
-  const base = readSessionDirEnv();
-  if (!base) return;
+  const base = requireSessionDir(sessionDir);
   const savePlan = planPendingSessionSaveWithNative({
     sessionId,
     pending: pending as Record<string, unknown>
@@ -102,9 +93,11 @@ export async function savePendingServerToolInjection(
   await writeJsonFileAtomic(file, savePlan.payload);
 }
 
-export async function loadPendingServerToolInjection(sessionId: string): Promise<PendingServerToolInjection | null> {
-  const base = readSessionDirEnv();
-  if (!base) return null;
+export async function loadPendingServerToolInjection(
+  sessionId: string,
+  sessionDir: string
+): Promise<PendingServerToolInjection | null> {
+  const base = requireSessionDir(sessionDir);
   const file = resolvePendingFile(base, sessionId);
   if (!file) return null;
   try {
@@ -132,9 +125,11 @@ export async function loadPendingServerToolInjection(sessionId: string): Promise
   }
 }
 
-export async function clearPendingServerToolInjection(sessionId: string): Promise<void> {
-  const base = readSessionDirEnv();
-  if (!base) return;
+export async function clearPendingServerToolInjection(
+  sessionId: string,
+  sessionDir: string
+): Promise<void> {
+  const base = requireSessionDir(sessionDir);
   const file = resolvePendingFile(base, sessionId);
   if (!file) return;
   try {

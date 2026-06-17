@@ -198,6 +198,11 @@ function readStoplessSessionId(adapterContext: unknown): string | undefined {
     return undefined;
   }
   const record = adapterContext as Record<string, unknown>;
+  const runtimeMetadata = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? record.metadata as Record<string, unknown>
+      : null;
   const direct = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
   if (direct) {
     return direct;
@@ -205,16 +210,57 @@ function readStoplessSessionId(adapterContext: unknown): string | undefined {
   const runtime = record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
     ? record.__rt as Record<string, unknown>
     : null;
+  const metadataSession =
+    metadata && typeof metadata.sessionId === 'string'
+      ? metadata.sessionId.trim()
+      : '';
+  if (metadataSession) {
+    return metadataSession;
+  }
   const rt = runtime && typeof runtime.sessionId === 'string' ? runtime.sessionId.trim() : '';
   if (rt) {
     return rt;
   }
+  const runtimeMetadataSession =
+    runtimeMetadata && typeof runtimeMetadata.sessionId === 'string'
+      ? runtimeMetadata.sessionId.trim()
+      : '';
+  if (runtimeMetadataSession) {
+    return runtimeMetadataSession;
+  }
   const responsesRequestContext =
-    runtime?.responsesRequestContext
-    && typeof runtime.responsesRequestContext === 'object'
-    && !Array.isArray(runtime.responsesRequestContext)
-      ? runtime.responsesRequestContext as Record<string, unknown>
-      : null;
+    (
+      runtime?.responsesRequestContext
+      && typeof runtime.responsesRequestContext === 'object'
+      && !Array.isArray(runtime.responsesRequestContext)
+        ? runtime.responsesRequestContext as Record<string, unknown>
+        : metadata?.responsesRequestContext
+    )
+    && typeof (
+      (
+        runtime?.responsesRequestContext
+        && typeof runtime.responsesRequestContext === 'object'
+        && !Array.isArray(runtime.responsesRequestContext)
+          ? runtime.responsesRequestContext as Record<string, unknown>
+          : metadata?.responsesRequestContext
+      )
+    ) === 'object'
+      ? (
+        (
+          runtime?.responsesRequestContext
+          && typeof runtime.responsesRequestContext === 'object'
+          && !Array.isArray(runtime.responsesRequestContext)
+            ? runtime.responsesRequestContext as Record<string, unknown>
+            : metadata?.responsesRequestContext
+        ) as Record<string, unknown>
+      )
+      : (
+        runtimeMetadata?.responsesRequestContext
+        && typeof runtimeMetadata.responsesRequestContext === 'object'
+        && !Array.isArray(runtimeMetadata.responsesRequestContext)
+          ? runtimeMetadata.responsesRequestContext as Record<string, unknown>
+          : null
+      );
   const relaySessionId =
     responsesRequestContext && typeof responsesRequestContext.sessionId === 'string'
       ? responsesRequestContext.sessionId.trim()
@@ -433,7 +479,8 @@ export async function runServerToolOrchestration(
     await persistPendingServerToolInjection({
       pendingInjection: engineResult.pendingInjection,
       requestId: options.requestId,
-      flowId
+      flowId,
+      adapterContext: options.adapterContext
     });
     logProgress(5, totalSteps, 'completed (mixed tools; no reenter)', { flowId });
     return {
@@ -468,7 +515,6 @@ export async function runServerToolOrchestration(
   }
   if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow) {
     const loopState = extractStoplessLoopState(engineResult.execution);
-    const sessionId = readStoplessSessionId(options.adapterContext);
     const projection = buildServertoolCliProjectionForAutoFlow({
       options: { requestId: options.requestId, adapterContext: options.adapterContext },
       flowId,
@@ -478,8 +524,7 @@ export async function runServerToolOrchestration(
         repeatCount: loopState.repeatCount,
         maxRepeats: loopState.maxRepeats,
         ...(loopState.triggerHint ? { triggerHint: loopState.triggerHint } : {})
-      },
-      ...(sessionId ? { sessionId, requestId: options.requestId } : {})
+      }
     });
     logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
       flowId,

@@ -45,16 +45,14 @@ export function parseStopMessageInstruction(instruction: string): RoutingInstruc
     return {
       type: 'stopMessageMode',
       stopMessageStageMode: resolved.stopMessageStageMode,
-      stopMessageMaxRepeats: resolved.stopMessageMaxRepeats,
-      ...(resolved.stopMessageAiMode ? { stopMessageAiMode: resolved.stopMessageAiMode } : {})
+      stopMessageMaxRepeats: resolved.stopMessageMaxRepeats
     };
   }
   return {
     type: 'stopMessageSet',
     stopMessageText: resolved.stopMessageText,
     stopMessageMaxRepeats: resolved.stopMessageMaxRepeats,
-    stopMessageSource: resolved.stopMessageSource,
-    ...(resolved.stopMessageAiMode ? { stopMessageAiMode: resolved.stopMessageAiMode } : {})
+    stopMessageSource: resolved.stopMessageSource
   };
 }
 
@@ -209,7 +207,6 @@ export function mergeVirtualRouterStopMessageSnapshotWithPersisted(
     stopMessageUpdatedAt: snapshot?.stopMessageUpdatedAt,
     stopMessageLastUsedAt: snapshot?.stopMessageLastUsedAt,
     stopMessageStageMode: snapshot?.stopMessageStageMode,
-    stopMessageAiMode: snapshot?.stopMessageAiMode,
     stopMessageAiSeedPrompt: snapshot?.stopMessageAiSeedPrompt,
     stopMessageAiHistory: snapshot?.stopMessageAiHistory
   };
@@ -234,7 +231,6 @@ export function mergeVirtualRouterStopMessageSnapshotWithPersisted(
     stopMessageUpdatedAt: merged.stopMessageUpdatedAt,
     stopMessageLastUsedAt: merged.stopMessageLastUsedAt,
     stopMessageStageMode: merged.stopMessageStageMode,
-    stopMessageAiMode: merged.stopMessageAiMode,
     stopMessageAiSeedPrompt: merged.stopMessageAiSeedPrompt,
     stopMessageAiHistory: merged.stopMessageAiHistory
   };
@@ -252,14 +248,6 @@ export function injectVirtualRouterRuntimeMetadata(
     ? (rt as Record<string, unknown>)
     : undefined;
   const runtimeOverrides: Record<string, unknown> = { nowMs };
-
-  const hasSessionDir = typeof existingRt?.sessionDir === 'string' && existingRt.sessionDir.trim().length > 0;
-  if (!hasSessionDir) {
-    const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
-    if (sessionDir) {
-      runtimeOverrides.sessionDir = sessionDir;
-    }
-  }
 
   const hasRccUserDir = typeof existingRt?.rccUserDir === 'string' && existingRt.rccUserDir.trim().length > 0;
   if (!hasRccUserDir) {
@@ -307,7 +295,6 @@ function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadata
   state.stopMessageUpdatedAt = undefined;
   state.stopMessageLastUsedAt = undefined;
   state.stopMessageStageMode = undefined;
-  state.stopMessageAiMode = undefined;
   state.stopMessageAiSeedPrompt = undefined;
   state.stopMessageAiHistory = undefined;
   state.preCommandSource = undefined;

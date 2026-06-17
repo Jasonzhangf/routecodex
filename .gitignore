@@ -17,6 +17,7 @@ artifacts/pack/
 scripts/tools-dev/responses-debug-client/logs/
 logs/
 tmp/
+.tmp/
 replay/
 /tools/
 /bin/
@@ -121,3 +122,4 @@ tmp-*
 docs/design/virtual-router-risk-audit.md
 sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/key_utils.rs
 docs/design/route-classifier-simplify.md
+__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__/

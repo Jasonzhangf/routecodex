@@ -8,41 +8,55 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::instructions::{InstructionTarget, RoutingInstructionState};
 use super::rcc_fence::StoplessGoalState;
 
-const ROUTECODEX_SESSION_DIR_ENV: &str = "ROUTECODEX_SESSION_DIR";
 const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
 const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
+const NO_SESSION_DIR_OVERRIDE_SENTINEL: &str = "__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__";
+
+#[derive(Clone)]
+enum SessionDirOverride {
+    Inherit,
+    Disabled,
+    Path(PathBuf),
+}
 
 thread_local! {
-    static SESSION_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static SESSION_DIR_OVERRIDE: RefCell<SessionDirOverride> = const { RefCell::new(SessionDirOverride::Inherit) };
 }
 
 struct SessionDirOverrideGuard {
-    previous: Option<PathBuf>,
+    previous: SessionDirOverride,
 }
 
 impl Drop for SessionDirOverrideGuard {
     fn drop(&mut self) {
         SESSION_DIR_OVERRIDE.with(|slot| {
-            *slot.borrow_mut() = self.previous.take();
+            let previous = std::mem::replace(&mut self.previous, SessionDirOverride::Inherit);
+            *slot.borrow_mut() = previous;
         });
     }
 }
 
-fn normalize_override_session_dir(raw: Option<&str>) -> Option<PathBuf> {
-    let trimmed = raw?.trim();
-    if trimmed.is_empty() {
-        return None;
+fn parse_session_dir_override(raw: Option<&str>) -> SessionDirOverride {
+    match raw {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed == NO_SESSION_DIR_OVERRIDE_SENTINEL {
+                SessionDirOverride::Disabled
+            } else {
+                SessionDirOverride::Path(PathBuf::from(trimmed))
+            }
+        }
+        None => SessionDirOverride::Inherit,
     }
-    Some(PathBuf::from(trimmed))
 }
 
-fn read_override_session_dir() -> Option<PathBuf> {
+fn read_override_session_dir() -> SessionDirOverride {
     SESSION_DIR_OVERRIDE.with(|slot| slot.borrow().clone())
 }
 
 pub(crate) fn with_session_dir_override<T>(raw: Option<&str>, callback: impl FnOnce() -> T) -> T {
-    let next = normalize_override_session_dir(raw);
+    let next = parse_session_dir_override(raw);
     let previous = SESSION_DIR_OVERRIDE.with(|slot| {
         let previous = slot.borrow().clone();
         *slot.borrow_mut() = next;
@@ -195,14 +209,10 @@ fn resolve_rcc_user_dir() -> Option<PathBuf> {
 }
 
 fn resolve_override_session_dir() -> Option<PathBuf> {
-    if let Some(explicit) = read_override_session_dir() {
-        return Some(explicit);
-    }
-    if let Ok(value) = env::var(ROUTECODEX_SESSION_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
+    match read_override_session_dir() {
+        SessionDirOverride::Path(explicit) => return Some(explicit),
+        SessionDirOverride::Disabled => return None,
+        SessionDirOverride::Inherit => {}
     }
     None
 }

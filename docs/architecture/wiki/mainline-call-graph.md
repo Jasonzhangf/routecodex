@@ -121,7 +121,7 @@ flowchart LR
 
 ## runtime.lifecycle.mainline
 
-Managed server and token-daemon lifecycle: pid cache write on start, stop-intent write on stop, instance registry as binding_pending.
+Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity.
 
 Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
 
@@ -165,6 +165,84 @@ flowchart LR
 | rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 
+## runtime.tmux_client_binding.mainline
+
+tmux/client attachment registry: daemon registration persists records, conversation binding narrows to tmux session, executor/runtime lookup consumes binding without turning it into request identity truth.
+
+Entry contract: `SessionClientRegisterRequest` via `docs/architecture/wiki/metadata-boundary-map.md`
+
+```mermaid
+flowchart LR
+  TmuxBindingLookupConsumed["TmuxBindingLookupConsumed"]
+  ConversationTmuxBindingResolved["ConversationTmuxBindingResolved"]
+  ConversationSessionBindRequest["ConversationSessionBindRequest"]
+  SessionBindingsPersisted["SessionBindingsPersisted"]
+  TmuxClientRecordRegistered["TmuxClientRecordRegistered"]
+  SessionClientRegisterRequest["SessionClientRegisterRequest"]
+  SessionClientRegisterRequest -->|scb-01| TmuxClientRecordRegistered
+  TmuxClientRecordRegistered -->|scb-02| SessionBindingsPersisted
+  ConversationSessionBindRequest -->|scb-03| ConversationTmuxBindingResolved
+  ConversationTmuxBindingResolved -->|scb-04| TmuxBindingLookupConsumed
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class SessionClientRegisterRequest anchored;
+  class TmuxClientRecordRegistered anchored;
+  class SessionBindingsPersisted anchored;
+  class ConversationSessionBindRequest anchored;
+  class ConversationTmuxBindingResolved anchored;
+  class TmuxBindingLookupConsumed anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| scb-01 | `SessionClientRegisterRequest -> TmuxClientRecordRegistered` | anchored | `registerSessionClientRoutes -> register` |  | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json |
+| scb-02 | `TmuxClientRecordRegistered -> SessionBindingsPersisted` | anchored | `register -> persistConversationBindings` |  | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json |
+| scb-03 | `ConversationSessionBindRequest -> ConversationTmuxBindingResolved` | anchored | `bindConversationSession -> persistConversationBindings` |  | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json |
+| scb-04 | `ConversationTmuxBindingResolved -> TmuxBindingLookupConsumed` | anchored | `resolveBoundTmuxSession -> resolveBoundTmuxSession` |  | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json |
+
+## stopless.session.mainline
+
+Stopless runtime-metadata continuation: stop response is evaluated, projected as client exec_command, executed by CLI, then restored from current request tool_output/runtime metadata into the next model turn.
+
+Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stopless-session-mainline-source.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  StoplessReq08NextTurnMaterialized["StoplessReq08NextTurnMaterialized"]
+  StoplessCli06ClientExecuted["StoplessCli06ClientExecuted"]
+  StoplessCli04ProjectionPlanned["StoplessCli04ProjectionPlanned"]
+  StoplessState03RuntimeSnapshotResolved["StoplessState03RuntimeSnapshotResolved"]
+  StoplessResp02SchemaGateEvaluated["StoplessResp02SchemaGateEvaluated"]
+  StoplessResp01StopDetected["StoplessResp01StopDetected"]
+  StoplessResp01StopDetected -->|stl-01| StoplessResp02SchemaGateEvaluated
+  StoplessResp02SchemaGateEvaluated -->|stl-02| StoplessState03RuntimeSnapshotResolved
+  StoplessState03RuntimeSnapshotResolved -->|stl-03| StoplessCli04ProjectionPlanned
+  StoplessCli04ProjectionPlanned -->|stl-04| StoplessCli06ClientExecuted
+  StoplessCli06ClientExecuted -->|stl-05| StoplessReq08NextTurnMaterialized
+  StoplessReq08NextTurnMaterialized -->|stl-06| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class StoplessResp01StopDetected anchored;
+  class StoplessResp02SchemaGateEvaluated anchored;
+  class StoplessState03RuntimeSnapshotResolved anchored;
+  class StoplessCli04ProjectionPlanned anchored;
+  class StoplessCli06ClientExecuted anchored;
+  class StoplessReq08NextTurnMaterialized anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| stl-01 | `StoplessResp01StopDetected -> StoplessResp02SchemaGateEvaluated` | anchored | `runServerToolOrchestration -> runStopMessageAutoHandlerWithNative` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-02 | `StoplessResp02SchemaGateEvaluated -> StoplessState03RuntimeSnapshotResolved` | anchored | `resolveRuntimeStopMessageStateFromAdapterContext -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-03 | `StoplessState03RuntimeSnapshotResolved -> StoplessCli04ProjectionPlanned` | anchored | `buildServertoolCliProjectionForAutoFlow -> plan_client_exec_cli_projection_output` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-04 | `StoplessCli04ProjectionPlanned -> StoplessCli06ClientExecuted` | anchored | `createServertoolCommand -> build_servertool_cli_binary_run_command_from_client_exec_result` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-05 | `StoplessCli06ClientExecuted -> StoplessReq08NextTurnMaterialized` | anchored | `has_stop_message_auto_cli_result_in_request_json -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-06 | `StoplessReq08NextTurnMaterialized -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |
@@ -175,6 +253,7 @@ flowchart LR
 | runtime.lifecycle.pid_cache_writer | `writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state | Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity. |
 | runtime.lifecycle.stop_intent_signal | `writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade. |
 | runtime.lifecycle.stop_intent_consumer | `consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Consumes and TTL-gates stop-intent.json; same owner truth as the writer. |
+| runtime.tmux_client_binding_lookup | `resolveBoundTmuxSession` | `runtime.tmux_client_binding`<br/>tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json | Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership. |
 
 ## Split Bindings
 

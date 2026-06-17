@@ -48,7 +48,9 @@ pub fn plan_stop_message_persist_snapshot(
         .or_else(|| input.schema_gate.get("countBudget"))
         .and_then(Value::as_bool)
         != Some(false);
-    let schema_used_before_count = read_non_negative_floor(input.schema_used_before_count.as_ref())
+    let explicit_schema_used_before_count =
+        read_non_negative_floor(input.schema_used_before_count.as_ref());
+    let schema_used_before_count = explicit_schema_used_before_count
         .unwrap_or_else(|| read_non_negative_floor(input.decision.get("used")).unwrap_or(0));
     let decision_max_repeats = read_non_negative_floor(input.decision.get("max_repeats"))
         .or_else(|| read_non_negative_floor(input.decision.get("maxRepeats")))
@@ -63,7 +65,10 @@ pub fn plan_stop_message_persist_snapshot(
         decision_max_repeats
     };
     let schema_budget_max_repeats = resolved_max_repeats.max(1);
-    let next_max_repeats = if decision_max_repeats > 0 {
+    let next_max_repeats = if !should_count_budget {
+        // Non-counting gate preserves the decision max_repeats verbatim.
+        decision_max_repeats
+    } else if decision_max_repeats > 0 {
         schema_budget_max_repeats
     } else {
         schema_budget_max_repeats.max(decision_max_repeats)
@@ -72,8 +77,15 @@ pub fn plan_stop_message_persist_snapshot(
     let no_change_count = read_non_negative_floor(input.schema_gate.get("no_change_count").or_else(|| input.schema_gate.get("noChangeCount"))).unwrap_or(0);
     let next_used = if should_count_budget {
         no_change_count.max(state_used.unwrap_or(schema_used_before_count + 1))
+    } else if explicit_schema_used_before_count.is_some() {
+        // Non-counting gate with explicit schema progress: freeze compare budget,
+        // but keep session truth advanced for the next turn.
+        state_used
+            .unwrap_or(schema_used_before_count.saturating_add(1))
+            .max(decision_used)
     } else {
-        state_used.unwrap_or(decision_used)
+        // No explicit schema progress was provided: preserve decision_used verbatim.
+        decision_used
     };
     let compare_remaining = (schema_budget_max_repeats - decision_used).max(0);
     let default_text = input.default_text.clone().unwrap_or_default();

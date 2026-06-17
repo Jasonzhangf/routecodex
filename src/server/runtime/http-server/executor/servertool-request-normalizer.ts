@@ -22,6 +22,14 @@ function readRuntimeResponsesRequestContext(
   return asFlatRecord(runtime?.responsesRequestContext);
 }
 
+function readNestedMetadata(baseContext: Record<string, unknown>): Record<string, unknown> | undefined {
+  return asFlatRecord(baseContext.metadata);
+}
+
+function readRuntimeMetadata(baseContext: Record<string, unknown>): Record<string, unknown> | undefined {
+  return asFlatRecord(baseContext.__rt);
+}
+
 function payloadContainsRccFence(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') {
     return false;
@@ -38,15 +46,28 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
   entryOriginRequest: unknown
 ): void {
   const entryOrigin = asFlatRecord(entryOriginRequest);
+  const nestedMetadata = readNestedMetadata(baseContext);
+  const runtimeMetadata = readRuntimeMetadata(baseContext);
   const responsesRequestContext =
     asFlatRecord(baseContext.responsesRequestContext)
+    ?? asFlatRecord(nestedMetadata?.responsesRequestContext)
     ?? readRuntimeResponsesRequestContext(baseContext);
   if (!entryOrigin) {
     const sessionIdFromResponsesContext =
       readSessionLikeToken(baseContext.sessionId) ??
+      readSessionLikeToken(baseContext.session_id) ??
+      readSessionLikeToken(nestedMetadata?.sessionId) ??
+      readSessionLikeToken(nestedMetadata?.session_id) ??
+      readSessionLikeToken(runtimeMetadata?.sessionId) ??
+      readSessionLikeToken(runtimeMetadata?.session_id) ??
       readSessionLikeToken(responsesRequestContext?.sessionId);
     const conversationIdFromResponsesContext =
       readSessionLikeToken(baseContext.conversationId) ??
+      readSessionLikeToken(baseContext.conversation_id) ??
+      readSessionLikeToken(nestedMetadata?.conversationId) ??
+      readSessionLikeToken(nestedMetadata?.conversation_id) ??
+      readSessionLikeToken(runtimeMetadata?.conversationId) ??
+      readSessionLikeToken(runtimeMetadata?.conversation_id) ??
       readSessionLikeToken(responsesRequestContext?.conversationId);
     if (sessionIdFromResponsesContext && !readSessionLikeToken(baseContext.sessionId)) {
       baseContext.sessionId = sessionIdFromResponsesContext;
@@ -62,6 +83,11 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
 
   const sessionId =
     readSessionLikeToken(baseContext.sessionId) ??
+    readSessionLikeToken(baseContext.session_id) ??
+    readSessionLikeToken(nestedMetadata?.sessionId) ??
+    readSessionLikeToken(nestedMetadata?.session_id) ??
+    readSessionLikeToken(runtimeMetadata?.sessionId) ??
+    readSessionLikeToken(runtimeMetadata?.session_id) ??
     readSessionLikeToken(responsesRequestContext?.sessionId) ??
     readSessionLikeToken(entryOrigin.sessionId) ??
     readSessionLikeToken(entryOrigin.session_id) ??
@@ -73,6 +99,11 @@ export function backfillAdapterContextSessionIdentifiersFromEntryOriginRequest(
     readSessionLikeToken(capturedMetadata?.session_id);
   const conversationId =
     readSessionLikeToken(baseContext.conversationId) ??
+    readSessionLikeToken(baseContext.conversation_id) ??
+    readSessionLikeToken(nestedMetadata?.conversationId) ??
+    readSessionLikeToken(nestedMetadata?.conversation_id) ??
+    readSessionLikeToken(runtimeMetadata?.conversationId) ??
+    readSessionLikeToken(runtimeMetadata?.conversation_id) ??
     readSessionLikeToken(responsesRequestContext?.conversationId) ??
     readSessionLikeToken(entryOrigin.conversationId) ??
     readSessionLikeToken(entryOrigin.conversation_id) ??

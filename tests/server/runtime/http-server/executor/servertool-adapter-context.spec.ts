@@ -179,6 +179,52 @@ describe('servertool adapter context builder', () => {
     expect(context.conversationId).toBe('conv-relay-rt');
   });
 
+  it('backfills session and conversation identifiers from metadata.sessionId without entry origin request', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        sessionId: 'sess-meta-direct',
+        conversationId: 'conv-meta-direct'
+      },
+      requestId: 'req-session-meta-direct-backfill',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBe('sess-meta-direct');
+    expect(context.conversationId).toBe('conv-meta-direct');
+  });
+
+  it('backfills session and conversation identifiers from __rt.sessionId without entry origin request', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {
+        __rt: {
+          sessionId: 'sess-rt-direct',
+          conversationId: 'conv-rt-direct'
+        }
+      },
+      requestId: 'req-session-rt-direct-backfill',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(context.sessionId).toBe('sess-rt-direct');
+    expect(context.conversationId).toBe('conv-rt-direct');
+  });
+
   it('forwards reasoning stop seed errors to onReasoningStopSeedError callback', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();

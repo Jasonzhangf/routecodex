@@ -12,6 +12,7 @@ import express, { type Application, type Request } from 'express';
 import type { Server } from 'http';
 
 import type { Socket } from 'node:net';
+import path from 'node:path';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -126,6 +127,7 @@ import {
 import {
   stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
+import { configureSessionClientRegistry } from './session-client-registry.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
 import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
 import {
@@ -332,7 +334,10 @@ export class RouteCodexHttpServer {
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     this.serverId = canonicalizeServerId(this.config.server.host, this.config.server.port);
-    ensureServerScopedSessionDir(this.serverId);
+    const serverSessionDir = ensureServerScopedSessionDir(this.serverId);
+    configureSessionClientRegistry({
+      bindingsStorePath: serverSessionDir ? path.join(serverSessionDir, 'session-bindings.json') : undefined
+    });
     const sessionCleanup = cleanupSessionStorageOnStartup({ isTmuxSessionAlive });
     if (
       sessionCleanup.removedLegacyScopeFiles > 0 ||

@@ -5,7 +5,8 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const quiet = process.argv.includes('--quiet');
-const routeCodexHome = path.join(os.homedir(), '.routecodex');
+const rccHome = path.join(os.homedir(), '.rcc');
+const legacyRouteCodexHome = path.join(os.homedir(), '.routecodex');
 
 function log(message) {
   if (!quiet) {
@@ -79,14 +80,28 @@ function isPidListeningOnPort(pid, port) {
 function cleanupPidFile(filePath) {
   const fileName = path.basename(filePath);
   const match = fileName.match(/^server-(\d+)\.pid$/i);
-  const filePort = match ? Number.parseInt(match[1], 10) : null;
+  const cachePort = fileName === 'pid.cache'
+    ? Number.parseInt(path.basename(path.dirname(filePath)), 10)
+    : null;
+  const filePort = match
+    ? Number.parseInt(match[1], 10)
+    : (Number.isFinite(cachePort) && cachePort > 0 ? cachePort : null);
   let raw = '';
   try {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch {
     return { removed: false, reason: 'unreadable' };
   }
-  const pid = Number.parseInt(String(raw || '').trim(), 10);
+  const trimmed = String(raw || '').trim();
+  let pid = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      pid = Number.parseInt(String(parsed?.pid || '').trim(), 10);
+    } catch {
+      pid = Number.NaN;
+    }
+  }
   if (!Number.isFinite(pid) || pid <= 0) {
     fs.rmSync(filePath, { force: true });
     return { removed: true, reason: 'invalid_pid' };
@@ -110,13 +125,30 @@ function cleanupPidFile(filePath) {
 }
 
 function main() {
-  if (!fs.existsSync(routeCodexHome)) {
-    return;
+  const candidates = [];
+  for (const rootDir of [rccHome, legacyRouteCodexHome]) {
+    if (!fs.existsSync(rootDir)) {
+      continue;
+    }
+    const entries = fs.readdirSync(rootDir);
+    for (const name of entries) {
+      if (/^server-\d+\.pid$/i.test(name) || name === 'server.cli.pid') {
+        candidates.push(path.join(rootDir, name));
+      }
+    }
   }
-  const entries = fs.readdirSync(routeCodexHome);
-  const candidates = entries
-    .filter((name) => /^server-\d+\.pid$/i.test(name) || name === 'server.cli.pid')
-    .map((name) => path.join(routeCodexHome, name));
+  const runtimePortsDir = path.join(rccHome, 'state', 'runtime-lifecycle', 'ports');
+  if (fs.existsSync(runtimePortsDir)) {
+    for (const portEntry of fs.readdirSync(runtimePortsDir, { withFileTypes: true })) {
+      if (!portEntry.isDirectory()) {
+        continue;
+      }
+      const cachePath = path.join(runtimePortsDir, portEntry.name, 'pid.cache');
+      if (fs.existsSync(cachePath)) {
+        candidates.push(cachePath);
+      }
+    }
+  }
 
   let removed = 0;
   let kept = 0;

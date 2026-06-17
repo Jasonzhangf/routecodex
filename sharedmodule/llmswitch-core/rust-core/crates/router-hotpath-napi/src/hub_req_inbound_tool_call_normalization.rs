@@ -395,6 +395,30 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
+fn is_terminal_budget_exhausted_stop_hook_output(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) else {
+        return false;
+    };
+    let tool_name = read_trimmed_string(row.get("toolName"))
+        .or_else(|| read_trimmed_string(row.get("tool_name")))
+        .unwrap_or_default();
+    if tool_name != "stop_message_auto" {
+        return false;
+    }
+    row.get("schemaGuidance")
+        .or_else(|| row.get("schema_guidance"))
+        .and_then(Value::as_object)
+        .and_then(|guidance| {
+            guidance
+                .get("triggerHint")
+                .or_else(|| guidance.get("trigger_hint"))
+        })
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("budget_exhausted")
+}
+
 fn render_stopless_schema_guidance_text(
     guidance: &serde_json::Value,
     trigger_hint: &str,
@@ -913,9 +937,11 @@ fn normalize_responses_input_function_calls(
                 if let Some(call_id) = call_id {
                     if auto_stop_hook_call_ids.contains(call_id.as_str()) {
                         if let Some(raw_output) = item_row.get("output").and_then(Value::as_str) {
-                            normalized_items.push(build_responses_text_guidance_input_item(
-                                build_stop_hook_guidance_text_from_output(raw_output),
-                            ));
+                            if !is_terminal_budget_exhausted_stop_hook_output(raw_output) {
+                                normalized_items.push(build_responses_text_guidance_input_item(
+                                    build_stop_hook_guidance_text_from_output(raw_output),
+                                ));
+                            }
                         }
                         continue;
                     }
@@ -973,6 +999,7 @@ mod tests {
         build_stop_hook_guidance_text_from_output, normalize_apply_patch_output_text,
         normalize_shell_like_tool_calls_before_governance,
     };
+    use super::normalize_responses_input_function_calls;
     use crate::hashline::compute_line_hash;
     use serde_json::{json, Value};
     use std::fs;
@@ -1562,6 +1589,36 @@ mod tests {
         assert!(!text.contains("格式不对"));
         assert!(!text.contains("重试机会"));
         assert!(!payload.to_string().contains("call_servertool_cli_stop_1"));
+        assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
+    }
+
+    #[test]
+    fn rewrites_auto_injected_stop_hook_pair_with_session_dir_env_prefix() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_servertool_cli_stop_env_1",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"ROUTECODEX_SESSION_DIR='/Users/fanzhang/.rcc/sessions/127.0.0.1:5555/ports/gateway_priority_5555' routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}' --session-id 'session-a' --request-id 'req-a'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_servertool_cli_stop_env_1",
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就继续推进。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"triggerHint\":\"no_schema\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let input = payload["input"].as_array().expect("input");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        let text = input[0]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("继续做下一步"));
+        assert!(text.contains("stopreason"));
+        assert!(!payload.to_string().contains("call_servertool_cli_stop_env_1"));
         assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
     }
 
@@ -2222,6 +2279,59 @@ mod tests {
         assert!(!text.contains("停止 JSON"));
         assert!(!text.contains("格式不对"));
         assert!(!text.contains("重试机会"));
+    }
+
+    #[test]
+    fn stop_hook_budget_exhausted_output_must_not_become_new_user_guidance_turn() {
+        let mut payload = json!({
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_stop_budget_exhausted",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"budget_exhausted\\\"}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_stop_budget_exhausted",
+              "output": json!({
+                "toolName": "stop_message_auto",
+                "summary": "stopless budget exhausted",
+                "repeatCount": 3,
+                "maxRepeats": 3,
+                "continuationPrompt": "不要再继续执行了。现在直接收尾并给出最终结论；如果正常收尾已经做不到，就明确说明为什么必须停，并把最后卡点交代清楚。",
+                "schemaGuidance": {
+                  "requiredFields": ["stopreason", "reason"],
+                  "stopreasonValues": { "finished": 0, "blocked": 1, "continueNeeded": 2 },
+                  "triggerHint": "budget_exhausted"
+                },
+                "input": {
+                  "flowId": "stop_message_flow",
+                  "repeatCount": 3,
+                  "maxRepeats": 3,
+                  "triggerHint": "budget_exhausted"
+                }
+              }).to_string()
+            }
+          ]
+        });
+
+        normalize_responses_input_function_calls(&mut payload, &std::collections::HashSet::new())
+            .expect("normalize");
+
+        let normalized_items = payload["input"].as_array().expect("input array");
+        assert!(
+            !normalized_items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("message")
+                    || item
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .map(|role| role.eq_ignore_ascii_case("user"))
+                        .unwrap_or(false)
+            }),
+            "budget_exhausted stop hook output must not inject a fresh user guidance turn: {}",
+            payload
+        );
     }
 
     fn does_not_normalize_nested_hashline_apply_patch_anymore() {

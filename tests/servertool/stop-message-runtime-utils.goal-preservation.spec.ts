@@ -8,7 +8,6 @@ import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateSync
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
-import { persistStopMessageState } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 import {
   applyStopMessageSnapshotToState,
   clearStopMessageState
@@ -35,7 +34,6 @@ function createGoalOnlyState(): RoutingInstructionState {
     stopMessageUpdatedAt: undefined,
     stopMessageLastUsedAt: undefined,
     stopMessageStageMode: undefined,
-    stopMessageAiMode: undefined,
     stopMessageAiSeedPrompt: undefined,
     stopMessageAiHistory: undefined,
     preCommandSource: undefined,
@@ -66,7 +64,7 @@ describe('stop_message_auto goal-state preservation', () => {
 
     const loaded = loadRoutingInstructionStateSync(stateKey) as RoutingInstructionState;
     clearStopMessageState(loaded, Date.now());
-    persistStopMessageState(stateKey, loaded);
+    saveRoutingInstructionStateSync(stateKey, loaded);
 
     const persisted = loadRoutingInstructionStateSync(stateKey) as RoutingInstructionState | null;
     expect(persisted?.stoplessGoalState).toMatchObject({
@@ -82,8 +80,7 @@ describe('stop_message_auto goal-state preservation', () => {
       used: 0,
       source: 'explicit',
       updatedAt: 300,
-      stageMode: 'on',
-      aiMode: 'off'
+      stageMode: 'on'
     });
 
     expect(merged.stoplessGoalState).toMatchObject({

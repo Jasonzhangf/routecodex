@@ -195,6 +195,64 @@ describe('SessionClientRegistry cleanup', () => {
     expect(killedPids).toEqual([]);
   });
 
+  it('loads bindings from explicit store path without ROUTECODEX_SESSION_DIR env', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-client-registry-'));
+    const bindingsStorePath = path.join(tempRoot, 'session-bindings.json');
+    const previous = process.env.ROUTECODEX_SESSION_DIR;
+    delete process.env.ROUTECODEX_SESSION_DIR;
+    try {
+      fs.writeFileSync(
+        bindingsStorePath,
+        JSON.stringify({
+          updatedAtMs: Date.now(),
+          records: [],
+          conversationToTmuxSession: {
+            conv_explicit_store_1: 'tmux_explicit_store_1'
+          }
+        }),
+        'utf8'
+      );
+      const registry = new SessionClientRegistry({ bindingsStorePath });
+      expect(registry.resolveBoundTmuxSession('conv_explicit_store_1')).toBe('tmux_explicit_store_1');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = previous;
+      }
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not infer bindings store path from ROUTECODEX_SESSION_DIR env', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-client-registry-env-'));
+    const bindingsStorePath = path.join(tempRoot, 'session-bindings.json');
+    const previous = process.env.ROUTECODEX_SESSION_DIR;
+    process.env.ROUTECODEX_SESSION_DIR = tempRoot;
+    try {
+      fs.writeFileSync(
+        bindingsStorePath,
+        JSON.stringify({
+          updatedAtMs: Date.now(),
+          records: [],
+          conversationToTmuxSession: {
+            conv_env_should_not_load: 'tmux_env_should_not_load'
+          }
+        }),
+        'utf8'
+      );
+      const registry = new SessionClientRegistry();
+      expect(registry.resolveBoundTmuxSession('conv_env_should_not_load')).toBeUndefined();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = previous;
+      }
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('skips unmanaged child pid during stale cleanup', () => {
     const registry = new SessionClientRegistry();
     registry.register({
@@ -330,10 +388,11 @@ describe('SessionClientRegistry cleanup', () => {
   it('stale cleanup preserves conversation mapping for tmux sessions that are still alive', async () => {
     const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
     const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stale-alive-'));
+    const bindingsStorePath = path.join(tempSessionDir, 'session-bindings.json');
     process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
 
     try {
-      const registry = new SessionClientRegistry();
+      const registry = new SessionClientRegistry({ bindingsStorePath });
       registry.register({
         daemonId: 'sessiond_stale_alive_mapping',
         callbackUrl: 'http://127.0.0.1:65570/inject',
@@ -364,8 +423,7 @@ describe('SessionClientRegistry cleanup', () => {
       expect(cleanup.removedTmuxSessionIds).toEqual([]);
       expect(cleanup.removedConversationSessionIds).toEqual([]);
 
-      const bindingsPath = path.join(tempSessionDir, 'session-bindings.json');
-      const persisted = JSON.parse(fs.readFileSync(bindingsPath, 'utf8'));
+      const persisted = JSON.parse(fs.readFileSync(bindingsStorePath, 'utf8'));
       expect(persisted.records).toEqual([]);
       expect(persisted.conversationToTmuxSession).toEqual({
         conv_stale_alive_mapping: 'rcc_stale_alive_mapping'
@@ -626,13 +684,14 @@ describe('SessionClientRegistry cleanup', () => {
   it('persists conversation->tmux bindings across registry instances', async () => {
     const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
     const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-bindings-'));
+    const bindingsStorePath = path.join(tempSessionDir, 'session-bindings.json');
     process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
 
     const daemonId = 'sessiond_persist_bindings';
     const tmuxSessionId = 'rcc_persist_bindings';
     const callbackUrl = 'http://127.0.0.1:65559/inject';
     try {
-      const registryA = new SessionClientRegistry();
+      const registryA = new SessionClientRegistry({ bindingsStorePath });
       registryA.register({
         daemonId,
         callbackUrl,
@@ -644,7 +703,7 @@ describe('SessionClientRegistry cleanup', () => {
       expect(bound.ok).toBe(true);
       expect(bound.tmuxSessionId).toBe(tmuxSessionId);
 
-      const registryB = new SessionClientRegistry();
+      const registryB = new SessionClientRegistry({ bindingsStorePath });
       registryB.register({
         daemonId,
         callbackUrl,

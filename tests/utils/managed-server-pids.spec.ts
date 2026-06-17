@@ -12,9 +12,12 @@ import {
 } from '../../src/utils/managed-server-pids.js';
 
 describe('managed server pid discovery', () => {
-  it('resolveManagedServerPidFiles returns only port-scoped pid file', () => {
+  it('resolveManagedServerPidFiles returns new pid cache path first and legacy fallback second', () => {
     const files = resolveManagedServerPidFiles(5520, '/tmp/rc-home');
-    expect(files).toEqual(['/tmp/rc-home/server-5520.pid']);
+    expect(files).toEqual([
+      '/tmp/rc-home/state/runtime-lifecycle/ports/5520/pid.cache',
+      '/tmp/rc-home/server-5520.pid'
+    ]);
   });
 
   it('isTrustedRouteCodexCommand accepts routecodex dist entry', () => {

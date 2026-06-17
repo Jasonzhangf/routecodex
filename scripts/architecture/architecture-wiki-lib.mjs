@@ -71,6 +71,20 @@ export const GENERATED_WIKI_PAGES = [
 
 export const MANUAL_WIKI_PAGES = [
   {
+    path: `${WIKI_ROOT}/stopless-session-mainline-source.md`,
+    title: '# Stopless Session Mainline Source',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Stopless Session Mainline',
+      '## Edge Owners and Current Status',
+      '## Active Gaps',
+      'stopless-gap-03',
+      'stopless-gap-04',
+      'stopless-gap-05',
+    ],
+  },
+  {
     path: `${WIKI_ROOT}/metadata-boundary-map.md`,
     title: '# Metadata Boundary Map',
     minMermaidBlocks: 2,

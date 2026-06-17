@@ -848,24 +848,30 @@ class ResponsesConversationStore {
   materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.ensurePersistenceLoaded();
     this.prune();
+    const requestedOwner = normalizeContinuationOwner(args.continuationOwner);
     const scopeKeys = buildRequestedScopeKeys({
       ...args,
       entryKind: normalizeEntryKind(args.entryKind)
     });
     const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
+    const matchedOwners = new Set<'direct' | 'relay'>();
     for (const scopeKey of scopeKeys) {
       const entry = this.scopeIndex.get(scopeKey);
-      if (
-        !entry
-        || entry.allowContinuation !== true
-        || normalizeContinuationOwner(entry.continuationOwner) === 'direct'
-      ) {
+      const owner = normalizeContinuationOwner(entry?.continuationOwner);
+      if (!entry || entry.allowContinuation !== true || !owner) {
+        continue;
+      }
+      matchedOwners.add(owner);
+      if (owner === 'direct') {
         continue;
       }
       const dedupeKey = `${entry.requestId}:${entry.lastResponseId ?? ''}`;
       if (!matches.has(dedupeKey)) {
         matches.set(dedupeKey, { entry, scopeKey });
       }
+    }
+    if (!requestedOwner && matchedOwners.has('direct') && matchedOwners.has('relay')) {
+      return null;
     }
     if (matches.size !== 1) {
       return null;

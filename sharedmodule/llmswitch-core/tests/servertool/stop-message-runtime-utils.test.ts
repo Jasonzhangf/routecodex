@@ -1,6 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { resolveStickyKey } from '../../src/servertool/handlers/stop-message-auto/runtime-utils.js';
+import {
+  resolveStickyKey,
+} from '../../src/servertool/handlers/stop-message-auto/runtime-utils.js';
 
 describe('stop_message_auto resolveStickyKey', () => {
   test('uses session scope for openai-responses when sessionId exists and no resume chain', () => {

@@ -1,6 +1,7 @@
 // feature_id: hub.response_anthropic_client_projection
 
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot, project_message_reasoning_text,
@@ -121,6 +122,28 @@ fn serialize_tool_input_arguments(input: &Value) -> String {
     serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string())
 }
 
+fn uniquify_tool_call_id(
+    raw_id: Option<String>,
+    index: usize,
+    seen: &mut HashSet<String>,
+) -> String {
+    let base = raw_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("call_{index}"));
+    if seen.insert(base.clone()) {
+        return base;
+    }
+    let mut suffix = 1usize;
+    loop {
+        let candidate = format!("{base}_dup_{suffix}");
+        if seen.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 pub(crate) fn build_openai_chat_response_from_anthropic_message(
     payload: &Value,
     request_id: &str,
@@ -139,6 +162,7 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
     let mut reasoning_signature: Option<String> = None;
     let mut redacted_reasoning: Option<String> = None;
     let mut tool_calls: Vec<Value> = Vec::new();
+    let mut seen_tool_call_ids: HashSet<String> = HashSet::new();
 
     for (index, block) in content.iter().enumerate() {
         let Some(block_row) = block.as_object() else {
@@ -170,8 +194,11 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
                 let Some(name) = read_trimmed_string(block_row.get("name")) else {
                     continue;
                 };
-                let id = read_trimmed_string(block_row.get("id"))
-                    .unwrap_or_else(|| format!("call_{index}"));
+                let id = uniquify_tool_call_id(
+                    read_trimmed_string(block_row.get("id")),
+                    index,
+                    &mut seen_tool_call_ids,
+                );
                 let input = block_row
                     .get("input")
                     .cloned()
@@ -764,6 +791,41 @@ mod tests {
         assert_eq!(tool_call["id"], "call_1");
         assert_eq!(tool_call["function"]["name"], "exec_command");
         assert_eq!(tool_call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    }
+
+    #[test]
+    fn build_openai_chat_response_from_anthropic_dedupes_duplicate_tool_use_ids() {
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({
+                "id": "msg_dup",
+                "role": "assistant",
+                "model": "glm-5.2",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call_dup",
+                        "name": "exec_command",
+                        "input": { "cmd": "pwd" }
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "call_dup",
+                        "name": "exec_command",
+                        "input": { "cmd": "ls" }
+                    }
+                ],
+                "stop_reason": "tool_use"
+            }),
+            "req_dup",
+        )
+        .expect("chat response from anthropic message");
+        let tool_calls = output["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool calls");
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["id"], "call_dup");
+        assert_eq!(tool_calls[1]["id"], "call_dup_dup_1");
+        assert_eq!(tool_calls[1]["function"]["arguments"], "{\"cmd\":\"ls\"}");
     }
 
     #[test]

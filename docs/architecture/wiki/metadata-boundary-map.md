@@ -39,6 +39,48 @@ Canonical sources:
 | `port` / `serverId` / `group` | 端口与实例隔离 | runtime metadata / snapshot root / restore scope | cross-port shared metadata |
 | `routeHint` / `streamIntent` / `servertool*` | 内部控制语义 | Hub / VR / runtime / servertool | client-visible protocol field |
 
+## Session Dir Clarification
+
+`ROUTECODEX_SESSION_DIR` is not a semantic session id. It is a runtime filesystem root that may host several unrelated state families at once:
+
+- routing state snapshots (`session:*`, `conversation:*`, `tmux:*`)
+- `session-bindings.json`
+- `provider-health.json`
+- `servertool-pending/*`
+
+This means `sessionId` / `tmuxSessionId` / `conversationId` are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.
+
+Persistence rule now stays explicit:
+
+- protocol-independent continuation state may be persisted/file-backed, because it must survive protocol boundaries and later restore with owner/scope validation;
+- request-local stopless / current-turn CLI projection state must not be upgraded into persisted session truth just because it has a `sessionId`;
+- `ROUTECODEX_SESSION_DIR` can host both categories physically, but the persistence decision comes from lifecycle contract, not from the directory existing.
+
+Namespace rule is now explicit:
+
+- `tmuxSessionId`: client attachment / injection runtime scope only
+- `conversationId` / `conversationSessionId`: conversation-level narrowing key only
+- request `sessionId`: request/continuation scope only
+- `session-bindings.json` may bind `conversationSessionId -> tmuxSessionId` for runtime injection lookup, but it must not redefine any of these namespaces as one identity
+- `session-bindings.json` production path is now runtime-bootstrap-owned: the HTTP server injects the bindings store path into `SessionClientRegistry`; the registry must not infer current-instance scope from feature-chain metadata, session ids, or `ROUTECODEX_SESSION_DIR`.
+
+## State Family Matrix
+
+| State family | Current owner | Lifetime | Persist/file? | Why |
+| --- | --- | --- | --- | --- |
+| Responses / protocol-independent continuation | responses continuation store + owner restore path | cross-request / cross-tool-turn / protocol restore | yes, required | continuation 恢复权必须显式保存，不能只靠 scope 命中 |
+| stopless `stop_message_auto` loop state | stopless runtime metadata + current request `tool_outputs` | current request + next tool roundtrip | no | 不是 protocol-independent continuation，不应升级成 persisted session truth |
+| servertool pending injection | `hub.servertool_pending_session` | cross-request followup bridge | pending review | 目前仍是文件态，但是否属于“必须持久化 continuation”需继续按 owner 收口审计 |
+| tmux / client bindings | `SessionClientRegistry` | client/tmux attachment lifecycle | yes, but separate namespace | 这是 client binding，不是 request session 或 continuation |
+| runtime lifecycle pid/stop-intent/instance registry | runtime lifecycle owners | cross-process runtime control | yes | 这是 runtime control plane，不是业务 continuation |
+| provider health / cooldown | provider runtime health owners | cross-request runtime heuristics | yes, if policy requires restart survival | 属于 runtime policy，不是 session 身份 |
+
+As of 2026-06-17, two implementation contracts are now explicit:
+
+- `sharedmodule/llmswitch-core/src/servertool/pending-session.ts` no longer reads `ROUTECODEX_SESSION_DIR` or top-level fallback fields. Caller must pass explicit `sessionDir` from runtime metadata.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.{ts,js}` now passes an explicit "no override" sentinel when caller does not provide `sessionDir`, and `router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs` no longer reads `ROUTECODEX_SESSION_DIR` as a storage override. Persistent routing-state owner now accepts only explicit override input or canonical `~/.rcc` roots.
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs` now reads runtime path overrides only from `metadata.__rt.*`; top-level `metadata.sessionDir/rccUserDir` no longer count as legal fallback.
+
 ## Request / Response Flow
 
 ```mermaid
@@ -143,6 +185,7 @@ Current explicit gates and tests already referenced by owner map:
 | `meta-gap-03` | Continuation isolation | 文档已要求 `entryKind + continuationOwner + scope` 三重隔离，但 wiki 层此前没有把 direct/relay 恢复权显式画出 | 容易误把 `sessionId` 当恢复权真源 |
 | `meta-gap-04` | Chat-process handoff | `responsesResume / responsesContext / responseFormat / anthropicToolNameMap` 仍在代码和旧类型声明中出现 | 需要继续审计哪些是过渡字段，哪些应继续收缩到 `semantics.*` |
 | `meta-gap-05` | Snapshot/replay boundary | 计划文档已要求 snapshot metadata 不回流 live path，但 wiki 之前没有把 replay 例外单独标红 | 容易把 debug root metadata 当 runtime metadata 复用 |
+| `meta-gap-06` | Session dir overloading | `ROUTECODEX_SESSION_DIR` 仍同时承载 routing state、bindings、health、pending files | stopless/pending-session 已收口到 metadata-only caller contract，但 runtime workdir root 仍混放多类状态，长期仍建议物理拆分 |
 
 ## Review Checklist
 

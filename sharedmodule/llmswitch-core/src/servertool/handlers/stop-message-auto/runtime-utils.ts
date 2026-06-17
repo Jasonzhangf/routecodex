@@ -1,17 +1,14 @@
-import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
+import type { JsonObject } from '../../../conversion/hub/types/json.js';
 import {
   getCapturedRequestWithNative,
   hasCompactionFlagWithNative,
-  planPersistStopMessageStateWithNative,
   planStopMessageDefaultConfigWithNative,
   planStopMessagePersistSnapshotWithNative,
   planStopMessagePersistedLookupWithNative,
-  planStopMessagePersistedStateSelectionWithNative,
   planStoplessDecisionContextGoalStatusWithNative,
   planStoplessDecisionContextSignalsWithNative,
   readRuntimeStopMessageStageModeWithNative,
-  recordStoplessContinuationStateWithNative,
   readServertoolFollowupFlowIdWithNative,
   resolveBdWorkingDirectoryForRecordWithNative,
   resolveClientConnectionStateWithNative,
@@ -22,17 +19,11 @@ import {
   resolveRuntimeStopMessageStateWithNative,
   resolveAdapterContextProviderKeyWithNative,
   resolveServertoolStateKeyWithNative,
-  savePersistedRuntimeStopMessageStateWithNative,
   resolveStopMessageFollowupToolContentMaxCharsWithNative,
   resolveStopMessageFollowupProviderKeyWithNative,
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../../../native/router-hotpath/native-servertool-core-semantics.js';
-import type { RoutingInstructionState } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
-import {
-  loadRoutingInstructionStateSync,
-  saveRoutingInstructionStateSync
-} from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 
 export function resolveStickyKey(
   record: {
@@ -93,98 +84,6 @@ export function planStopMessagePersistedLookup(
     runtimeMetadata: asRecord(runtimeMetadata) ?? undefined,
     options
   });
-}
-
-export function planStopMessagePersistedStateSelection(candidateKeys: string[]): {
-  snapshot?: {
-    text: string;
-    providerKey?: string;
-    maxRepeats: number;
-    used: number;
-    source?: string;
-    updatedAt?: number;
-    lastUsedAt?: number;
-    stageMode?: 'on' | 'off' | 'auto';
-    aiMode?: 'on' | 'off';
-  };
-  stageMode?: 'on' | 'off' | 'auto';
-  tombstone: {
-    exhaustedDefault: boolean;
-    cleared: boolean;
-  };
-} {
-  return planStopMessagePersistedStateSelectionWithNative({
-    states: candidateKeys.map((key) => ({
-      key,
-      state: loadRoutingInstructionStateSync(key) ?? null
-    }))
-  });
-}
-
-export function persistStopMessageState(stickyKey: string | undefined, state: RoutingInstructionState): void {
-  const plan = planPersistStopMessageStateWithNative({
-    state: buildPersistableRoutingInstructionState(state)
-  });
-  saveRoutingInstructionStateSync(stickyKey, plan.action === 'clear' ? null : state);
-}
-
-export function recordStoplessContinuationState(args: {
-  sessionId: string;
-  requestId: string;
-  text: string;
-  nextUsed: number;
-  maxRepeats: number;
-  nowMs?: number;
-}): {
-  key: string;
-  action: 'save' | 'clear';
-  used: number;
-  maxRepeats: number;
-} {
-  const plan = recordStoplessContinuationStateWithNative(args);
-  const persisted = plan.state as unknown as RoutingInstructionState;
-  saveRoutingInstructionStateSync(
-    plan.key,
-    plan.action === 'clear'
-      ? null
-      : persisted
-  );
-  savePersistedRuntimeStopMessageStateWithNative({
-    sessionId: args.sessionId,
-    payload: plan
-  });
-  return {
-    key: plan.key,
-    action: plan.action,
-    used: plan.used,
-    maxRepeats: plan.maxRepeats
-  };
-}
-
-export function seedStoplessCliPersistedState(args: {
-  sessionId: string;
-  requestId: string;
-  text: string;
-  nextUsed: number;
-  maxRepeats: number;
-  nowMs?: number;
-}): {
-  key: string;
-  action: 'save' | 'clear';
-  used: number;
-  maxRepeats: number;
-} {
-  const plan = recordStoplessContinuationStateWithNative(args);
-  savePersistedRuntimeStopMessageStateWithNative({
-    sessionId: args.sessionId,
-    payload: plan
-  });
-  return {
-    key: plan.key,
-    action: plan.action,
-    used: plan.used,
-    maxRepeats: plan.maxRepeats
-  };
 }
 
 export function resolveStopMessageSessionScope(
@@ -342,22 +241,6 @@ function readNonEmptyString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
-}
-
-function buildPersistableRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {
-  return {
-    ...state,
-    allowedProviders: Array.from(state.allowedProviders ?? []),
-    disabledProviders: Array.from(state.disabledProviders ?? []),
-    disabledKeys: Array.from(state.disabledKeys ?? new Map()).map(([provider, keys]) => ({
-      provider,
-      keys: Array.from(keys)
-    })),
-    disabledModels: Array.from(state.disabledModels ?? new Map()).map(([provider, models]) => ({
-      provider,
-      models: Array.from(models)
-    }))
-  };
 }
 
 export function resolveBdWorkingDirectoryForRecord(

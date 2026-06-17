@@ -621,7 +621,16 @@ function extractRouteHint(input: PipelineExecutionInput): string | undefined {
   if (metadataRouteHint) {
     return metadataRouteHint;
   }
-  const bodyRouteHint = normalizeToken(asRecord(asRecord(input.body).metadata)?.routeHint);
+  const bodyMetadata = asRecord(asRecord(input.body).metadata);
+  const bodyHasResponsesResume =
+    isRecord(bodyMetadata?.responsesResume)
+    || isRecord(bodyMetadata?.responsesResumeContext)
+    || typeof bodyMetadata?.previous_response_id === 'string'
+    || typeof bodyMetadata?.response_id === 'string';
+  if (bodyHasResponsesResume) {
+    return undefined;
+  }
+  const bodyRouteHint = normalizeToken(bodyMetadata?.routeHint);
   if (bodyRouteHint) {
     return bodyRouteHint;
   }

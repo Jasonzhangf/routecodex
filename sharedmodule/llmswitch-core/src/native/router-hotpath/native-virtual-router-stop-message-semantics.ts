@@ -12,14 +12,12 @@ export type StopMessageResolvedNativeParseOutput =
       type: 'stopMessageMode';
       stopMessageStageMode: 'on' | 'off' | 'auto';
       stopMessageMaxRepeats?: number;
-      stopMessageAiMode?: 'on' | 'off';
     }
   | {
       type: 'stopMessageSet';
       stopMessageText: string;
       stopMessageMaxRepeats?: number;
       stopMessageSource?: 'explicit_file' | 'explicit_text';
-      stopMessageAiMode?: 'on' | 'off';
     };
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
@@ -46,8 +44,7 @@ function parseResolvedStopMessageNativePayload(raw: string): StopMessageResolved
     return {
       type: 'stopMessageMode',
       stopMessageStageMode: parsed.stopMessageStageMode,
-      ...(typeof parsed.stopMessageMaxRepeats === 'number' ? { stopMessageMaxRepeats: parsed.stopMessageMaxRepeats } : {}),
-      ...(parsed.stopMessageAiMode === 'on' || parsed.stopMessageAiMode === 'off' ? { stopMessageAiMode: parsed.stopMessageAiMode } : {})
+      ...(typeof parsed.stopMessageMaxRepeats === 'number' ? { stopMessageMaxRepeats: parsed.stopMessageMaxRepeats } : {})
     };
   }
   if (parsed.type !== 'stopMessageSet' || typeof parsed.stopMessageText !== 'string') return null;
@@ -57,8 +54,7 @@ function parseResolvedStopMessageNativePayload(raw: string): StopMessageResolved
     ...(typeof parsed.stopMessageMaxRepeats === 'number' ? { stopMessageMaxRepeats: parsed.stopMessageMaxRepeats } : {}),
     ...(parsed.stopMessageSource === 'explicit_file' || parsed.stopMessageSource === 'explicit_text'
       ? { stopMessageSource: parsed.stopMessageSource }
-      : {}),
-    ...(parsed.stopMessageAiMode === 'on' || parsed.stopMessageAiMode === 'off' ? { stopMessageAiMode: parsed.stopMessageAiMode } : {})
+      : {})
   };
 }
 

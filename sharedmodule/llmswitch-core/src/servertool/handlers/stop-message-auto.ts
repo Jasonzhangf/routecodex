@@ -25,7 +25,6 @@ import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
   hasCompactionFlag,
-  persistStopMessageState,
   readServerToolFollowupFlowId,
   resolveClientConnectionState,
   resolveDefaultStopMessageSnapshot,
@@ -35,15 +34,10 @@ import {
   planStopMessagePersistSnapshot,
   planStoplessDecisionContextGoalStatus,
   planStoplessDecisionContextSignals,
-  planStopMessagePersistedLookup,
-  planStopMessagePersistedStateSelection,
   readRuntimeStopMessageStageMode,
   resolveAdapterContextProviderKey,
-  seedStoplessCliPersistedState,
-  resolveStopMessageSessionScope
 } from './stop-message-auto/runtime-utils.js';
 import { readStoplessGoalState } from './stopless-goal-state.js';
-import { loadRoutingInstructionStateSync } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
 import type {
   StopMessageDecisionContext,
   StopMessageDecision
@@ -53,10 +47,6 @@ import {
   evaluateStopSchemaGateWithNative,
   runStopMessageAutoHandlerWithNative
 } from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
-import {
-  applyStopMessageSnapshotToState,
-  clearStopMessageState
-} from './stop-message-auto/routing-state.js';
 import { writeStoplessLearnedNoteEntry } from './memory/cache-writer.js';
 import {
   buildStopMessageTerminalVisiblePayloadWithNative,
@@ -245,44 +235,6 @@ function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
   row.metadata = metadata;
 }
 
-function clearPersistedStopMessageRuntimeState(keys: string[]): void {
-  for (const key of keys) {
-    if (!isPersistentStickyKey(key)) continue;
-    const persistedState = loadRoutingInstructionStateSync(key) ?? null;
-    if (!persistedState) continue;
-    clearStopMessageState(persistedState, Date.now());
-    persistStopMessageState(key, persistedState);
-  }
-}
-
-function resetPersistedStopMessageUsed(keys: string[]): void {
-  const now = Date.now();
-  for (const key of keys) {
-    if (!isPersistentStickyKey(key)) continue;
-    const persistedState = loadRoutingInstructionStateSync(key) ?? null;
-    if (!persistedState) continue;
-    if (persistedState.stopMessageUsed !== undefined || persistedState.stopMessageLastUsedAt !== undefined) {
-      persistedState.stopMessageUsed = 0;
-      persistedState.stopMessageLastUsedAt = undefined;
-      persistedState.stopMessageUpdatedAt = now;
-      persistStopMessageState(key, persistedState);
-    }
-  }
-}
-
-function handlerResultPersistKeys(candidateKeys: string[], stickyKey?: string, strictSessionScope?: string): string[] {
-  const out: string[] = [];
-  for (const key of [stickyKey, strictSessionScope, ...candidateKeys]) {
-    if (!isPersistentStickyKey(key)) continue;
-    if (!out.includes(key)) out.push(key);
-  }
-  return out;
-}
-
-function isPersistentStickyKey(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('session:');
-}
-
 function debugLog(message: string, extra?: JsonObject): void {
   if (!STOPMESSAGE_DEBUG) {
     return;
@@ -331,30 +283,14 @@ const handler: ServerToolHandler = async (
     });
     return null;
   }
-  const persistedLookupPlan = planStopMessagePersistedLookup(record, rt, {
-    includeSnapshotLookup: true,
-    includeTombstoneLookup: true
-  });
-  const candidateKeys = persistedLookupPlan.candidateKeys;
-  const persistedStateSelection = planStopMessagePersistedStateSelection(candidateKeys);
-  const persistedSnap = persistedLookupPlan.readStopMessageSnapshot
-    ? persistedStateSelection.snapshot ?? null
-    : null;
   const runtimeSnap = resolveRuntimeStopMessageStateFromAdapterContext(ctx.adapterContext);
   const persistedGoalRead = readStoplessGoalState(ctx.adapterContext);
   const goalStatusPlan = planStoplessDecisionContextGoalStatus({
     adapterContext: ctx.adapterContext,
     persistedGoalState: persistedGoalRead.state
   });
-  const tombstone = persistedLookupPlan.readStopMessageTombstone
-    ? persistedStateSelection.tombstone
-    : { exhaustedDefault: false, cleared: false };
-  const explicitMode = (
-    tombstone.cleared
-      ? undefined
-      : (readRuntimeStopMessageStageMode(rt)
-        ?? persistedStateSelection.stageMode)
-  );
+  const tombstone = { exhaustedDefault: false, cleared: false };
+  const explicitMode = readRuntimeStopMessageStageMode(rt);
   const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
   const captured = getCapturedRequest(ctx.adapterContext);
   const decisionSignals = planStoplessDecisionContextSignals({
@@ -385,14 +321,7 @@ const handler: ServerToolHandler = async (
     followup_flow_id: followupFlowId || undefined,
     stop_eligible: stopGateway.eligible,
     has_responses_submit_tool_outputs_resume: decisionSignals.hasResponsesSubmitToolOutputsResume,
-    persisted_snapshot: persistedSnap ? {
-      text: persistedSnap.text,
-      ...(persistedSnap.providerKey ? { provider_key: persistedSnap.providerKey } : {}),
-      max_repeats: persistedSnap.maxRepeats,
-      used: persistedSnap.used,
-      source: (persistedSnap.source === 'default' ? 'default' : 'persisted') as any,
-      stage_mode: (persistedSnap.stageMode ?? 'on') as any,
-    } : undefined,
+    persisted_snapshot: undefined,
     runtime_snapshot: runtimeSnap ? {
       text: runtimeSnap.text,
       ...(runtimeSnap.providerKey ? { provider_key: runtimeSnap.providerKey } : {}),
@@ -443,14 +372,10 @@ const handler: ServerToolHandler = async (
   try {
     if (decision.action !== 'trigger' && decision.skip_reason === 'skip_reached_max_repeats') {
       const prefixed = applyStopSummaryPrefix(ctx.base, '');
-      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       compare.reason = 'stop_schema_budget_exhausted';
       return buildStopSchemaFinalPlan(prefixed);
     }
     if (decision.action !== 'trigger') {
-      if (!stopGateway.eligible) {
-        resetPersistedStopMessageUsed(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
-      }
       if (decision.skip_reason === 'skip_no_stopmessage_snapshot' || decision.skip_reason === 'skip_goal_active') {
         const assistantText = assistantStopText;
         if (assistantText && captured) {
@@ -505,7 +430,6 @@ const handler: ServerToolHandler = async (
     compare.toolSignatureHash = observation.toolSignatureHash;
     if (schemaGate.action === 'fail_fast') {
       const prefixed = applyStopSummaryPrefix(ctx.base, '');
-      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       return buildStopSchemaFinalPlan(prefixed);
     }
 
@@ -518,7 +442,6 @@ const handler: ServerToolHandler = async (
         requestId: ctx.requestId,
         parsed: schemaGate.parsed
       });
-      clearPersistedStopMessageRuntimeState(handlerResultPersistKeys(candidateKeys, persistedLookupPlan.stickyKey || undefined, persistedLookupPlan.strictSessionScope || undefined));
       return buildStopSchemaFinalPlan(prefixed);
     }
 
@@ -527,19 +450,16 @@ const handler: ServerToolHandler = async (
       : { ...decision, stopSchemaTriggerHint: schemaGate.reason_code };
 
     // ── Call native handler result assembler ──
-    const stickyKey = persistedLookupPlan.stickyKey || undefined;
-    const strictSessionScope = persistedLookupPlan.strictSessionScope || undefined;
     const handlerResult = runStopMessageAutoHandlerWithNative({
       decision: effectiveDecision as any,
       adapterContext: record,
       base: { ...ctx.base } as Record<string, unknown>,
-      candidateKeys,
-      stickyKey,
-      strictSessionScope,
+      candidateKeys: [],
+      stickyKey: undefined,
+      strictSessionScope: undefined,
       followupFlowId: followupFlowId || undefined,
     });
 
-    // ── Execute persist I/O (TS writes state files) ──
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
     const persistPlan = planStopMessagePersistSnapshot({
@@ -564,30 +484,6 @@ const handler: ServerToolHandler = async (
       lastUsedAt: usedAt
     };
     attachStopMessageRuntimeStateToFollowup(handlerResult.followup, snapInput);
-    for (const key of handlerResult.persistKeys) {
-      const persistedState = loadRoutingInstructionStateSync(key) ?? null;
-      const nextState = applyStopMessageSnapshotToState(persistedState, snapInput);
-      persistStopMessageState(key, nextState);
-    }
-    const sessionScope = resolveStopMessageSessionScope(ctx.adapterContext);
-    const sessionId = typeof sessionScope === 'string' && sessionScope.startsWith('session:')
-      ? sessionScope.slice('session:'.length)
-      : '';
-    if (sessionId) {
-      seedStoplessCliPersistedState({
-        sessionId,
-        requestId: ctx.requestId,
-        text: persistPlan.snapshot.text,
-        // Keep the CLI-visible state aligned with the single post-handler truth.
-        // Older preseed semantics wrote the pre-followup used count and caused
-        // mixed native/CLI entrypoints to oscillate between used=N and used=N+1.
-        nextUsed: typeof persistPlan.snapshot.used === 'number'
-          ? persistPlan.snapshot.used
-          : schemaUsedBeforeCount,
-        maxRepeats: persistPlan.nextMaxRepeats,
-        nowMs: usedAt
-      });
-    }
 
     return {
       flowId: FLOW_ID,
@@ -596,7 +492,6 @@ const handler: ServerToolHandler = async (
           chatResponse: ctx.base,
           execution: {
             flowId: FLOW_ID,
-            ...(stickyKey ? { stopMessageReservation: { stickyKey, previousState: null } } : {}),
             followup: handlerResult.followup as unknown as ServerToolFollowupPlan,
           context: {
             decision: effectiveDecision as unknown as JsonObject,

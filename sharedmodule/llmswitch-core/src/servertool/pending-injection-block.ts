@@ -6,6 +6,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type { PendingServerToolInjection } from './pending-session.js';
 import { savePendingServerToolInjection } from './pending-session.js';
+import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 
 export const SERVERTOOL_PENDING_SESSION_FEATURE_ID = 'feature_id: hub.servertool_pending_session';
 
@@ -13,7 +14,17 @@ export async function persistPendingServerToolInjection(args: {
   pendingInjection: NonNullable<ServerSideToolEngineResult['pendingInjection']>;
   requestId: string;
   flowId: string;
+  adapterContext?: unknown;
 }): Promise<boolean> {
+  const runtime = args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
+    ? readRuntimeMetadata(args.adapterContext as Record<string, unknown>)
+    : undefined;
+  const sessionDir = typeof runtime?.sessionDir === 'string' && runtime.sessionDir.trim()
+    ? runtime.sessionDir.trim()
+    : '';
+  if (!sessionDir) {
+    throw new Error('[servertool-pending] runtime metadata sessionDir missing');
+  }
   const plan = planPendingInjectionPersistWithNative({
     pendingInjection: args.pendingInjection,
     requestId: args.requestId,
@@ -27,7 +38,8 @@ export async function persistPendingServerToolInjection(args: {
     for (const record of plan.records) {
       await savePendingServerToolInjection(
         record.sessionId,
-        record.pending as Omit<PendingServerToolInjection, 'version' | 'sessionId'>
+        record.pending as Omit<PendingServerToolInjection, 'version' | 'sessionId'>,
+        sessionDir
       );
     }
     return true;

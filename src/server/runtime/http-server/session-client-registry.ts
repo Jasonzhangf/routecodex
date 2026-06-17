@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+// feature_id: runtime.tmux_client_binding
 import {
   cleanupDeadTmuxSessionsFromRegistry,
   cleanupStaleHeartbeatsFromRegistry,
@@ -88,6 +89,11 @@ export class SessionClientRegistry {
   private readonly conversationToTmuxSession = new Map<string, string>();
   private bindingsLoaded = false;
   private bindingsStorePath: string | undefined;
+  private explicitBindingsStorePath: string | undefined;
+
+  constructor(options?: { bindingsStorePath?: string }) {
+    this.explicitBindingsStorePath = this.normalizeSessionDirEnvValue(options?.bindingsStorePath);
+  }
 
   private normalizeSessionDirEnvValue(raw: unknown): string | undefined {
     const normalized = normalizeString(raw);
@@ -102,11 +108,16 @@ export class SessionClientRegistry {
   }
 
   private resolveBindingsStorePath(): string | undefined {
-    const sessionDir = this.normalizeSessionDirEnvValue(process.env.ROUTECODEX_SESSION_DIR);
-    if (!sessionDir) {
-      return undefined;
+    return this.explicitBindingsStorePath;
+  }
+
+  setBindingsStorePath(bindingsStorePath?: string): void {
+    const next = this.normalizeSessionDirEnvValue(bindingsStorePath);
+    if (this.explicitBindingsStorePath === next) {
+      return;
     }
-    return path.join(sessionDir, 'session-bindings.json');
+    this.explicitBindingsStorePath = next;
+    this.bindingsLoaded = false;
   }
 
   private ensureConversationBindingsLoaded(): void {
@@ -848,6 +859,10 @@ const singleton = new SessionClientRegistry();
 
 export function getSessionClientRegistry(): SessionClientRegistry {
   return singleton;
+}
+
+export function configureSessionClientRegistry(options: { bindingsStorePath?: string }): void {
+  singleton.setBindingsStorePath(options.bindingsStorePath);
 }
 
 export async function injectSessionClientPromptWithResult(

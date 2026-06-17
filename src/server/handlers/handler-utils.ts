@@ -1,7 +1,13 @@
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext } from './types.js';
-import { mapErrorToHttp, mapErrorToPublicLogSummary, type HttpErrorPayload } from '../utils/http-error-mapper.js';
+import {
+  isClientDisconnectHttpProjectionCandidate,
+  isClientDisconnectHttpProjectionSentinel,
+  mapErrorToHttp,
+  mapErrorToPublicLogSummary,
+  type HttpErrorPayload,
+} from '../utils/http-error-mapper.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
@@ -403,6 +409,11 @@ export async function respondWithPipelineError(
 ): Promise<void> {
   const effectiveRequestId = formatRequestId(requestId);
   const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
+  if (isClientDisconnectHttpProjectionSentinel(normalizedError)
+    || isClientDisconnectHttpProjectionCandidate(normalizedError)) {
+    terminateClientDisconnectedResponse(res, effectiveRequestId, options?.forceSse === true ? 'sse' : 'json');
+    return;
+  }
   const routePayload: RouteErrorPayload = {
     code: typeof (normalizedError as Record<string, unknown>).code === 'string'
       ? String((normalizedError as Record<string, unknown>).code)
@@ -489,6 +500,11 @@ export async function writeStartedSsePipelineError(
 ): Promise<void> {
   const effectiveRequestId = formatRequestId(requestId);
   const normalizedError = normalizeError(error, effectiveRequestId, entryEndpoint);
+  if (isClientDisconnectHttpProjectionSentinel(normalizedError)
+    || isClientDisconnectHttpProjectionCandidate(normalizedError)) {
+    terminateClientDisconnectedResponse(res, effectiveRequestId, 'sse-started');
+    return;
+  }
   const routePayload: RouteErrorPayload = {
     code: typeof (normalizedError as Record<string, unknown>).code === 'string'
       ? String((normalizedError as Record<string, unknown>).code)
@@ -540,6 +556,23 @@ export async function writeStartedSsePipelineError(
     }).catch((snapshotError) => {
       logHandlerNonBlockingError(`writeServerSnapshot:started_sse_error:${effectiveRequestId}`, snapshotError);
     });
+  }
+}
+
+function terminateClientDisconnectedResponse(
+  res: Response,
+  requestId: string,
+  mode: 'json' | 'sse' | 'sse-started'
+): void {
+  try {
+    const maybeDestroy = res as Response & { destroy?: () => void };
+    if (typeof maybeDestroy.destroy === 'function') {
+      maybeDestroy.destroy();
+      return;
+    }
+    res.end();
+  } catch (error) {
+    logHandlerNonBlockingError(`clientDisconnectTerminate:${mode}:${requestId}`, error);
   }
 }
 

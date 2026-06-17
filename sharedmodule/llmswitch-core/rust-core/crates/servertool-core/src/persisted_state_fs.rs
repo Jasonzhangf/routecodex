@@ -6,8 +6,8 @@
 //! persist `RoutingInstructionState`:
 //!
 //!   * scope is `session:` / `tmux:` / `conversation:`
-//!   * directory resolution prefers `ROUTECODEX_SESSION_DIR` (or override via
-//!     the same env vars), then falls back to `~/.rcc/state/routing`
+//!   * directory resolution prefers the explicit `session_dir` passed by the
+//!     caller; if omitted, it falls back to `~/.rcc/state/routing`
 //!     (`tmux:` keys live under `~/.rcc/sessions` to match the host).
 //!   * filename is `<scope>-<safe_id>.json` where unsafe characters in the id
 //!     are replaced with `_`.
@@ -28,7 +28,6 @@ use crate::persisted_lookup::{
     RuntimeStopMessageStateSnapshot,
 };
 
-const ROUTECODEX_SESSION_DIR_ENV: &str = "ROUTECODEX_SESSION_DIR";
 const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
 const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
@@ -66,18 +65,12 @@ fn resolve_rcc_user_dir() -> Option<PathBuf> {
     Some(home_dir.join(".rcc"))
 }
 
-fn resolve_override_session_dir() -> Option<PathBuf> {
-    if let Ok(value) = env::var(ROUTECODEX_SESSION_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
-    }
-    None
-}
-
-fn resolve_state_dir(scope: &str) -> Option<PathBuf> {
-    if let Some(explicit) = resolve_override_session_dir() {
+fn resolve_state_dir(scope: &str, session_dir: Option<&str>) -> Option<PathBuf> {
+    if let Some(explicit) = session_dir
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(PathBuf::from)
+    {
         return Some(explicit);
     }
     if scope.starts_with("tmux:") {
@@ -107,15 +100,19 @@ fn safe_id(raw_id: &str) -> Option<String> {
     }
 }
 
-fn resolve_filepath(scope: &str, raw_id: &str) -> Option<PathBuf> {
-    let dir = resolve_state_dir(scope)?;
+fn resolve_filepath(scope: &str, raw_id: &str, session_dir: Option<&str>) -> Option<PathBuf> {
+    let dir = resolve_state_dir(scope, session_dir)?;
     let safe = safe_id(raw_id)?;
     let scope_label = scope.trim_end_matches(':');
     Some(dir.join(format!("{}-{}.json", scope_label, safe)))
 }
 
-pub fn resolve_filepath_for_write(scope: &str, raw_id: &str) -> Option<PathBuf> {
-    resolve_filepath(scope, raw_id)
+pub fn resolve_filepath_for_write(
+    scope: &str,
+    raw_id: &str,
+    session_dir: Option<&str>,
+) -> Option<PathBuf> {
+    resolve_filepath(scope, raw_id, session_dir)
 }
 
 fn is_persistent_key(key: &str) -> bool {
@@ -129,13 +126,14 @@ fn is_persistent_key(key: &str) -> bool {
 /// the file is missing or the snapshot is empty.
 pub fn load_persisted_runtime_stop_message_state(
     session_id: &str,
+    session_dir: Option<&str>,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
     let key = format!("session:{}", session_id.trim());
     if !is_persistent_key(&key) {
         return None;
     }
     let (_scope, raw_id) = key.split_once(':')?;
-    let filepath = resolve_filepath("session:", raw_id)?;
+    let filepath = resolve_filepath("session:", raw_id, session_dir)?;
     let raw = match fs::read_to_string(&filepath) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,

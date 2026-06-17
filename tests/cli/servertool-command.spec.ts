@@ -95,10 +95,6 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
-      '--session-id',
-      sessionId,
-      '--request-id',
-      requestId,
       '--input-json',
       '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}'
     ]);
@@ -109,11 +105,11 @@ describe('servertool CLI command', () => {
     expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
-      repeatCount: 2,
-      maxRepeats: 3,
-      sessionId,
-      requestId
+      repeatCount: 3,
+      maxRepeats: 3
     });
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.requestId).toBeUndefined();
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
     expect(payload.schemaGuidance).toBeDefined();
@@ -138,6 +134,36 @@ describe('servertool CLI command', () => {
     }
   });
 
+  it('runs stopless CLI without session identity flags', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}`);
+      }
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'stop_message_auto',
+      '--input-json',
+      '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}'
+    ]);
+
+    expect(errors).toEqual([]);
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload.repeatCount).toBe(2);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.requestId).toBeUndefined();
+  });
+
   it('passes explicit repeat flags through to the standalone Rust binary', async () => {
     const { sessionId, requestId } = uniqueStoplessIdentity();
     const output: string[] = [];
@@ -158,10 +184,6 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
-      '--session-id',
-      sessionId,
-      '--request-id',
-      requestId,
       '--repeat-count',
       '2',
       '--max-repeats',
@@ -176,15 +198,15 @@ describe('servertool CLI command', () => {
     expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
-      repeatCount: 2,
+      repeatCount: 3,
       maxRepeats: 5,
-      sessionId,
-      requestId,
       input: {
-        repeatCount: 2,
+        repeatCount: 3,
         maxRepeats: 5
       }
     });
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.requestId).toBeUndefined();
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
     expect(payload.schemaGuidance).toBeDefined();
@@ -498,17 +520,16 @@ describe('servertool CLI command', () => {
     expect(exits).toEqual([1]);
   });
 
-  it('auto-fills stop_message_auto session identity when caller omits it', async () => {
+  it('omitting sessionId no longer fails for stopless CLI run', async () => {
     const output: string[] = [];
     const errors: string[] = [];
+    let exitCode = 0;
     const program = new Command();
     program.exitOverride();
     createServertoolCommand(program, {
       log: (line) => output.push(line),
       error: (line) => errors.push(line),
-      exit: (code) => {
-        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
-      }
+      exit: (code) => { exitCode = code; }
     });
 
     await program.parseAsync([
@@ -521,20 +542,11 @@ describe('servertool CLI command', () => {
       '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}'
     ]);
 
+    expect(exitCode).toBe(0);
     expect(errors).toEqual([]);
-    expectNoPrivateServertoolCarrier(output[0] ?? '');
     const payload = JSON.parse(output[0] ?? '{}');
-    expect(payload).toMatchObject({
-      toolName: 'stop_message_auto',
-      flowId: 'stop_message_flow'
-    });
-    expect(typeof payload.repeatCount).toBe('number');
-    expect(payload.repeatCount).toBeGreaterThan(0);
-    expect(typeof payload.maxRepeats).toBe('number');
-    expect(payload.maxRepeats).toBeGreaterThan(0);
-    expect(typeof payload.sessionId).toBe('string');
-    expect(payload.sessionId.length).toBeGreaterThan(0);
-    expect(typeof payload.requestId).toBe('string');
-    expect(payload.requestId.length).toBeGreaterThan(0);
+    expect(payload.repeatCount).toBe(2);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.requestId).toBeUndefined();
   });
 });

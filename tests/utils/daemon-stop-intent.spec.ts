@@ -11,7 +11,7 @@ import {
 } from '../../src/utils/daemon-stop-intent.js';
 
 describe('daemon stop intent', () => {
-  it('writes and consumes stop intent marker once', () => {
+  it('writes and consumes stop intent marker once', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stop-intent-'));
     const port = 5520;
 
@@ -22,6 +22,10 @@ describe('daemon stop intent', () => {
     });
 
     const markerPath = resolveDaemonStopIntentPath(port, tempRoot);
+    expect(markerPath).toContain('/state/runtime-lifecycle/ports/5520/stop-intent.json');
+    for (let idx = 0; idx < 10 && !fs.existsSync(markerPath); idx += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     expect(fs.existsSync(markerPath)).toBe(true);
 
     const consumed = consumeDaemonStopIntent(port, {

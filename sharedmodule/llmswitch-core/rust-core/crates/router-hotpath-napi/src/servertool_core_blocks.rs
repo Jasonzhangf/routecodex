@@ -607,57 +607,6 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
 }
 
-pub fn record_stopless_continuation_state_json(input_json: &str) -> Result<String, String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct RecordStoplessInput {
-        session_id: String,
-        request_id: String,
-        text: String,
-        next_used: u64,
-        max_repeats: u64,
-        now_ms: Option<u64>,
-    }
-    let input: RecordStoplessInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize record stopless input: {e}"))?;
-    let now_ms = input.now_ms.unwrap_or_else(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0)
-    });
-    let output = persisted_lookup::record_stopless_continuation_state(
-        &input.session_id,
-        &input.request_id,
-        &input.text,
-        input.next_used,
-        input.max_repeats,
-        now_ms,
-    )
-    .map_err(|e| format!("record_stopless_continuation_state: {e}"))?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize record stopless output: {e}"))
-}
-
-pub fn save_persisted_runtime_stop_message_state_json(input_json: &str) -> Result<String, String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct SavePersistedStoplessStateInput {
-        session_id: String,
-        payload: servertool_core::persisted_lookup::StoplessContinuationPersistOutput,
-    }
-    let input: SavePersistedStoplessStateInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize save persisted stopless input: {e}"))?;
-    let filepath = servertool_core::persisted_state_fs_write::save_persisted_runtime_stop_message_state(
-        &input.session_id,
-        &input.payload,
-    )
-    .map_err(|e| format!("save_persisted_runtime_stop_message_state: {e}"))?;
-    serde_json::to_string(&serde_json::json!({
-        "filepath": filepath.to_string_lossy().to_string()
-    }))
-    .map_err(|e| format!("serialize save persisted stopless output: {e}"))
-}
-
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
     let input: stopless_orchestration_contract::StoplessOrchestrationPlanInput =
         serde_json::from_str(input_json)

@@ -179,7 +179,7 @@ chains:
         status: anchored
 
   - chain_id: runtime.lifecycle.mainline
-    summary: "Managed server and token-daemon lifecycle: pid cache write on start, stop-intent write on stop, instance registry as binding_pending."
+    summary: "Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
     entry_contract:
       node: ServerPidCacheRecord
       owner_doc: docs/design/server-runtime-lifecycle-ssot.md
@@ -263,6 +263,130 @@ chains:
         status: binding pending
         note: "No main runtime caller wired yet. Helper exists; wiring required."
 
+  - chain_id: runtime.tmux_client_binding.mainline
+    summary: "tmux/client attachment registry: daemon registration persists records, conversation binding narrows to tmux session, executor/runtime lookup consumes binding without turning it into request identity truth."
+    entry_contract:
+      node: SessionClientRegisterRequest
+      owner_doc: docs/architecture/wiki/metadata-boundary-map.md
+    edges:
+      - step_id: scb-01
+        from_node: SessionClientRegisterRequest
+        to_node: TmuxClientRecordRegistered
+        caller_symbol: registerSessionClientRoutes
+        caller_file: src/server/runtime/http-server/session-client-routes.ts
+        callee_symbol: register
+        callee_file: src/server/runtime/http-server/session-client-registry.ts
+        owner_feature_id: runtime.tmux_client_binding
+        semantic_input: "daemonId + callbackUrl + optional tmuxSessionId/workdir/client flags"
+        semantic_output: "normalized daemon-attached tmux/client record in registry memory"
+        status: anchored
+      - step_id: scb-02
+        from_node: TmuxClientRecordRegistered
+        to_node: SessionBindingsPersisted
+        caller_symbol: register
+        caller_file: src/server/runtime/http-server/session-client-registry.ts
+        callee_symbol: persistConversationBindings
+        callee_file: src/server/runtime/http-server/session-client-registry.ts
+        owner_feature_id: runtime.tmux_client_binding
+        semantic_input: "registry record set + optional conversation binding updates"
+        semantic_output: "session-bindings.json updated under runtime workdir root"
+        status: anchored
+      - step_id: scb-03
+        from_node: ConversationSessionBindRequest
+        to_node: ConversationTmuxBindingResolved
+        caller_symbol: bindConversationSession
+        caller_file: src/server/runtime/http-server/session-client-registry.ts
+        callee_symbol: persistConversationBindings
+        callee_file: src/server/runtime/http-server/session-client-registry.ts
+        owner_feature_id: runtime.tmux_client_binding
+        semantic_input: "conversationSessionId plus optional tmux/daemon/workdir hints"
+        semantic_output: "conversationSessionId narrowed to one bound tmux session with persisted mapping"
+        status: anchored
+      - step_id: scb-04
+        from_node: ConversationTmuxBindingResolved
+        to_node: TmuxBindingLookupConsumed
+        caller_symbol: resolveBoundTmuxSession
+        caller_file: src/server/runtime/http-server/session-client-registry.ts
+        callee_symbol: resolveBoundTmuxSession
+        callee_file: src/server/runtime/http-server/executor-metadata.ts
+        owner_feature_id: runtime.tmux_client_binding
+        semantic_input: "conversation/session scope token from runtime-side executor metadata lookup"
+        semantic_output: "tmux binding used as runtime dispatch hint only, not as request session identity"
+        status: anchored
+
+  - chain_id: stopless.session.mainline
+    summary: "Stopless runtime-metadata continuation: stop response is evaluated, projected as client exec_command, executed by CLI, then restored from current request tool_output/runtime metadata into the next model turn."
+    entry_contract:
+      node: StoplessResp01StopDetected
+      owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
+    edges:
+      - step_id: stl-01
+        from_node: StoplessResp01StopDetected
+        to_node: StoplessResp02SchemaGateEvaluated
+        caller_symbol: runServerToolOrchestration
+        caller_file: sharedmodule/llmswitch-core/src/servertool/engine.ts
+        callee_symbol: runStopMessageAutoHandlerWithNative
+        callee_file: sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "HubRespChatProcess03Governed stop response + adapterContext carrying requestId/sessionId/entryEndpoint/routeName"
+        semantic_output: "stop schema gate decision and stopless loop state candidate"
+        status: anchored
+      - step_id: stl-02
+        from_node: StoplessResp02SchemaGateEvaluated
+        to_node: StoplessState03RuntimeSnapshotResolved
+        caller_symbol: resolveRuntimeStopMessageStateFromAdapterContext
+        caller_file: sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts
+        callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "adapterContext/runtime metadata plus current request body/tool_outputs"
+        semantic_output: "runtime stopless snapshot restored from metadata or current CLI tool_output"
+        status: anchored
+      - step_id: stl-03
+        from_node: StoplessState03RuntimeSnapshotResolved
+        to_node: StoplessCli04ProjectionPlanned
+        caller_symbol: buildServertoolCliProjectionForAutoFlow
+        caller_file: sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
+        callee_symbol: plan_client_exec_cli_projection_output
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "flowId/repeatCount/maxRepeats/triggerHint only"
+        semantic_output: "client-visible exec_command using public alias reasoning_stop; no sessionDir/sessionId/requestId flags"
+        status: anchored
+      - step_id: stl-04
+        from_node: StoplessCli04ProjectionPlanned
+        to_node: StoplessCli06ClientExecuted
+        caller_symbol: createServertoolCommand
+        caller_file: src/cli/commands/servertool.ts
+        callee_symbol: build_servertool_cli_binary_run_command_from_client_exec_result
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "exec_command shell string with status-only input and repeat flags"
+        semantic_output: "servertool CLI stdout JSON containing continuationPrompt/schemaGuidance/repeatCount/maxRepeats"
+        status: anchored
+      - step_id: stl-05
+        from_node: StoplessCli06ClientExecuted
+        to_node: StoplessReq08NextTurnMaterialized
+        caller_symbol: has_stop_message_auto_cli_result_in_request_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+        callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "next request tool_outputs / runtime metadata"
+        semantic_output: "stopless runtime snapshot restored into request turn without file persistence"
+        status: anchored
+      - step_id: stl-06
+        from_node: StoplessReq08NextTurnMaterialized
+        to_node: VrRoute04SelectedTarget
+        caller_symbol: classify
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+        callee_symbol: classify
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "stopless followup metadata/current-turn signal"
+        semantic_output: "thinking route; historical tools route hint must not dominate stopless turn"
+        status: anchored
+
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture
     symbol: captureReqInboundResponsesContextSnapshotJson
@@ -306,6 +430,13 @@ shared_multi_reference_functions:
     reused_by_chains:
       - runtime.lifecycle.mainline
     note: "Consumes and TTL-gates stop-intent.json; same owner truth as the writer."
+  - function_id: runtime.tmux_client_binding_lookup
+    symbol: resolveBoundTmuxSession
+    file: src/server/runtime/http-server/session-client-registry.ts
+    owner_feature_id: runtime.tmux_client_binding
+    reused_by_chains:
+      - runtime.tmux_client_binding.mainline
+    note: "Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership."
 
 split_bindings:
   - binding_id: request.route_selection.runtime_vs_typed

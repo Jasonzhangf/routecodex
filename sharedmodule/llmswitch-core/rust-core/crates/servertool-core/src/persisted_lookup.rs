@@ -333,6 +333,56 @@ pub fn resolve_runtime_stop_message_state_from_adapter_context(
             return Some(snapshot);
         }
     }
+    if let Some(snapshot) = resolve_stopless_cli_result_snapshot_from_request(&input.adapter_context) {
+        return Some(snapshot);
+    }
+    None
+}
+
+fn resolve_stopless_cli_result_snapshot_from_request(
+    adapter_context: &Value,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    let record = adapter_context.as_object()?;
+    let request = get_captured_request(adapter_context)
+        .or_else(|| record.get("__raw_request_body").cloned())?;
+    read_stopless_cli_result_snapshot_from_request(&request)
+}
+
+fn read_stopless_cli_result_snapshot_from_request(
+    request: &Value,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    let request_obj = request.as_object()?;
+    let tool_outputs = request_obj.get("tool_outputs")?.as_array()?;
+    for output in tool_outputs {
+        let output_record = output.as_object()?;
+        let raw_output = read_trimmed_string(output_record.get("output"))?;
+        let parsed: Value = serde_json::from_str(&raw_output).ok()?;
+        let row = parsed.as_object()?;
+        if read_trimmed_string(row.get("toolName")).as_deref() != Some("stop_message_auto") {
+            continue;
+        }
+        if read_trimmed_string(row.get("flowId")).as_deref() != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID) {
+            continue;
+        }
+        let repeat_count = read_js_nonnegative_integer(row.get("repeatCount"))?;
+        let max_repeats = read_js_nonnegative_integer(row.get("maxRepeats"))?;
+        if max_repeats <= 0 {
+            continue;
+        }
+        let text = read_trimmed_string(row.get("continuationPrompt"))
+            .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
+        return Some(RuntimeStopMessageStateSnapshot {
+            text,
+            provider_key: None,
+            max_repeats,
+            used: repeat_count.saturating_sub(1),
+            source: Some("client_exec_result".to_string()),
+            updated_at: None,
+            last_used_at: None,
+            stage_mode: Some("on".to_string()),
+            ai_mode: None,
+        });
+    }
     None
 }
 
@@ -1042,14 +1092,13 @@ pub fn collect_stop_message_persisted_candidate_keys(
     let row = direct_record.as_object();
     let mut candidate_keys: Vec<String> = Vec::new();
 
+    push_unique_scope_key(&mut candidate_keys, strict_session_scope.clone());
+
     if let Some(session_id) = row.and_then(|obj| read_trimmed_string(obj.get("sessionId"))) {
         push_unique_scope_key(&mut candidate_keys, Some(format!("session:{}", session_id)));
     }
 
-    if !candidate_keys.is_empty() {
-        push_unique_scope_key(&mut candidate_keys, strict_session_scope.clone());
-        push_unique_scope_key(&mut candidate_keys, sticky_key.clone());
-    }
+    push_unique_scope_key(&mut candidate_keys, sticky_key.clone());
 
     (strict_session_scope, sticky_key, candidate_keys)
 }
@@ -1066,95 +1115,6 @@ pub fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
 /// `requestId`-based keys.
 ///
 /// `next_used` is clamped into `[0, max_repeats]`. `text` is required; an empty
-/// `text` is treated as an explicit "clear" action.
-pub fn record_stopless_continuation_state(
-    session_id: &str,
-    request_id: &str,
-    text: &str,
-    next_used: u64,
-    max_repeats: u64,
-    now_ms: u64,
-) -> Result<StoplessContinuationPersistOutput, String> {
-    let session_id_trim = session_id.trim();
-    if session_id_trim.is_empty() {
-        return Err("record_stopless_continuation_state: session_id is required".to_string());
-    }
-    if !session_id_trim
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.'))
-    {
-        return Err("record_stopless_continuation_state: session_id contains invalid characters".to_string());
-    }
-    let request_id_trim = request_id.trim();
-    if request_id_trim.is_empty() {
-        return Err("record_stopless_continuation_state: request_id is required".to_string());
-    }
-    if max_repeats == 0 {
-        return Err("record_stopless_continuation_state: max_repeats must be > 0".to_string());
-    }
-    let used = next_used.min(max_repeats);
-    let key = format!("session:{session_id_trim}");
-    if text.trim().is_empty() {
-        return Ok(StoplessContinuationPersistOutput {
-            key,
-            action: "clear".to_string(),
-            state: Value::Null,
-            used,
-            max_repeats,
-        });
-    }
-    let mut state = serde_json::Map::new();
-    state.insert(
-        "stopMessageText".to_string(),
-        Value::String(text.to_string()),
-    );
-    state.insert(
-        "stopMessageMaxRepeats".to_string(),
-        Value::Number(serde_json::Number::from(max_repeats)),
-    );
-    state.insert(
-        "stopMessageUsed".to_string(),
-        Value::Number(serde_json::Number::from(used)),
-    );
-    state.insert(
-        "stopMessageSource".to_string(),
-        Value::String("default".to_string()),
-    );
-    state.insert(
-        "stopMessageStageMode".to_string(),
-        Value::String("on".to_string()),
-    );
-    state.insert(
-        "stopMessageAiMode".to_string(),
-        Value::String("off".to_string()),
-    );
-    state.insert(
-        "stopMessageUpdatedAt".to_string(),
-        Value::Number(serde_json::Number::from(now_ms)),
-    );
-    state.insert(
-        "stopMessageLastUsedAt".to_string(),
-        Value::Number(serde_json::Number::from(now_ms)),
-    );
-    Ok(StoplessContinuationPersistOutput {
-        key,
-        action: "save".to_string(),
-        state: Value::Object(state),
-        used,
-        max_repeats,
-    })
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StoplessContinuationPersistOutput {
-    pub key: String,
-    pub action: String,
-    pub state: Value,
-    pub used: u64,
-    pub max_repeats: u64,
-}
-
 pub fn resolve_servertool_sticky_key(metadata: &Value) -> String {
     if let Some(session_scope) = resolve_session_scope(metadata) {
         return session_scope;
@@ -1582,6 +1542,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_session_scope_participates_even_when_direct_record_lacks_session_id() {
+        let input = StopMessagePersistedLookupPlannerInput {
+            record: json!({
+                "requestId": "req-stopless"
+            }),
+            runtime_metadata: Some(json!({
+                "sessionId": "runtime-session"
+            })),
+            options: None,
+        };
+
+        let plan = plan_stop_message_persisted_lookup(&input);
+
+        assert_eq!(
+            plan.strict_session_scope.as_deref(),
+            Some("session:runtime-session")
+        );
+        assert_eq!(plan.sticky_key.as_deref(), Some("session:runtime-session"));
+        assert_eq!(plan.candidate_keys, vec!["session:runtime-session"]);
+    }
+
+    #[test]
     fn options_only_control_snapshot_and_tombstone_reads() {
         let input = StopMessagePersistedLookupPlannerInput {
             record: json!({
@@ -1604,7 +1586,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_metadata_alone_does_not_synthesize_candidate_keys() {
+    fn runtime_metadata_session_scope_becomes_stopless_candidate_key() {
         let input = StopMessagePersistedLookupPlannerInput {
             record: json!({}),
             runtime_metadata: Some(json!({
@@ -1620,7 +1602,7 @@ mod tests {
             Some("session:runtime-session")
         );
         assert_eq!(plan.sticky_key.as_deref(), Some("session:runtime-session"));
-        assert!(plan.candidate_keys.is_empty());
+        assert_eq!(plan.candidate_keys, vec!["session:runtime-session"]);
     }
 
     #[test]
@@ -2008,7 +1990,7 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_ignores_stopless_cli_result_from_request_record() {
+    fn adapter_context_restores_stopless_cli_result_from_request_record() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
             adapter_context: json!({
@@ -2030,7 +2012,12 @@ mod tests {
             }),
         };
 
-        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("stopless cli result snapshot");
+        assert_eq!(snapshot.text, "continue from result");
+        assert_eq!(snapshot.max_repeats, 5);
+        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
     #[test]

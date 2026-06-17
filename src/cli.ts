@@ -13,7 +13,8 @@ import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
-import { ensureRccUserDirEnvironment, resolveRccPath } from './config/user-data-paths.js';
+import { ensureRccUserDirEnvironment } from './config/user-data-paths.js';
+import { resolveTokenDaemonPidPath } from './utils/server-runtime-pid.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import {
   ensurePortAvailableImpl,
@@ -105,7 +106,7 @@ const pkgName: string = (() => {
 const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
-const TOKEN_DAEMON_PID_FILE = resolveRccPath('token-daemon.pid');
+const TOKEN_DAEMON_PID_FILE = resolveTokenDaemonPidPath();
 
 function logCliNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');

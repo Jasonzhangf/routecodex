@@ -82,7 +82,12 @@ describe('pending-injection-block native shell', () => {
       persistPendingServerToolInjection({
         pendingInjection: buildPendingInjection(),
         requestId: ' req-1 ',
-        flowId: ' flow-1 '
+        flowId: ' flow-1 ',
+        adapterContext: {
+          __rt: {
+            sessionDir: tempRoot
+          }
+        }
       })
     ).resolves.toBe(true);
 
@@ -109,7 +114,12 @@ describe('pending-injection-block native shell', () => {
           aliasSessionIds: ['']
         },
         requestId: 'req-2',
-        flowId: 'flow-2'
+        flowId: 'flow-2',
+        adapterContext: {
+          __rt: {
+            sessionDir: tempRoot
+          }
+        }
       })
     ).resolves.toBe(false);
 
@@ -123,7 +133,12 @@ describe('pending-injection-block native shell', () => {
       persistPendingServerToolInjection({
         pendingInjection: buildPendingInjection(),
         requestId: 'req-3',
-        flowId: 'flow-3'
+        flowId: 'flow-3',
+        adapterContext: {
+          __rt: {
+            sessionDir: tempRoot
+          }
+        }
       })
     ).rejects.toMatchObject({
       code: 'SERVERTOOL_PENDING_INJECTION_FAILED',

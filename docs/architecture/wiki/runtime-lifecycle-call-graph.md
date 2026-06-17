@@ -13,7 +13,7 @@ Render rules:
 
 ## runtime.lifecycle.mainline
 
-Managed server and token-daemon lifecycle: pid cache write on start, stop-intent write on stop, instance registry as binding_pending.
+Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity.
 
 Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
 

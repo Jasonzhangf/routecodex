@@ -731,6 +731,52 @@ pub(crate) fn normalize_responses_tool_call_arguments_for_client(
     Value::Object(payload)
 }
 
+fn sanitize_responses_output_item_for_replay_safety(record: &mut Map<String, Value>) {
+    let item_type = record
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match item_type.as_str() {
+        "reasoning" => {
+            record.remove("content");
+            record.remove("status");
+        }
+        "function_call" | "function_call_output" => {
+            record.remove("status");
+        }
+        _ => {}
+    }
+}
+
+fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(sanitize_responses_client_payload_for_replay_safety_deep)
+                .collect(),
+        ),
+        Value::Object(record) => {
+            let mut out = Map::new();
+            for (key, child) in record {
+                out.insert(
+                    key.clone(),
+                    sanitize_responses_client_payload_for_replay_safety_deep(child),
+                );
+            }
+            sanitize_responses_output_item_for_replay_safety(&mut out);
+            Value::Object(out)
+        }
+        _ => value.clone(),
+    }
+}
+
+pub(crate) fn sanitize_responses_client_payload_for_replay_safety(value: &Value) -> Value {
+    sanitize_responses_client_payload_for_replay_safety_deep(value)
+}
+
 fn has_responses_freeform_apply_patch_tool(tools_raw: &Value) -> bool {
     let tool_index = build_client_tool_index(tools_raw);
     tool_index
@@ -910,10 +956,11 @@ fn project_responses_client_body_for_client_core(
 ) -> Value {
     let normalized =
         normalize_responses_tool_call_arguments_for_client(responses_payload, tools_raw);
+    let sanitized = sanitize_responses_client_payload_for_replay_safety(&normalized);
     if has_responses_freeform_apply_patch_tool(tools_raw) {
-        convert_apply_patch_function_calls_to_custom_tool_calls(&normalized)
+        convert_apply_patch_function_calls_to_custom_tool_calls(&sanitized)
     } else {
-        normalized
+        sanitized
     }
 }
 
@@ -1349,10 +1396,10 @@ fn mark_response_function_call_outputs_completed(response: &mut Map<String, Valu
 
 fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
     let Some(record) = data.as_object() else {
-        return data.clone();
+        return sanitize_responses_client_payload_for_replay_safety(data);
     };
     let Some(response) = record.get("response").and_then(Value::as_object) else {
-        return data.clone();
+        return sanitize_responses_client_payload_for_replay_safety(data);
     };
     let response_has_required_action = response.get("required_action").is_some();
     let top_level_has_required_action = record.get("required_action").is_some();
@@ -1363,7 +1410,7 @@ fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
         .unwrap_or(false);
     if !response_has_required_action && !top_level_has_required_action && !response_requires_action
     {
-        return data.clone();
+        return sanitize_responses_client_payload_for_replay_safety(data);
     }
 
     let mut next = data.clone();
@@ -1385,7 +1432,7 @@ fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
             mark_response_function_call_outputs_completed(next_response);
         }
     }
-    next
+    sanitize_responses_client_payload_for_replay_safety(&next)
 }
 
 fn build_standard_tool_call_sse_frames_from_required_action_payload(

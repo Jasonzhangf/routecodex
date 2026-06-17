@@ -24,7 +24,10 @@ export const RCC_SUBDIRS = {
   camoufoxFingerprint: 'camoufox-fp',
   camoufoxProfiles: 'camoufox-profiles',
   docs: 'docs',
-  precommand: 'precommand'
+  precommand: 'precommand',
+  runtimeLifecycle: 'state/runtime-lifecycle',
+  run: 'run',
+  tokenStats: 'state/token-manager'
 } as const;
 export type RccSubdirKey = keyof typeof RCC_SUBDIRS;
 
@@ -225,6 +228,18 @@ export function resolveRccDocsDir(homeDir?: string): string {
 
 export function resolveRccPrecommandDir(homeDir?: string): string {
   return resolveRccSubdir('precommand', homeDir);
+}
+
+export function resolveRccRuntimeLifecycleDir(homeDir?: string): string {
+  return resolveRccSubdir('runtimeLifecycle', homeDir);
+}
+
+export function resolveRccRunDir(homeDir?: string): string {
+  return resolveRccSubdir('run', homeDir);
+}
+
+export function resolveRccTokenStatsDir(homeDir?: string): string {
+  return resolveRccSubdir('tokenStats', homeDir);
 }
 
 export function ensureRccUserDirEnvironment(homeDir?: string): string {

@@ -17,7 +17,7 @@ model response
 [S1 projected]
   - response is projected to assistant tool_call:
     tool: exec_command
-    cmd: routecodex servertool run <toolName> --input-json '<json>'
+    cmd: routecodex hook run <toolName> --input-json '<json>'
   - reasoning carries the full stop/servertool summary
   - content remains empty
   |
@@ -42,13 +42,14 @@ model response
 Command:
 
 ```text
-routecodex servertool run <toolName> --input-json '<json-object>'
+routecodex hook run <toolName> --input-json '<json-object>'
 ```
 
 Common fields:
 
 - `flowId`: servertool flow id when invoked from an auto flow.
 - Tool-specific fields are passed as JSON object fields; no ticket, hidden handle, or metadata lookup is allowed.
+- Only protocol-independent continuation may be persisted outside the current request/tool roundtrip. Ordinary stopless CLI projection must not introduce writeback files or sessionDir identity coupling.
 
 `stop_message_auto` fields:
 

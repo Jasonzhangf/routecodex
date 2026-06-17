@@ -15,7 +15,7 @@ import {
   tryAcquireTokenManagerLeader,
   releaseTokenManagerLeader
 } from '../token-daemon/leader-lock.js';
-import { resolveRccPath } from '../config/user-data-paths.js';
+import { resolveTokenDaemonPidPath } from '../utils/server-runtime-pid.js';
 import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
@@ -36,7 +36,7 @@ function logTokenDaemonCommandNonBlockingError(
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const TOKEN_DAEMON_PID_FILE = resolveRccPath('token-daemon.pid');
+const TOKEN_DAEMON_PID_FILE = resolveTokenDaemonPidPath();
 const CLI_ENTRY = path.resolve(__dirname, '../cli.js');
 
 async function safeInteractiveRefresh(selector: string, options: { force?: boolean }): Promise<void> {
