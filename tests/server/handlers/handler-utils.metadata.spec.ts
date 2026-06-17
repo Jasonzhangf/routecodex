@@ -1,14 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  mergePipelineMetadata,
+  buildHandlerPipelineMetadata,
   stripRequestBodyMetadataForPipeline
 } from '../../../src/server/handlers/handler-utils.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   it('throws on client routeHint metadata (no silent drop)', () => {
-    expect(() => mergePipelineMetadata(
+    expect(() => buildHandlerPipelineMetadata(
       { routeHint: 'coding' },
       { providerProtocol: 'openai-responses' }
     )).toThrow('[server.req_adapter] forbidden client metadata field: routeHint');
@@ -17,7 +17,7 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   it('accepts session scope metadata fields and forwards them through carrier only', () => {
     const internalMetadata = { providerProtocol: 'openai-responses' } as Record<string, unknown>;
     const center = MetadataCenter.attach(internalMetadata);
-    const merged = mergePipelineMetadata(
+    const merged = buildHandlerPipelineMetadata(
       {
         sessionId: 'sess-1',
         session_id: 'sess-legacy',
@@ -41,7 +41,7 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   });
 
   it('keeps session scope fields stable when request metadata is absent', () => {
-    const merged = mergePipelineMetadata(undefined, {
+    const merged = buildHandlerPipelineMetadata(undefined, {
       providerProtocol: 'openai-responses',
       sessionId: 'sess-keep',
       conversationId: 'conv-keep'
@@ -54,14 +54,14 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
   });
 
   it('throws on client __rt metadata (no merge with internal __rt, no silent drop)', () => {
-    expect(() => mergePipelineMetadata(
+    expect(() => buildHandlerPipelineMetadata(
       { __rt: { routeHint: 'coding', keep: true } },
       { providerProtocol: 'openai-responses', __rt: { internal: true } }
     )).toThrow('[server.req_adapter] forbidden client metadata field: __rt');
   });
 
   it('accepts whitelisted client identity fields and forwards them', () => {
-    const merged = mergePipelineMetadata(
+    const merged = buildHandlerPipelineMetadata(
       {
         clientRequestId: 'client-1',
         userAgent: 'ua',

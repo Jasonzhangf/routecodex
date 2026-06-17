@@ -6,12 +6,11 @@ import {
   respondWithPipelineError,
   writeStartedSsePipelineError,
   sendPipelineResponse,
-  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  mergePipelineMetadata,
+  buildHandlerPipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
@@ -68,7 +67,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
-      metadata: mergePipelineMetadata(requestBodyMetadata, {
+      metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
         stream: wantsSSE,
         clientRequestId,
         clientStream: acceptsSse || undefined,
@@ -79,7 +78,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         clientConnectionState
       })
     });
-    if (!hasSsePayload(result.body)) {
+    if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });

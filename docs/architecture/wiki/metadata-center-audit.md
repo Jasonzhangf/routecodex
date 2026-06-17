@@ -147,9 +147,9 @@ Canonical references:
 
 ### A. Repeated Merge
 
-已确认至少有两次主 merge：
+已确认至少有两次主 merge/projection：
 
-1. `src/server/handlers/handler-utils.ts::mergePipelineMetadata`
+1. `src/server/handlers/handler-utils.ts::buildHandlerPipelineMetadata`
 2. `src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata`
 
 结果：
@@ -160,7 +160,7 @@ Canonical references:
 
 ### B. Multi-source Session Backfill
 
-`servertool-adapter-context` / `servertool-request-normalizer` 当前会从这些来源找 `sessionId/conversationId`：
+历史上 `servertool-adapter-context` / `servertool-request-normalizer` 曾会从这些来源找 `sessionId/conversationId`：
 
 - top-level metadata
 - nested `metadata`
@@ -325,9 +325,8 @@ type MetadataSlot<T> = {
 
 ## Open Risks
 
-当前这页还是审计输入面，不是实现 closeout。仍未完成的部分：
+当前这页还是审计输入面，不是完整 closeout 设计真源。仍未完成的部分：
 
 - 尚未把所有 slot 和真实 symbol 做一一绑定
-- 尚未补 machine-readable manifest
 - 尚未把现有 merge/backfill 物理删除
 - 尚未完成 live replay 验证

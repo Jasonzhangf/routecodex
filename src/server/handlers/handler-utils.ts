@@ -12,7 +12,7 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { colorizeRequestLog, formatHighlightedFinishReasonLabel } from '../utils/request-log-color.js';
-import { deriveFinishReasonWithVisibleSuccessFallback } from '../utils/finish-reason.js';
+import { deriveFinishReason } from '../utils/finish-reason.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { formatRequestTimingSummary } from '../utils/stage-logger.js';
 import {
@@ -20,7 +20,7 @@ import {
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
 import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
-export { hasSsePayload, sendPipelineResponse, type SsePayloadShape } from './handler-response-utils.js';
+export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 
 const CLIENT_HEADER_DENYLIST = new Set([
@@ -271,7 +271,7 @@ export function logRequestComplete(
   }
   const resolvedId = formatRequestId(requestId);
   const timestamp = formatTimestamp();
-  const finishReason = deriveFinishReasonWithVisibleSuccessFallback(body);
+  const finishReason = deriveFinishReason(body);
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
   const timingSuffix = options?.preserveTimingForUsage
     ? ''
@@ -684,7 +684,7 @@ export function stripRequestBodyMetadataForPipeline<T>(payload: T): T {
   return withoutMetadata as T;
 }
 
-export function mergePipelineMetadata(
+export function buildHandlerPipelineMetadata(
   requestBodyMetadata: Record<string, unknown> | undefined,
   internalMetadata: Record<string, unknown>
 ): Record<string, unknown> {

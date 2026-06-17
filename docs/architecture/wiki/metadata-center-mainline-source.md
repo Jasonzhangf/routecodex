@@ -164,7 +164,7 @@ Without this provenance contract, the center would still fail the real maintenan
 
 Current remaining flat merge/projection surfaces include:
 
-- `src/server/handlers/handler-utils.ts::mergePipelineMetadata`
+- `src/server/handlers/handler-utils.ts::buildHandlerPipelineMetadata`
 - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata`
 
 Request truth itself no longer lacks a single write ledger:

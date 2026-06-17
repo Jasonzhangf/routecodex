@@ -5,12 +5,11 @@ import {
   respondWithPipelineError,
   writeStartedSsePipelineError,
   sendPipelineResponse,
-  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  mergePipelineMetadata,
+  buildHandlerPipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
@@ -111,7 +110,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: strippedPipelineBody,
-      metadata: mergePipelineMetadata(requestBodyMetadata, {
+      metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
         stream: wantsStream,
         clientRequestId,
         inboundStream,
@@ -121,7 +120,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         clientConnectionState
       })
     });
-    if (!hasSsePayload(result.body)) {
+    if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });

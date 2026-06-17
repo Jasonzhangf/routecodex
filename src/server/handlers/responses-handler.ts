@@ -9,12 +9,11 @@ import {
   respondWithPipelineError,
   writeStartedSsePipelineError,
   sendPipelineResponse,
-  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
-  mergePipelineMetadata,
+  buildHandlerPipelineMetadata,
 } from './handler-utils.js';
 import {
   buildResponsesConversationPortScopeForHttp,
@@ -125,6 +124,9 @@ export async function handleResponses(
       entryEndpoint,
       responseIdFromPath: options.responseIdFromPath,
       requestId,
+      requestMetadata: {
+        clientHeaders,
+      },
       portScope: responsesConversationPortScope,
       forceStream: options.forceStream,
       acceptsSse,
@@ -174,7 +176,7 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: pipelineBody,
-      metadata: mergePipelineMetadata(preparedPipelineBody.requestBodyMetadata, buildResponsesPipelineMetadataForHttp({
+      metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, buildResponsesPipelineMetadataForHttp({
         streamPlan: preparedRuntime.streamPlan,
         clientRequestId,
         clientHeaders,
@@ -258,7 +260,7 @@ export async function handleResponses(
       requestContext,
       providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
     });
-    if (!hasSsePayload(result.body)) {
+    if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
