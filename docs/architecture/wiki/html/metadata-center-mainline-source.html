@@ -155,6 +155,7 @@
 
           MetaReq01InboundSeeded --&gt;|mtc-01| MetaReq02TruthMaterialized
           MetaReq02TruthMaterialized --&gt;|mtc-02| MetaReq03ContinuationAttached
+          MetaReq02TruthMaterialized --&gt;|mtc-02-result| MetaReq03ContinuationAttached
           MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
@@ -167,6 +168,7 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>mtc-01</code></td><td>inbound seed -&gt; request truth</td><td><code>ServerReqInbound01ClientRaw</code> / <code>HubReqInbound02Standardized</code></td><td><code>request_truth</code> seed only</td><td>handler + req_inbound capture</td></tr>
         <tr><td><code>mtc-02</code></td><td>request truth fixed -&gt; continuation attached</td><td><code>HubReqChatProcess03Governed</code></td><td><code>continuation_context</code></td><td>responses/chat continuation semantics</td></tr>
+        <tr><td><code>mtc-02-result</code></td><td>request truth fixed -&gt; result continuation attached</td><td><code>HubReqChatProcess03Governed</code> / host result bridge</td><td><code>continuation_context</code></td><td><code>attachResponsesRequestContextToResultForHttp -&gt; MetadataCenter.writeContinuationContext</code>; result metadata 现在也只把 <code>responsesRequestContext</code> 写进 center continuation family</td></tr>
         <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls</td></tr>
         <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td><code>request-executor-pipeline-attempt.ts</code> currently projects <code>target</code> + <code>compatibilityProfile</code> onto flat metadata while keeping request truth center-bound</td></tr>
         <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td><code>responses-response-bridge.ts</code> currently derives <code>finishReason</code> and persists lifecycle using MetadataCenter-backed request truth</td></tr>

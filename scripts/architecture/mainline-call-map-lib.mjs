@@ -150,6 +150,11 @@ export function validateMainlineCallMap(root) {
       }
 
       if (pending) {
+        for (const fieldName of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
+          if (edge?.[fieldName] !== undefined) {
+            failures.push(`${edgeWhere}: binding pending edge must not carry ${fieldName}; move verified symbols to split_bindings or mark the edge anchored/partial`);
+          }
+        }
         const splitBindingId =
           typeof edge?.split_binding_id === 'string' ? edge.split_binding_id.trim() : '';
         if (splitBindingId) {
@@ -466,4 +471,26 @@ export function renderMainlineCallGraphMarkdown(root) {
   }
 
   return `${lines.join('\n').trimEnd()}\n`;
+}
+
+// Chain-id -> wiki markdown path mapping (used by wiki-consistency gates)
+export const GENERATED_WIKI_CHAIN_PAGES = [
+  { chainId: 'request.mainline', path: 'docs/architecture/wiki/request-mainline-call-graph.md' },
+  { chainId: 'response.mainline', path: 'docs/architecture/wiki/response-mainline-call-graph.md' },
+  { chainId: 'error.mainline', path: 'docs/architecture/wiki/error-mainline-call-graph.md' },
+  { chainId: 'runtime.lifecycle.mainline', path: 'docs/architecture/wiki/runtime-lifecycle-call-graph.md' },
+  { chainId: 'runtime.tmux_client_binding.mainline', path: MAINLINE_WIKI_PATH },
+  { chainId: 'stopless.session.mainline', path: 'docs/architecture/wiki/stopless-session-mainline-source.md' },
+  { chainId: 'metadata.center.mainline', path: 'docs/architecture/wiki/metadata-center-mainline-source.md' },
+];
+
+export function loadGeneratedChainPages() {
+  const map = new Map();
+  for (const { chainId, path: relPath } of GENERATED_WIKI_CHAIN_PAGES) {
+    const absPath = path.join(process.cwd(), relPath);
+    if (fs.existsSync(absPath)) {
+      map.set(chainId, relPath);
+    }
+  }
+  return map;
 }

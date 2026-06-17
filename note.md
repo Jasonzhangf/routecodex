@@ -276,6 +276,18 @@
     - `stopMessageEnabled=true + stopMessageExcludeDirect=false` 的首轮 `/v1/responses` 现在必须 `requiresHubRelay=true`
   - `tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts`
     - `stopMessage.includeDirect=true` 时，`executePortAwarePipeline(5555, /v1/responses)` 必须在 direct transport 前 relay 到 Hub
+
+## 2026-06-18 stopless live non-activation narrowed to metadata-center clone loss
+
+- 在线 5555 现象已复核：`/v1/responses` 返回 provider 原始 `response.completed`，`output_text` 直接泄漏 stop schema，没有 `exec_command`。
+- 黑盒继续暴露第二个独立红点：`seedReasoningStopStateFromCapturedRequest` / `readStoplessGoalState` 在 Jest 下因 `servertool/handlers/stopless-goal-state` 被 source `require` 成 `ERR_REQUIRE_ESM`。
+- 更关键的 live 结构性漏洞：
+  - `buildServerToolAdapterContext(...)` 只信 `MetadataCenter.readRequestTruth()`，若 center 缺失会主动 `delete baseContext.sessionId/conversationId`；
+  - `decorateMetadataForAttempt(...)` 之前只做 `structuredClone`，没有把 `MetadataCenter` symbol 重新 bind 到 attempt clone；
+  - 这会让 request 入口明明已经写入的 request truth，在 response-stage adapterContext 里看起来像“无 session truth”，最终触发 Rust stopless contract 的 `stop_message_missing_session -> terminal_final`，表现为 stop schema 泄漏而非 cli projection。
+- 本轮修复方向：
+  - `executor-metadata.ts` 在 attempt clone 后显式 `MetadataCenter.bind(clone, MetadataCenter.read(base))`；
+  - `module-loader.ts` 把 `servertool/handlers/stopless-goal-state` 加入 Jest dist-only 前缀，避免黑盒继续被 `ERR_REQUIRE_ESM` 挡住。
 - 当前结论：
   - 代码层根因不是“sessionId 不存在”，而是“首轮 stopless direct->relay 判定器未接主线，且接入位置还必须早于 VR 准备检查”；
   - 线上要真正激活，还需要把目标端口配置成 `stopMessage.includeDirect=true`，否则默认仍是 direct 排除 stopless。
@@ -3883,3 +3895,29 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 同步更新：
   - function-map / verification-map：把 handler closeout helper 与 focused handler test 纳入 `hub.metadata_center_mainline`
   - mainline-call-map / metadata-center wiki：`mtc-07` 改为 anchored，不再写 pending
+## 2026-06-18 mainline node-id consistency gate closeout
+
+- completion audit 继续往下查时，发现“manifest、wiki、mainline call map 共用 node IDs，并被机器校验”这条还没完全锁死：
+  - repo 里已有 `scripts/architecture/verify-architecture-mainline-node-id-consistency.mjs` 草稿；
+  - 但它没接进 `package.json`，也没进 `verify:architecture-review-surface-light`；
+  - 且脚本自身错误地拿聚合页 `wiki/mainline-call-graph.md` 的全量节点去和每一条 chain 单独比，天然会误报。
+- 已修：
+  - `scripts/architecture/verify-architecture-mainline-node-id-consistency.mjs`
+    - 改成按 chain 选对应 wiki 页面；
+    - 对使用聚合页的 chain，只截取 `## <chain_id>` 对应 section；
+    - 对 `stopless.session.mainline` / `metadata.center.mainline` 改用各自 manual wiki 页面，而不是聚合页；
+    - 正反向都只做 chain-local node/step 一致性校验，不再跨 chain 误报。
+  - `scripts/architecture/mainline-call-map-lib.mjs`
+    - `GENERATED_WIKI_CHAIN_PAGES` 改成把 `stopless.session.mainline` 指向 `stopless-session-mainline-source.md`；
+    - `metadata.center.mainline` 指向 `metadata-center-mainline-source.md`。
+  - `package.json`
+    - 新增 `verify:architecture-mainline-node-id-consistency`
+    - `verify:architecture-review-surface-light` 现已强制跑该 gate
+  - `scripts/architecture/verify-function-map-build-wiring.mjs`
+    - 新增自检：`verify:architecture-review-surface-light` 若移除 `verify:architecture-mainline-node-id-consistency` 会直接失败
+  - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`
+    - `metadata.center.mainline` 行改成 `mtc-07 = anchored`，不再沿用旧 pending 叙事
+- gate 继续跑后又抓到一条真实 drift：
+  - `docs/architecture/mainline-call-map.yml` 里 `metadata.center.mainline` 有 `mtc-02-result`；
+  - `docs/architecture/wiki/metadata-center-mainline-source.md` 只写了 `mtc-02`，漏了 result-side continuation attach；
+  - 已补 `mtc-02-result` 到 mermaid + table，保证 chain-local node/step 机器校验能过。

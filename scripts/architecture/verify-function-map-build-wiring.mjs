@@ -7,6 +7,10 @@ const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const scripts = pkg.scripts || {};
 
 const requiredScript = 'verify:function-map-compile-gate';
+const requiredReviewSurfaceLightScript = 'verify:architecture-review-surface-light';
+const requiredNodeIdConsistencyScript = 'verify:architecture-mainline-node-id-consistency';
+const requiredReviewSurfaceScript = 'verify:architecture-review-surface';
+const requiredLongtailScript = 'verify:architecture-ci-longtail';
 const compileGate = scripts[requiredScript] || '';
 const requiredGateParts = [
   'verify:architecture-feature-id-anchors',
@@ -37,19 +41,37 @@ if (!compileGate) {
 
 for (const buildScriptName of ['build', 'build:min']) {
   const command = scripts[buildScriptName] || '';
+  if (!command.includes(`npm run ${requiredReviewSurfaceLightScript}`)) {
+    failures.push(`${buildScriptName} must run ${requiredReviewSurfaceLightScript}`);
+  }
   if (!command.includes(`npm run ${requiredScript}`)) {
     failures.push(`${buildScriptName} must run ${requiredScript}`);
   }
   const tscIndex = command.indexOf('tsc');
+  const reviewSurfaceIndex = command.indexOf(`npm run ${requiredReviewSurfaceLightScript}`);
   const gateIndex = command.indexOf(`npm run ${requiredScript}`);
+  if (tscIndex !== -1 && (reviewSurfaceIndex === -1 || reviewSurfaceIndex > tscIndex)) {
+    failures.push(`${buildScriptName} must run ${requiredReviewSurfaceLightScript} before tsc`);
+  }
   if (tscIndex !== -1 && (gateIndex === -1 || gateIndex > tscIndex)) {
     failures.push(`${buildScriptName} must run ${requiredScript} before tsc`);
   }
 }
 
+const reviewSurfaceLight = scripts[requiredReviewSurfaceLightScript] || '';
+if (!reviewSurfaceLight.includes(`npm run ${requiredNodeIdConsistencyScript}`)) {
+  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredNodeIdConsistencyScript}`);
+}
+
 const architectureCi = scripts['verify:architecture-ci'] || '';
+if (!architectureCi.includes(`npm run ${requiredReviewSurfaceScript}`)) {
+  failures.push(`verify:architecture-ci must run ${requiredReviewSurfaceScript}`);
+}
 if (!architectureCi.includes('npm run verify:function-map-build-wiring')) {
   failures.push('verify:architecture-ci must run verify:function-map-build-wiring');
+}
+if (!architectureCi.includes(`npm run ${requiredLongtailScript}`)) {
+  failures.push(`verify:architecture-ci must run ${requiredLongtailScript}`);
 }
 
 if (failures.length > 0) {
@@ -60,3 +82,4 @@ if (failures.length > 0) {
 
 console.log('[verify:function-map-build-wiring] ok');
 console.log(`- build scripts require ${requiredScript}`);
+console.log(`- build scripts require ${requiredReviewSurfaceLightScript}`);

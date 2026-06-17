@@ -10,6 +10,7 @@
 - `verify:architecture-ci-longtail` 清绿，且 longtail 中应进入主 CI 的 gate 已接入 `verify:architecture-ci`。
 - `build` / `build:min` 或等价本地安装前置 gate 能阻断 mainline/wiki/manifest 漂移，不能只依赖远端 CI。
 - `metadata-center-manifest.yml` 与 function map、mainline call map、wiki node IDs 有机器校验。
+- wiki / mainline call map 的 chain-local node IDs 与 step IDs 有独立机器校验，不只靠 manifest token 命中。
 - wiki HTML 有 repo 内正式渲染产物，并补浏览器级 render smoke，至少验证 Mermaid 非空、无 console error。
 - 瘦身阶段只删除已证明的死代码、零消费者 export、重复 wrapper、stale doc/gate/script 引用；功能行为和真实传输 payload 保持语义等价。
 
@@ -21,6 +22,7 @@
 - `verify:architecture-review-surface` 已接入 `verify:architecture-ci`。
 - `verify:architecture-ci-longtail` 已接入 `verify:architecture-ci`。
 - `verify:function-map-build-wiring` 已加锁：后续若移除 build/min 的 review surface light，或移除 architecture-ci 的 review surface / longtail，会直接失败。
+- `verify:architecture-mainline-node-id-consistency` 已接入 `verify:architecture-review-surface-light`，且 `verify:function-map-build-wiring` 已加锁：若 review surface light 移除此 gate，会直接失败。
 
 已验证：
 
@@ -43,6 +45,7 @@
   - `npm run verify:architecture-wiki-sync` PASS。
   - `npm run verify:architecture-wiki-html-sync` PASS。
   - `npm run verify:architecture-manifest-sync` PASS。
+  - `npm run verify:architecture-mainline-node-id-consistency` PASS。
   - `npm run verify:architecture-wiki-browser-smoke` PASS，Chrome 检查 14 个 HTML wiki 页面。
   - `npm run verify:architecture-ci-longtail` PASS。
   - `npm run verify:function-map-compile-gate` PASS。
@@ -139,6 +142,7 @@ Out of scope：
 
 1. 新增 `verify:architecture-review-surface`：
    - `verify:architecture-mainline-call-map`
+   - `verify:architecture-mainline-node-id-consistency`
    - `verify:architecture-wiki-sync`
    - `verify:architecture-wiki-html-sync`
    - `verify:architecture-manifest-sync`
@@ -199,6 +203,7 @@ Out of scope：
 架构 review surface：
 
 - `npm run verify:architecture-mainline-call-map`
+- `npm run verify:architecture-mainline-node-id-consistency`
 - `npm run verify:architecture-wiki-sync`
 - `npm run verify:architecture-wiki-html-sync`
 - `npm run verify:architecture-ci-longtail`
