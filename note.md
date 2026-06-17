@@ -1,9 +1,297 @@
+## 2026-06-18 architecture/build gate rerun + doc drift closeout
+
+- 重新按当前 worktree 取了完整硬证据，不再沿用 earlier shell 采样不稳定的旧结论：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface-light` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+- 这次 rerun 说明当前代码面上：
+  - no-custom-payload-carriers / mainline-call-map / wiki-sync / wiki-html-sync / manifest-sync 全绿；
+  - review surface 已真实进入主 `architecture-ci`；
+  - `build:min` 已能在本地前置链挡住 review-surface 漂移，不再只是远端 CI 兜底。
+- 本轮剩余漂移已经收敛到文档叙事而不是 gate/代码：
+  - `docs/goals/hub-pipeline-architecture-review-surface-cleanup-plan.md` 仍把 `mtc-07` 写成 pending；
+  - `docs/architecture/wiki/metadata-center-mainline-source.md` 仍把 center 主线描述成 `future`。
+- 收口动作：
+  - architecture review surface 计划改为：`mtc-07` 已 anchored 到 `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`；
+  - metadata-center wiki 改成“当前已部分实现、仍在迁移”，不再沿用 future 叙事；
+  - 改完需要重渲染 wiki HTML，并复跑 wiki sync/html sync/manifest sync。
+
+## 2026-06-17 hub pipeline architecture review evidence
+
+## 2026-06-18 metadata center mtc-07 closeout verified
+
+- 本轮目标是把 `docs/architecture/mainline-call-map.yml` 里的 `metadata.center.mainline::mtc-07` 从 `binding pending` 收成真实 owner/binding，不接手 Jason 正在并行清理的 `__routecodex_*` / SSE custom payload 字段线。
+- 实现收口：
+  - `src/server/runtime/http-server/metadata-center/metadata-center.ts`
+    - 增加 `METADATA_CENTER_STATUS_ORDER`
+    - 增加 `transitionSlotStatus(...)`
+    - 增加 `markReleased(...)`
+    - `releaseMetadataCenterForHttpResponse(...)` 已从 handler helper 收回到 MetadataCenter owner 文件，避免 function-map canonical builder 漂移
+  - `src/server/handlers/handler-response-common.ts`
+    - 改为从 MetadataCenter owner import/re-export `releaseMetadataCenterForHttpResponse`
+  - `src/server/handlers/handler-response-utils.ts`
+    - JSON `empty` / normal closeout 都显式调用 release helper
+  - `src/server/handlers/handler-response-sse.ts`
+    - bridge error / structured error / missing stream / prestart client close / normal SSE finish-close 都显式调用 release helper
+- 文档绑定同步：
+  - `docs/architecture/function-map.yml`：`hub.metadata_center_mainline` 维持 active，canonical builder `releaseMetadataCenterForHttpResponse` 已与真实 owner 对齐
+  - `docs/architecture/mainline-call-map.yml`：`mtc-07` 真实绑定改为 `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`：`mtc-07` 说明改成真实 owner 文件
+  - 已重渲染 generated wiki / HTML：`mainline-call-graph.md` 与 `metadata-center-mainline-source.html` 等同步
+- 定向验证通过：
+  - `tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts`
+  - `tests/server/http-server/executor-metadata.spec.ts`
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+  - `node scripts/architecture/verify-function-map-canonical-builder-definitions.mjs`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-wiki-sync`
+  - `npm run verify:architecture-wiki-html-sync`
+  - `npm run verify:architecture-manifest-sync`
+  - `npm run verify:architecture-review-surface-light`
+  - `npm run verify:architecture-review-surface`
+  - `npm run verify:architecture-ci-longtail`
+  - `node scripts/architecture/verify-function-map-build-wiring.mjs`
+  - `npm run verify:architecture-no-custom-payload-carriers`
+  - `npx tsc --noEmit --pretty false`
+  - `git diff --check`
+- 结论：
+  - `mtc-07` 现在已有真实 closeout/release owner，不再是“文档 pending edge”
+  - 此 slice 不改 payload 语义，不改 provider/runtime 路由，只做 request-scoped MetadataCenter closeout 状态收口
+- 剩余非本轮 blocker：
+  - 完整 `build:min` / `verify:architecture-ci` 通过 shell 工具长链采样存在 session 输出异常；当前已拿到其前置 review-surface / function-map / longtail leaf 证据，但本轮只把它记为“工具取证不稳定”，不把它宣称成未验证的失败或成功
+  - Jason 最新规则下，`assertClientResponseHasNoInternalCarriers()` 对顶层 `metadata` 仍需后续补成一律 fail-fast 审计点
+
+## 2026-06-18 response metadata guard protocol-shape closeout
+
+- 继续处理 `assertClientResponseHasNoInternalCarriers(...)` 的剩余边界时，先按当前 worktree 跑了：
+  - `tests/red-tests/server_response_projection_metadata_guard.test.ts`
+  - `tests/red-tests/server_sse_guard_e2e.test.ts`
+  - `tests/red-tests/server_sse_metadata_guard_e2e.test.ts`
+- 真实红点不是“所有 metadata 都漏”，而是：
+  - generic SSE frame 顶层 `metadata` 仍被放过；
+  - 但 `Responses` 协议里的合法 metadata 场景（`object: "response"` / `type: "response.*"`）本来就是绿的，不能一刀切打死。
+- 最小修复：
+  - `src/server/handlers/handler-response-common.ts`
+    - 新增 `isClientVisibleProtocolMetadataContainer(...)`
+    - 规则改成：只有 `Responses` 合法协议形状才允许 `metadata` 继续递归检查；其它 generic frame/body 一旦出现顶层 `metadata` 直接 fail-fast
+  - `tests/red-tests/server_response_projection_metadata_guard.test.ts`
+    - 新增非 `Responses` JSON body 顶层 `metadata` 即使值看似 client-safe 也必须报错的覆盖
+- 已验证：
+  - `tests/red-tests/server_response_projection_metadata_guard.test.ts` PASS
+  - `tests/red-tests/server_sse_guard_e2e.test.ts` PASS
+  - `tests/red-tests/server_sse_metadata_guard_e2e.test.ts` PASS
+  - `tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts` PASS
+- 未作为本轮证据的噪音：
+  - `tests/server/handlers/handler-metadata-boundary.spec.ts` 当前混有既有 mock/协议漂移：
+    - `/v1/responses` helper 按 JSON 解析，但当前 mock path 可能返回 SSE error frame 文本；
+    - image/messages/chat 分支也夹杂旧 mock body 形状和 handler error-path 断言；
+
+## 2026-06-18 handler metadata boundary contract refresh + persisted request-context fix
+
+- 在清 `handler-metadata-boundary.spec.ts` 噪音时，先确认了三处真实漂移不是 runtime regressions，而是测试样本落后于当前契约：
+  - `/v1/responses` 未显式传 `stream: false`，当前 handler 默认可能走 SSE；
+  - `/v1/images/generations` 样本缺 `model`，当前 handler 正常返回 400；
+  - image path 当前 pipeline body/metadata 键名是 `imageGeneration`，不再是旧断言里的 `qwenImageGeneration`。
+- 已修测试契约：
+  - `tests/server/handlers/handler-metadata-boundary.spec.ts`
+    - responses 两个 JSON 断言样本补 `stream: false`
+    - image 样本补 `model`
+    - image 断言改成 `imageGeneration`
+    - persisted request-context 断言改成读 `MetadataCenter.continuation_context.responsesRequestContext`，不再读旧 flat `metadata.responsesRequestContext`
+- 随后暴露出一个真实实现问题：
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts::buildResponsesRequestContextForHttp`
+  - 之前把 `args.payload` 原样塞进 `responsesRequestContext.payload`
+  - 这会把客户端 request body `metadata` 持久化进 continuation request context，违背“request body metadata 不进 persisted responses request context”规则
+- 已修唯一 owner：
+  - `buildResponsesRequestContextForHttp(...)` 现在先过 `stripRequestBodyMetadataForPipelineForHttp(args.payload)`，持久化时只存剥离 metadata 的 payload
+- 新增 focused lock：
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
+    - 新增 `strips request body metadata before persisting relay request context payload`
+- 已验证：
+  - `tests/server/handlers/handler-metadata-boundary.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/state-integrations.metadata-center.spec.ts` PASS
+  - `npm run verify:architecture-review-surface-light` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+
+## 2026-06-18 responses handler single-bridge-surface trim
+
+- `npm run verify:architecture-ci` 最新红项已收敛到 `verify:responses-handler-single-bridge-surface`。
+- 根因不是 bridge 逻辑漂移，而是 handler 层仍自带 `hasSsePayload()` facade：
+  - `src/server/handlers/handler-response-utils.ts` 导出本地 helper；
+  - `chat-handler.ts` / `messages-handler.ts` / `responses-handler.ts` 通过 `handler-utils.ts` 间接消费；
+  - gate 将其视为 responses handler response-side extra surface。
+- 最小修复面：物理删除 `hasSsePayload` export/re-export，handler 与测试统一改成直接判 `result.sseStream !== undefined`，不引入新 facade。
+- 已完成：
+  - `src/server/handlers/handler-response-utils.ts` 删除 `hasSsePayload()`；
+  - `src/server/handlers/handler-utils.ts` 删除转发导出；
+  - `chat-handler.ts` / `messages-handler.ts` / `responses-handler.ts` 改成直接判 `result.sseStream === undefined` 决定是否走 JSON complete log；
+  - `tests/red-tests/server_sse_guard_e2e.test.ts` 不再依赖 module helper。
+- 已验证：
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npm run verify:architecture-ci` PASS
+  - `npm run build:min` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 新发现但未纳入本轮 gate 闭环：
+  - `tests/red-tests/server_sse_guard_e2e.test.ts` 现在暴露 `assertClientResponseHasNoInternalCarriers()` 对顶层 `metadata` 不是一律 fail-fast，只在 metadata 内部命中 internal carrier key 时才报错。
+  - 这和 Jason 最新“非协议标准字段不得混入 payload”规则不完全一致，应作为内部字段清理后的下一收口点。
+
+## 2026-06-18 finish reason fallback alias removal
+
+- 候选 `src/server/utils/finish-reason.ts::deriveFinishReasonWithVisibleSuccessFallback` 已确认是真死别名，不再承载任何独立语义：
+  - 实现只是 `return deriveFinishReason(body)`；
+  - 生产调用点只剩 `src/server/handlers/handler-utils.ts` 与 `src/server/runtime/http-server/index.ts`；
+  - 直接测试 import 只剩 `tests/server/utils/finish-reason.visible-success.spec.ts`；
+  - 其余两处只是 handler focused tests 的 mock residue，不是 runtime consumer。
+- 已完成：
+  - 删除 `deriveFinishReasonWithVisibleSuccessFallback` export；
+  - `handler-utils.ts` / `http-server/index.ts` 统一改回直接调用 `deriveFinishReason(...)`；
+  - `tests/server/utils/finish-reason.visible-success.spec.ts` 改成直接覆盖 `deriveFinishReason(...)` 的 visible-success 场景；
+  - `verify:architecture-deleted-path` 新增 repo-wide deny token，禁止 `deriveFinishReasonWithVisibleSuccessFallback` 在 `src/tests/scripts` 复活。
+- 定向验证过程中发现两条 submit_tool_outputs focused tests 的 mock 与当前真实导出漂移：
+  - 缺 `captureReqInboundResponsesContextSnapshot`
+  - 缺 `lookupResponsesContinuationByResponseId`
+  - 已做最小 mock 同步，不改测试语义。
+- 已验证：
+  - `tests/server/utils/finish-reason.spec.ts`
+  - `tests/server/utils/finish-reason.visible-success.spec.ts`
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts`
+  - `npm run verify:architecture-deleted-path`
+  - `npx tsc --noEmit --pretty false`
+  - `npm run verify:architecture-ci`
+  - `npm run build:min`
+  - `git diff --check`
+
+## 2026-06-18 metadata center mainline pending-edge closeout progress
+
+- 重新按当前 worktree 复核 `docs/architecture/mainline-call-map.yml` 的 `metadata.center.mainline` 后半段，不再沿用“mtc-04..07 全 pending”的旧叙事。
+- 当前真实代码绑定：
+  - `mtc-04` 可诚实绑定到 `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt`：
+    - 这里在 `finalizeRequestExecutorAttemptMetadata(...)` 之后写 `mergedMetadata.target` 与 `mergedMetadata.compatibilityProfile`；
+    - 说明 provider observation 已有真实 adjacent owner，但仍走 flat metadata，不是显式 `provider_observation` family。
+  - `mtc-05` 可诚实绑定到 `src/modules/llmswitch/bridge/responses-response-bridge.ts::persistResponsesConversationLifecycleForHttp`：
+    - 当前 response closeout 会本地 `deriveFinishReason(args.body)`；
+    - 同时通过 `readRuntimeRequestTruthIdentifiers(args.metadata)` 读取 MetadataCenter-backed request truth 做 continuation lifecycle persistence；
+    - 这是真实 response-observation read path，但 `response_observation` 尚未落成独立 center family。
+  - `mtc-06` 可诚实绑定到 `src/server/runtime/http-server/executor/servertool-adapter-context.ts::buildServerToolAdapterContext -> MetadataCenter.readRequestTruth()`：
+    - servertool projection 现在已锁住 request `sessionId/conversationId` 只从 center 读；
+    - 但 route/provider observation 仍来自 flat metadata bag，所以只能记 `partial`。
+- 仍不能伪造的部分：
+  - `mtc-07` closeout/release 仍无显式 MetadataCenter finalize/release API；继续保持 `binding pending`，不编假 symbol。
+- 文档同步方向：
+  - `docs/architecture/wiki/metadata-center-mainline-source.md` 应改成“`mtc-04/05/06` partial、`mtc-07` pending”的状态描述；
+  - slimming / architecture review plans 也要同步，不再把后半段说成 4 条全 pending。
+
+## 2026-06-18 servertool-request-normalizer single-consumer trim
+
+- 复核后确认 `src/server/runtime/http-server/executor/servertool-request-normalizer.ts` 只有 39 行、只承载 `syncStoplessGoalStateFromCapturedRequest(...)` 一个 helper，且生产 consumer 仅 `buildServerToolAdapterContext(...)` 一处。
+- 现有 `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts` 已经覆盖该 helper 的核心语义，不需要先补新测试：
+  - RCC fenced `capturedEntryRequest` 覆盖 `capturedChatRequest`
+  - metadata `capturedEntryRequest` 作为 RCC fence fallback
+  - `onReasoningStopSeedError` 回调吞错路径
+- 本轮动作：
+  - 将 `syncStoplessGoalStateFromCapturedRequest(...)` 直接内联回 `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+  - 物理删除 `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`
+  - `docs/architecture/verification-map.yml` 删除该单文件 unit 路径
+  - `scripts/architecture/verify-architecture-deleted-path.mjs` 新增 deleted-path 防复活
+- 这属于“单 consumer 单函数文件回收”，不改变 stopless / MetadataCenter 语义，只缩小 host-side glue surface。
+
+- 本轮已把 Hub Pipeline architecture review surface 从“有文档但会漂移”推进到可 gate 化状态：
+  - `package.json` 新增 `verify:architecture-review-surface-light` 和 `verify:architecture-review-surface`；
+  - `build` / `build:min` 已在 `tsc` 前强制运行 `verify:architecture-review-surface-light`；
+  - `verify:architecture-ci` 已接入完整 `verify:architecture-review-surface` 和 `verify:architecture-ci-longtail`；
+  - `scripts/architecture/verify-function-map-build-wiring.mjs` 已加锁：如果 build/min 移除 review surface light，或 architecture-ci 移除 review surface / longtail，会直接失败。
+- 当前 architecture review surface 验证已通过：
+  - `npm run verify:architecture-review-surface` PASS：mainline call map 7 chains / 44 edges / 9 shared functions；wiki sync 检查 7 generated + 7 manual pages；HTML sync PASS；metadata-center manifest sync PASS；Chrome browser smoke 检查 14 HTML pages。
+  - `npm run verify:architecture-ci-longtail` PASS：deleted-path、duplicate-owner、ts-owner-ban 都绿。
+  - `npm run verify:function-map-compile-gate` PASS：71 active features，284 canonical builders，且 build wiring gate 已检查 review surface light。
+  - `npm run verify:architecture-mainline-mermaid-sync` PASS；`git diff --check` PASS。
+- 当前未跑 `build:min`：Jason 正在并行处理 payload/SSE 内部字段清理，完整 build 可能被该进行中代码面影响；本轮只宣称 architecture review surface/gate 闭环，不宣称全仓 build 通过。
+- active goal 继续推进到瘦身审计候选表：
+  - 已更新 `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`，新增“当前状态复核补充”表，包含 owner、consumer count、处置结论、风险、验证路径。
+  - 当前明确 delete candidate：`servertool-response-normalizer.ts::buildServerToolSseWrapperBody`，生产 consumer 为 0（只剩定义、测试、历史 doc），但与 Jason 正在处理的 payload/SSE 字段清理重叠，本轮只登记不删除。
+  - 当前 merge/rename candidate：`deriveFinishReasonWithVisibleSuccessFallback`，函数体已只是 `deriveFinishReason`，但 dirty 文件与现有测试仍引用旧名。
+  - 当前 marker cleanup candidate：`bodyContainsReasoningStopFinalizedMarker` 恒返回 false，属于旧 `__routecodex_reasoning_stop_finalized` marker 残留接口，需等内部字段清理稳定后删除调用链。
+  - 当前 defer：`responses-sse-bridge.ts` 和 `responses-response-bridge.ts`，仍是 function-map owner/canonical bridge surface，不能按“大文件/重复 facade”直接删除。
+- 最新验证：
+  - `npm run verify:function-map-build-wiring` PASS。
+  - `git diff --check` PASS。
+  - `npm run verify:architecture-review-surface-light` 当前 FAIL 于新接入的 `verify:architecture-no-custom-payload-carriers`，红项为当前已知 `__sse_responses` / `__routecodexDirectPassthrough` / `__sse_stream` 残留；这与 Jason 并行清理任务一致，本轮不抢改。
+- 继续复核（不触碰并行 payload/SSE 内部字段清理实现）：
+  - `npm run verify:architecture-mainline-call-map` PASS：7 chains / 44 edges / 9 shared functions。
+  - `npm run verify:architecture-wiki-sync` PASS：7 generated wiki pages + 7 manual wiki pages。
+  - `npm run verify:architecture-wiki-html-sync` PASS：HTML render artifacts match。
+  - `npm run verify:architecture-manifest-sync` PASS：`metadata.center.mainline` / 8 nodes / owner `hub.metadata_center_mainline`。
+  - `npm run verify:architecture-wiki-browser-smoke` PASS：Chrome loaded 14 HTML pages and Mermaid smoke render was nonblank.
+  - `npm run verify:architecture-ci-longtail` PASS：deleted-path / duplicate-owner / ts-owner-ban all green.
+  - `npm run verify:function-map-compile-gate` PASS：71 active features, 284 canonical builders, build wiring still requires review surface light.
+  - `npm run verify:architecture-mainline-mermaid-sync` PASS；`git diff --check` PASS。
+  - 当前剩余 blocker 仍是 Jason 正在清的 non-standard payload carrier gate；本轮不抢改 `__routecodex_*` / SSE wrapper 字段实现面。
+
+## 2026-06-17 SSE/custom-field boundary correction
+
+- Jason 明确纠正：SSE 层只能承载标准协议语义，不能解析帧内容来触发 servertool/stopless，也不能在请求/响应 payload 内塞自定义控制字段。
+- 最新收口规则：所有非协议标准字段都不得混入请求/响应 payload；`__routecodex_*` 与 `__sse_responses` 这类内部 carrier 必须迁出 payload，内部控制只走 `MetadataCenter` / runtime side-channel。
+- 当前已定位两类污染源：
+  - direct continuation owner 通过 `__routecodexDirectPassthrough` 放进 result metadata 并被 SSE handler / bridge 读取；
+  - SSE stream 通过 `body.__sse_responses` 包装传给 response handler，属于自定义 response payload 字段。
+- 收口方向：direct owner 写入 `MetadataCenter.continuation` 或显式 typed result side-channel；SSE stream 迁到 `PipelineExecutionResult.sseStream` 等 runtime side-channel，handler 不再从 body 解析 wrapper。
+- 当前必须删除的错误面：
+  - `__routecodex_finish_reason`
+  - `__routecodex_stream_contract_probe_body`
+  - `__routecodex_reasoning_stop_finalized`
+  - `provider-response-converter` 的 `prebuilt_sse_stopless_bridge`
+- 新边界：finish reason、terminal probe、servertool/stopless 状态只能来自 chat process 正常语义或 MetadataCenter/runtime side-channel；不能通过 SSE wrapper 自定义字段传递。
+- `__sse_responses` 仍是更深一层的内部 stream carrier 残留，后续也应迁到 MetadataCenter/runtime side-channel，不再作为 payload 字段长期存在。
+
+- function-map/verification-map 体系当前较完整：`npm run verify:function-map-compile-gate` PASS，覆盖 71 active features、71 verification rows、284 canonical builders，且 `build` / `build:min` 已强制先跑该 gate。
+- 当前不能宣称 hub pipeline 架构闭环已全锁住：`npm run verify:architecture-mainline-call-map` FAIL，`metadata.center.mainline` 的 `mtc-01/mtc-02` symbol 绑定漂移；`npm run verify:architecture-wiki-sync` 因 mainline map 无法 render；`npm run verify:architecture-wiki-html-sync` FAIL，`metadata-center-mainline-source.html` out of sync。
+- mainline call map 状态量化：7 chains / 43 edges，其中 34 anchored、3 partial、6 binding pending；pending 主要集中在 request route/outbound split 与 metadata center 后半段。
+- 流程漂移缺口：`build:min` 只强制 function-map compile gate，不强制 mainline/wiki gate；CI workflow 跑 `verify:architecture-ci` 会挡，但本地安装/构建可绕过 mainline/wiki 漂移。`verify:architecture-ci-longtail` 当前 FAIL 于 duplicate-owner 的 `metadata:runtime` 跨 family overlap，且未并入主 architecture-ci。
+- wiki/manifest 缺口：repo 有 HTML wiki 与 `metadata-center-manifest.yml`，但未看到 manifest 与 call map/wiki/function-map 的一致性校验，也未看到浏览器级 wiki render smoke gate；目前只锁 markdown/html 文本同步。
+
 ## 2026-06-17 stopless hidden responsesRequestContext session leak
 
 - 现网 `0.90.3077` 日志已确认不是历史噪音：`[servertool] ... stop_message_auto ... used=0 left=3 active=true` 后，同一请求仍以 `finish_reason=tool_calls` 返回，而同条 request 的 `[session-request][rt]` 仍是 `session=unknown`。
 - 工作树与安装态 `sharedmodule/llmswitch-core/dist/servertool/engine.js` 都已含 `skipped_missing_session` gate，说明“缺 gate”不是根因。
 - 新候选根因：`src/server/runtime/http-server/executor/servertool-request-normalizer.ts` 仍把 `responsesRequestContext.sessionId/conversationId` 回填到 `baseContext.sessionId/conversationId`；而 session realtime log 不把这层 continuation context 当请求 session 真相。
 - 这会导致 stopless 在“外层请求 session=unknown，但 relay/resume context 内有旧 session”时误激活；修复方向是把 `responsesRequestContext` 从 request session truth 候选里移除，并补红测锁“responsesRequestContext-only 不得激活 stopless”。
+
+## 2026-06-18 stopless first-turn direct bypass root cause
+
+- “5555 该激活却没激活”当前已锁到 direct/relay 主线，而不是 finish_reason 或 session header 缺失：
+  - `~/.rcc/config.toml` 中 `5555` 为 `sameProtocolBehavior = "direct"`；
+  - 项目规则已写明 direct 响应不进入 Hub `resp_chatprocess`，因此 stopless 不会在 direct 路上激活；
+  - Rust 已有 `evaluateResponsesDirectRouteDecision*` / `servertool_followup_requires_hub_relay` 契约，但 TS 主线 `executeRouterDirectPipelineForPort()` 之前根本没接这层判定。
+- 本轮已修唯一主线：
+  - `src/server/runtime/http-server/index.ts` 在 router-direct 进入 VR 之前先跑 `evaluateDirectRouteDecision(...)`；
+  - 若 `requiresHubRelay=true`，直接返回 relayable skip，不再先撞 `virtual-router-not-ready` 或直通 provider；
+  - 若 provider wire 非法，直接抛 host payload contract error，禁止继续 direct route。
+- 新红测已先红后绿：
+  - `tests/server/runtime/http-server/direct-passthrough-payload.spec.ts`
+    - `stopMessageEnabled=true + stopMessageExcludeDirect=false` 的首轮 `/v1/responses` 现在必须 `requiresHubRelay=true`
+  - `tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts`
+    - `stopMessage.includeDirect=true` 时，`executePortAwarePipeline(5555, /v1/responses)` 必须在 direct transport 前 relay 到 Hub
+- 当前结论：
+  - 代码层根因不是“sessionId 不存在”，而是“首轮 stopless direct->relay 判定器未接主线，且接入位置还必须早于 VR 准备检查”；
+  - 线上要真正激活，还需要把目标端口配置成 `stopMessage.includeDirect=true`，否则默认仍是 direct 排除 stopless。
+
+## 2026-06-17 metadata center read-path trim follow-up
+
+- 本轮继续对 goal 做真正收口，不再只停在入口 materialize：
+  - `src/server/runtime/http-server/executor/servertool-adapter-context.ts` 已改成 request `sessionId/conversationId` 只读 `MetadataCenter.request_truth`，不再从 `entryOriginRequest`、平铺 `metadata.sessionId`、`__rt.sessionId` 或其它别名回填。
+  - `src/server/runtime/http-server/executor/servertool-request-normalizer.ts` 已物理删除 `backfillAdapterContextSessionIdentifiersFromEntryOriginRequest()`，旧 request truth 回填面消失。
+- 新发现并已修：`MetadataCenter.writeRequestTruth()` 之前只是名义上的 `write_once`，实现上仍允许覆盖；现已改成第二次写同 slot 直接抛错，避免 request truth 被后续阶段静默重定义。
+- 定向回归已通过：
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+  - `tests/server/http-server/executor-metadata.spec.ts`
+  - `tests/servertool/stopless-cli-continuation.spec.ts`
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+  - `npx tsc --noEmit --pretty false`
 
 ## 2026-06-17 factual Codex samples session headers audit
 
@@ -27,6 +315,19 @@
 - 新确认的疑点不是“Codex 不带 session”，而是 live 链某处没有把这个事实反映到最终日志/功能读点：
   - `src/server/runtime/http-server/index.ts::readSessionIdForUsageLog()` 仍只读顶层 `metadata.sessionId/session_id`，不读 `MetadataCenter.request_truth`
   - 因此即使 request truth 已存在，usage/session realtime log 仍可能打印 `session=unknown`
+
+## 2026-06-17 legacy /v1/messages replay session truth progress
+
+- 旧失败 replay 样本 `tests/fixtures/goal-request-user-input-real-samples/runs/sample_1781701218849/metadata-center-replay-flattened-before-fix/request.json` 当前已证明：
+  - 最初失败不是“Codex 没带 session”，而是 replay script 只认顶层 `headers`，没有把样本里 `body.metadata.clientHeaders` 还原成真实 HTTP headers。
+  - 修完 `scripts/replay-codex-sample.mjs` 后，`/v1/messages` 不再因 `clientHeaders` / `rcc_passthrough_tool_choice` 这类 replay-only metadata 被 server req adapter 拒绝。
+  - 最新 live 5555 日志已出现：
+    - `req=req_1781701966842_f92f387a sid=019dfdc9-bcd7-7b70-8384-8bcaa9a63e6f`
+    - request id 从 `anthropic-messages-unknown-unknown-*` 变成 `anthropic-messages-minimax.key1-MiniMax-M3-*`
+  - 说明这条 replay 已经过了“session truth / metadata contract”层，进入真实 provider 路由。
+- 当前这条 replay 的新失败点已经前移到真实 upstream/provider 400：
+  - `invalid params, function name or parameters is empty (2013)`
+  - 这不再是 session truth 丢失问题。
 
 ## 2026-06-17 stopless live replay second root cause
 
@@ -3392,3 +3693,193 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - stopless CLI result restore 扩展到 Responses `input[].function_call_output/tool_result/tool_message`，并优先 raw request over captured stale request。
 - stopMessageAiMode 已从 routing snapshot / budget state 预期中删除；Rust 测试同步期望 `ai_mode=None`。
 - metadata-center 新增后验证：tsc PASS、build-core PASS、verify-servertool-rust-only PASS、function-map compile gate PASS、mainline map PASS、mermaid/html sync PASS、focused Jest 49 PASS、stopless/servertool focused Jest 81 PASS、Rust servertool 298 PASS。
+
+## 2026-06-18 SSE side-channel contract drift cleanup
+
+- 本轮红点不是生产代码复活旧 carrier，而是测试仍按旧契约构造 `body.sseStream` / `__routecodex_finish_reason` / `STREAM_CONTRACT_PROBE_BODY_KEY`。
+- 当前 handler 真契约已确认：
+  - live SSE 入口只认顶层 `PipelineExecutionResult.sseStream`；
+  - direct passthrough 只接受标准 Responses SSE event，generic `event: message` 会命中 `RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION`；
+  - stream-end 超时测试当前真实错误可能是 `HTTP_SSE_TIMEOUT`，不再保证一定是旧 `SSE_CLIENT_PROJECTION_TIMEOUT`。
+- 已同步收口测试面：
+  - `provider-response-converter.finish-reason.spec.ts` 改成 ESM `unstable_mockModule`，补齐 bridge export surface，避免误落真实 state-integrations；
+  - `request-complete-log.spec.ts` 改成当前无彩色 `status=200`，并锁“stream wrapper custom metadata 不得定义 finish_reason”；
+  - handler/SSE 黑盒测试统一改为 top-level `result.sseStream`；
+  - direct passthrough metadata guard 测试改用合法 `response.metadata` SSE frame，而不是非标准 `event: message`；
+  - tool continuation timeout 测试去掉 hidden probe carrier，改成从标准 SSE frame 自举或在 stream end repair 收口。
+- 本轮验证：
+  - `npm run verify:architecture-no-custom-payload-carriers` PASS
+  - root `npx tsc --noEmit --pretty false` PASS
+  - 定向 Jest 8 suites / 44 tests PASS（provider-response-converter finish/prebuilt/unified、request-complete-log、apply-patch freeform SSE、metadata guard、sse projection timeout、responses-response-bridge direct guard）
+
+## 2026-06-18 request-truth reader trim follow-up
+
+- 本轮继续收 `sessionId/conversationId` 读取面，先修真正会影响 continuation/usage 的 direct `/v1/responses` 读点，而不是继续放大 tmux fallback。
+- 新增唯一 helper：`src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+  - `readRuntimeRequestTruthIdentifiers()` 只认 `MetadataCenter.request_truth`，其次才认平铺 `sessionId/session_id`、`conversationId/conversation_id`；
+  - 明确不再把 `clientTmuxSessionId/tmuxSessionId` 当 request session truth。
+- `src/server/runtime/http-server/index.ts` 已收口：
+  - `readSessionIdForUsageLog()` 改为只读 centralized request-truth reader，不再 tmux fallback；
+  - direct `recordResponsesResponseForRequest(...)` 的 `conversationId` 改为同样走 centralized reader，不再只读顶层 `inputMetadata.conversationId`。
+- 这次没有继续改 stopless owner 本体；目标只是把 request truth 读取面再收干净，减少“日志/continuation 看起来像 session 丢了”的伪信号。
+- 本轮验证：
+  - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+  - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+  - root `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 仍未宣称 live stopless 激活闭环已完成：
+  - 本轮没有 build/install/restart/replay，因为修改面先收在 request-truth helper + static contract；
+  - 下一步应继续查 `/v1/responses` live path 里 request-truth 是否每次都被 materialize 进 `MetadataCenter`，再决定是否需要在线重放/构建验证。
+
+## 2026-06-18 response-side request-truth reader trim
+
+- 继续把 response-side bridge 的 request/session 读取面收向 `MetadataCenter`，避免 response handler / lifecycle persist 再从 flat metadata 猜 session truth。
+- `src/modules/llmswitch/bridge/responses-response-bridge.ts` 已收口两处：
+  - `buildResponsesRequestLogContextForHttp()` 现在优先读 `readRuntimeRequestTruthIdentifiers(metadata)`，只有 usageLogInfo 已显式携带时才覆盖；
+  - `resolveResponsesConversationPersistInputsForHttp()` 在 `args.sessionId/args.conversationId` 与 `usageLogInfo.*` 都缺失时，会回退到 `MetadataCenter.request_truth`，不再只靠 flat metadata。
+- 这一步仍然不允许 continuation context 升级成 request truth；reader helper 只看 `request_truth + flat sessionId/conversationId`，不读 `responsesRequestContext.*`、不读 tmux。
+- 本轮新增验证：
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts` PASS
+    - 锁 `buildResponsesRequestLogContextForHttp()` 优先读 center truth；
+    - 锁 `persistResponsesConversationLifecycleForHttp()` 在 usageLogInfo 缺 session 标识时，仍能从 center truth 写入 persisted response context。
+  - 联合回归：
+    - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+    - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+    - root `npx tsc --noEmit --pretty false` PASS
+    - `git diff --check` PASS
+
+## 2026-06-18 continuation-context top-level read removal
+
+- 继续清理旧 merge/backfill 语义：`src/modules/llmswitch/bridge/responses-response-bridge.ts::resolveResponsesRequestContextForHttp()` 之前仍直接读取顶层 `metadata.responsesRequestContext`，这是 continuation_context 绕过 `MetadataCenter` 的旧残留。
+- 现已改成：
+  - 只从 `MetadataCenter.read(metadata)?.readContinuationContext().responsesRequestContext` 取 continuation request context；
+  - 若 center 没有，则只退回显式 `fallback` 参数；
+  - 不再把顶层 `metadata.responsesRequestContext` 当合法读源。
+- 这一步把一个真实的旧读路径物理切断了；生产 builder 仍会写 center，因此不会影响正常 Responses handler/bridge 流程。
+- 本轮新增/更新验证：
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` PASS
+    - 锁 center continuation context 优先于 fallback；
+    - 锁“只有顶层 metadata.responsesRequestContext、没有 center binding”时不得命中，必须退回 fallback。
+  - 联合回归：
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts` PASS
+    - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+    - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+    - root `npx tsc --noEmit --pretty false` PASS
+    - `git diff --check` PASS
+
+## 2026-06-18 continuation-context top-level write removal progress
+
+- 继续清 continuation_context 的旧平铺写入：
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts::buildResponsesPipelineMetadataForHttp()` 不再把 `responsesRequestContext` 平铺写入 metadata；
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts::attachResponsesRequestContextToResultForHttp()` 也不再往 `nextMetadata.responsesRequestContext` 回填，只写 `MetadataCenter.continuation_context.responsesRequestContext`。
+- 为了支撑删除旧写入，`src/modules/llmswitch/bridge/state-integrations.ts::extractContinuationContextSessionIdentifiersFromMetadata()` 已改成只读 `MetadataCenter.read(meta)?.readContinuationContext().responsesRequestContext`，不再从顶层 `meta.responsesRequestContext` 取 continuation session 标识。
+- 这一轮的结构性结果：
+  - request-side responses bridge：写 center，不再写 top-level `responsesRequestContext`；
+  - response-side responses bridge：读 center，不再读 top-level `responsesRequestContext`；
+  - continuation-only extractor：读 center，不再读 top-level `responsesRequestContext`。
+- 本轮新增/更新验证：
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts` PASS
+    - 锁 request-side / response-side 都只写 center；
+    - 锁 metadata 顶层 `responsesRequestContext` 已不存在。
+  - `tests/modules/llmswitch/bridge/state-integrations.metadata-center.spec.ts` PASS
+    - 锁 continuation extractor 只认 center；
+    - 锁没有 center binding 时，顶层 `responsesRequestContext` 不再被读取。
+  - 联合回归：
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` PASS
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts` PASS
+    - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+    - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+    - root `npx tsc --noEmit --pretty false` PASS
+    - `git diff --check` PASS
+- 当前仍残留的相关生产旧写入点：
+  - stopless/sharedmodule 侧还有 runtime-utils 对顶层 `responsesRequestContext` 的消费，需要继续迁。
+
+## 2026-06-18 executor-metadata continuation top-level removal
+
+- `src/server/runtime/http-server/executor-metadata.ts` 的 continuation-only fallback 已继续收口：
+  - 当请求里只带 continuation session 线索、没有 request truth 时，现在只写 `MetadataCenter.continuation_context.responsesRequestContext`；
+  - 不再把 `responsesRequestContext` 回填到顶层 metadata。
+- 同时修了一个真实 merge 漏洞：
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata()` 之前只保 request-side metadata center，pipeline 侧 continuation center 会丢；
+  - 现在当 request-side center 与 pipeline-side center 同时存在时，会把 pipeline `continuation_context` 合并进最终 merged metadata center，同时继续保持 request truth 以 request-side 为唯一真源。
+- 本轮更新验证：
+  - `tests/server/http-server/executor-metadata.spec.ts` PASS
+    - 锁 request truth 仍由 request-side center 主导；
+    - 锁 pipeline-side continuation context 会被合并到最终 center，而不是丢失或回退成顶层字段。
+  - `tests/server/runtime/http-server/executor-metadata.binding.spec.ts` PASS
+    - 锁顶层 `responsesRequestContext` 不再 materialize 成 request truth；
+    - 现在也不再被自动写回 top-level metadata；单靠 request metadata 顶层 `responsesRequestContext` 也不再进入 continuation center。
+  - root `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 sharedmodule stopless continuation carrier trim
+
+- sharedmodule stop-message runtime helper 也继续收口：
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts::buildServertoolRoutingMetadata()` 不再把 `record.responsesRequestContext` / `metadata.responsesRequestContext` / `runtime.responsesRequestContext` 重新拼回 routing metadata。
+- 这一步的含义：
+  - stopless/servertool state key / session scope 相关 native helper 现在只看正常 request truth、continuation、responsesResume 等显式字段；
+  - 不再依赖旧的顶层 `responsesRequestContext` carrier。
+- 本轮验证：
+  - `tests/servertool/stop-message-runtime-utils.continuation.spec.ts` PASS
+  - 联合回归：
+    - `tests/server/http-server/executor-metadata.spec.ts` PASS
+    - `tests/server/runtime/http-server/executor-metadata.binding.spec.ts` PASS
+    - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts` PASS
+    - `tests/modules/llmswitch/bridge/state-integrations.metadata-center.spec.ts` PASS
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` PASS
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts` PASS
+    - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+    - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+    - total focused suites green: 53 assertions PASS
+  - root `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 metadata-center verification + install/restart follow-up
+
+- 为了把 handoff 里的 focused stack 重新拉绿，本轮先修了两处测试壳漂移：
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts`
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts`
+- 修复方式仅限 test mock surface 对齐当前 bridge import 面；未改生产语义。之后 9 个 metadata-center focused suites 重新 PASS（53/53）。
+- 本轮额外确认：
+  - root `npx tsc --noEmit --pretty false` PASS
+  - `verify:architecture-mainline-call-map` PASS
+  - install script 内 `verify:function-map-compile-gate` / `verify:architecture-review-surface-light` / `verify:servertool-rust-only` 等已在隔离构建目录跑通
+- 全局安装真相：
+  - `routecodex --version` / `rcc --version` 已到 `0.90.3087`
+  - `~/.rcc/install/current` 与 `/Volumes/extension/.rcc/install/current` 都指向 `releases/routecodex-0.90.3087-2026-06-17T171023Z`
+- 在线重启真相：
+  - 首次 install 收尾后，在线 `/health` 仍是 `0.90.3081`，说明安装成功但运行进程未切版
+  - 追加 `routecodex restart --port 5555` 后，`127.0.0.1:5555` / `5520` / `10000` `/health` 全部变成 `0.90.3087` 且 `ready=true pipelineReady=true`
+- 当前仍未闭环的 live blocker：
+  - `scripts/tests/stopless-5555-final-probe.mjs` 在新版本 5555 上首步失败：返回 `status=completed`，没有 `exec_command`
+  - 这说明当前线上问题已不是“无限循环”或“安装没生效”，而是“该激活时没激活”仍未证实修复
+  - 新增最小核对：`tests/server/utils/finish-reason.spec.ts` 已补 `responses status=completed + assistant output_text => stop` 断言并 PASS，说明 finish-reason 映射不是当前根因
+- 下一步唯一重点：
+  - 继续查 5555 live 请求为何 `status=completed` 时没有进入 `stop_message_auto` / CLI projection；优先排查 same-protocol direct / stop-gateway / response-stage orchestration 真正走的是哪条链
+
+## 2026-06-18 reasoning-stop finalized marker residue trim
+
+- 复核 `bodyContainsReasoningStopFinalizedMarker` 后确认它已经不在 request-executor 运行时主链中：
+  - `src/server/runtime/http-server/executor/request-executor-response-contract.ts` 的导出实现恒 `false`；
+  - `src/server/runtime/http-server/executor/request-executor-response-inspect.ts` 还有一份重复恒 `false` 定义，但零消费者；
+  - runtime 仅剩 `request-executor.ts::__requestExecutorTestables` 把 response-contract 那份 helper 暴露给测试。
+- 本轮动作：
+  - 物理删除 response-contract / response-inspect 的双份旧 helper；
+  - `request-executor.ts` 删除 testable 暴露；
+  - `tests/server/runtime/http-server/request-executor.spec.ts` 改成锁“旧 helper 已不可见”；
+  - `verify:architecture-deleted-path` 新增 repo-wide deny token：`bodyContainsReasoningStopFinalizedMarker` 与 `__routecodex_reasoning_stop_finalized`。
+- 这一步不触碰 Jason 正在做的内部字段实现收口，只先删除已经失效的 host-side marker inspection 残留，并给旧符号加防复活 gate。
+
+## 2026-06-18 metadata-center mtc-07 closeout binding
+
+- 重新复核 `mtc-07` 后确认此前文档说得没错：repo 只有 `request_truth` / `continuation_context` 写入与读取，没有显式 closeout/release API，因此 mainline-call-map 一直只能写 `binding pending`。
+- 本轮最小实现：
+  - `MetadataCenter` 新增幂等 `markReleased(...)`，只改 slot status/history，不改 payload/value；
+  - `handler-response-common.ts` 新增 `releaseMetadataCenterForHttpResponse(...)`，作为 handler closeout 统一 helper；
+  - JSON closeout、SSE finish/close cleanup、SSE bridge error、JSON->SSE bridge end/error、prestart client close 都接入该 helper。
+- 这使 `mtc-07` 从“文档 future owner”变成真实相邻边：
+  - `releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`
+  - 语义是 request closeout 后将 request-scoped center slots 标记为 `released`，不再保持 `active`
+- 同步更新：
+  - function-map / verification-map：把 handler closeout helper 与 focused handler test 纳入 `hub.metadata_center_mainline`
+  - mainline-call-map / metadata-center wiki：`mtc-07` 改为 anchored，不再写 pending

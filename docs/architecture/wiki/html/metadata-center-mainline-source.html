@@ -124,7 +124,7 @@
       <article>
         <h1>Metadata Center Mainline Source</h1>
         <h2>Purpose</h2>
-        <p>This page is the review surface for the future request-scoped metadata center mainline. It answers one question only:</p>
+        <p>This page is the review surface for the request-scoped metadata center mainline as it exists today and continues to migrate. It answers one question only:</p>
         <ul>
           <li>across the request/response lifecycle, which metadata family should be written where, and which stage is the unique owner of that write.</li>
         </ul>
@@ -134,7 +134,7 @@
           <li><code>docs/architecture/verification-map.yml</code> -&gt; <code>feature_id: hub.metadata_boundary</code></li>
           <li><code>docs/architecture/mainline-call-map.yml</code></li>
         </ul>
-        <p>This page exists because the current repo already proved that &quot;metadata passed as plain object and repeatedly merged&quot; is not queryable enough for long-lived maintenance. The immediate goal is to establish the human review surface before implementation.</p>
+        <p>This page exists because the current repo already proved that &quot;metadata passed as plain object and repeatedly merged&quot; is not queryable enough for long-lived maintenance. The current goal is to keep the human review surface aligned with the real implementation while the remaining partial families migrate.</p>
         <h2>Main Rule</h2>
         <ul>
           <li>Metadata must converge into one request-scoped center, not continue as free-floating <code>Record&lt;string, unknown&gt;</code> merges.</li>
@@ -168,10 +168,10 @@
         <tr><td><code>mtc-01</code></td><td>inbound seed -&gt; request truth</td><td><code>ServerReqInbound01ClientRaw</code> / <code>HubReqInbound02Standardized</code></td><td><code>request_truth</code> seed only</td><td>handler + req_inbound capture</td></tr>
         <tr><td><code>mtc-02</code></td><td>request truth fixed -&gt; continuation attached</td><td><code>HubReqChatProcess03Governed</code></td><td><code>continuation_context</code></td><td>responses/chat continuation semantics</td></tr>
         <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls</td></tr>
-        <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td>selected target/provider/model/protocol</td></tr>
-        <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td>finish reason / parsed response semantics</td></tr>
-        <tr><td><code>mtc-06</code></td><td>response observed -&gt; servertool context projection</td><td><code>HubRespChatProcess03Governed</code></td><td>read-only projection from center; no new request truth</td><td>stopless/followup/servertool consumers</td></tr>
-        <tr><td><code>mtc-07</code></td><td>projected -&gt; closeout released</td><td><code>HubRespOutbound04ClientSemantic</code> / <code>ServerRespOutbound05ClientFrame</code></td><td><code>status/provenance</code> closeout only</td><td>finalize / release current request-scoped center</td></tr>
+        <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td><code>request-executor-pipeline-attempt.ts</code> currently projects <code>target</code> + <code>compatibilityProfile</code> onto flat metadata while keeping request truth center-bound</td></tr>
+        <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td><code>responses-response-bridge.ts</code> currently derives <code>finishReason</code> and persists lifecycle using MetadataCenter-backed request truth</td></tr>
+        <tr><td><code>mtc-06</code></td><td>response observed -&gt; servertool context projection</td><td><code>HubRespChatProcess03Governed</code></td><td>read-only projection from center; no new request truth</td><td><code>servertool-adapter-context.ts</code> now reads request truth from <code>MetadataCenter.readRequestTruth()</code> for session/conversation projection</td></tr>
+        <tr><td><code>mtc-07</code></td><td>projected -&gt; closeout released</td><td><code>HubRespOutbound04ClientSemantic</code> / <code>ServerRespOutbound05ClientFrame</code></td><td><code>status/provenance</code> closeout only</td><td><code>metadata-center.ts::releaseMetadataCenterForHttpResponse -&gt; MetadataCenter.markReleased</code>; JSON closeout、SSE finish/close、SSE bridge-error 现已共用真实 handler closeout owner</td></tr>
         </tbody>
         </table>
         <h2>Family Definitions</h2>
@@ -262,15 +262,21 @@
         }</code></pre>
         <p>Without this provenance contract, the center would still fail the real maintenance goal: &quot;once the value is wrong, immediately know who wrote it, at which stage, and whether the overwrite was legal.&quot;</p>
         <h2>Current Structural Problems This Page Is Meant To Eliminate</h2>
-        <h3>1. Repeated Merge</h3>
-        <p>Current repeated merge surfaces include:</p>
+        <h3>1. Repeated Merge Residue</h3>
+        <p>Current remaining flat merge/projection surfaces include:</p>
         <ul>
           <li><code>src/server/handlers/handler-utils.ts::mergePipelineMetadata</code></li>
           <li><code>src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata</code></li>
         </ul>
-        <p>That means current metadata has no single write ledger.</p>
-        <h3>2. Multi-source Session Backfill</h3>
-        <p><code>sessionId/conversationId</code> are currently recovered from multiple places:</p>
+        <p>Request truth itself no longer lacks a single write ledger:</p>
+        <ul>
+          <li><code>src/server/runtime/http-server/executor-metadata.ts::buildRequestMetadata</code> owns request truth materialization</li>
+          <li><code>src/modules/llmswitch/bridge/responses-request-bridge.ts</code> owns continuation context attachment</li>
+          <li><code>src/server/runtime/http-server/executor/servertool-adapter-context.ts</code> now reads request truth only from <code>MetadataCenter</code></li>
+        </ul>
+        <p>The remaining problem is that some broader runtime fields are still projected through flat metadata merge surfaces.</p>
+        <h3>2. Multi-source Session Backfill Residue</h3>
+        <p>Historical bad sources were:</p>
         <ul>
           <li>top-level metadata</li>
           <li>nested <code>metadata</code></li>
@@ -279,7 +285,12 @@
           <li><code>capturedEntryRequest</code></li>
           <li><code>capturedChatRequest</code></li>
         </ul>
-        <p>This is direct evidence that request truth has no single owner.</p>
+        <p>Current verified status:</p>
+        <ul>
+          <li><code>servertool-adapter-context</code> no longer backfills request <code>sessionId/conversationId</code> from <code>entryOriginRequest</code> / flat metadata / <code>__rt</code></li>
+          <li><code>responsesRequestContext-only</code> no longer activates stopless</li>
+          <li>request truth is write-once inside <code>MetadataCenter</code></li>
+        </ul>
         <h3>3. Continuation Context Pollution</h3>
         <p><code>responsesRequestContext.sessionId/conversationId</code> belongs to continuation context only.</p>
         <p>It must never define:</p>
@@ -296,9 +307,14 @@
           <li><code>conversationSessionId</code></li>
           <li><code>stopMessageClientInjectSessionScope</code></li>
         </ul>
+        <h2>Current Status</h2>
+        <p>Completed:</p>
+        <p>1. center-facing docs and source map landed 2. <code>request_truth</code> and <code>continuation_context</code> landed 3. stopless/servertool consumers moved to center reads 4. live replay proved request truth <code>sessionId</code> now appears in runtime logs instead of <code>session=unknown</code></p>
+        <p>Still open:</p>
+        <p>1. delete remaining scattered flat merge/projection surfaces 2. promote <code>provider_observation</code> / <code>response_observation</code> from flat projection to explicit center-backed families so <code>mtc-04</code> / <code>mtc-05</code> / <code>mtc-06</code> can move from <code>partial</code> toward fully anchored family ownership 3. continue replay closeout for the remaining upstream <code>/v1/messages</code> <code>HTTP_400</code> that is no longer a session-truth bug</p>
         <h2>Migration Order</h2>
-        <p>Before implementation, the expected implementation order is:</p>
-        <p>1. write center-facing docs and source map 2. implement <code>request_truth</code> and <code>continuation_context</code> 3. migrate stopless/servertool consumers to center reads 4. delete scattered merge/backfill paths 5. replay live failing samples</p>
+        <p>Next migration order:</p>
+        <p>1. keep <code>request_truth</code> write-once and <code>continuation_context</code> replaceable as separate center families 2. finish provider observation and response observation family projection without reopening request-truth writes 3. replace remaining flat merge/projection surfaces with center-backed projections 4. add manifest and wiki sync gates so node IDs stay shared across machine and human review surfaces 5. replay real request samples after each runtime-facing migration slice</p>
         <h2>Review Checklist</h2>
         <ul>
           <li>Is the field classified into the correct family rather than left in a flat namespace?</li>
@@ -309,12 +325,12 @@
           <li>Does the planned center expose provenance and overwrite history for every critical slot?</li>
         </ul>
         <h2>Status</h2>
-        <p>Current status is documentation-only and audit-ready.</p>
+        <p>Current status is partially implemented and still under migration.</p>
         <p>What is done:</p>
         <ul>
           <li>human-readable audit surface exists</li>
           <li>metadata family split exists</li>
-          <li>mainline-stage owner proposal exists</li>
+          <li>mainline-stage owner map exists</li>
         </ul>
         <p>What is done in repo:</p>
         <ul>
@@ -322,12 +338,14 @@
           <li>dedicated <code>function-map.yml</code> feature exists as <code>hub.metadata_center_mainline</code></li>
           <li>dedicated <code>mainline-call-map.yml</code> chain exists as <code>metadata.center.mainline</code></li>
           <li>dedicated <code>verification-map.yml</code> feature exists as <code>hub.metadata_center_mainline</code></li>
+          <li><code>request_truth</code> and <code>continuation_context</code> are implemented in <code>MetadataCenter</code></li>
+          <li>request truth is write-once</li>
         </ul>
         <p>What is not done yet:</p>
         <ul>
-          <li>mainline call bindings are still <code>binding pending</code></li>
-          <li>no implementation yet</li>
-          <li>no live replay closeout yet</li>
+          <li><code>mtc-04</code> / <code>mtc-05</code> / <code>mtc-06</code> are only <code>partial</code>: the repo has real caller/callee/read-path truth now, but <code>provider_observation</code> / <code>response_observation</code> are still projected through flat metadata rather than first-class MetadataCenter families</li>
+          <li>remaining flat merge/projection surfaces are not fully replaced</li>
+          <li>manifest/wiki/mainline sync gates are not fully wired</li>
         </ul>
       </article>
     </section>
