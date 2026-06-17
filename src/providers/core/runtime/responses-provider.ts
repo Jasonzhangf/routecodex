@@ -58,6 +58,7 @@ type ResponsesSseConverter = {
 
 const buildProviderSseStreamConfig = (context: ProviderContext): {
   idleTimeoutMs?: number;
+  headersTimeoutMs?: number;
 } => {
   const meta = context.metadata && typeof context.metadata === 'object'
     ? context.metadata as Record<string, unknown>
@@ -72,14 +73,30 @@ const buildProviderSseStreamConfig = (context: ProviderContext): {
     ?? runtimeMeta?.providerStreamNoContentTimeoutMs
     ?? runtimeMeta?.streamNoContentTimeoutMs
     ?? runtimeMeta?.noContentTimeoutMs;
-  if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
-    return { idleTimeoutMs: Math.floor(candidate) };
-  }
+  const headersCandidate =
+    meta?.providerStreamHeadersTimeoutMs
+    ?? meta?.streamHeadersTimeoutMs
+    ?? meta?.headersTimeoutMs
+    ?? runtimeMeta?.providerStreamHeadersTimeoutMs
+    ?? runtimeMeta?.streamHeadersTimeoutMs
+    ?? runtimeMeta?.headersTimeoutMs;
   const profileCandidate = context.profile?.extensions?.providerStreamNoContentTimeoutMs;
-  if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
-    return { idleTimeoutMs: Math.floor(profileCandidate) };
+  const profileHeadersCandidate = context.profile?.extensions?.providerStreamHeadersTimeoutMs;
+  const config: {
+    idleTimeoutMs?: number;
+    headersTimeoutMs?: number;
+  } = {};
+  if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+    config.idleTimeoutMs = Math.floor(candidate);
+  } else if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
+    config.idleTimeoutMs = Math.floor(profileCandidate);
   }
-  return {};
+  if (typeof headersCandidate === 'number' && Number.isFinite(headersCandidate) && headersCandidate > 0) {
+    config.headersTimeoutMs = Math.floor(headersCandidate);
+  } else if (typeof profileHeadersCandidate === 'number' && Number.isFinite(profileHeadersCandidate) && profileHeadersCandidate > 0) {
+    config.headersTimeoutMs = Math.floor(profileHeadersCandidate);
+  }
+  return config;
 };
 
 function applyRequestRuntimeMetadataToProviderContext(

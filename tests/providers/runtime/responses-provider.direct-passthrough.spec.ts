@@ -251,7 +251,7 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.response_id).toBeUndefined();
   });
 
-  test('passes Responses no-content timeout into provider SSE transport idle timeout', async () => {
+  test('passes Responses stream transport timeouts into provider SSE transport config', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-provider-idle-timeout',
       type: 'responses-http-provider',
@@ -269,9 +269,9 @@ describe('ResponsesProvider direct passthrough', () => {
     provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
     provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
 
-    let capturedStreamConfig: { idleTimeoutMs?: number } | undefined;
+    let capturedStreamConfig: { idleTimeoutMs?: number; headersTimeoutMs?: number } | undefined;
     provider.httpClient = {
-      postStream: async (_url: string, _body: any, _headers: Record<string, string>, streamConfig?: { idleTimeoutMs?: number }) => {
+      postStream: async (_url: string, _body: any, _headers: Record<string, string>, streamConfig?: { idleTimeoutMs?: number; headersTimeoutMs?: number }) => {
         capturedStreamConfig = streamConfig;
         throw new Error('STOP_AFTER_CAPTURE');
       }
@@ -283,11 +283,15 @@ describe('ResponsesProvider direct passthrough', () => {
       stream: true
     } as any;
     attachProviderRuntimeMetadata(inbound, {
-      metadata: { entryEndpoint: '/v1/responses', providerStreamNoContentTimeoutMs: 75 }
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        providerStreamNoContentTimeoutMs: 75,
+        providerStreamHeadersTimeoutMs: 240_000
+      }
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 75 });
+    expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 75, headersTimeoutMs: 240_000 });
   });
 
   test('direct passthrough no-content timeout ignores keepalive-only SSE traffic', async () => {
