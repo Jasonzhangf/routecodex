@@ -1349,6 +1349,38 @@ owners:
       - "The buffer is runtime-local spill state only; it must not become a client/provider payload carrier."
       - "Buffered entries remain bounded by request count and per-request entry caps until explicit error-stage flush."
 
+  - feature_id: provider.debug_example_hooks_surface
+    status: active
+    summary: "provider debug example hooks and debug-mode toggles stay in explicit TS debug-owner surface"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider debug example hooks and debug-mode toggles stay in explicit TS debug-owner surface"
+    owner_module: src/providers/core/hooks/debug-example-hooks.ts
+    canonical_types:
+      - BidirectionalHook
+      - HookExecutionContext
+      - HookDataPacket
+    canonical_builders:
+      - registerDebugExampleHooks
+      - enableDebugMode
+      - disableDebugMode
+    allowed_paths:
+      - src/providers/core/hooks/debug-example-hooks.ts
+      - src/providers/core/config/provider-debug-hooks.ts
+      - tests/providers/core/hooks
+      - docs/architecture
+    forbidden_paths:
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+    required_tests:
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "This feature is debug-only observation surface; it must not become a normal response metadata owner."
+      - "Example hooks may inspect or append debug metadata, but protocol-bearing client/provider payload semantics stay outside this owner."
+
   - feature_id: responses.direct_tool_shape_contract
     status: active
     summary: "Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape"

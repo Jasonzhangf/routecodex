@@ -758,6 +758,22 @@ verification:
       - "Buffered provider snapshots are runtime-local error-spill state only; they must not become normal payload carriers."
       - "Queue bounds and flush-on-error behavior should be validated together with snapshot release gating."
 
+  - feature_id: provider.debug_example_hooks_surface
+    change_risk: low
+    unit:
+      - src/providers/core/hooks/debug-example-hooks.ts
+      - src/providers/core/config/provider-debug-hooks.ts
+    contract:
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Debug example hooks are observation/demo surface only; changes must not silently widen normal response metadata ownership."
+      - "Focused tests should cover response metadata observation plus debug-mode toggle wiring through BidirectionalHookManager."
+
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high
     unit:

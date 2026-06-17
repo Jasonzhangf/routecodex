@@ -74,6 +74,7 @@ interface ErrorInfoPayload extends UnknownObject {
   code?: string | number;
 }
 
+// feature_id: provider.debug_example_hooks_surface
 /**
  * 请求监控Hook - 监控请求预处理和验证阶段的数据变化
  */
