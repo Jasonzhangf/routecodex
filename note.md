@@ -3221,3 +3221,18 @@ cleanup-stale-server-pids.mjs 存在但引用 ~/.routecodex（老目录），不
   2. 再把 `responses-response-bridge.ts` 继续向 native owner 收口，TS 只留 IO/persist glue
   3. 合并 `hub-pipeline-execute-request-stage.ts` / `hub-pipeline-execute-chat-process-entry.ts`
   4. 清掉 stale script path 与 checked-in TS emit artifacts
+
+## 2026-06-17 commit 169c57ded
+
+136 files, +12436 -2011。
+
+- stopless persisted_state_fs_write.rs 物理删除；cli_contract 不再读/写文件状态
+- persisted_lookup 新增 `resolve_stopless_cli_result_snapshot_from_request()` 从 tool_outputs 取真源
+- napi_proxy runtime path overrides 只读 `__rt.*`，删顶层 fallback
+- pending-session/injection 统一显式 sessionDir 参数，删 env 猜测
+- stopMessageAiMode 字段从 LegacyReasoningStopRoutingState 删掉（build 抓到的回归）
+- providerFailureExemption 类型 + port-config validator
+- .gitignore 新增 `__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__/` + `.tmp/`
+- architecture function-map/mainline-call-map/wiki 全量更新
+
+Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-only PASS, focused Jest 44/44 PASS。
