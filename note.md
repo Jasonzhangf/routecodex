@@ -16,6 +16,45 @@
   - `responses-response-bridge.ts` 仍没有安全的“整文件瘦身”证据，只能继续找更小粒度 helper 或后续 native-downshift 点
   - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 已把这两个候选项改成当前 worktree 的唯一文件级 consumer count，避免继续沿用旧 token-hit 数
 
+## 2026-06-18 internal-field cleanup audit prep
+
+- 目标：在 Jason 并行清 `__routecodex_*` / SSE custom 字段时，先把“当前 gate 覆盖面”和“剩余内部 carrier 分布”审计清楚，不抢改实现。
+- 当前 `verify-no-custom-payload-carriers.mjs` 事实：
+  - 只扫描 `src`、`sharedmodule/llmswitch-core/src`、`rust-core/router-hotpath-napi/src`
+  - 只禁 6 个精确 token：
+    - `__sse_responses`
+    - `__sse_stream`
+    - `__routecodexDirectPassthrough`
+    - `__routecodex_finish_reason`
+    - `__routecodex_stream_contract_probe_body`
+    - `__routecodex_reasoning_stop_finalized`
+  - 不扫描 `tests` / `scripts` / `docs`
+  - 不做 generic prefix ban：不会拦 `__routecodexPreselectedRoute`、`__routecodexRetryProviderKey`、`__routecodexRequestInfo`、`__routecodexProviderErrorReported` 等其它前缀字段
+- 当前 runtime 仍存在的 `__routecodex*` 主要分三类：
+  1. request-side metadata side-channel
+     - `sharedmodule/.../hub-pipeline-execute-request-stage.ts`
+     - `src/server/runtime/http-server/index.ts`
+     - `src/server/runtime/http-server/executor-metadata.ts`
+     - 仍在读/写 `__routecodexPreselectedRoute`、`__routecodexRetryProviderKey`
+  2. internal object / error marker
+     - `src/providers/core/runtime/http-request-executor.ts` 的 `__routecodexRequestInfo`
+     - `src/providers/core/runtime/provider-request-header-orchestrator.ts` 的 `__routecodexAuthPreflightFatal`
+     - `src/providers/core/utils/provider-error-reporter.ts` 的 `__routecodexProviderErrorReported`
+     - `src/providers/core/utils/snapshot-writer-buffer.ts` 的 `__routecodexProviderSnapshotErrorBuffer`
+  3. client-visible metadata guard / rejection logic
+     - `src/modules/llmswitch/bridge/responses-response-bridge.ts` 会把 `__routecodex*` / `__rt*` / `providerKey` 视为 internal metadata carrier，在 `response.metadata` SSE frame 中 fail-fast
+- 当前 client-visible `metadata` 出口规则：
+  - `src/server/handlers/handler-response-common.ts`
+    - 非 `response` / `response.*` 协议形状的顶层 `metadata` 直接 fail-fast
+    - 对合法 `response.metadata`，若内部含 `__routecodex*` / `__rt*` / internal metadata keys，也会 fail-fast
+    - 普通 provider `response.metadata` 仍允许透传，这是当前标准协议语义，不是自定义 carrier
+- 结论：
+  - 当前“payload 自定义字段”热区 gate 是绿的，但它只锁住了已知高风险 token，不是“所有 `__routecodex*` 前缀一律防复活”的完整 gate
+  - 当前 repo 里仍有大量 `tests` / `docs` / `fixtures` 历史样本使用旧字段，后续如果 Jason 要求彻底收口，这些面也需要分开判定：保留为历史样本、还是同步清理
+  - 等 Jason 的实现清理合入后，下一轮审计应重点看两件事：
+    1. runtime 侧是否还把请求/响应 payload 语义建立在 `__routecodex*` 字段上
+    2. static gate 是否要从“精确 token denylist”升级到“prefix-aware + side-channel-aware”防复活
+
 ## 2026-06-18 install/build tiering gate closeout
 
 - 为了把“本地 build/install 与 CI 都能阻断 review-surface 漂移”从间接事实收成机器锁，本轮只补了调用层级 gate，不接手 Jason 正在做的 `__routecodex_*` / SSE custom 字段清理。

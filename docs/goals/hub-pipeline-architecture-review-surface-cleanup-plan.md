@@ -76,6 +76,7 @@
 当前剩余非 blocker 缺口：
 
 - 本轮补的是“install/build 调用层级防漂移 gate”，不是一次新的 release/global install 实机 smoke；也就是说，当前已经有静态机器锁保证安装链不会绕开 `build:min`，但没有在这条 slice 里重新执行 `install:global` / `install:release` 端到端安装验证。
+- `verify-no-custom-payload-carriers` 当前是“已知高风险 token denylist”，不是 generic `__routecodex*` / `__sse_*` 前缀防复活 gate；它当前也不扫描 `tests` / `scripts` / `docs`。这对 review-surface 绿灯足够，但对 Jason 最新“所有非标准 payload 字段都要锁死”规则还不是最终形态。
 
 ## 范围与边界
 
