@@ -2,6 +2,7 @@ import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { getClientConnectionAbortSignal } from '../../../utils/client-connection-state.js';
 import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from '../executor-metadata.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 import {
@@ -28,16 +29,17 @@ export async function initializeRequestExecutorRequestState(args: {
   await args.onRequestStart?.({ requestId: args.input.requestId, metadata: initialMetadata });
 
   bindSessionConversationSession(initialMetadata);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(initialMetadata);
   registerRequestLogContext(args.input.requestId, {
     logSessionColorKey: initialMetadata.logSessionColorKey,
     clientTmuxSessionId: initialMetadata.clientTmuxSessionId,
     client_tmux_session_id: initialMetadata.client_tmux_session_id,
     tmuxSessionId: initialMetadata.tmuxSessionId,
     tmux_session_id: initialMetadata.tmux_session_id,
-    sessionId: initialMetadata.sessionId,
-    session_id: initialMetadata.session_id,
-    conversationId: initialMetadata.conversationId,
-    conversation_id: initialMetadata.conversation_id
+    sessionId: requestTruth.sessionId,
+    session_id: requestTruth.sessionId,
+    conversationId: requestTruth.conversationId,
+    conversation_id: requestTruth.conversationId
   });
 
   const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
