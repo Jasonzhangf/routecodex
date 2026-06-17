@@ -78,14 +78,23 @@
 当前已验证命令：
 
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers`
+- `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability`
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-no-custom-payload-carriers`
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs`
 
 当前基线：
 
-- `__routecodex*`: `runtime=76, test=81, script=10, doc=5`，runtime unique files=`26`
-- `__sse_*`: `runtime=0, test=20, script=11, doc=3`，runtime unique files=`0`
-- `response.metadata`: `runtime=11, test=13, script=2, doc=26`，runtime unique files=`4`
+- `__routecodex*`: `runtime=76, test=81, script=12, doc=17`，runtime unique files=`26`
+- `__sse_*`: `runtime=0, test=20, script=13, doc=6`，runtime unique files=`0`
+- `response.metadata`: `runtime=11, test=13, script=3, doc=32`，runtime unique files=`4`
+- owner-queryability 审计当前结果：
+  - `__routecodex*` runtime files=`26`，其中 `unique-owner=7`、`ambiguous-owner=17`、`missing-owner=2`、`missing-verification=10`
+  - `response.metadata` runtime files=`4`，其中 `unique-owner=1`、`ambiguous-owner=2`、`missing-owner=1`、`missing-verification=1`
+  - 高信号缺口：
+    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`：`missing-owner`
+    - `src/providers/core/utils/snapshot-writer-buffer.ts`：`missing-owner`
+    - `src/providers/core/hooks/debug-example-hooks.ts`：`response.metadata` 下 `missing-owner`
+    - `src/server/runtime/http-server/executor/**` 多数热区仍落在 `hub.metadata_center_mainline` 与 `server.http_runtime_entry` 双 owner 歧义下，清字段前必须先补 owner/queryability
 
 | 候选项 | Owner feature | 当前 residue / 结论 | 风险 | 必跑验证 / gate |
 | --- | --- | --- | --- | --- |
