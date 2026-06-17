@@ -88,13 +88,14 @@
 - `__sse_*`: `runtime=0, test=20, script=13, doc=6`，runtime unique files=`0`
 - `response.metadata`: `runtime=11, test=13, script=3, doc=32`，runtime unique files=`4`
 - owner-queryability 审计当前结果：
-  - `__routecodex*` runtime files=`26`，其中 `unique-owner=7`、`ambiguous-owner=17`、`missing-owner=2`、`missing-verification=10`
+  - `__routecodex*` runtime files=`26`，其中 `unique-owner=9`、`ambiguous-owner=17`、`missing-owner=0`、`missing-verification=8`
   - `response.metadata` runtime files=`4`，其中 `unique-owner=1`、`ambiguous-owner=2`、`missing-owner=1`、`missing-verification=1`
   - 高信号缺口：
-    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`：`missing-owner`
-    - `src/providers/core/utils/snapshot-writer-buffer.ts`：`missing-owner`
     - `src/providers/core/hooks/debug-example-hooks.ts`：`response.metadata` 下 `missing-owner`
     - `src/server/runtime/http-server/executor/**` 多数热区仍落在 `hub.metadata_center_mainline` 与 `server.http_runtime_entry` 双 owner 歧义下，清字段前必须先补 owner/queryability
+  - 本轮已收口：
+    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` 现已由 `hub.request_stage_pipeline_bridge` 唯一 owning feature 锚定
+    - `src/providers/core/utils/snapshot-writer-buffer.ts` 现已由 `snapshot.provider_error_buffer` 唯一 owning feature 锚定
 
 | 候选项 | Owner feature | 当前 residue / 结论 | 风险 | 必跑验证 / gate |
 | --- | --- | --- | --- | --- |

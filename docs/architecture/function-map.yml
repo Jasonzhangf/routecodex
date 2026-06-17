@@ -207,9 +207,9 @@ owners:
 
   - feature_id: hub.servertool_stopless_cli_continuation
     status: active
-    summary: "stop_message_auto runtime-metadata-only CLI continuation planning"
+    summary: "stop_message_auto current-turn CLI continuation planning"
     owner_kind: rust_ssot
-    owner_scope: "stop_message_auto runtime metadata + current tool_output continuation planning"
+    owner_scope: "stop_message_auto current-turn tool_output continuation planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
     canonical_types:
       - StoplessOrchestrationPlanInput
@@ -780,10 +780,10 @@ owners:
       - "Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage."
 
   - feature_id: hub.metadata_center_mainline
-    status: proposed
+    status: active
     summary: "request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout"
     owner_kind: transitional
-    owner_scope: "request-scoped metadata truth/provenance registry for request and response lifecycle; current implementation owner is TS host/bridge runtime while migration target remains Rust"
+    owner_scope: "request-scoped metadata truth/provenance registry for request and response lifecycle; current implementation owner is TS host/runtime bridge"
     owner_module: src/server/runtime/http-server
     canonical_types:
       - MetaReq01InboundSeeded
@@ -798,6 +798,7 @@ owners:
       - buildRequestMetadata
       - finalizeRequestExecutorAttemptMetadata
       - buildServerToolAdapterContext
+      - releaseMetadataCenterForHttpResponse
     allowed_paths:
       - src/server/handlers
       - src/server/runtime/http-server
@@ -810,6 +811,7 @@ owners:
       - src/providers/core/runtime
     required_tests:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
+      - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
       - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
@@ -817,8 +819,9 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "This feature is documentation/index-only for now; implementation not started."
-      - "Current repeated merge/backfill surfaces (`mergePipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`, adapter-context session backfill) are explicit migration sources, not desired end-state."
+      - "This feature now has a concrete TS request-scoped center owner; remaining work is to finish deleting all legacy flat merge/backfill surfaces."
+      - "Closeout release is now a real handler owner path: response closeout must call `releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`, not stay as documentation-only pending state."
+      - "Current repeated merge/backfill surfaces (`mergePipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`) are now thin projection surfaces; adapter-context session backfill has been physically deleted."
       - "`request_truth.sessionId/conversationId` must remain distinct from `continuation_context.responsesRequestContext.*` and from tmux/client attachment scope."
       - "Future center must store provenance: writer module, symbol, stage, status, overwrite history."
       - "Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports."
@@ -862,6 +865,34 @@ owners:
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types."
+
+  - feature_id: hub.request_stage_pipeline_bridge
+    status: active
+    summary: "Hub request-stage TS bridge executes native request/chat_process stage plan and preserves preselected-route handoff semantics"
+    owner_kind: ts_bridge
+    owner_scope: "Hub request-stage TS bridge executes native request/chat_process stage plan and preserves preselected-route handoff semantics"
+    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+    canonical_types:
+      - HubPipelineResult
+    canonical_builders:
+      - executeRequestStagePipeline
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+      - tests/sharedmodule
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/router
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:llmswitch-core-tsc
+    migration_target: rust
+    notes:
+      - "This file is the TS request/chat_process execution shell only; route selection and request-stage semantics remain Rust-owned."
+      - "Preselected-route handoff must stay request-scoped control metadata, not client/provider payload."
 
   - feature_id: hub.chat_envelope_type_surface
     status: active
@@ -907,9 +938,9 @@ owners:
 
   - feature_id: hub.stage_timing_observation
     status: active
-    summary: "Hub stage timing observation glue for logs and runtime metadata top-summary attachment"
+    summary: "Hub stage timing observation glue for logs and top-summary attachment"
     owner_kind: ts_runtime_owner
-    owner_scope: "Hub stage timing observation glue for logs and runtime metadata top-summary attachment"
+    owner_scope: "Hub stage timing observation glue for logs and top-summary attachment"
     owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
     canonical_types:
       - HubStageTopSummaryEntry
@@ -1281,6 +1312,42 @@ owners:
       - "Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written."
       - "Hub `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported."
       - "Hub snapshot recorder is TS observation glue only; payload normalization/trimming semantics must remain native-owned."
+
+  - feature_id: snapshot.provider_error_buffer
+    status: active
+    summary: "provider snapshot error-spill buffer keeps bounded request-scoped samples until an error-stage flush"
+    owner_kind: ts_runtime_owner
+    owner_scope: "provider snapshot error-spill buffer keeps bounded request-scoped samples until an error-stage flush"
+    owner_module: src/providers/core/utils/snapshot-writer-buffer.ts
+    canonical_types:
+      - ProviderSnapshotPersistInput
+    canonical_builders:
+      - shouldFlushSnapshotBuffer
+      - bufferProviderSnapshotForErrorFlush
+      - takeBufferedProviderSnapshots
+      - resetProviderSnapshotErrorBufferForTests
+    allowed_paths:
+      - src/providers/core/utils/snapshot-writer-buffer.ts
+      - src/providers/core/utils/snapshot-writer.ts
+      - tests/providers/core/utils
+      - docs/architecture
+    forbidden_paths:
+      - src/providers/profile
+      - src/client
+    required_tests:
+      - tests/providers/core/utils/snapshot-writer.queue.spec.ts
+      - tests/providers/core/utils/snapshot-writer.error-spill.spec.ts
+      - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+      - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
+      - tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts
+    required_gates:
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "The buffer is runtime-local spill state only; it must not become a client/provider payload carrier."
+      - "Buffered entries remain bounded by request count and per-request entry caps until explicit error-stage flush."
 
   - feature_id: responses.direct_tool_shape_contract
     status: active

@@ -435,12 +435,13 @@ verification:
       - src/server/runtime/http-server/executor-metadata.ts
       - src/server/runtime/http-server/executor/request-executor-attempt-state.ts
       - src/server/runtime/http-server/executor/servertool-adapter-context.ts
-      - src/server/runtime/http-server/executor/servertool-request-normalizer.ts
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/server/handlers/handler-response-common.ts
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
       - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
+      - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
     integration:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
     smoke: []
@@ -482,6 +483,23 @@ verification:
     notes:
       - "HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel."
+
+  - feature_id: hub.request_stage_pipeline_bridge
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run verify:llmswitch-core-tsc
+      - npm run build:min
+    notes:
+      - "This TS shell may only preserve preselected-route handoff and execute the native request/chat_process plan."
+      - "Any route-selection or payload-semantics change still belongs to Rust/native Hub mainline owners."
 
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low
@@ -718,6 +736,27 @@ verification:
     notes:
       - "Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests."
       - "Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue."
+
+  - feature_id: snapshot.provider_error_buffer
+    change_risk: medium
+    unit:
+      - src/providers/core/utils/snapshot-writer-buffer.ts
+      - src/providers/core/utils/snapshot-writer.ts
+    contract:
+      - tests/providers/core/utils/snapshot-writer.queue.spec.ts
+      - tests/providers/core/utils/snapshot-writer.error-spill.spec.ts
+      - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
+    integration:
+      - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
+      - tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts
+    smoke:
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+    build:
+      - npm run build:min
+    notes:
+      - "Buffered provider snapshots are runtime-local error-spill state only; they must not become normal payload carriers."
+      - "Queue bounds and flush-on-error behavior should be validated together with snapshot release gating."
 
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high

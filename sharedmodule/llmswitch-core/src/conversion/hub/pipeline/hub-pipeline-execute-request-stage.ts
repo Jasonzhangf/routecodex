@@ -8,6 +8,7 @@ import type {
 import { runHubPipelineLibWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 
+// feature_id: hub.request_stage_pipeline_bridge
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
   routerEngine: VirtualRouterRuntime;

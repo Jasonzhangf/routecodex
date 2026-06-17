@@ -9,6 +9,8 @@ export type ProviderSnapshotPersistInput = {
   entryPort?: number;
 };
 
+export const SNAPSHOT_PROVIDER_ERROR_BUFFER_FEATURE_ID = 'feature_id: snapshot.provider_error_buffer';
+
 type SnapshotBufferGlobal = {
   __routecodexProviderSnapshotErrorBuffer?: Map<string, ProviderSnapshotPersistInput[]>;
 };
