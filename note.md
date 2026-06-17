@@ -3921,3 +3921,7 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
   - `docs/architecture/mainline-call-map.yml` 里 `metadata.center.mainline` 有 `mtc-02-result`；
   - `docs/architecture/wiki/metadata-center-mainline-source.md` 只写了 `mtc-02`，漏了 result-side continuation attach；
   - 已补 `mtc-02-result` 到 mermaid + table，保证 chain-local node/step 机器校验能过。
+- 顺手重新按当前 worktree 审 `responses-sse-bridge.ts` / `responses-response-bridge.ts` export consumer count：
+  - 没有新的 zero-consumer export 浮出来；
+  - `responses-sse-bridge.ts` 仍是高引用 re-export facade，不适合直接删；
+  - `responses-response-bridge.ts` 当前最小 src consumer 也仍有 2，继续只能按“更小粒度 helper / native-downshift”推进，不能按大文件直接拆删。
