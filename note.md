@@ -1,5 +1,21 @@
 ## 2026-06-18 architecture/build gate rerun + doc drift closeout
 
+## 2026-06-18 bridge surface re-audit on current worktree
+
+- 在当前大脏树上重新复核 `responses-sse-bridge.ts` / `responses-response-bridge.ts`，目标不是改实现，而是保证 slimming candidate table 仍然说真话。
+- 口径：
+  - 扫描 `src` / `tests` / `scripts` / `docs/architecture` / `docs/goals`
+  - 排除 `dist` / `coverage` / `target` / `node_modules` / `.git` / `*migrated*`
+  - 统计“唯一引用文件数”，并额外做 exported symbol 零消费者扫描
+- 结果：
+  - `responses-sse-bridge`：唯一文件级命中 `runtime=4, test=5, script=1, doc=12`
+  - `responses-response-bridge`：唯一文件级命中 `runtime=5, test=11, script=1, doc=13`
+  - 两个文件的 exported symbol 复核都没有出现新的 zero-consumer export
+- 结论：
+  - `responses-sse-bridge.ts` 仍然只是 facade surface，但当前仍被 runtime handler / bridge barrel / red gate / map 消费，不能直接删
+  - `responses-response-bridge.ts` 仍没有安全的“整文件瘦身”证据，只能继续找更小粒度 helper 或后续 native-downshift 点
+  - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 已把这两个候选项改成当前 worktree 的唯一文件级 consumer count，避免继续沿用旧 token-hit 数
+
 ## 2026-06-18 install/build tiering gate closeout
 
 - 为了把“本地 build/install 与 CI 都能阻断 review-surface 漂移”从间接事实收成机器锁，本轮只补了调用层级 gate，不接手 Jason 正在做的 `__routecodex_*` / SSE custom 字段清理。
@@ -30,6 +46,24 @@
   - no-custom-payload-carriers / mainline-call-map / wiki-sync / wiki-html-sync / manifest-sync 全绿；
   - review surface 已真实进入主 `architecture-ci`；
   - `build:min` 已能在本地前置链挡住 review-surface 漂移，不再只是远端 CI 兜底。
+
+## 2026-06-18 stopless submit_tool_outputs relay mainline correction
+
+- 继续追 live stopless 首轮激活后“第一次 submit_tool_outputs 没把工具结果带回 provider”的问题，先用真实 persisted continuation state 和 dist bridge 做了两段本地复核：
+  - `responses-conversation-store.resumeResponsesConversation(...)` 产出的 payload 正常，包含 `previous_response_id + input[user, function_call, function_call_output]`，并且 `meta.fullInput/toolOutputsDetailed` 也正常。
+  - `buildChatRequestFromResponses(...)` 对上述 resumed payload 的本地复核也正常，能产出 `assistant tool_call + role=tool/tool_call_id` 的 chat messages。
+- 这说明根因不在 continuation store，也不在 Responses->Chat bridge 本体；收敛到“relay-owned submit_tool_outputs 已经 local materialize 成普通 `/v1/responses` continuation 后，仍带着 synthetic `/v1/responses.submit_tool_outputs` 往下走，存在被 provider/runtime 当成 upstream-native submit endpoint 重新解释的风险”。
+- 本轮收口：
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+    - relay-owned `resumeResponsesConversation(...)` 成功后，`pipelineEntryEndpoint` 改为 `/v1/responses`，不再继续沿用 `/v1/responses.submit_tool_outputs`。
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`
+    - 把 relay resume mock 从过时的 `tool_outputs` 形状改成真实 materialized `input[function_call,function_call_output]`；
+    - 断言 pipeline 主线改为 `/v1/responses`，且 body 不再含 `tool_outputs`。
+  - `tests/providers/core/runtime/responses-provider-helpers.spec.ts`
+    - 新增 guard：`previous_response_id + input/function_call_output` 绝不能被 `extractSubmitToolOutputsPayload()` 误判成 native submit payload。
+- 当前单测证据：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts` PASS
+  - `tests/providers/core/runtime/responses-provider-helpers.spec.ts` 跑通了新增 guard，但文件内已有旧断言 `429 affectsHealth=false` 目前本地仍红，属于既有基线噪音，和本轮 submit relay 改动无关。
 - 本轮剩余漂移已经收敛到文档叙事而不是 gate/代码：
   - `docs/goals/hub-pipeline-architecture-review-surface-cleanup-plan.md` 仍把 `mtc-07` 写成 pending；
   - `docs/architecture/wiki/metadata-center-mainline-source.md` 仍把 center 主线描述成 `future`。
