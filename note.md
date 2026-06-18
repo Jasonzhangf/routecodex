@@ -1,3 +1,22 @@
+## 2026-06-19 MetadataCenter followup-dispatch legacy control removal slice
+
+- 当前 slice 目标：清理 `servertool-followup-dispatch` / nested metadata builder 中最后一段 active legacy followup control 读取与 promotion，避免 `metadata.__rt.serverToolFollowup/clientInjectSource/stoplessGoalStatus` 或 flat `metadata.serverToolFollowup/isServerToolFollowup/clientInjectSource` 继续作为真源。
+- 代码收口：
+  - `readFollowupMarkerFromMetadata(...)` 只读 `MetadataCenter.read(metadata)?.readRuntimeControl()` 的 `serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus`。
+  - `writeFollowupRuntimeControlToMetadata(...)` 只写 `MetadataCenter.runtime_control`，不再回写 `metadata.__rt.serverToolFollowup/clientInjectSource/serverToolFollowupSource/stoplessGoalStatus`。
+  - `buildServerToolNestedRequestMetadata(...)` 合并 base/extra 的 request-scoped MetadataCenter side-channel，再用 `readRuntimeControlProjection(out)` 判断 followup continuity；不再用 `__rt.serverToolFollowup` 派生 session/daemon/tmux 或清 `clientRequestId`。
+  - nested explicit followup source 只读 `runtime_control.serverToolFollowupSource`；source-only followup 仍合法，但必须走 MetadataCenter。
+- 测试锁定：
+  - `servertool-followup-dispatch.spec.ts` 所有正向 followup 激活改用 MetadataCenter helper，反向断言 nested metadata 不再出现 `__rt.serverToolFollowup`。
+  - `servertool-followup-dispatch.contract.spec.ts` 新增静态 gate，禁止 `promoteLegacyFollowupControlToMetadataCenter`、flat `metadata.serverToolFollowup/isServerToolFollowup/clientInjectSource`、`rt?.serverToolFollowup/clientInjectSource/serverToolFollowupSource/stoplessGoalStatus`、`runtimeMeta.serverToolFollowup` 复活。
+- 验证：
+  - focused Jest：`servertool-followup-dispatch.contract.spec.ts` + `servertool-followup-dispatch.spec.ts` PASS（37 tests）。
+  - related Jest：dispatch contract/spec + adapter-context + request-executor-runtime-blocks + provider-response-converter contract + goal-followup-http400 PASS（6 suites / 69 tests）。
+  - `npx tsc --noEmit --pretty false` PASS。
+  - `npm run audit:custom-payload-carriers` PASS：`__routecodex* runtime=14 files=9`，`__sse_* runtime files=0`。
+  - owner/queryability, runtime-manifest, containment, `verify:function-map-compile-gate`, `verify:architecture-ci`, `build:min`, `git diff --check` 均 PASS。
+- 剩余风险：本 slice 未安装/重启 live 5555；结论仅限 repo worktree/build/gate，不宣称当前已安装 runtime。
+
 ## 2026-06-19 MetadataCenter request-route runtime-control slice
 
 - 当前 slice 目标：把 request route control 的 active truth 从 flat `__routecodex*` 迁到 `MetadataCenter.runtime_control` / native runtime side-channel projection，功能不变，降低 payload-side-channel residue。

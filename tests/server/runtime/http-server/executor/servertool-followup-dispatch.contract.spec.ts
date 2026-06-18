@@ -7,6 +7,10 @@ const FOLLOWUP_DISPATCH_PATH = path.join(
   ROOT,
   'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts'
 );
+const FOLLOWUP_METADATA_PATH = path.join(
+  ROOT,
+  'src/server/runtime/http-server/executor/servertool-followup-metadata.ts'
+);
 
 function countMatches(source: string, pattern: string): number {
   return source.split(pattern).length - 1;
@@ -61,5 +65,27 @@ describe('servertool followup dispatch contract', () => {
     expect(nestedBuilderBlock).toContain('writeStopMessageEnabledRuntimeControl(');
     expect(source).toContain("'stopMessageEnabled'");
     expect(source).toContain('writeRuntimeControl(');
+  });
+
+  it('does not promote legacy followup control fields from normal metadata payload', () => {
+    const dispatchSource = fs.readFileSync(FOLLOWUP_DISPATCH_PATH, 'utf8');
+    const metadataSource = fs.readFileSync(FOLLOWUP_METADATA_PATH, 'utf8');
+    const combinedSource = `${dispatchSource}\n${metadataSource}`;
+
+    expect(combinedSource).not.toContain('promoteLegacyFollowupControlToMetadataCenter');
+    expect(combinedSource).not.toContain('metadata?.serverToolFollowup');
+    expect(combinedSource).not.toContain('metadata?.isServerToolFollowup');
+    expect(combinedSource).not.toContain('metadata?.clientInjectSource');
+    expect(combinedSource).not.toContain('metadata.serverToolFollowup');
+    expect(combinedSource).not.toContain('metadata.isServerToolFollowup');
+    expect(combinedSource).not.toContain('metadata.clientInjectSource');
+    expect(combinedSource).not.toContain('rt?.serverToolFollowup');
+    expect(combinedSource).not.toContain('rt?.clientInjectSource');
+    expect(combinedSource).not.toContain('rt?.serverToolFollowupSource');
+    expect(combinedSource).not.toContain('rt?.stoplessGoalStatus');
+    expect(combinedSource).not.toContain('runtimeMeta?.serverToolFollowup');
+    expect(combinedSource).not.toContain('runtimeMeta.serverToolFollowup');
+    expect(combinedSource).toContain('readRuntimeControlProjection(out)');
+    expect(dispatchSource).toContain('MetadataCenter.read(metadata)?.readRuntimeControl()');
   });
 });

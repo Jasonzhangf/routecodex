@@ -21,6 +21,49 @@ function metadataWithStopMessageRuntimeControl(enabled: boolean): Record<string,
   return metadata;
 }
 
+function metadataWithFollowupRuntimeControl(
+  source?: string,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = { ...extra };
+  const center = MetadataCenter.attach(metadata);
+  center.writeRuntimeControl(
+    'serverToolFollowup',
+    true,
+    {
+      module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+      symbol: 'metadataWithFollowupRuntimeControl',
+      stage: 'test'
+    }
+  );
+  if (source) {
+    center.writeRuntimeControl(
+      'serverToolFollowupSource',
+      source,
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+        symbol: 'metadataWithFollowupRuntimeControl',
+        stage: 'test'
+      }
+    );
+  }
+  return metadata;
+}
+
+function metadataWithFollowupSourceRuntimeControl(source: string): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'serverToolFollowupSource',
+    source,
+    {
+      module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+      symbol: 'metadataWithFollowupSourceRuntimeControl',
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
+
 function readBoundRuntimeControl(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
   const center = metadata ? Reflect.get(metadata, METADATA_CENTER_SYMBOL) as { readRuntimeControl?: () => Record<string, unknown> } | undefined : undefined;
   return typeof center?.readRuntimeControl === 'function' ? center.readRuntimeControl() : {};
@@ -319,15 +362,14 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/messages',
       requestId: 'req_followup_dispatch_1',
       body: { messages: [{ role: 'user', content: 'continue' }] },
-      metadata: {
-        __rt: { serverToolFollowup: true },
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         clientHeaders: {
           'anthropic-session-id': 'sess_1',
           'anthropic-conversation-id': 'conv_1',
           authorization: 'Bearer should-not-forward'
         },
         clientRequestId: 'client_req_1'
-      },
+      }),
       baseMetadata: {
         someBase: 'value'
       },
@@ -368,7 +410,7 @@ describe('servertool followup dispatch helper', () => {
         entryEndpoint: input.entryEndpoint,
         stage: input.metadata?.stage,
         direction: input.metadata?.direction,
-        followup: input.metadata?.__rt?.serverToolFollowup
+        followup: readBoundRuntimeControl(input.metadata).serverToolFollowup
       }
     }));
 
@@ -381,9 +423,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/chat/completions',
       requestId: `req_followup_dispatch_entry_${entryEndpoint.replace(/[^a-z0-9]+/gi, '_')}`,
       body: body as Record<string, unknown>,
-      metadata: {
-        __rt: { serverToolFollowup: true }
-      },
+      metadata: metadataWithFollowupRuntimeControl(),
       baseMetadata: {
         routecodexLocalPort: 5555,
         routecodexPortMode: 'router'
@@ -401,7 +441,8 @@ describe('servertool followup dispatch helper', () => {
       direction: 'request',
       stage: 'inbound'
     });
-    expect(nestedInput.metadata.__rt.serverToolFollowup).toBe(true);
+    expect(readBoundRuntimeControl(nestedInput.metadata).serverToolFollowup).toBe(true);
+    expect(nestedInput.metadata.__rt?.serverToolFollowup).toBeUndefined();
     expect(result.body).toMatchObject({
       entryEndpoint,
       stage: 'inbound',
@@ -452,7 +493,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_client_aborted_before_start',
       body: { input: 'continue' },
-      metadata: { __rt: { serverToolFollowup: true } },
+      metadata: metadataWithFollowupRuntimeControl(),
       baseMetadata: { clientAbortSignal: controller.signal },
       executeNested
     })).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
@@ -481,7 +522,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_preserve_abort_signal',
       body: { input: 'continue' },
-      metadata: { __rt: { serverToolFollowup: true } },
+      metadata: metadataWithFollowupRuntimeControl(),
       baseMetadata: { clientAbortSignal: controller.signal },
       executeNested
     });
@@ -511,7 +552,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_disabled_nested',
       body: { input: 'continue' },
-      metadata: { __rt: { serverToolFollowup: true } },
+      metadata: metadataWithFollowupRuntimeControl(),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -548,15 +589,13 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_loopstate_enabled_nested',
       body: { input: 'continue' },
-      metadata: {
+      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message', {
         __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.stop_message',
           serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
           stopMessageEnabled: false,
           routecodexPortStopMessageEnabled: false
         }
-      },
+      }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -595,15 +634,14 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_policy_enabled_nested',
       body: { input: 'continue' },
-      metadata: {
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         __rt: {
-          serverToolFollowup: true,
           serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
           stopMessageFollowupPolicy: 'preserve_eligibility',
           stopMessageEnabled: false,
           routecodexPortStopMessageEnabled: false
         }
-      },
+      }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -638,13 +676,12 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_root_budget_nested',
       body: { input: 'continue' },
-      metadata: {
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         serverToolLoopState: { flowId: 'stop_message_flow', maxRepeats: 3, repeatCount: 1 },
         __rt: {
-          serverToolFollowup: true,
           serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
         }
-      },
+      }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -677,7 +714,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_non_stopmessage_disabled_nested',
       body: { input: 'continue' },
-      metadata: { __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.apply_patch_read_before_retry' } },
+      metadata: metadataWithFollowupRuntimeControl('servertool.apply_patch_read_before_retry'),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -703,13 +740,12 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/messages',
       requestId: 'req_followup_dispatch_3',
       body: { messages: [{ role: 'user', content: 'continue' }] },
-      metadata: {
-        __rt: { serverToolFollowup: true },
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         clientHeaders: {
           'x-routecodex-session-daemon-id': 'daemon_1',
           'x-routecodex-client-tmux-session-id': 'tmux_1'
         }
-      }
+      })
     });
 
     expect(result).toEqual({ ok: true });
@@ -734,14 +770,13 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_4',
       body: { input: 'continue' },
-      metadata: {
-        __rt: { serverToolFollowup: true },
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         clientHeaders: {
           'user-agent': 'Codex/1.0',
           authorization: 'Bearer test-token',
           'anthropic-session-id': 'sess_1'
         }
-      },
+      }),
       executeNested
     });
 
@@ -791,12 +826,7 @@ describe('servertool followup dispatch helper', () => {
         input: 'continue',
         tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
       },
-      metadata: {
-        __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.reasoning_stop_continue'
-        }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.reasoning_stop_continue'),
       requestSemantics,
       executeNested
     });
@@ -858,9 +888,7 @@ describe('servertool followup dispatch helper', () => {
         input: 'continue',
         tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
       },
-      metadata: {
-        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.reasoning_stop_guard' }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.reasoning_stop_guard'),
       requestSemantics: {
         tools: {
           clientToolsRaw: goalTools
@@ -923,12 +951,7 @@ describe('servertool followup dispatch helper', () => {
         input: 'continue',
         tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
       },
-      metadata: {
-        __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.reasoning_stop_guard'
-        }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.reasoning_stop_guard'),
       requestSemantics,
       executeNested
     });
@@ -994,7 +1017,7 @@ describe('servertool followup dispatch helper', () => {
         input: 'continue',
         tools: [{ type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }]
       },
-      metadata: {
+      metadata: metadataWithFollowupRuntimeControl('servertool.reasoning_stop_guard', {
         requestSemantics: {
           responses: {
             requestParameters: {
@@ -1011,12 +1034,8 @@ describe('servertool followup dispatch helper', () => {
               }
             ]
           }
-        },
-        __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.reasoning_stop_guard'
         }
-      },
+      }),
       requestSemantics,
       executeNested
     });
@@ -1107,12 +1126,7 @@ describe('servertool followup dispatch helper', () => {
           }
         ]
       },
-      metadata: {
-        __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.apply_patch_read_before_retry'
-        }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.apply_patch_read_before_retry'),
       requestSemantics,
       executeNested
     });
@@ -1151,11 +1165,7 @@ describe('servertool followup dispatch helper', () => {
         parallel_tool_calls: true,
         reasoning: { effort: 'medium', summary: 'detailed' }
       },
-      metadata: {
-        __rt: {
-          clientInjectSource: 'servertool.apply_patch_read_before_retry'
-        }
-      },
+      metadata: metadataWithFollowupSourceRuntimeControl('servertool.apply_patch_read_before_retry'),
       executeNested
     });
 
@@ -1191,9 +1201,7 @@ describe('servertool followup dispatch helper', () => {
         contextSnapshot: { input: [{ role: 'user', content: [{ type: 'input_text', text: 'seed' }] }] },
         contextMetadataKey: 'responsesContext'
       },
-      metadata: {
-        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message'),
       requestSemantics: {
         responses: {
           context: { input: [{ role: 'user', content: [{ type: 'input_text', text: 'seed' }] }] }
@@ -1233,12 +1241,7 @@ describe('servertool followup dispatch helper', () => {
         max_tokens: 8192,
         input: 'continue'
       },
-      metadata: {
-        __rt: {
-          serverToolFollowup: true,
-          clientInjectSource: 'servertool.stop_message'
-        }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message'),
       requestSemantics: {
         stoplessGoalState: { status: 'active' },
         __routecodex: {
@@ -1343,14 +1346,13 @@ describe('servertool followup dispatch helper', () => {
         stream: false,
         input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
       },
-      metadata: {
-        __rt: { serverToolFollowup: true },
+      metadata: metadataWithFollowupRuntimeControl(undefined, {
         clientHeaders: {
           accept: 'text/event-stream',
           authorization: 'Bearer test-token',
           'content-type': 'application/json'
         }
-      },
+      }),
       executeNested
     });
 
@@ -1418,8 +1420,7 @@ describe('servertool followup dispatch helper', () => {
         stream: false,
         input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
       },
-      metadata: {
-        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' },
+      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message', {
         clientInjectOnly: true,
         clientInjectText: '继续执行',
         clientTmuxSessionId: 'tmux_legacy',
@@ -1427,7 +1428,7 @@ describe('servertool followup dispatch helper', () => {
         inboundStream: true,
         clientAcceptsSse: true,
         stream: true
-      },
+      }),
       executeNested
     });
 
@@ -1472,9 +1473,7 @@ describe('servertool followup dispatch helper', () => {
           { role: 'tool', tool_call_id: 'call_apply_patch_1', content: '{"status":"APPLY_PATCH_APPLIED","ok":true}' }
         ]
       },
-      metadata: {
-        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.apply_patch_flow' }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.apply_patch_flow'),
       requestSemantics: {
         tools: { clientToolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }] },
         responses: { requestParameters: { tool_choice: 'required' } }
@@ -1512,9 +1511,7 @@ describe('servertool followup dispatch helper', () => {
         tool_choice: { type: 'auto' },
         max_output_tokens: 8192
       },
-      metadata: {
-        __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.stop_message' }
-      },
+      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message'),
       requestSemantics: {
         __routecodex: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.stop_message' },
         tools: { clientToolsRaw: [{ type: 'function', name: 'apply_patch', parameters: { type: 'object', properties: {} } }] },

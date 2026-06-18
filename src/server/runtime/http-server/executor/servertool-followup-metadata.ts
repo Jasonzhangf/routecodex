@@ -1,7 +1,14 @@
 // feature_id: server.servertool_followup_metadata_surface
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
-
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
+import type {
+  MetadataCenterClientAttachmentScope,
+  MetadataCenterContinuationContext,
+  MetadataCenterDebugSnapshot,
+  MetadataCenterProviderObservation,
+  MetadataCenterRequestTruth,
+  MetadataCenterRuntimeControl
+} from '../metadata-center/metadata-center-types.js';
 
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
@@ -138,15 +145,95 @@ function stripStopMessageControlMetadataFields(metadata: Record<string, unknown>
   }
 }
 
-function readBoundMetadataCenter(value: Record<string, unknown>): unknown {
-  const center = Reflect.get(value, METADATA_CENTER_SYMBOL);
-  return center && typeof center === 'object' ? center : undefined;
+function readMetadataCenterFrom(value: Record<string, unknown>): MetadataCenter | undefined {
+  return MetadataCenter.read(value);
 }
 
-function bindMetadataCenter(target: Record<string, unknown>, center: unknown): void {
-  if (center && typeof center === 'object') {
-    Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+function mergeNestedMetadataCenters(
+  target: Record<string, unknown>,
+  sources: Array<Record<string, unknown>>
+): void {
+  const centers = sources
+    .map(readMetadataCenterFrom)
+    .filter((center): center is MetadataCenter => Boolean(center));
+  if (!centers.length) {
+    return;
   }
+  const merged = new MetadataCenter();
+  for (const center of centers) {
+    const snapshot = center.snapshot();
+    for (const [key, slot] of Object.entries(snapshot.requestTruth)) {
+      if (!slot) {
+        continue;
+      }
+      try {
+        merged.writeRequestTruth(
+          key as keyof MetadataCenterRequestTruth,
+          slot.value as MetadataCenterRequestTruth[keyof MetadataCenterRequestTruth],
+          slot.writtenBy,
+          'merged into servertool followup nested metadata'
+        );
+      } catch {
+        continue;
+      }
+    }
+    for (const [key, slot] of Object.entries(snapshot.continuationContext)) {
+      if (!slot) {
+        continue;
+      }
+      merged.writeContinuationContext(
+        key as keyof MetadataCenterContinuationContext,
+        slot.value as MetadataCenterContinuationContext[keyof MetadataCenterContinuationContext],
+        slot.writtenBy,
+        'merged into servertool followup nested metadata'
+      );
+    }
+    for (const [key, slot] of Object.entries(snapshot.runtimeControl)) {
+      if (!slot) {
+        continue;
+      }
+      merged.writeRuntimeControl(
+        key as keyof MetadataCenterRuntimeControl,
+        slot.value as MetadataCenterRuntimeControl[keyof MetadataCenterRuntimeControl],
+        slot.writtenBy,
+        'merged into servertool followup nested metadata'
+      );
+    }
+    for (const [key, slot] of Object.entries(snapshot.providerObservation)) {
+      if (!slot) {
+        continue;
+      }
+      merged.writeProviderObservation(
+        key as keyof MetadataCenterProviderObservation,
+        slot.value as MetadataCenterProviderObservation[keyof MetadataCenterProviderObservation],
+        slot.writtenBy,
+        'merged into servertool followup nested metadata'
+      );
+    }
+    for (const [key, slot] of Object.entries(snapshot.clientAttachmentScope)) {
+      if (!slot) {
+        continue;
+      }
+      merged.writeClientAttachmentScope(
+        key as keyof MetadataCenterClientAttachmentScope,
+        slot.value as MetadataCenterClientAttachmentScope[keyof MetadataCenterClientAttachmentScope],
+        slot.writtenBy,
+        'merged into servertool followup nested metadata'
+      );
+    }
+    for (const [key, slot] of Object.entries(snapshot.debugSnapshot)) {
+      if (!slot) {
+        continue;
+      }
+      merged.writeDebugSnapshot(
+        key as keyof MetadataCenterDebugSnapshot,
+        slot.value as MetadataCenterDebugSnapshot[keyof MetadataCenterDebugSnapshot],
+        slot.writtenBy,
+        'merged into servertool followup nested metadata'
+      );
+    }
+  }
+  MetadataCenter.bind(target, merged);
 }
 
 export function extractFollowupSessionHeaders(
@@ -237,14 +324,7 @@ export function buildServerToolNestedRequestMetadata(args: {
     direction: 'request',
     stage: 'inbound'
   };
-  const sourceMetadataCenter =
-    readBoundMetadataCenter(extraMetadata)
-    ?? readBoundMetadataCenter(baseMetadata)
-    ?? MetadataCenter.read(extraMetadata)
-    ?? MetadataCenter.read(baseMetadata);
-  if (sourceMetadataCenter) {
-    bindMetadataCenter(out, sourceMetadataCenter);
-  }
+  mergeNestedMetadataCenters(out, [baseMetadata, extraMetadata]);
   stripMappableSemanticsMetadataFields(out);
   stripProviderSelectionMetadataFields(out);
   stripStopMessageControlMetadataFields(out);
@@ -283,8 +363,11 @@ export function buildServerToolNestedRequestMetadata(args: {
     args.onMergeRuntimeMetaError?.(error);
   }
 
-  const runtimeMeta = asRecord((out as Record<string, unknown>).__rt);
-  if (runtimeMeta?.serverToolFollowup === true) {
+  const runtimeControl = readRuntimeControlProjection(out);
+  const isServerToolFollowup =
+    runtimeControl.serverToolFollowup === true
+    || Boolean(readNonEmptyString(runtimeControl.serverToolFollowupSource));
+  if (isServerToolFollowup) {
     const continuityHeaders = extractFollowupSessionHeaders(out.clientHeaders);
     if (continuityHeaders) {
       const sessionId = extractPreservedSessionToken(continuityHeaders, 'session');

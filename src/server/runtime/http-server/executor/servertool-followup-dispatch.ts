@@ -260,27 +260,16 @@ function readFollowupMarkerFromMetadata(
   metadata?: Record<string, unknown>
 ): FollowupRuntimeControl {
   const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl();
-  const rt =
-    metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-      ? (metadata.__rt as Record<string, unknown>)
-      : undefined;
   const sourceCandidate = [
     runtimeControl?.serverToolFollowupSource,
-    metadata?.clientInjectSource,
-    rt?.clientInjectSource,
-    rt?.serverToolFollowupSource
   ].find((value) => typeof value === 'string' && value.trim().length > 0);
   const stoplessGoalStatus = [
     runtimeControl?.stoplessGoalStatus,
-    rt?.stoplessGoalStatus
   ].find((value) => typeof value === 'string' && value.trim().length > 0);
 
   return {
     serverToolFollowup: [
       runtimeControl?.serverToolFollowup,
-      metadata?.serverToolFollowup,
-      metadata?.isServerToolFollowup,
-      rt?.serverToolFollowup
     ].some(readBooleanFlag),
     ...(typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()
       ? { stoplessGoalStatus: stoplessGoalStatus.trim().toLowerCase() }
@@ -335,21 +324,6 @@ function writeFollowupRuntimeControlToMetadata(
       'servertool-followup-dispatch'
     );
   }
-  const rt =
-    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-      ? (metadata.__rt as Record<string, unknown>)
-      : {};
-  metadata.__rt = {
-    ...rt,
-    ...(control.serverToolFollowup ? { serverToolFollowup: true } : {}),
-    ...(control.followupSource
-      ? {
-          clientInjectSource: control.followupSource,
-          serverToolFollowupSource: control.followupSource
-        }
-      : {}),
-    ...(control.stoplessGoalStatus ? { stoplessGoalStatus: control.stoplessGoalStatus } : {})
-  };
 }
 
 function writeStopMessageEnabledRuntimeControl(
@@ -590,25 +564,22 @@ async function buildServerToolNestedInput(args: {
     nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
       ? (nestedMetadata.__rt as Record<string, unknown>)
       : {};
-  const followupSource = [nestedMetadata.clientInjectSource, nestedRuntime.clientInjectSource]
-    .find((value) => typeof value === 'string' && value.trim().length > 0);
-  const hasExplicitFollowupSource = typeof followupSource === 'string';
+  const nestedRuntimeControl = readRuntimeControlProjection(nestedMetadata);
+  const runtimeFollowupSource =
+    typeof nestedRuntimeControl.serverToolFollowupSource === 'string' && nestedRuntimeControl.serverToolFollowupSource.trim()
+      ? nestedRuntimeControl.serverToolFollowupSource.trim()
+      : undefined;
+  const hasExplicitFollowupSource = typeof runtimeFollowupSource === 'string';
   const hasExplicitFollowupFlow =
     nestedRuntime.serverToolLoopState
     && typeof nestedRuntime.serverToolLoopState === 'object'
     && !Array.isArray(nestedRuntime.serverToolLoopState);
-  const nestedRuntimeControl = readRuntimeControlProjection(nestedMetadata);
   const runtimeStopMessageDisabled = nestedRuntimeControl.stopMessageEnabled === false;
-  const keepStopMessageEnabled =
-    !hasExplicitFollowupSource
-    && !hasExplicitFollowupFlow
-    && !runtimeStopMessageDisabled
-    && nestedRuntimeControl.stopMessageEnabled === true;
-  if (!keepStopMessageEnabled) {
+  if ((hasExplicitFollowupSource || hasExplicitFollowupFlow) && !runtimeStopMessageDisabled) {
     writeStopMessageEnabledRuntimeControl(
       nestedMetadata,
       false,
-      'servertool nested followup stop-message disabled'
+      'servertool nested explicit followup flow disables stop-message recursion'
     );
   }
   if (args.mode === 'reenter' && isFollowup) {
