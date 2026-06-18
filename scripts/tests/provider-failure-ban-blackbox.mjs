@@ -63,6 +63,48 @@ function buildResponsesOkBody(text) {
   };
 }
 
+function sanitizeSessionSegment(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_.-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function canonicalizeServerId(host, port) {
+  const rawHost = String(host || '').trim();
+  const normalizedHost = (() => {
+    if (!rawHost) return '127.0.0.1';
+    const lowered = rawHost.toLowerCase();
+    if (lowered === '0.0.0.0' || lowered === '::' || lowered === '::0') {
+      return '127.0.0.1';
+    }
+    return rawHost;
+  })();
+  const normalizedPort = Number.isFinite(port) ? Math.floor(port) : port;
+  return `${normalizedHost}:${normalizedPort}`;
+}
+
+function resolveProviderHealthPathForPortScope(ctx, userConfig, port) {
+  const portConfig = userConfig?.httpserver?.ports?.find((entry) => Number(entry?.port) === port);
+  assert.ok(portConfig, `blackbox missing port config for ${port}`);
+  const serverId = canonicalizeServerId(portConfig.host ?? userConfig?.httpserver?.host, port);
+  const serverSegment = sanitizeSessionSegment(serverId);
+  const rawScope = typeof portConfig.routingPolicyGroup === 'string' && portConfig.routingPolicyGroup.trim()
+    ? portConfig.routingPolicyGroup.trim()
+    : String(port);
+  const scopeSegment = sanitizeSessionSegment(rawScope);
+  assert.ok(serverSegment, 'blackbox failed to resolve server session segment');
+  assert.ok(scopeSegment, 'blackbox failed to resolve port session segment');
+  return path.join(ctx.rccHome, 'sessions', serverSegment, 'ports', scopeSegment, 'provider-health.json');
+}
+
+function readRoutingGroupHealth(routeCodex, routingPolicyGroup) {
+  const groupPipelines = routeCodex?.hubPipelinesByRoutingPolicyGroup;
+  const pipeline = groupPipelines instanceof Map ? groupPipelines.get(routingPolicyGroup) : undefined;
+  return pipeline?.getVirtualRouter?.()?.getStatus?.()?.health ?? [];
+}
+
 async function createMockUpstream({ status, body, onHit }) {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -313,6 +355,42 @@ function summarizeHealthFile(parsed) {
   };
 }
 
+async function findProviderHealthFiles(rootDir) {
+  const files = [];
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name === 'provider-health.json') {
+        files.push(fullPath);
+      }
+    }
+  }
+  await walk(rootDir);
+  return files.sort();
+}
+
+async function readOptionalProviderHealthSummary(providerHealthPath) {
+  try {
+    return summarizeHealthFile(JSON.parse(await fs.readFile(providerHealthPath, 'utf8')));
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return summarizeHealthFile(undefined);
+    }
+    throw error;
+  }
+}
+
 function findHealthEntry(entries, prefix) {
   if (!Array.isArray(entries)) {
     return undefined;
@@ -350,6 +428,7 @@ async function withScenarioRuntime(options, fn) {
       : 15000;
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-provider-failure-'));
   const home = path.join(tmpDir, 'home');
+  const rccHome = path.join(home, '.rcc');
   const sessionDir = path.join(tmpDir, 'sessions');
   const restores = [];
   let servers = [];
@@ -358,6 +437,7 @@ async function withScenarioRuntime(options, fn) {
     await fs.mkdir(sessionDir, { recursive: true });
     restores.push(
       setEnv('HOME', home),
+      setEnv('RCC_HOME', rccHome),
       setEnv('ROUTECODEX_SESSION_DIR', sessionDir),
       setEnv('ROUTECODEX_SNAPSHOT', '0'),
       setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
@@ -371,6 +451,7 @@ async function withScenarioRuntime(options, fn) {
     const { __requestExecutorTestables } = await import('../../dist/server/runtime/http-server/request-executor.js');
     return await fn({
       tmpDir,
+      rccHome,
       sessionDir,
       RouteCodexHttpServer,
       handleResponses,
@@ -456,13 +537,28 @@ async function run503Scenario() {
     assert.equal(primaryHits, 3, 'fourth request should bypass runtime-cooled primary');
     assert.equal(backupHits, 4);
 
-    const providerHealthPath = path.join(ctx.sessionDir, 'provider-health.json');
-    const persisted = JSON.parse(await fs.readFile(providerHealthPath, 'utf8'));
-    const healthSummary = summarizeHealthFile(persisted);
+    const runtimeHealthAfter503 = readRoutingGroupHealth(firstServer.routeCodex, 'gateway_priority_5555');
+    const primaryRuntimeHealthAfter503 = findHealthEntry(runtimeHealthAfter503, 'primary.');
+    assert.ok(primaryRuntimeHealthAfter503, '503 scenario should mark primary in runtime health after third strike');
+    assert.equal(readHealthState(primaryRuntimeHealthAfter503), 'tripped');
+
+    const providerHealthPath = resolveProviderHealthPathForPortScope(ctx, userConfig, 5555);
+    const providerHealthFiles = await findProviderHealthFiles(ctx.tmpDir);
+    assert.deepEqual(
+      providerHealthFiles.filter((filePath) => filePath !== providerHealthPath),
+      [],
+      'provider health must only persist under the port-scoped runtime truth path'
+    );
+    const healthSummary = await readOptionalProviderHealthSummary(providerHealthPath);
     assert.equal(
       healthSummary.providerCooldowns.length,
       0,
       '503 recoverable cooldown must not persist across restart'
+    );
+    await assert.rejects(
+      () => fs.stat(path.join(ctx.sessionDir, 'provider-health.json')),
+      (error) => error?.code === 'ENOENT',
+      'provider health must not leak into legacy ROUTECODEX_SESSION_DIR root'
     );
 
     await closeServer(firstServer.httpHarness.server);

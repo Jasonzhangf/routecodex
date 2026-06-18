@@ -2,6 +2,9 @@ use chrono::{Datelike, Local, TimeZone};
 use serde_json::Value;
 
 use super::VirtualRouterEngineCore;
+use crate::virtual_router_engine::routing_state_store::{
+    with_session_dir_override, with_session_dir_persistence_disabled,
+};
 use crate::virtual_router_engine::time_utils::now_ms;
 
 #[derive(Debug)]
@@ -46,6 +49,14 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
+        let session_dir = resolve_event_session_dir(event);
+        match session_dir.as_deref() {
+            Some(value) => with_session_dir_override(Some(value), || self.handle_provider_success_scoped(event)),
+            None => with_session_dir_persistence_disabled(|| self.handle_provider_success_scoped(event)),
+        }
+    }
+
+    fn handle_provider_success_scoped(&mut self, event: &Value) {
         self.refresh_provider_health_from_store(false);
         let provider_key = event
             .get("runtime")
@@ -74,6 +85,14 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
+        let session_dir = resolve_event_session_dir(event);
+        match session_dir.as_deref() {
+            Some(value) => with_session_dir_override(Some(value), || self.handle_provider_failure_scoped(event)),
+            None => with_session_dir_persistence_disabled(|| self.handle_provider_failure_scoped(event)),
+        }
+    }
+
+    fn handle_provider_failure_scoped(&mut self, event: &Value) {
         self.refresh_provider_health_from_store(false);
         if !event_affects_health(event) {
             return;
@@ -105,6 +124,14 @@ impl VirtualRouterEngineCore {
     }
 
     pub(crate) fn handle_provider_error(&mut self, event: &Value) {
+        let session_dir = resolve_event_session_dir(event);
+        match session_dir.as_deref() {
+            Some(value) => with_session_dir_override(Some(value), || self.handle_provider_error_scoped(event)),
+            None => with_session_dir_persistence_disabled(|| self.handle_provider_error_scoped(event)),
+        }
+    }
+
+    fn handle_provider_error_scoped(&mut self, event: &Value) {
         self.refresh_provider_health_from_store(false);
         if !event_affects_health(event) {
             return;
@@ -330,6 +357,16 @@ fn event_affects_health(event: &Value) -> bool {
         return false;
     }
     true
+}
+
+fn resolve_event_session_dir(event: &Value) -> Option<String> {
+    event
+        .get("runtime")
+        .and_then(|v| v.get("sessionDir").or_else(|| v.get("session_dir")))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
 }
 
 fn resolve_provider_key(event: &Value) -> Option<String> {
@@ -737,6 +774,25 @@ mod tests {
         })
     }
 
+    fn build_error_event_with_session_dir(
+        provider_key: &str,
+        classification: &str,
+        session_dir: &PathBuf,
+    ) -> Value {
+        let mut event = build_error_event(provider_key, classification);
+        event["runtime"]["sessionDir"] =
+            Value::String(session_dir.to_string_lossy().to_string());
+        event
+    }
+
+    fn unique_temp() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rcc-provider-event-scope-{unique}"))
+    }
+
     fn build_top_level_error_event(provider_key: &str, classification: &str) -> Value {
         json!({
             "code": "HTTP_429",
@@ -813,6 +869,66 @@ mod tests {
         assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 0);
         assert_eq!(state.cooldown_expires_at, None);
+    }
+
+    #[test]
+    fn provider_error_persistence_uses_event_runtime_session_dir() {
+        let provider_key = "test.key1.model";
+        let root_dir = unique_temp();
+        let scoped_dir = unique_temp();
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(&scoped_dir).unwrap();
+
+        with_session_dir_override(root_dir.to_str(), || {
+            let mut core = build_test_core(provider_key, "gpt-test");
+            let event = build_error_event_with_session_dir(
+                provider_key,
+                "unrecoverable",
+                &scoped_dir,
+            );
+
+            core.handle_provider_error(&event);
+
+            let scoped_path = scoped_dir.join("provider-health.json");
+            let root_path = root_dir.join("provider-health.json");
+            assert!(
+                scoped_path.exists(),
+                "provider health must persist in event runtime sessionDir"
+            );
+            assert!(
+                !root_path.exists(),
+                "provider health must not inherit ambient/root session dir"
+            );
+        });
+
+        let _ = fs::remove_dir_all(root_dir);
+        let _ = fs::remove_dir_all(scoped_dir);
+    }
+
+    #[test]
+    fn provider_error_without_runtime_session_dir_does_not_persist_to_root_session() {
+        let provider_key = "test.key1.model";
+        let root_dir = unique_temp();
+        fs::create_dir_all(&root_dir).unwrap();
+
+        with_session_dir_override(root_dir.to_str(), || {
+            let mut core = build_test_core(provider_key, "gpt-test");
+            let event = build_error_event(provider_key, "unrecoverable");
+
+            core.handle_provider_error(&event);
+
+            let root_path = root_dir.join("provider-health.json");
+            assert!(
+                !root_path.exists(),
+                "provider health without event runtime sessionDir must fail closed instead of persisting to root"
+            );
+            assert!(
+                load_provider_health_state().is_none(),
+                "ambient/root session store must remain empty"
+            );
+        });
+
+        let _ = fs::remove_dir_all(root_dir);
     }
 
     #[test]

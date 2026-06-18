@@ -66,6 +66,16 @@ pub(crate) fn with_session_dir_override<T>(raw: Option<&str>, callback: impl FnO
     callback()
 }
 
+pub(crate) fn with_session_dir_persistence_disabled<T>(callback: impl FnOnce() -> T) -> T {
+    let previous = SESSION_DIR_OVERRIDE.with(|slot| {
+        let previous = slot.borrow().clone();
+        *slot.borrow_mut() = SessionDirOverride::Disabled;
+        previous
+    });
+    let _guard = SessionDirOverrideGuard { previous };
+    callback()
+}
+
 pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstructionState> {
     if !is_persistent_key(key) {
         return None;

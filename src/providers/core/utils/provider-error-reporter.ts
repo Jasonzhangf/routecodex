@@ -77,7 +77,7 @@ interface EmitOptions {
 export type ErrorErr01SourceRaised = EmitOptions;
 export type ErrorErr02HostCaptured = ProviderErrorEventExtended;
 
-const PROVIDER_ERROR_REPORTED_MARKER = '__routecodexProviderErrorReported';
+const PROVIDER_ERROR_REPORTED_MARKER = Symbol.for('routecodex.provider.errorReported');
 
 function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtended {
   const err = normalizeError(options.error);
@@ -190,7 +190,7 @@ function hasProviderErrorReportedMarker(error: unknown): boolean {
   return Boolean(
     error
     && typeof error === 'object'
-    && (error as Record<string, unknown>)[PROVIDER_ERROR_REPORTED_MARKER] === true
+    && (error as { [PROVIDER_ERROR_REPORTED_MARKER]?: unknown })[PROVIDER_ERROR_REPORTED_MARKER] === true
   );
 }
 
@@ -198,7 +198,7 @@ function markProviderErrorReported(error: unknown): void {
   if (!error || typeof error !== 'object') {
     return;
   }
-  (error as Record<string, unknown>)[PROVIDER_ERROR_REPORTED_MARKER] = true;
+  (error as { [PROVIDER_ERROR_REPORTED_MARKER]?: boolean })[PROVIDER_ERROR_REPORTED_MARKER] = true;
 }
 
 export function capture_error_err_02_host_from_error_err_01_source(
@@ -245,12 +245,25 @@ export async function emitProviderSuccessAndWait(runtime: ExtendedRuntimeMetadat
 }
 
 export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedRuntimeMetadata {
-  const rtMeta = ctx.runtimeMetadata?.metadata && typeof ctx.runtimeMetadata.metadata === 'object'
-    ? (ctx.runtimeMetadata.metadata as Record<string, unknown>)
+  const runtimeMetadataRecord = ctx.runtimeMetadata && typeof ctx.runtimeMetadata === 'object' && !Array.isArray(ctx.runtimeMetadata)
+    ? (ctx.runtimeMetadata as Record<string, unknown>)
     : undefined;
-  const rtHints = rtMeta?.__rt && typeof rtMeta.__rt === 'object' && !Array.isArray(rtMeta.__rt)
-    ? (rtMeta.__rt as Record<string, unknown>)
+  const contextMetadataRecord = ctx.metadata && typeof ctx.metadata === 'object' && !Array.isArray(ctx.metadata)
+    ? (ctx.metadata as Record<string, unknown>)
     : undefined;
+  const runtimeMetadataCarrier = runtimeMetadataRecord?.metadata && typeof runtimeMetadataRecord.metadata === 'object' && !Array.isArray(runtimeMetadataRecord.metadata)
+    ? (runtimeMetadataRecord.metadata as Record<string, unknown>)
+    : undefined;
+  const directRtHints = runtimeMetadataRecord?.__rt && typeof runtimeMetadataRecord.__rt === 'object' && !Array.isArray(runtimeMetadataRecord.__rt)
+    ? (runtimeMetadataRecord.__rt as Record<string, unknown>)
+    : undefined;
+  const contextRtHints = contextMetadataRecord?.__rt && typeof contextMetadataRecord.__rt === 'object' && !Array.isArray(contextMetadataRecord.__rt)
+    ? (contextMetadataRecord.__rt as Record<string, unknown>)
+    : undefined;
+  const carrierRtHints = runtimeMetadataCarrier?.__rt && typeof runtimeMetadataCarrier.__rt === 'object' && !Array.isArray(runtimeMetadataCarrier.__rt)
+    ? (runtimeMetadataCarrier.__rt as Record<string, unknown>)
+    : undefined;
+  const rtHints = directRtHints ?? contextRtHints ?? carrierRtHints;
   const sessionDir = typeof rtHints?.sessionDir === 'string' && rtHints.sessionDir.trim()
     ? rtHints.sessionDir.trim()
     : undefined;

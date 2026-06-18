@@ -8,7 +8,11 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   reportProviderSuccessToRouterPolicy: mockReportProviderSuccessToRouterPolicy
 }));
 
-const { emitProviderError, emitProviderSuccessAndWait } = await import('../../../../src/providers/core/utils/provider-error-reporter.js');
+const {
+  buildRuntimeFromProviderContext,
+  emitProviderError,
+  emitProviderSuccessAndWait
+} = await import('../../../../src/providers/core/utils/provider-error-reporter.js');
 
 describe('provider-error-reporter', () => {
   beforeEach(() => {
@@ -90,6 +94,38 @@ describe('provider-error-reporter', () => {
         routeName: 'thinking'
       }),
       timestamp: expect.any(Number)
+    }));
+  });
+
+  it('projects request-scoped runtime paths from provider context for router policy ingress', () => {
+    const runtime = buildRuntimeFromProviderContext({
+      requestId: 'req-runtime-scope',
+      providerKey: 'primary.key1.gpt-5.3-codex',
+      providerId: 'primary',
+      providerType: 'responses',
+      providerProtocol: 'openai-responses',
+      routeName: 'thinking',
+      runtimeMetadata: {
+        requestId: 'req-runtime-scope',
+        providerKey: 'primary.key1.gpt-5.3-codex',
+        __rt: {
+          sessionDir: '/tmp/routecodex-session-port-scope',
+          rccUserDir: '/tmp/routecodex-rcc-home'
+        },
+        metadata: {
+          __rt: {
+            sessionDir: '/tmp/wrong-nested-session',
+            rccUserDir: '/tmp/wrong-nested-rcc'
+          }
+        }
+      }
+    } as never);
+
+    expect(runtime).toEqual(expect.objectContaining({
+      requestId: 'req-runtime-scope',
+      providerKey: 'primary.key1.gpt-5.3-codex',
+      sessionDir: '/tmp/routecodex-session-port-scope',
+      rccUserDir: '/tmp/routecodex-rcc-home'
     }));
   });
 });
