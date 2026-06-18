@@ -257,12 +257,43 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
+    const finalizeRouteHint = (() => {
+      const md = isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined;
+      if (md) {
+        if (typeof md.routeName === 'string' && md.routeName.trim()) return md.routeName.trim();
+        const usage = md.usageLogInfo;
+        if (usage && typeof usage === 'object' && typeof (usage as Record<string, unknown>).routeName === 'string'
+          && ((usage as Record<string, unknown>).routeName as string).trim()) {
+          return ((usage as Record<string, unknown>).routeName as string).trim();
+        }
+      }
+      const usageTop = (result as { usageLogInfo?: { routeName?: unknown } }).usageLogInfo;
+      if (usageTop && typeof usageTop.routeName === 'string' && usageTop.routeName.trim()) {
+        return usageTop.routeName.trim();
+      }
+      return undefined;
+    })();
+    const finalizeProviderKey = (() => {
+      if (typeof resumeMeta?.providerKey === 'string' && resumeMeta.providerKey.trim()) {
+        return resumeMeta.providerKey.trim();
+      }
+      const usageTop = (result as { usageLogInfo?: { providerKey?: unknown } }).usageLogInfo;
+      if (usageTop && typeof usageTop.providerKey === 'string' && usageTop.providerKey.trim()) {
+        return usageTop.providerKey.trim();
+      }
+      const md = isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined;
+      if (md && typeof md.providerKey === 'string' && md.providerKey.trim()) {
+        return md.providerKey.trim();
+      }
+      return undefined;
+    })();
     result.metadata = await finalizeResponsesPipelineResultForHttp({
       entryEndpoint: pipelineEntryEndpoint,
       body: result.body,
       resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
       requestContext,
-      providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
+      providerKey: finalizeProviderKey,
+      ...(finalizeRouteHint ? { routeHint: finalizeRouteHint } : {})
     });
     if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {

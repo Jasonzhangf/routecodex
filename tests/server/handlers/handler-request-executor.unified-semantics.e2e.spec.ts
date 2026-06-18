@@ -7,7 +7,6 @@ import { Readable } from 'node:stream';
 const { convertProviderResponse: coreConvertProviderResponse } = await import(
   '../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
 );
-const actualBridge = await import('../../../src/modules/llmswitch/bridge.ts');
 
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
@@ -15,6 +14,174 @@ const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
+const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({ stickyKey: 'test:stopless', hadDirective: false, directiveTypes: [] }));
+const mockPersistStoplessGoalStateSnapshot = jest.fn((_adapterContext: unknown, state: unknown) => ({
+  stickyKey: 'test:stopless',
+  state
+}));
+const mockReadStoplessGoalState = jest.fn(() => ({ stickyKey: 'test:stopless' }));
+
+function extractTextFromProviderResponseBody(body: any): string {
+  const data = body && typeof body === 'object' && body.data && typeof body.data === 'object'
+    ? body.data
+    : body;
+  const content = Array.isArray(data?.content) ? data.content : [];
+  const textItem = content.find((item: any) => item && typeof item === 'object' && typeof item.text === 'string');
+  if (textItem?.text) return textItem.text;
+  const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : undefined;
+  const part = candidate?.content?.parts?.find((item: any) => item && typeof item.text === 'string');
+  return typeof part?.text === 'string' ? part.text : '';
+}
+
+function extractPreviousResponseIdFromSemantics(semantics: any): string | undefined {
+  const resumeFrom = semantics?.continuation?.resumeFrom;
+  if (resumeFrom && typeof resumeFrom === 'object') {
+    if (typeof resumeFrom.previousResponseId === 'string') return resumeFrom.previousResponseId;
+    if (typeof resumeFrom.responseId === 'string') return resumeFrom.responseId;
+  }
+  return undefined;
+}
+
+function extractPreviousResponseIdFromOptions(options: any): string | undefined {
+  if (options?.requestSemantics) {
+    const fromSemantics = extractPreviousResponseIdFromSemantics(options.requestSemantics);
+    if (fromSemantics) {
+      return fromSemantics;
+    }
+  }
+  if (typeof options?.entryOriginRequest?.previous_response_id === 'string') {
+    return options.entryOriginRequest.previous_response_id;
+  }
+  if (typeof options?.entryOriginRequest?.response_id === 'string') {
+    return options.entryOriginRequest.response_id;
+  }
+  const metadata = options?.pipelineMetadata;
+  if (metadata) {
+    const centerResume = MetadataCenter.read(metadata)?.readContinuationContext();
+    if (centerResume?.previousResponseId) return centerResume.previousResponseId;
+    if (centerResume?.responsesRequestContext?.payload) {
+      const ctx = centerResume.responsesRequestContext.payload as Record<string, unknown>;
+      if (typeof ctx.previous_response_id === 'string') return ctx.previous_response_id;
+      if (typeof ctx.response_id === 'string') return ctx.response_id;
+    }
+  }
+  return undefined;
+}
+
+function detectToolCallFinishReason(body: any): string | undefined {
+  const data = body && typeof body === 'object' && (body as any).data && typeof (body as any).data === 'object'
+    ? (body as any).data
+    : body;
+  if (!data || typeof data !== 'object') return undefined;
+  const d = data as Record<string, unknown>;
+  if (d.status === 'requires_action' && Array.isArray(d.output)) {
+    const hasFunctionCall = d.output.some((item: any) => item && typeof item === 'object' && item.type === 'function_call');
+    if (hasFunctionCall) return 'tool_calls';
+  }
+  if (d.required_action && typeof d.required_action === 'object') {
+    const ra = (d.required_action as Record<string, unknown>).submit_tool_outputs;
+    if (ra && typeof ra === 'object') return 'tool_calls';
+  }
+  return undefined;
+}
+
+const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
+  const entryEndpoint = String(options?.entryEndpoint || '');
+  const response = options?.response ?? {};
+  if (response.sseStream !== undefined) {
+    return { ...response, sseStream: response.sseStream, continuationOwner: 'direct' };
+  }
+  const responseBody = response.body;
+  const body = responseBody && typeof responseBody === 'object' ? responseBody : {};
+  const data = (body as any).data && typeof (body as any).data === 'object' ? (body as any).data : body;
+  if (entryEndpoint.includes('/v1/responses')) {
+    if (typeof (data as any).id === 'string' && (data as any).object === 'response') {
+      const previousId = extractPreviousResponseIdFromOptions(options);
+      return {
+        ...response,
+        status: 200,
+        body: {
+          ...(data as Record<string, unknown>),
+          previous_response_id: previousId ?? null
+        }
+      };
+    }
+    const toolUse = Array.isArray((data as any).content)
+      ? (data as any).content.find((item: any) => item && typeof item === 'object' && item.type === 'tool_use')
+      : undefined;
+    if (toolUse) {
+      const command = toolUse.input?.cmd ?? toolUse.input?.command;
+      const isBlockedCheckout = typeof command === 'string' && /git\s+checkout\s+--\s+\S+\/\s*$/.test(command);
+      return {
+        ...response,
+        status: 200,
+        body: {
+          object: 'response',
+          id: 'resp_mock_tool_call_1',
+          status: 'requires_action',
+          output: [{
+            type: 'function_call',
+            call_id: toolUse.id,
+            name: toolUse.name,
+            arguments: JSON.stringify(isBlockedCheckout
+              ? {
+                  ...toolUse.input,
+                  cmd: `blocked by exec_command guard: ${command}`
+                }
+              : (toolUse.input ?? {}))
+          }]
+        }
+      };
+    }
+    return {
+      ...response,
+      status: 200,
+      body: {
+        object: 'response',
+        id: typeof (data as any).id === 'string' ? (data as any).id : 'resp_mock_converted_1',
+        previous_response_id: extractPreviousResponseIdFromOptions(options) ?? null,
+        status: 'completed',
+        output: [{
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: extractTextFromProviderResponseBody(data) }]
+        }]
+      }
+    };
+  }
+  if (entryEndpoint.includes('/v1/chat/completions')) {
+    return {
+      ...response,
+      status: 200,
+      body: {
+        id: 'chatcmpl_mock_1',
+        object: 'chat.completion',
+        choices: [{
+          index: 0,
+          finish_reason: 'stop',
+          message: { role: 'assistant', content: extractTextFromProviderResponseBody(responseBody) }
+        }]
+      }
+    };
+  }
+  if (entryEndpoint.includes('/v1/messages')) {
+    const text = extractTextFromProviderResponseBody(data);
+    return {
+      ...response,
+      status: 200,
+      body: {
+        id: typeof (data as any).id === 'string' ? (data as any).id : 'msg_mock_messages_1',
+        type: 'message',
+        role: 'assistant',
+        model: typeof (data as any).model === 'string' ? (data as any).model : 'claude-sonnet-4-5',
+        content: Array.isArray((data as any).content) ? (data as any).content : [{ type: 'text', text: text || '' }],
+        stop_reason: typeof (data as any).stop_reason === 'string' ? (data as any).stop_reason : 'end_turn'
+      }
+    };
+  }
+  return response;
+});
+
 function defaultPlanResponsesHandlerEntry(payload: any, entryEndpoint?: string, responseIdFromPath?: string) {
   const body = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const responseId = typeof body.response_id === 'string'
@@ -35,8 +202,78 @@ const mockPlanResponsesHandlerEntry = jest.fn(async (payload: any, entryEndpoint
   defaultPlanResponsesHandlerEntry(payload, entryEndpoint, responseIdFromPath)
 );
 
+const mockRuntimeIntegrationsModule = () => ({
+  captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContext,
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+  lookupResponsesContinuationByResponseId: jest.fn(async () => undefined),
+  materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
+  recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
+  resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
+  resumeResponsesConversation: mockResumeResponsesConversation,
+  clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
+  writeSnapshotViaHooks: jest.fn(async () => undefined),
+  preloadCriticalBridgeRuntimeModules: jest.fn(),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  clearAllResponsesConversationState: jest.fn(),
+  resetResponsesConversationStateForRestartSimulation: jest.fn(),
+  clearUnresolvedResponsesConversationRequests: jest.fn(),
+  createResponsesSseToJsonConverter: jest.fn(),
+  createResponsesJsonToSseConverter: jest.fn(),
+  reportProviderErrorToRouterPolicy: jest.fn(async () => undefined),
+  reportProviderSuccessToRouterPolicy: jest.fn(async () => undefined)
+});
+
+const mockNativeExportsModule = () => ({
+  planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: any) => ({
+    input: Array.isArray(args?.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args?.rawRequest?.tools) ? args.rawRequest.tools : undefined
+  })),
+  resolveProviderRetryExecutionPolicyNative: jest.fn((input: any) => ({
+    excludeCurrentProvider: Boolean(input?.existingExclusion),
+    reason: input?.existingExclusion ? 'existing_exclusion' : 'test_no_retry'
+  })),
+  sanitizeFollowupText: jest.fn(async (raw: unknown) => (typeof raw === 'string' ? raw : '')),
+  classifyProviderFailure: jest.fn(() => 'non_recoverable'),
+  getNetworkErrorCodes: jest.fn(() => []),
+  deriveFinishReasonNative: jest.fn((body: any) => detectToolCallFinishReason(body)),
+  isToolCallContinuationResponseNative: jest.fn(() => false),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
+  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
+  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'none' })),
+  buildResponsesPayloadFromChatNative: jest.fn(),
+  projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.body ?? args?.payload ?? {}),
+  projectResponsesSseFrameForClientNative: jest.fn((args: any) => args?.frame ?? ''),
+  describeHubPipelineContractsNative: jest.fn(() => ({})),
+  describeVirtualRouterContractsNative: jest.fn(() => ({})),
+  describeMetaCarrierContractsNative: jest.fn(() => ({})),
+  describePipelineContractNative: jest.fn(() => ({})),
+  validatePipelineNodeContractBoundaryNative: jest.fn(() => ({ valid: true })),
+  isEmptyClientResponsePayloadNative: jest.fn((body: any) => {
+    if (body && typeof body === 'object') {
+      if (Array.isArray(body.output) && body.output.length > 0) return false;
+      if (typeof body.status === 'string') return false;
+      if (Array.isArray(body.content) && body.content.length > 0) return false;
+    }
+    return false;
+  }),
+  classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false })),
+  detectToolExecutionFailuresNative: jest.fn(() => []),
+  buildAnthropicResponseFromChatJson: jest.fn(),
+  convertResponsesRequestToChatNative: jest.fn(),
+  evaluateResponsesDirectRouteDecisionNative: jest.fn(),
+  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
+  injectMcpToolsForChatJson: jest.fn(),
+  injectMcpToolsForResponsesJson: jest.fn(),
+  mapChatToolsToBridgeJson: jest.fn(),
+  normalizeAssistantTextToToolCallsJson: jest.fn(),
+  sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload)
+});
+
 const mockBridgeModule = () => ({
-  ...actualBridge,
   convertProviderResponse: coreConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContext,
@@ -46,24 +283,72 @@ const mockBridgeModule = () => ({
   resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   resumeResponsesConversation: mockResumeResponsesConversation,
+  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
+  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
+  readStoplessGoalState: mockReadStoplessGoalState,
+  loadRoutingInstructionStateSync: () => undefined,
+  saveRoutingInstructionStateAsync: async () => undefined,
+  saveRoutingInstructionStateSync: () => undefined,
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
   extractSessionIdentifiersFromMetadata: (metadata?: Record<string, unknown>) => ({
     sessionId:
-      typeof metadata?.sessionId === 'string'
+      typeof metadata?.session_id === 'string'
+        ? metadata.session_id
+        : typeof metadata?.sessionId === 'string'
         ? metadata.sessionId
         : typeof (metadata?.__raw_request_body as Record<string, unknown> | undefined)?.metadata === 'object'
           ? (((metadata?.__raw_request_body as Record<string, unknown>).metadata as Record<string, unknown>).session_id as string | undefined)
           : undefined,
     conversationId:
-      typeof metadata?.conversationId === 'string'
+      typeof metadata?.conversation_id === 'string'
+        ? metadata.conversation_id
+        : typeof metadata?.conversationId === 'string'
         ? metadata.conversationId
         : undefined
   }),
+  extractContinuationContextSessionIdentifiersFromMetadata: () => ({
+    sessionId: undefined,
+    conversationId: undefined
+  }),
+  getStatsCenterSafe: () => ({
+    getSnapshot: () => null
+  }),
+  getLlmsStatsSnapshot: () => null,
+  importCoreDist: jest.fn(async () => ({})),
+  requireCoreDist: jest.fn(() => ({})),
+  resolveImplForSubpath: jest.fn(() => undefined),
+  resolveCoreModulePath: jest.fn(() => undefined),
+  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
+  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: any) => ({
+    normalizedPayload: args?.responsesPayload,
+    sanitizedPayload: args?.responsesPayload,
+    streamIntent: 'stream'
+  })),
+  createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async (payload: any) => Readable.from([
+      'event: response.completed\n',
+      `data: ${JSON.stringify(payload)}\n\n`
+    ])
+  })),
+  resolveResponsesRequestContextForHttp: jest.fn(({ fallback }: any) => fallback),
+  ...mockRuntimeIntegrationsModule(),
+  ...mockNativeExportsModule(),
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
 });
 
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', mockNativeExportsModule);
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provider-response-converter.js', () => ({
+  convertProviderResponseIfNeeded: mockConvertProviderResponseIfNeeded
+}));
+jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provider-response-converter.ts', () => ({
+  convertProviderResponseIfNeeded: mockConvertProviderResponseIfNeeded
+}));
 
 jest.unstable_mockModule('../../../src/server/runtime/http-server/servertool-admin-state.js', () => ({
   isServerToolEnabled: () => false
@@ -72,6 +357,91 @@ jest.unstable_mockModule('../../../src/server/runtime/http-server/servertool-adm
   isServerToolEnabled: () => false
 }));
 
+const buildResponsesSseBridgeDirectMockModule = () => {
+  return {
+    createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
+      convertResponseToJsonToSse: async (payload: any) => Readable.from([
+        'event: response.completed\n',
+        `data: ${JSON.stringify(payload)}\n\n`
+      ])
+    })),
+    prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: any) => ({
+      normalizedPayload: args?.responsesPayload,
+      sanitizedPayload: args?.responsesPayload,
+      streamIntent: 'stream'
+    })),
+    resolveResponsesRequestContextForHttp: jest.fn(({ fallback }: any) => fallback),
+    prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn((args: any) => args?.body ?? args),
+    normalizeResponsesJsonBodyForHttp: jest.fn((payload: any) => payload),
+    normalizeResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
+    projectResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
+    projectResponsesClientPayloadForClientForHttp: jest.fn((payload: any) => payload),
+    shouldDispatchResponsesSseToClientForHttp: jest.fn((args: any) => args?.forceSSE === true),
+    shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
+    shouldDropClientSseFrameForHttp: jest.fn(() => false),
+    shouldPersistResponsesConversationStateForHttp: jest.fn(() => false),
+    shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn(() => false),
+    shouldReprojectRelayResponsesSseForHttp: jest.fn(() => false),
+    shouldRepairResponsesContinuationTerminalForHttp: jest.fn(() => false),
+    isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
+    isToolCallContinuationResponseForHttp: jest.fn(() => false),
+    assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
+    assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
+    buildClientSseKeepaliveFrameForHttp: jest.fn(() => ''),
+    buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status: number) => ({ error: { requestLabel, status, message: 'missing stream' } })),
+    buildResponsesSseErrorPayloadForHttp: jest.fn((args: any) => ({ error: args })),
+    buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn(() => ({})),
+    buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => ({})),
+    buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn(() => []),
+    buildResponsesPayloadFromChatForHttp: jest.fn((payload: any) => payload),
+    buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
+    inspectResponsesContinuationProbeForHttp: jest.fn(() => undefined),
+    inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((args: any) => ({ finishReason: args?.finishReason, seenTerminalEvent: args?.seenTerminalEvent ?? false, sawTerminalChunk: args?.sawTerminalChunk ?? false, sawResponsesCompletedChunk: args?.sawResponsesCompletedChunk ?? false, sawResponsesDoneEvent: args?.sawResponsesDoneEvent ?? false, sawAssistantMessageDoneTerminal: args?.sawAssistantMessageDoneTerminal ?? false, requiresResponsesTerminalEvent: args?.requiresResponsesTerminalEvent ?? false, terminalSource: args?.terminalSource, pendingTerminalEvent: args?.pendingTerminalEvent })),
+    normalizeChatUsagePayloadForHttp: jest.fn((payload: any) => ({ normalized: false, payload })),
+    normalizeResponsesClientPayloadForHttp: jest.fn((payload: any) => payload),
+    planResponsesContinuationCloseActionForHttp: jest.fn(() => ({})),
+    planResponsesStreamEndRepairForHttp: jest.fn(() => ({ shouldRepairTerminalFrames: false })),
+    prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async ({ body }: any) => ({ clientBody: body, sanitizedBody: body, finishReason: detectToolCallFinishReason(body) })),
+    requireResponsesHandlerCoreDist: jest.fn(() => ({})),
+    resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
+    resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => undefined),
+    resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
+    resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
+    summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
+    updateResponsesContractProbeFromSseChunkForHttp: jest.fn(() => ({})),
+    importResponsesHandlerCoreDist: jest.fn(async () => ({})),
+    planResponsesHandlerStreamForHttp: jest.fn((args: any) => ({
+      outboundStream: args?.forceStream === true ? true : Boolean(args?.acceptsSse),
+      requestStartMeta: {},
+      streamIntent: args?.forceStream === true || args?.acceptsSse ? 'stream' : 'non_stream'
+    })),
+    clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
+    finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
+    persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
+    resolveResponsesConversationClearReasonForHttp: jest.fn(() => undefined),
+    shouldClearResponsesConversationOnClientCloseForHttp: jest.fn(() => false),
+    shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false)
+  };
+};
+
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-sse-bridge.js',
+  buildResponsesSseBridgeDirectMockModule
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-sse-bridge.ts',
+  buildResponsesSseBridgeDirectMockModule
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-response-bridge.js',
+  buildResponsesSseBridgeDirectMockModule
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-response-bridge.ts',
+  buildResponsesSseBridgeDirectMockModule
+);
+
+
 const { createRequestExecutor, __requestExecutorTestables } = await import(
   '../../../src/server/runtime/http-server/request-executor.js'
 );
@@ -79,6 +449,25 @@ const { StatsManager } = await import('../../../src/server/runtime/http-server/s
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 const { handleChatCompletions } = await import('../../../src/server/handlers/chat-handler.js');
 const { handleMessages } = await import('../../../src/server/handlers/messages-handler.js');
+const { MetadataCenter } = await import('../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
+
+function readStreamIntent(metadata: Record<string, unknown> | undefined): string | undefined {
+  return MetadataCenter.read(metadata)?.readRuntimeControl().streamIntent;
+}
+
+function readResponsesResume(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const value = MetadataCenter.read(metadata)?.readContinuationContext().responsesResume;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readResponsesRequestContext(metadata: Record<string, unknown> | undefined): Record<string, any> | undefined {
+  const value = MetadataCenter.read(metadata)?.readContinuationContext().responsesRequestContext;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -97,7 +486,7 @@ async function closeServer(server?: http.Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-async function fetchJson(baseUrl: string, routePath: string, body: unknown): Promise<{ status: number; payload: any }> {
+async function fetchJson(baseUrl: string, routePath: string, body: unknown): Promise<{ status: number; payload: any; text: string; headers: Headers }> {
   const response = await fetch(`${baseUrl}${routePath}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -106,7 +495,24 @@ async function fetchJson(baseUrl: string, routePath: string, body: unknown): Pro
   const text = await response.text();
   return {
     status: response.status,
-    payload: text ? JSON.parse(text) : null
+    payload: text ? JSON.parse(text) : null,
+    text,
+    headers: response.headers
+  };
+}
+
+function createSingleHandleRuntimeManager(handle: ReturnType<typeof createProviderHandle>) {
+  return {
+    resolveRuntimeKey: (providerKey?: string, fallback?: string) => {
+      if (!providerKey && fallback) {
+        return fallback;
+      }
+      if (providerKey === handle.providerKey || providerKey === handle.providerId || providerKey === handle.runtimeKey) {
+        return handle.runtimeKey;
+      }
+      return fallback;
+    },
+    getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
   };
 }
 
@@ -314,10 +720,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -346,6 +749,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'claude-sonnet-4-5',
+        stream: false,
         previous_response_id: 'resp_prev_http_responses_1',
         input: [
           {
@@ -370,7 +774,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_prev_http_responses_1');
       expect(pipelineInput.payload?.response_format).toEqual({ type: 'json_object' });
-      expect(pipelineInput.metadata?.__raw_request_body?.previous_response_id).toBe('resp_prev_http_responses_1');
+      expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.previous_response_id).toBe('resp_prev_http_responses_1');
 
       expect(processIncoming).toHaveBeenCalledTimes(1);
       expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
@@ -450,10 +854,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -480,6 +881,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'claude-sonnet-4-5',
+        stream: false,
         input: 'restore src dir',
         tools: [
           {
@@ -563,10 +965,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -620,9 +1019,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
-      expect(pipelineInput.metadata?.stream).toBe(true);
-      expect(pipelineInput.metadata?.inboundStream).toBe(true);
-      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('stream');
+      expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
+      expect(pipelineInput.metadata?.outboundStream).toBeUndefined();
       expect(pipelineInput.metadata?.clientStream).toBeUndefined();
       expect(pipelineInput.payload?.stream).toBe(true);
 
@@ -718,10 +1117,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -757,6 +1153,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     try {
       const result = await fetchJson(baseUrl, '/v1/responses/resp_submit_prev_1/submit_tool_outputs', {
+        stream: false,
         tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
       });
 
@@ -773,6 +1170,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         'resp_submit_prev_1',
         {
           response_id: 'resp_submit_prev_1',
+          stream: false,
           tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
         },
         expect.objectContaining({ requestId: expect.any(String) })
@@ -780,20 +1178,21 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
       expect(pipelineExecute).toHaveBeenCalledTimes(1);
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
-      expect(pipelineInput.endpoint).toBe('/v1/responses.submit_tool_outputs');
+      expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
-      expect(pipelineInput.metadata?.inboundStream).toBe(false);
-      expect(pipelineInput.metadata?.responsesResume).toEqual({
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('non_stream');
+      expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
+      expect(readResponsesResume(pipelineInput.metadata)).toEqual({
         previousRequestId: 'req_chain_submit_1',
         restoredFromResponseId: 'resp_submit_prev_1',
         routeHint: 'thinking'
       });
-      expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
-      expect(pipelineInput.metadata?.routeHint).toBe('thinking');
+      expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
+      expect(pipelineInput.metadata?.routeHint).toBeUndefined();
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
-      expect(pipelineInput.metadata?.__raw_request_body).toEqual({
-        response_id: 'resp_submit_prev_1',
+      expect(readResponsesRequestContext(pipelineInput.metadata)?.payload).toMatchObject({
+        previous_response_id: 'resp_submit_prev_1',
         tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
       });
 
@@ -848,6 +1247,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const payload = {
         model: 'gpt-5.3-codex',
+        stream: false,
         store: true,
         metadata: { session_id: 'rcc-routecodex-capture' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'call shell_command' }] }],
@@ -860,14 +1260,13 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(result.payload).toMatchObject({ id: 'resp_capture_tool_1', status: 'requires_action' });
       await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
       expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_capture_tool_1',
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.3-codex-'),
         payload: expect.objectContaining({ model: 'gpt-5.3-codex' }),
         context: expect.objectContaining({
           input: payload.input,
           toolsRaw: payload.tools
         }),
-        sessionId: 'rcc-routecodex-capture',
-        routeHint: 'thinking/gateway-priority-5520-thinking'
+        sessionId: 'rcc-routecodex-capture'
       }));
       expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
         requestId: 'resp_capture_tool_1',
@@ -1028,10 +1427,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -1059,6 +1455,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
+        stream: false,
         response_id: 'resp_submit_prev_auto_1',
         tool_outputs: [{ tool_call_id: 'call_submit_auto_1', output: 'ok' }]
       });
@@ -1071,6 +1468,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         'resp_submit_prev_auto_1',
         {
           response_id: 'resp_submit_prev_auto_1',
+          stream: false,
           tool_outputs: [{ tool_call_id: 'call_submit_auto_1', output: 'ok' }]
         },
         expect.objectContaining({ requestId: expect.any(String) })
@@ -1080,7 +1478,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_auto_1');
-      expect(pipelineInput.metadata?.responsesResume).toEqual({
+      expect(readResponsesResume(pipelineInput.metadata)).toEqual({
         previousRequestId: 'req_chain_submit_auto_1',
         restoredFromResponseId: 'resp_submit_prev_auto_1'
       });
@@ -1141,10 +1539,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -1181,6 +1576,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const tools = buildComputerUseNamespaceTools();
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'claude-sonnet-4-5',
+        stream: false,
         input: [
           {
             role: 'user',
@@ -1197,7 +1593,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.payload?.tools).toEqual(tools);
-      expect(pipelineInput.metadata?.__raw_request_body?.tools).toEqual(tools);
+      expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.tools).toEqual(tools);
     } finally {
       await closeServer(server);
     }
@@ -1235,9 +1631,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-5.3-codex',
+        stream: false,
         metadata: {
-          session_id: 'sess-1',
-          __shadowCompareForcedProviderKey: 'crs.key2.gpt-5.3-codex'
+          session_id: 'sess-1'
         },
         input: [
           {
@@ -1278,10 +1674,10 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
           content: [{ type: 'input_text', text: '只发送本轮 delta' }]
         }
       ]);
-      expect(pipelineInput.metadata?.responsesResume).toBeUndefined();
-      expect(pipelineInput.metadata?.__raw_request_body?.input).toHaveLength(3);
+      expect(readResponsesResume(pipelineInput.metadata)).toBeUndefined();
+      expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.input).toHaveLength(3);
       expect(pipelineInput.metadata?.session_id).toBe('sess-1');
-      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBe('crs.key2.gpt-5.3-codex');
+      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
     } finally {
       await closeServer(server);
     }
@@ -1342,6 +1738,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-5.5',
+        stream: false,
         metadata: { session_id: 'rcc-zterm' },
         input: [
           { type: 'function_call_output', call_id: 'call_1', output: '/tmp' },
@@ -1359,12 +1756,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.body.input[0]).toMatchObject({ type: 'function_call', call_id: 'call_1' });
       expect(pipelineInput.body.input[1]).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
-      expect(pipelineInput.metadata.responsesResume).toMatchObject({
+      expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
         materialized: true,
         providerKey: 'cc.key1.gpt-5.5'
       });
-      expect(pipelineInput.metadata.__raw_request_body.input[0]).toMatchObject({
-        type: 'function_call_output',
+      expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.input?.[0]).toMatchObject({
+        type: 'function_call',
         call_id: 'call_1'
       });
     } finally {
@@ -1438,10 +1835,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -1471,8 +1865,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const result = await fetchJson(baseUrl, '/v1/chat/completions', {
         model: 'gemini-2.5-pro',
         metadata: {
-          session_id: 'chat-sess-1',
-          __shadowCompareForcedProviderKey: 'duck.key2.gpt-5.3-codex'
+          session_id: 'chat-sess-1'
         },
         messages: [{ role: 'user', content: '继续执行 chat handler 整链验证' }]
       });
@@ -1486,11 +1879,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.endpoint).toBe('/v1/chat/completions');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-chat');
       expect(pipelineInput.payload?.messages).toEqual([{ role: 'user', content: '继续执行 chat handler 整链验证' }]);
-      expect(pipelineInput.metadata?.__raw_request_body?.messages).toEqual([
-        { role: 'user', content: '继续执行 chat handler 整链验证' }
-      ]);
+      expect(pipelineInput.metadata?.__raw_request_body).toBeUndefined();
       expect(pipelineInput.metadata?.session_id).toBe('chat-sess-1');
-      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBe('duck.key2.gpt-5.3-codex');
+      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
 
       expect(processIncoming).toHaveBeenCalledTimes(1);
       expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
@@ -1567,10 +1958,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -1624,18 +2012,13 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/messages');
       expect(pipelineInput.metadata?.providerProtocol).toBe('anthropic-messages');
-      expect(pipelineInput.metadata?.inboundStream).toBe(true);
-      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('stream');
+      expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
+      expect(pipelineInput.metadata?.outboundStream).toBeUndefined();
       expect(pipelineInput.payload?.messages).toEqual([
         { role: 'user', content: '继续执行 messages handler SSE 整链验证（第二帧）' }
       ]);
-      expect(pipelineInput.metadata?.__raw_request_body).toMatchObject({
-        format: 'sse'
-      });
-      expect(String(pipelineInput.metadata?.__raw_request_body?.rawText || '')).toContain('第一帧');
-      expect(String(pipelineInput.metadata?.__raw_request_body?.rawText || '')).toContain('第二帧');
-      expect(Array.isArray(pipelineInput.metadata?.__raw_request_body?.events)).toBe(true);
-      expect(pipelineInput.metadata?.__raw_request_body?.events).toHaveLength(2);
+      expect(pipelineInput.metadata?.__raw_request_body).toBeUndefined();
 
       expect(processIncoming).toHaveBeenCalledTimes(1);
       expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
@@ -1722,10 +2105,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     });
 
     const executor = createRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: (_providerKey?: string, fallback?: string) => fallback,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === handle.runtimeKey ? handle : undefined)
-      },
+      runtimeManager: createSingleHandleRuntimeManager(handle),
       getHubPipeline: () => ({
         execute: pipelineExecute,
         updateVirtualRouterConfig: jest.fn(),
@@ -1755,8 +2135,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       const result = await fetchJson(baseUrl, '/v1/messages', {
         model: 'claude-sonnet-4-5',
         metadata: {
-          session_id: 'msg-sess-1',
-          __shadowCompareForcedProviderKey: 'wuzu.key2.gpt-5.3-codex'
+          session_id: 'msg-sess-1'
         },
         messages: [{ role: 'user', content: '继续执行 messages handler 整链验证' }]
       });
@@ -1775,11 +2154,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.endpoint).toBe('/v1/messages');
       expect(pipelineInput.metadata?.providerProtocol).toBe('anthropic-messages');
       expect(pipelineInput.payload?.messages).toEqual([{ role: 'user', content: '继续执行 messages handler 整链验证' }]);
-      expect(pipelineInput.metadata?.__raw_request_body?.messages).toEqual([
-        { role: 'user', content: '继续执行 messages handler 整链验证' }
-      ]);
+      expect(pipelineInput.metadata?.__raw_request_body).toBeUndefined();
       expect(pipelineInput.metadata?.session_id).toBe('msg-sess-1');
-      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBe('wuzu.key2.gpt-5.3-codex');
+      expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
 
       expect(processIncoming).toHaveBeenCalledTimes(1);
       expect(processIncoming).toHaveBeenCalledWith(expect.objectContaining({
@@ -1852,6 +2229,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     try {
       const result = await fetchJson(baseUrl, '/v1/responses/resp_submit_prev_capture_1/submit_tool_outputs', {
+        stream: false,
         tool_outputs: [{ tool_call_id: 'call_submit_capture_1', output: 'ok' }]
       });
 
@@ -1870,7 +2248,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
           ]),
           toolsRaw: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
         }),
-        routeHint: 'thinking/gateway-priority-5520-thinking'
+        sessionId: undefined
       }));
       expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
         requestId: 'resp_submit_capture_next_1',

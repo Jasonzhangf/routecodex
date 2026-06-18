@@ -765,6 +765,7 @@ export async function recordResponsesResponseForHttp(args: {
   sessionId?: string;
   conversationId?: string;
   entryKind?: 'responses' | 'chat' | 'messages';
+  routeHint?: string;
 }): Promise<void> {
   await recordResponsesResponseForRequest({
     ...args,
@@ -783,6 +784,7 @@ export async function seedResponsesToolCallResponseForHttp(args: {
     routingPolicyGroup?: string;
   };
   providerKey?: string;
+  routeHint?: string;
 }): Promise<void> {
   const responseId = readResponsesResponseIdFromHttp(args.body);
   const finishReason = deriveFinishReason(args.body);
@@ -811,7 +813,8 @@ export async function seedResponsesToolCallResponseForHttp(args: {
       matchedPort: requestContext.matchedPort,
       routingPolicyGroup: requestContext.routingPolicyGroup,
       sessionId: requestContext.sessionId,
-      conversationId: requestContext.conversationId
+      conversationId: requestContext.conversationId,
+      ...(typeof args.routeHint === 'string' ? { routeHint: args.routeHint } : {})
     });
   }
 }
@@ -822,6 +825,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
   resultMetadata: Record<string, unknown> | undefined;
   requestContext: ResponsesRequestContextForHttp;
   providerKey?: string;
+  routeHint?: string;
 }): Promise<Record<string, unknown> | undefined> {
   const nextMetadata = attachResponsesRequestContextToResultForHttp({
     entryEndpoint: args.entryEndpoint,
@@ -831,9 +835,10 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
   if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
     return nextMetadata;
   }
+  const continuationContext = MetadataCenter.read(nextMetadata)?.readContinuationContext();
   await seedResponsesToolCallResponseForHttp({
     body: args.body,
-    requestContext: nextMetadata?.responsesRequestContext as {
+    requestContext: continuationContext?.responsesRequestContext as {
       payload?: Record<string, unknown>;
       context?: Record<string, unknown>;
       sessionId?: string;
@@ -842,6 +847,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
       routingPolicyGroup?: string;
     } | undefined,
     providerKey: args.providerKey,
+    ...(typeof args.routeHint === 'string' ? { routeHint: args.routeHint } : {})
   });
   return nextMetadata;
 }
