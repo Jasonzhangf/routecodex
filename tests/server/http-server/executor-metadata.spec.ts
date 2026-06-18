@@ -274,6 +274,36 @@ describe('executor metadata session daemon extraction', () => {
     expect(snapshot?.requestTruth.sessionId?.history.length).toBeGreaterThan(0);
   });
 
+  it('writes stopMessageEnabled runtime control when latest responses user input carries stopless directive', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-stopless-directive-1',
+      headers: {},
+      query: {},
+      body: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: '请继续处理，并在准备结束时遵守要求。<**stopless:on**>'
+              }
+            ]
+          }
+        ]
+      },
+      metadata: {}
+    } as any);
+
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readRuntimeControl()).toMatchObject({
+      stopMessageEnabled: true
+    });
+  });
+
   it('materializes request truth from factual Codex session headers', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses',

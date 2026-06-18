@@ -176,16 +176,18 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
                 "tool_choice": "auto"
             },
             "metadata": {
-                "__routecodexPreselectedRoute": {
-                    "target": {
-                        "providerKey": "primary.key1.gpt-test",
-                        "providerType": "responses",
-                        "runtimeKey": "primary.key1",
-                        "modelId": "gpt-test",
-                        "outboundProfile": "openai-chat"
-                    },
-                    "decision": { "routeName": "default" },
-                    "diagnostics": {}
+                "__rt": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "primary.key1.gpt-test",
+                            "providerType": "responses",
+                            "runtimeKey": "primary.key1",
+                            "modelId": "gpt-test",
+                            "outboundProfile": "openai-chat"
+                        },
+                        "decision": { "routeName": "default" },
+                        "diagnostics": {}
+                    }
                 }
             },
             "processMode": "chat",
@@ -275,16 +277,18 @@ fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_
                 "tool_choice": "auto"
             },
             "metadata": {
-                "__routecodexPreselectedRoute": {
-                    "target": {
-                        "providerKey": "mimo.key2.mimo-v2.5",
-                        "providerType": "anthropic",
-                        "runtimeKey": "mimo.key2",
-                        "modelId": "mimo-v2.5",
-                        "outboundProfile": "anthropic-messages"
-                    },
-                    "decision": { "routeName": "tools" },
-                    "diagnostics": {}
+                "__rt": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "mimo.key2.mimo-v2.5",
+                            "providerType": "anthropic",
+                            "runtimeKey": "mimo.key2",
+                            "modelId": "mimo-v2.5",
+                            "outboundProfile": "anthropic-messages"
+                        },
+                        "decision": { "routeName": "tools" },
+                        "diagnostics": {}
+                    }
                 }
             },
             "processMode": "chat",
@@ -317,6 +321,85 @@ fn execute_hub_pipeline_json_builds_non_empty_anthropic_messages_from_responses_
             .and_then(|value| value.as_str()),
         Some("exec_command")
     );
+}
+
+#[test]
+fn execute_hub_pipeline_json_preserves_stopless_instructions_for_anthropic_provider_payload() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "mimo.key2.mimo-v2.5": {
+                        "providerKey": "mimo.key2.mimo-v2.5",
+                        "providerType": "anthropic",
+                        "runtimeKey": "mimo.key2",
+                        "modelId": "mimo-v2.5",
+                        "endpoint": "mock://mimo",
+                        "auth": { "type": "apikey", "apiKey": "mimo-key" },
+                        "outboundProfile": "anthropic-messages"
+                    }
+                },
+                "routing": {
+                    "tools": [{
+                        "id": "tools-priority",
+                        "mode": "priority",
+                        "targets": ["mimo.key2.mimo-v2.5"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-responses-stopless-to-anthropic-system",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "mimo-v2.5",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "read files" }]
+                }],
+                "stream": false
+            },
+            "metadata": {
+                "stopMessageEnabled": true,
+                "__rt": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "mimo.key2.mimo-v2.5",
+                            "providerType": "anthropic",
+                            "runtimeKey": "mimo.key2",
+                            "modelId": "mimo-v2.5",
+                            "outboundProfile": "anthropic-messages"
+                        },
+                        "decision": { "routeName": "tools" },
+                        "diagnostics": {}
+                    }
+                }
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert!(
+        output
+            .pointer("/payload/system")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"),
+        "unexpected output: {}",
+        output
+    );
+    assert!(output.pointer("/payload/instructions").is_none());
 }
 
 #[test]
@@ -370,17 +453,19 @@ fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_
                 "tool_choice": "auto"
             },
             "metadata": {
-                "__routecodexPreselectedRoute": {
-                    "target": {
-                        "providerKey": "minimax.key1.MiniMax-M3",
-                        "providerType": "anthropic",
-                        "runtimeKey": "minimax.key1",
-                        "modelId": "MiniMax-M3",
-                        "outboundProfile": "anthropic-messages",
-                        "compatibilityProfile": "anthropic:claude-code"
-                    },
-                    "decision": { "routeName": "thinking" },
-                    "diagnostics": {}
+                "__rt": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "minimax.key1.MiniMax-M3",
+                            "providerType": "anthropic",
+                            "runtimeKey": "minimax.key1",
+                            "modelId": "MiniMax-M3",
+                            "outboundProfile": "anthropic-messages",
+                            "compatibilityProfile": "anthropic:claude-code"
+                        },
+                        "decision": { "routeName": "thinking" },
+                        "diagnostics": {}
+                    }
                 }
             },
             "processMode": "chat",

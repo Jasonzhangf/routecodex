@@ -1393,8 +1393,11 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const retryProviderKey = typeof metadata.__routecodexRetryProviderKey === 'string'
-        ? metadata.__routecodexRetryProviderKey
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
         : undefined;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
@@ -1491,6 +1494,7 @@ describe('direct passthrough route-level', () => {
     expect(secondDirectSend).toHaveBeenCalledTimes(1);
     expect(route).toHaveBeenCalledTimes(2);
     expect(route.mock.calls[0]?.[1]).toEqual(expect.not.objectContaining({ __routecodexRetryProviderKey: expect.anything() }));
+    expect(route.mock.calls[1]?.[1]).toEqual(expect.not.objectContaining({ __routecodexRetryProviderKey: expect.anything() }));
     expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       excludedProviderKeys: [firstProviderKey],
     }));

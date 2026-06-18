@@ -130,6 +130,31 @@ function loadVerificationOwners(repoRoot) {
   }));
 }
 
+function loadManifestOwners(repoRoot) {
+  const manifestPath = path.join(repoRoot, 'docs/architecture/custom-payload-carrier-runtime-manifest.yml');
+  if (!fs.existsSync(manifestPath)) {
+    return new Map();
+  }
+  const manifest = YAML.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const owners = new Map();
+  for (const group of toArray(manifest?.carrier_runtime_surfaces)) {
+    const groupId = String(group?.carrier_id || '');
+    if (!groupId) {
+      continue;
+    }
+    const byPath = new Map();
+    for (const entry of toArray(group?.files)) {
+      const rel = normalizeRel(entry?.path);
+      const ownerFeatureId = typeof entry?.owner_feature_id === 'string' ? entry.owner_feature_id.trim() : '';
+      if (rel && ownerFeatureId) {
+        byPath.set(rel, ownerFeatureId);
+      }
+    }
+    owners.set(groupId, byPath);
+  }
+  return owners;
+}
+
 function describeFunctionMatches(relFile, functionOwners) {
   const ownerMatches = [];
   const collaboratorMatches = [];
@@ -181,9 +206,27 @@ function describeVerificationMatches(relFile, verificationOwners) {
   return matches;
 }
 
+function describeVerificationMatchesForFeature(relFile, ownerFeatureId, verificationOwners) {
+  const feature = verificationOwners.find((candidate) => candidate.featureId === ownerFeatureId);
+  if (!feature) {
+    return [];
+  }
+  const reasons = feature.paths.filter((candidate) => pathMatch(candidate, relFile));
+  if (reasons.length === 0) {
+    return [];
+  }
+  return [
+    {
+      featureId: feature.featureId,
+      reasons: [...new Set(reasons.map((reason) => `verification:${reason}`))],
+    },
+  ];
+}
+
 export function collectCustomPayloadCarrierOwnerQueryability(repoRoot = process.cwd()) {
   const functionOwners = loadFunctionOwners(repoRoot);
   const verificationOwners = loadVerificationOwners(repoRoot);
+  const manifestOwners = loadManifestOwners(repoRoot);
   const states = new Map(customPayloadCarrierPatternGroups.map((group) => [group.id, []]));
 
   for (const scanRoot of runtimeScanRoots) {
@@ -209,19 +252,26 @@ export function collectCustomPayloadCarrierOwnerQueryability(repoRoot = process.
         if (fileMatches.length === 0) {
           continue;
         }
+        const manifestOwnerFeatureId = manifestOwners.get(group.id)?.get(rel) ?? null;
         const { ownerMatches, collaboratorMatches } = describeFunctionMatches(rel, functionOwners);
-        const verificationMatches = describeVerificationMatches(rel, verificationOwners);
+        const manifestOwnerMatches = manifestOwnerFeatureId
+          ? [{ featureId: manifestOwnerFeatureId, reasons: ['manifest:custom-payload-carrier-runtime-manifest.yml'] }]
+          : [];
+        const resolvedOwnerMatches = manifestOwnerMatches.length > 0 ? manifestOwnerMatches : ownerMatches;
+        const verificationMatches = manifestOwnerFeatureId
+          ? describeVerificationMatchesForFeature(rel, manifestOwnerFeatureId, verificationOwners)
+          : describeVerificationMatches(rel, verificationOwners);
         const ownerState =
-          ownerMatches.length === 0
+          resolvedOwnerMatches.length === 0
             ? 'missing-owner'
-            : ownerMatches.length === 1
+            : resolvedOwnerMatches.length === 1
               ? 'unique-owner'
               : 'ambiguous-owner';
         states.get(group.id)?.push({
           file: rel,
           samples: fileMatches,
           ownerState,
-          ownerMatches,
+          ownerMatches: resolvedOwnerMatches,
           collaboratorMatches,
           verificationMatches,
         });

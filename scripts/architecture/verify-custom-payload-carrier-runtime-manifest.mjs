@@ -112,6 +112,7 @@ const functionOwners = toArray(functionMap.owners).map((owner) => ({
   featureId: owner.feature_id,
   ownerModule: normalizeRel(owner.owner_module),
 }));
+const functionOwnerIds = new Set(functionOwners.map((owner) => owner.featureId));
 
 const verificationOwners = toArray(verificationMap.verification).map((feature) => ({
   featureId: feature.feature_id,
@@ -140,6 +141,17 @@ function verificationStateFor(relFile) {
     }
   }
   return 'missing';
+}
+
+function verificationStateForOwnerFeature(relFile, ownerFeatureId) {
+  if (!ownerFeatureId) {
+    return 'missing';
+  }
+  const feature = verificationOwners.find((candidate) => candidate.featureId === ownerFeatureId);
+  if (!feature) {
+    return 'missing';
+  }
+  return feature.paths.some((candidate) => pathMatch(candidate, relFile)) ? 'present' : 'missing';
 }
 
 const failures = [];
@@ -190,6 +202,12 @@ for (const group of groups) {
     if (!allowedSemanticFamilies.has(entry.semantic_family)) {
       failures.push(`${group.id} manifest file ${rel} uses unknown semantic_family: ${entry.semantic_family}`);
     }
+    const ownerFeatureId = typeof entry.owner_feature_id === 'string' ? entry.owner_feature_id.trim() : '';
+    if (!ownerFeatureId) {
+      failures.push(`${group.id} manifest file ${rel} missing owner_feature_id`);
+    } else if (!functionOwnerIds.has(ownerFeatureId)) {
+      failures.push(`${group.id} manifest file ${rel} owner_feature_id not found in function-map: ${ownerFeatureId}`);
+    }
     const resolutionTrack = categoryResolutionTracks.get(entry.category);
     if (!resolutionTrack) {
       failures.push(`${group.id} manifest file ${rel} category ${entry.category} has no resolution track mapping`);
@@ -230,13 +248,15 @@ for (const group of groups) {
   }
 
   for (const [rel, entry] of manifestFiles.entries()) {
-    const actualOwnerState = ownerStateFor(rel);
+    const actualOwnerState = entry.owner_feature_id ? 'unique-owner' : ownerStateFor(rel);
     if (entry.owner_queryability !== actualOwnerState) {
       failures.push(
         `${group.id} manifest owner_queryability mismatch for ${rel}: expected ${entry.owner_queryability}, got ${actualOwnerState}`
       );
     }
-    const actualVerificationState = verificationStateFor(rel);
+    const actualVerificationState = entry.owner_feature_id
+      ? verificationStateForOwnerFeature(rel, entry.owner_feature_id)
+      : verificationStateFor(rel);
     if (entry.verification_state !== actualVerificationState) {
       failures.push(
         `${group.id} manifest verification_state mismatch for ${rel}: expected ${entry.verification_state}, got ${actualVerificationState}`

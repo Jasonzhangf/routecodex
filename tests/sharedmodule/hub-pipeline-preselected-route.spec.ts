@@ -40,7 +40,9 @@ function createNormalized(overrides: Record<string, unknown> = {}) {
     },
     metadata: {
       requestId: 'req_preselected_route',
-      __routecodexPreselectedRoute: preselectedRoute,
+      __rt: {
+        preselectedRoute,
+      },
     },
     processMode: 'chat',
     direction: 'request',
@@ -83,7 +85,9 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          __routecodexPreselectedRoute: preselectedRoute,
+          __rt: expect.objectContaining({
+            preselectedRoute,
+          }),
         }),
       }),
     }));
@@ -103,7 +107,182 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          __routecodexPreselectedRoute: preselectedRoute,
+          __rt: expect.objectContaining({
+            preselectedRoute,
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('projects MetadataCenter runtime stop-message control into native request metadata', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {},
+            providerObservation: {},
+            runtimeControl: {
+              stopMessageEnabled: {
+                value: true,
+                status: 'active',
+                writer: {
+                  module: 'src/server/runtime/http-server/index.ts',
+                  symbol: 'HttpServerV2.executePipelineForPort',
+                  stage: 'ServerReqInbound01ClientRaw'
+                },
+                reason: 'port stop-message enablement'
+              }
+            }
+          },
+          __rt: {
+            preselectedRoute,
+            stopMessageEnabled: false,
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          stopMessageEnabled: true,
+          routecodexPortStopMessageEnabled: true,
+          __rt: expect.objectContaining({
+            preselectedRoute,
+            stopMessageEnabled: true,
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __routecodexPreselectedRoute: {
+            target: {
+              providerKey: 'legacy.flat.should-not-win',
+              providerType: 'openai',
+              outboundProfile: 'openai-responses',
+              modelId: 'legacy-model',
+            },
+            decision: {
+              routeName: 'legacy-flat',
+              poolId: 'legacy',
+              reasoning: 'legacy-flat',
+            },
+            diagnostics: {},
+          },
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {},
+            providerObservation: {},
+            runtimeControl: {
+              preselectedRoute: {
+                value: preselectedRoute,
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue',
+                  stage: 'test'
+                },
+                reason: 'test route pin'
+              }
+            }
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(routerEngine.route).not.toHaveBeenCalled();
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          __rt: expect.objectContaining({
+            preselectedRoute,
+          }),
+        }),
+      }),
+    }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt?.preselectedRoute?.target?.providerKey)
+      .toBe('preselected.key1.gpt-5.5');
+  });
+
+  it('projects stopless runtime control into native top-level metadata for relay request owners', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {},
+            providerObservation: {},
+            runtimeControl: {
+              stopless: {
+                value: {
+                  sessionId: 'sess-stopless-1',
+                  flowId: 'stop_message_flow',
+                  repeatCount: 2,
+                  maxRepeats: 3,
+                  triggerHint: 'no_schema',
+                  continuationPrompt: '继续做下一步',
+                  schemaFeedback: {
+                    reasonCode: 'stop_schema_missing',
+                    missingFields: ['stopreason', 'reason']
+                  },
+                  active: true
+                },
+                status: 'active',
+                writer: {
+                  module: 'src/servertool/handlers/stop-message-auto.ts',
+                  symbol: 'writeStoplessRuntimeControlToBoundMetadataCenter',
+                  stage: 'stop_message_auto_runtime_control_writer'
+                },
+                reason: 'stopless-runtime-state'
+              }
+            }
+          },
+          __rt: {
+            preselectedRoute,
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          stopless: expect.objectContaining({
+            sessionId: 'sess-stopless-1',
+            flowId: 'stop_message_flow',
+            repeatCount: 2,
+            maxRepeats: 3,
+          }),
+          __rt: expect.objectContaining({
+            stopless: expect.objectContaining({
+              sessionId: 'sess-stopless-1',
+              flowId: 'stop_message_flow',
+              repeatCount: 2,
+              maxRepeats: 3,
+            }),
+          }),
         }),
       }),
     }));

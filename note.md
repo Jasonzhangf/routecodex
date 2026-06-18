@@ -1,3 +1,25 @@
+## 2026-06-19 MetadataCenter request-route runtime-control slice
+
+- 当前 slice 目标：把 request route control 的 active truth 从 flat `__routecodex*` 迁到 `MetadataCenter.runtime_control` / native runtime side-channel projection，功能不变，降低 payload-side-channel residue。
+- 代码收口：
+  - `prepareRequestExecutorAttemptState(...)` 删除 legacy flat `__routecodexRetryProviderKey`，retry pin 写入 `MetadataCenter.runtime_control.retryProviderKey`。
+  - `executeRequestStagePipeline(...)` 优先读取 `MetadataCenter.runtime_control.preselectedRoute`，legacy `__rt.preselectedRoute` 只作为 native ingress projection；同名 runtime control 由 MetadataCenter 覆盖 `__rt`。
+  - Rust route metadata / meta carrier / VR route consumer 改读 `metadata.__rt.retryProviderKey` -> internal `retryProviderKey`，不再读 flat `__routecodexRetryProviderKey`。
+  - 本地 error/global markers 清理：provider request info、auth preflight fatal、snapshot buffer、daemon admin locals 从 `__routecodex*` marker 转成 Symbol 或普通 local key。
+  - custom payload carrier manifest 改为只保留 guard/contract surfaces，并要求每个 manifest entry 显式 `owner_feature_id`，owner-queryability gate 能按 manifest owner 反查 verification-map。
+- 测试锁定：
+  - `request-executor-attempt-state.contract.spec.ts` 正向断言 retry pin 写入 MetadataCenter，并反向断言 flat key 被删除。
+  - `hub-pipeline-preselected-route.spec.ts` 断言 MetadataCenter preselectedRoute 胜过 flat residue，且 stopMessage/stopless runtime_control 会投影到 native metadata；legacy `__rt` 不能覆盖 MetadataCenter 同名控制位。
+  - Rust route/meta focused tests 覆盖 retryProviderKey carrier 与 route consumer；Rust hub-pipeline fixture 改用 `__rt.preselectedRoute`。
+- 已验证：
+  - custom payload carrier audit / owner-queryability / runtime manifest / containment PASS；当前 `__routecodex* runtime=14 files=9`，均为 guard/contract surfaces。
+  - focused Jest：request-executor-attempt-state + hub-pipeline-preselected-route PASS；executor-metadata + direct route focused suite PASS（Jest open-handle caveat，测试已 PASS）。
+  - Rust focused：router_metadata_input forced-provider test PASS；meta_error_carriers PASS；virtual_router_engine::engine::route PASS。
+  - `npx tsc --noEmit --pretty false`、`git diff --check`、`verify:function-map-compile-gate`、`build:min`、`verify:architecture-ci` 均已在同一 worktree PASS；staged slice 提交前需复跑核心 gate。
+- 剩余风险：
+  - 当前未安装/重启当前 uncommitted code；5555 health 只证明 live runtime 可用，不能证明本 slice 安装态。
+  - 仓库仍有并行脏改和历史 test/contract 对 legacy key 的引用；本 slice 只提交 request-route runtime-control 与 local-marker 清理。
+
 ## 2026-06-19 MetadataCenter followup/goal-state slice
 
 - 当前 slice 目标：继续把 Hub pipeline / followup 控制语义从 legacy `__rt` 收口到 `MetadataCenter.runtime_control`，保持功能不变，只移除 active mainline 对旧内部字段的依赖。

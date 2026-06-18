@@ -16,6 +16,7 @@ import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
+import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
 
 
 function logExecutorMetadataNonBlocking(
@@ -686,6 +687,18 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         symbol: 'buildRequestMetadata',
         stage: 'HubReqInbound02Standardized'
       }
+    );
+  }
+  if (hasStoplessDirectiveInRequestPayload(input.body)) {
+    center.writeRuntimeControl(
+      'stopMessageEnabled',
+      true,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request stopless directive'
     );
   }
 

@@ -12,18 +12,19 @@ export type ProviderSnapshotPersistInput = {
 export const SNAPSHOT_PROVIDER_ERROR_BUFFER_FEATURE_ID = 'feature_id: snapshot.provider_error_buffer';
 
 type SnapshotBufferGlobal = {
-  __routecodexProviderSnapshotErrorBuffer?: Map<string, ProviderSnapshotPersistInput[]>;
+  [PROVIDER_SNAPSHOT_ERROR_BUFFER_MARKER]?: Map<string, ProviderSnapshotPersistInput[]>;
 };
 
+const PROVIDER_SNAPSHOT_ERROR_BUFFER_MARKER = Symbol.for('routecodex.provider.snapshotErrorBuffer');
 const PROVIDER_SNAPSHOT_BUFFER_MAX_REQUESTS = 128;
 const PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST = 24;
 
 function getProviderSnapshotErrorBuffer(): Map<string, ProviderSnapshotPersistInput[]> {
   const scope = globalThis as SnapshotBufferGlobal;
-  if (!scope.__routecodexProviderSnapshotErrorBuffer) {
-    scope.__routecodexProviderSnapshotErrorBuffer = new Map<string, ProviderSnapshotPersistInput[]>();
+  if (!scope[PROVIDER_SNAPSHOT_ERROR_BUFFER_MARKER]) {
+    scope[PROVIDER_SNAPSHOT_ERROR_BUFFER_MARKER] = new Map<string, ProviderSnapshotPersistInput[]>();
   }
-  return scope.__routecodexProviderSnapshotErrorBuffer;
+  return scope[PROVIDER_SNAPSHOT_ERROR_BUFFER_MARKER];
 }
 
 export function shouldFlushSnapshotBuffer(stage: string): boolean {

@@ -94,7 +94,7 @@ impl HubPipelineEngine {
         read_preselected_route(metadata).ok_or_else(|| {
             HubPipelineError::new(
                 "hub_pipeline_missing_preselected_route",
-                "Rust HubPipeline req route stage requires metadata.__routecodexPreselectedRoute for bootstrapped virtual router config",
+                "Rust HubPipeline req route stage requires metadata.__rt.preselectedRoute for bootstrapped virtual router config",
             )
         })
     }
@@ -1057,7 +1057,7 @@ mod tests {
 }
 
 fn read_preselected_route(metadata: &Value) -> Option<Value> {
-    let route = metadata.get("__routecodexPreselectedRoute")?;
+    let route = metadata.get("__rt")?.get("preselectedRoute")?;
     let target = route.get("target")?;
     let decision = route.get("decision")?;
     if !target.is_object() || !decision.is_object() {
@@ -1149,6 +1149,7 @@ fn project_normal_request_payload(request: &Value) -> Value {
         "model",
         "messages",
         "input",
+        "instructions",
         "tools",
         "tool_choice",
         "stream",

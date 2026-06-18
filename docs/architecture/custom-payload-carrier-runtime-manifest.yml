@@ -35,179 +35,95 @@ carrier_runtime_surfaces:
   - carrier_id: routecodex_prefix
     description: "__routecodex* runtime residues still present before full MetadataCenter/runtime side-channel cleanup."
     files:
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs
-        category: payload_side_channel
-        semantic_family: response_followup_semantics
-        owner_queryability: ambiguous-owner
-        verification_state: present
-        note: "response/requestSemantics followup residue; not a client payload contract."
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "request-side retry provider pin side-channel."
       - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+        owner_feature_id: hub.pipeline_contract_surface
         category: contract_or_test_surface
         semantic_family: request_route_control_contract
         owner_queryability: unique-owner
         verification_state: present
         note: "Rust contract help names the current boundary token."
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: ambiguous-owner
-        verification_state: present
-        note: "Rust request-stage preselected route side-channel."
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
-        category: contract_or_test_surface
-        semantic_family: request_route_control_contract
-        owner_queryability: ambiguous-owner
-        verification_state: present
-        note: "Rust fixture/tests lock current route side-channel behavior."
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/meta_error_carriers.rs
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: ambiguous-owner
-        verification_state: present
-        note: "typed metadata carrier still copies retry pin residue."
       - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+        owner_feature_id: hub.response_responses_client_projection
         category: contract_or_test_surface
         semantic_family: request_route_control_contract
-        owner_queryability: ambiguous-owner
+        owner_queryability: unique-owner
         verification_state: present
-        note: "Rust response contract tests still reference current route side-channel token."
+        note: "Rust response client projection contract test locks source metadata removal; owner is declared here to avoid broad Rust directory owner ambiguity."
       - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+        owner_feature_id: server.rust_contract_surface
         category: contract_or_test_surface
         semantic_family: request_route_control_contract
         owner_queryability: unique-owner
         verification_state: present
         note: "server contract help documents current boundary token."
-      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "VR retry provider pin side-channel."
-      - path: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "TS bridge still forwards preselected route side-channel into Rust."
       - path: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
         category: guard_surface
         semantic_family: response_metadata_protocol_guard
         owner_queryability: unique-owner
         verification_state: present
         note: "direct passthrough SSE metadata isolation guard."
-      - path: src/providers/core/runtime/http-request-executor.ts
-        category: local_runtime_marker
-        semantic_family: provider_runtime_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "local error object marker; not a payload field."
-      - path: src/providers/core/runtime/provider-request-header-orchestrator.ts
-        category: local_runtime_marker
-        semantic_family: provider_runtime_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "local auth preflight fatal marker; not a payload field."
-      - path: src/providers/core/runtime/transport/oauth-header-preflight.ts
-        category: local_runtime_marker
-        semantic_family: provider_runtime_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "local auth preflight fatal marker writer."
-      - path: src/providers/core/utils/provider-error-reporter.ts
-        category: local_runtime_marker
-        semantic_family: provider_runtime_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "local provider error reported marker."
-      - path: src/providers/core/utils/snapshot-writer-buffer.ts
-        category: local_runtime_marker
-        semantic_family: provider_runtime_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "local snapshot error buffer marker."
       - path: src/server/handlers/handler-response-common.ts
+        owner_feature_id: server.responses_handler_family
         category: guard_surface
         semantic_family: client_response_guard
         owner_queryability: unique-owner
         verification_state: present
         note: "client-visible JSON/SSE internal carrier fail-fast guard."
       - path: src/server/handlers/handler-utils.ts
+        owner_feature_id: server.responses_handler_family
         category: guard_surface
         semantic_family: request_entry_guard
         owner_queryability: unique-owner
         verification_state: present
         note: "client request metadata entry denylist still names retry provider pin residue."
-      - path: src/server/runtime/http-server/daemon-admin-routes.ts
-        category: local_runtime_marker
-        semantic_family: daemon_admin_local_marker
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "daemon-admin route-local auth flags; not request/response payload."
       - path: src/server/runtime/http-server/executor-metadata.ts
+        owner_feature_id: hub.metadata_center_request_capture
         category: guard_surface
         semantic_family: request_route_control
         owner_queryability: unique-owner
         verification_state: present
         note: "request metadata attempt clone only strips stale preselected-route residue on retry/exclusion paths."
-      - path: src/server/runtime/http-server/executor/provider-response-converter.ts
-        category: payload_side_channel
-        semantic_family: response_followup_semantics
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "response-side requestSemantics.__routecodex residue."
       - path: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
-        category: payload_side_channel
+        owner_feature_id: hub.metadata_center_attempt_merge
+        category: guard_surface
         semantic_family: request_route_control
         owner_queryability: unique-owner
         verification_state: present
-        note: "retry provider pin written into request metadata side-channel."
-      - path: src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
-        category: payload_side_channel
-        semantic_family: response_followup_semantics
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "servertool followup dispatch still carries requestSemantics.__routecodex residue."
+        note: "stale retry provider pin delete guard after MetadataCenter runtime_control migration."
       - path: src/server/runtime/http-server/executor/servertool-followup-metadata.ts
+        owner_feature_id: server.servertool_followup_metadata_surface
         category: guard_surface
         semantic_family: request_route_control
         owner_queryability: unique-owner
         verification_state: present
         note: "followup metadata guard strips provider-selection residue before hub reentry."
-      - path: src/server/runtime/http-server/index.ts
-        category: payload_side_channel
-        semantic_family: request_route_control
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "http entry still writes preselected route / retry provider pin side-channel."
-
   - carrier_id: response_metadata
     description: "response.metadata runtime residues still present before full response projection cleanup."
     files:
       - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+        owner_feature_id: hub.pipeline_contract_surface
         category: contract_or_test_surface
         semantic_family: response_metadata_contract
         owner_queryability: unique-owner
         verification_state: present
         note: "Rust contract help names client response metadata event."
       - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+        owner_feature_id: server.rust_contract_surface
         category: contract_or_test_surface
         semantic_family: response_metadata_contract
         owner_queryability: unique-owner
         verification_state: present
         note: "server contract help names response.metadata event."
       - path: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
         category: guard_surface
         semantic_family: response_metadata_protocol_guard
         owner_queryability: unique-owner
         verification_state: present
         note: "direct passthrough response.metadata protocol/guard owner."
       - path: src/providers/core/hooks/debug-example-hooks.ts
+        owner_feature_id: provider.debug_example_hooks_surface
         category: local_runtime_marker
         semantic_family: provider_debug_observation
         owner_queryability: unique-owner

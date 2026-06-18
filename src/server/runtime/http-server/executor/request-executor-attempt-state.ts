@@ -10,6 +10,12 @@ import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js'
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 
+const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
+  symbol: 'prepareRequestExecutorAttemptState',
+  stage: 'request_executor_attempt_runtime_control'
+} as const;
+
 export type PreparedRequestExecutorAttemptState = {
   metadataForAttempt: Record<string, unknown>;
   clientAbortSignal: AbortSignal | undefined;
@@ -48,11 +54,17 @@ export function prepareRequestExecutorAttemptState(args: {
   if (args.forcedRouteHint) {
     metadataForAttempt.routeHint = args.forcedRouteHint;
   }
-  if (args.retryProviderKey) {
-    metadataForAttempt.__routecodexRetryProviderKey = args.retryProviderKey;
-    delete metadataForAttempt.excludedProviderKeys;
-  } else if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
+  if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
     delete metadataForAttempt.__routecodexRetryProviderKey;
+  }
+  if (args.retryProviderKey) {
+    MetadataCenter.attach(metadataForAttempt).writeRuntimeControl(
+      'retryProviderKey',
+      args.retryProviderKey,
+      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
+      'request executor retry provider pin'
+    );
+    delete metadataForAttempt.excludedProviderKeys;
   }
 
   const loggerRecord =

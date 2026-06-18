@@ -42,6 +42,24 @@ const logHttpRequestExecutorNonBlockingError = (
 };
 
 const MAX_SSE_BUSINESS_ERROR_PEEK_BYTES = 64 * 1024;
+const PROVIDER_REQUEST_INFO_LOCAL_MARKER = Symbol.for('routecodex.provider.requestInfo');
+
+type ProviderRequestInfoLocalMarker = {
+  [PROVIDER_REQUEST_INFO_LOCAL_MARKER]?: PreparedHttpRequest;
+};
+
+function readPreparedRequestFromLocalErrorMarker(error: unknown): PreparedHttpRequest | undefined {
+  return error && typeof error === 'object'
+    ? (error as ProviderRequestInfoLocalMarker)[PROVIDER_REQUEST_INFO_LOCAL_MARKER]
+    : undefined;
+}
+
+function writePreparedRequestToLocalErrorMarker(error: unknown, requestInfo: PreparedHttpRequest): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  (error as ProviderRequestInfoLocalMarker)[PROVIDER_REQUEST_INFO_LOCAL_MARKER] = requestInfo;
+}
 
 function readProviderSnapshotMetadata(context: ProviderContext): Record<string, unknown> | undefined {
   const metadata = (context as { metadata?: unknown }).metadata;
@@ -187,9 +205,7 @@ export class HttpRequestExecutor {
       return await this.executeHttpRequestAcrossTargets(processedRequest, context, prepared);
     } catch (error) {
       const requestInfoOverride =
-        error && typeof error === 'object' && '__routecodexRequestInfo' in error
-          ? ((error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo ?? prepared)
-          : prepared;
+        readPreparedRequestFromLocalErrorMarker(error) ?? prepared;
       const normalized = await this.deps.normalizeHttpError(error, processedRequest, requestInfoOverride, context);
       throw normalized;
     }
@@ -443,15 +459,15 @@ export class HttpRequestExecutor {
         }
 
         if (error && typeof error === 'object') {
-          (error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo = candidate;
+          writePreparedRequestToLocalErrorMarker(error, candidate);
         }
         throw error;
       }
     }
-    const finalError: Error & { __routecodexRequestInfo?: PreparedHttpRequest } = Object.assign(
+    const finalError: Error = Object.assign(
       new Error('provider-runtime-error: no provider HTTP target executed'),
-      { __routecodexRequestInfo: lastRequestInfo }
     );
+    writePreparedRequestToLocalErrorMarker(finalError, lastRequestInfo);
     throw finalError;
   }
 

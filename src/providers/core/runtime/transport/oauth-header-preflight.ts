@@ -12,6 +12,7 @@ type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: strin
 type OAuthAwareAuthProvider = IAuthProvider & {
   getOAuthClient?: () => { loadToken?: () => void };
 };
+const AUTH_PREFLIGHT_FATAL_LOCAL_MARKER = Symbol.for('routecodex.provider.authPreflightFatal');
 
 export interface OAuthHeaderPreflightContext {
   auth: OAuthAuth | { type: string };
@@ -61,7 +62,7 @@ export class OAuthHeaderPreflight {
         }).catch(() => {
           // ignore background repair errors
         });
-        (authErr as Error & { __routecodexAuthPreflightFatal?: boolean }).__routecodexAuthPreflightFatal = true;
+        (authErr as Error & { [AUTH_PREFLIGHT_FATAL_LOCAL_MARKER]?: boolean })[AUTH_PREFLIGHT_FATAL_LOCAL_MARKER] = true;
         throw authErr;
       }
       // 非认证类的 ensureValid 错误只做日志，避免影响正常流量。

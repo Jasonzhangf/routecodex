@@ -9,6 +9,7 @@ import { isCodexUaMode } from './provider-runtime-utils.js';
 import { HeaderUtils, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderUtils } from './transport/index.js';
 
 type ProviderConfigInternal = OpenAIStandardConfig['config'];
+const AUTH_PREFLIGHT_FATAL_LOCAL_MARKER = Symbol.for('routecodex.provider.authPreflightFatal');
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -127,7 +128,7 @@ export async function buildProviderRequestHeaders(options: {
     if (
       error &&
       typeof error === 'object' &&
-      (error as { __routecodexAuthPreflightFatal?: unknown }).__routecodexAuthPreflightFatal === true
+      (error as { [AUTH_PREFLIGHT_FATAL_LOCAL_MARKER]?: unknown })[AUTH_PREFLIGHT_FATAL_LOCAL_MARKER] === true
     ) {
       throw error;
     }

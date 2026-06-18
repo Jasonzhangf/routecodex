@@ -83,7 +83,9 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     copy_normalized_string_array(source, &mut control, "excludedProviderKeys");
     copy_normalized_string_array(source, &mut control, "disabledProviderKeyAliases");
     copy_non_empty_string(source, &mut control, "__shadowCompareForcedProviderKey");
-    copy_non_empty_string(source, &mut control, "__routecodexRetryProviderKey");
+    if let Some(rt) = source.get("__rt").and_then(|value| value.as_object()) {
+        copy_non_empty_string(rt, &mut control, "retryProviderKey");
+    }
     copy_non_empty_string(source, &mut control, "routeHint");
     copy_non_empty_string(source, &mut control, "routerDirectInboundProtocol");
     copy_non_empty_string(source, &mut control, "routecodexRoutingPolicyGroup");
@@ -254,7 +256,9 @@ mod tests {
             "allowedProviders": [" p1.key1 ", "", 7],
             "disabledProviderKeyAliases": ["p1.key2"],
             "__shadowCompareForcedProviderKey": " p2.key3.model ",
-            "__routecodexRetryProviderKey": " p3.key4.model ",
+            "__rt": {
+                "retryProviderKey": " p3.key4.model "
+            },
             "routeHint": " tools ",
             "routerDirectInboundProtocol": " openai-responses ",
             "routecodexRoutingPolicyGroup": " coding ",

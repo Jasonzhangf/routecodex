@@ -336,7 +336,7 @@ impl VirtualRouterEngineCore {
             selection_routing_state.forced_target = None;
         }
         if let Some(target) = meta_route_03
-            .get_string("__routecodexRetryProviderKey")
+            .get_string("retryProviderKey")
             .as_deref()
             .and_then(parse_retry_provider_key_target)
         {

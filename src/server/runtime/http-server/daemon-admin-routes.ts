@@ -94,10 +94,10 @@ export function isLocalRequest(req: Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
-const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = '__routecodexDaemonAdminAuthRequired';
-const DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY = '__routecodexDaemonAdminApiKeyConfigured';
-const DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY = '__routecodexDaemonAdminLocalBypassEnabled';
-const DAEMON_ADMIN_EXPECTED_APIKEY_LOCAL_KEY = '__routecodexDaemonAdminExpectedApiKey';
+const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = 'routecodex.daemonAdmin.authRequired';
+const DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY = 'routecodex.daemonAdmin.apiKeyConfigured';
+const DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY = 'routecodex.daemonAdmin.localBypassEnabled';
+const DAEMON_ADMIN_EXPECTED_APIKEY_LOCAL_KEY = 'routecodex.daemonAdmin.expectedApiKey';
 
 function normalizeHost(value: unknown): string {
   if (typeof value !== 'string') {
