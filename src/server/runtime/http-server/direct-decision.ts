@@ -21,6 +21,10 @@
  *       current provider key.
  *   - only 1 candidate left OR no retryable plan OR attempt budget exhausted:
  *       decision is `rethrow` with `mutatedExcluded = new Set()`.
+ *   - terminal provider auth/payment failures (401/402/403):
+ *       decision is `rethrow` even if the unified policy produced an
+ *       `exclude_and_reroute` plan for the standard executor. Router-direct
+ *       must not hide auth failure by recursively selecting another provider.
  */
 
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
@@ -91,6 +95,56 @@ function remainingCandidates(pool: ReadonlyArray<string>, excluded: ReadonlySet<
   return n;
 }
 
+function readStatusCode(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const record = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  const candidates = [
+    record.statusCode,
+    record.status,
+    record.response?.status,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function readErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const record = error as { code?: unknown; upstreamCode?: unknown };
+  for (const candidate of [record.code, record.upstreamCode]) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim().toUpperCase();
+    }
+  }
+  return undefined;
+}
+
+function isTerminalAuthFailure(error: unknown): boolean {
+  const status = readStatusCode(error);
+  if (status === 401 || status === 402 || status === 403) {
+    return true;
+  }
+  const code = readErrorCode(error);
+  return code === 'HTTP_401'
+    || code === 'HTTP_402'
+    || code === 'HTTP_403'
+    || code === 'INVALID_API_KEY'
+    || code === 'INVALID_ACCESS_TOKEN'
+    || code === 'ACCESS_DENIED'
+    || code === 'INSUFFICIENT_QUOTA';
+}
+
 export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): DirectRetryDecision {
   const {
     retryExecutionPlan,
@@ -109,12 +163,19 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
 
-  // Reverse 2: attempt budget exhausted.
+  // Reverse 2: terminal auth/payment failures are not provider switching
+  // opportunities on router-direct. Surface the original error instead of
+  // hiding it behind a recursive direct reroute.
+  if (isTerminalAuthFailure(error)) {
+    return rethrowDecision(error, excludedProviderKeys);
+  }
+
+  // Reverse 3: attempt budget exhausted.
   if (directAttempt >= maxAttempts) {
     return rethrowDecision(error, excludedProviderKeys);
   }
 
-  // Reverse 3: no retryable plan at all.
+  // Reverse 4: no retryable plan at all.
   if (
     !retryExecutionPlan.shouldRetry
     || !retryExecutionPlan.retrySwitchPlan

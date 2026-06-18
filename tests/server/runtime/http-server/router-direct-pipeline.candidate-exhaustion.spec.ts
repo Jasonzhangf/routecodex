@@ -126,6 +126,22 @@ describe('router-direct.candidate-exhaustion', () => {
     expect(decision.mutatedExcluded).toEqual(new Set());
   });
 
+  it('[reverse] terminal auth 401 with reroute plan → must fail fast without route mutation', () => {
+    const decision = decideDirectRouterRetry({
+      retryExecutionPlan: plan(),
+      excludedProviderKeys: new Set(),
+      directAttempt: 1,
+      maxAttempts: 3,
+      providerKey: 'p1',
+      pool: ['p1', 'p2'],
+      error: { statusCode: 401, status: 401, code: 'HTTP_401', message: 'Upstream authentication failed' },
+    });
+    expect(decision.action).toBe('rethrow');
+    expect(decision.shouldRecurse).toBe(false);
+    expect(decision.shouldRethrow).toBe(true);
+    expect(decision.mutatedExcluded).toEqual(new Set());
+  });
+
   it('[reverse] attempt exhausted (directAttempt >= maxAttempts) → rethrow', () => {
     const decision = decideDirectRouterRetry({
       retryExecutionPlan: plan(),

@@ -1,3 +1,70 @@
+## 2026-06-18 internal metadata request-write topology plan
+
+- Jason clarified the next cleanup rule: request nodes should not perform unnecessary metadata writes; only necessary request-scoped control truth may be written to `MetadataCenter`, especially `runtime_control`.
+- Updated `docs/goals/internal-metadata-center-migration-plan.md` with a dedicated request metadata write topology:
+  - default request-node behavior is no metadata create/merge/backfill/patch/scrub;
+  - legal writes are limited to canonical `MetadataCenter` families: `request_truth`, `continuation_context`, `runtime_control`, `provider_observation`, and debug/replay where explicitly scoped;
+  - old payload-side-channel fields must be physically removed, not renamed into generic metadata;
+  - new gates must fail old `__routecodex*`, `requestSemantics.__routecodex`, `__sse_*`, internal payload metadata/options writes, and undeclared `MetadataCenter.writeRuntimeControl(...)` slots.
+- This is a planning/doc update only; runtime migration and final verification remain pending.
+
+
+## 2026-06-18 internal metadata cleanup closeout
+
+- Goal status reached for the requested cleanup slice: request/response/provider/client payloads no longer carry internal control truth, and necessary control truth is written only through `MetadataCenter` / runtime side-channel.
+- Verified gates:
+  - `npm run audit:custom-payload-carriers` PASS
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-ci-longtail` PASS
+  - `npm run verify:architecture-review-surface` PASS
+  - `npm run verify:architecture-ci` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run build:min` PASS
+  - `git diff --check` PASS
+- Focused runtime proof:
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` PASS after direct 401 fail-fast fix
+  - `routecodex restart --port 5555` PASS
+  - `curl http://127.0.0.1:5555/health` returned `ready=true pipelineReady=true version=0.90.3136`
+  - real `/v1/responses` smoke returned `ok`
+  - provider-request body had no `metadata`, `__routecodex*`, `__sse_*`, or `__rt`
+  - `client-request.json` contains `body.metadata.__rt` only as snapshot runtime capture; inner `body.body` remained protocol-only
+- Residual intentional surfaces remain only as guard/contract/doc references and are covered by manifest + owner-queryability gates.
+
+## 2026-06-18 XLC key split and 5555 priority update
+
+- XLC provider config updated: `key1` is documented for GLM models, `key2` for DeepSeek models; `key2` secret is intentionally not repeated here.
+- 5555 `coding` / `thinking` / `longcontext` route priority updated to `XLC.key1.glm-5.2 -> XLC.key2.deepseek-v4-pro -> fwd.minimax.MiniMax-M3 -> GPT`.
+- Verification:
+  - `routecodex config validate` PASS.
+  - Direct upstream curl: `key1 + glm-5.2` currently returns upstream 429 rate-limit after earlier successful 200; `key2 + deepseek-v4-pro` reaches upstream and returns 402 insufficient balance.
+  - 5555 live sample after restart shows first attempt `XLC.key1.glm-5.2`, second attempt `XLC.key2.deepseek-v4-pro`, then MiniMax.
+- Boundary: 5555 remains `sameProtocolBehavior = "direct"` per Jason correction; do not change direct/relay behavior for this config task.
+
+## 2026-06-18 global internal metadata audit for MetadataCenter migration
+
+- Audit scope: global `__routecodex*`, `__sse_*`, and `response.metadata` runtime residues before planning MetadataCenter/runtime side-channel migration.
+- Commands run:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+- Current baseline:
+  - `__routecodex*`: `runtime=72`, runtime files=`25`; category split: `payload_side_channel=10`, `guard_surface=5`, `local_runtime_marker=6`, `contract_or_test_surface=4`.
+  - `__sse_*`: runtime files=`0`; remaining hits are tests/scripts/docs/fixtures only.
+  - `response.metadata`: runtime files=`4`; split: `guard_surface=1`, `local_runtime_marker=1`, `contract_or_test_surface=2`.
+  - Owner queryability: `__routecodex* unique-owner=20 / ambiguous-owner=5 / missing-owner=0 / missing-verification=0`; `response.metadata unique-owner=4 / ambiguous-owner=0`.
+- Migration finding:
+  - Only `payload_side_channel=10` is the direct MetadataCenter/runtime side-channel migration target.
+  - `guard_surface` must remain as fail-fast boundary during migration.
+  - `local_runtime_marker` should be renamed to typed local fields/WeakMap/local symbol state, not routed through normal request/response payload.
+  - `contract_or_test_surface` should change only after corresponding runtime migration changes, otherwise tests/contracts become stale.
+- Primary migration lanes:
+  - Request route control: `__routecodexRetryProviderKey` and `__routecodexPreselectedRoute` -> `MetadataCenter.runtime_control.retryProviderKey/preselectedRoute`.
+  - Response followup semantics: `requestSemantics.__routecodex.{serverToolFollowup,serverToolFollowupSource,stoplessGoalStatus}` -> `MetadataCenter.runtime_control.serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus`.
+  - Rust request-route readers currently still consume old flat fields; they must move after TS writers are migrated, not before.
+
 ## 2026-06-18 stopless schema-missing guidance branch fix
 
 - Jason 最新明确要求：`schema missing` 时的引导不能只是“补字段”，必须显式分支：
@@ -226,6 +293,50 @@
 - 已补 source-to-sink 审计：
   - `__routecodexRetryProviderKey` 当前最窄 TS writers = `request-executor-attempt-state.ts` + `index.ts`
   - `__routecodexPreselectedRoute` 当前关键链 = `index.ts` writer -> `executor-metadata.ts` / `servertool-followup-metadata.ts` guards -> `hub-pipeline-execute-request-stage.ts` bridge -> Rust `hub_pipeline_lib/engine.rs` read
+
+## 2026-06-18 stopless metadata/request-result writer-first audit
+
+- Jason 当前要求先清 stopless 这条线的 metadata 与 request-result 改写点，确保 trace 可读、唯一 writer 可锁。
+- 已确认 stopless metadata 真正应该保留的主 writer：
+  - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+  - 这里写 `flowId/repeatCount/maxRepeats/triggerHint/continuationPrompt/schemaFeedback/active` 到 `MetadataCenter`。
+- 已确认重复 writer 并已物理删除：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts`
+  - 删除原因：它从 `runtimePreCommandState.stopMessageText/Used/MaxRepeats` 二次回灌 stopless runtime control，属于非 owner 的重复写入，`reason=seed-from-routing-state`。
+- 新增 focused test：
+  - `tests/servertool/stopless-metadata-writer-ownership.spec.ts`
+  - 锁 `runServerSideToolEngine` 不再从 precommand routing state 重写 stopless metadata。
+- 已验证：
+  - `tests/servertool/stopless-metadata-writer-ownership.spec.ts` PASS
+  - `tests/servertool/servertool-auto-hook-trace.spec.ts` PASS
+- 当前 request-result 改写 owner 仍分两段，需继续收口：
+  - fresh request 翻译 owner：`rust-core/.../hub_req_inbound_tool_call_normalization.rs`
+  - continuation/history 折叠 owner：`rust-core/.../shared_responses_conversation_utils.rs`
+- 当前最可疑的非必要链路点：
+  - `req_process_stage1_tool_governance_blocks/request_result.rs` 会把外部 metadata 与 governed metadata 再 merge 一次，必须加 trace / 红测确认 stopless control 没被覆盖。
+  - `hub_req_inbound_tool_call_normalization.rs` 与 `shared_responses_conversation_utils.rs` 都会把 stopless tool output 翻译成模型可见文本；后续需要锁“谁负责翻译，谁只负责折叠历史”，避免双 owner。
+
+## 2026-06-18 stopless MetadataCenter staged bridge: request-local control truth to provider-request blackbox
+
+- Jason 当前明确方向已锁：stopless 等控制语义不能继续跟 normal payload/history 走，必须收进 `MetadataCenter`；这次只做 stopless 的 staged bridge，不宣称 session-scoped 中心化已经完成。
+- 本轮实现：
+  - 新增唯一 helper：`sharedmodule/llmswitch-core/src/servertool/stopless-metadata-center.ts`
+  - `server-side-tools.ts` 里 legacy routing-state -> stopless runtime control seed 改走该 helper
+  - `stop-message-auto.ts` finalize 写 stopless runtime control 也改走同一 helper，避免两份写入语义
+  - `src/utils/responses-to-chat.ts` 补 host-side guard：native codec 若未把现有 `instructions` 投成 `system` message，则显式补到最终 `messages[0]`
+- 证据：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stopless-metadata-center.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/utils/responses-to-chat-native.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+- 这轮新锁住的黑盒结论：
+  - `MetadataCenter.runtime_control.stopless`
+    -> `prepareResponsesRequestBodyForHttp(...).pipelineBody.instructions`
+    -> `normalizeResponsesToChatBody(...).messages`
+    已能本地证明落到最终 provider-request 形态
+- 仍然未完成的边界：
+  - 这只是 request-local MetadataCenter staged bridge，不等于 session-scoped control center
+  - 在线 5555 真实样本还没复核；只有完成 build/install/restart + replay/观察 provider-request 样本后，才能宣称线上链路也通
 - 新增更强约束：
   - `metadata-center-manifest.yml` 已声明 `runtime_control` family 与 `MetaReq04RuntimeControlBound`
   - `metadata-center-types.ts` 也已有 `runtime_control`
@@ -5489,3 +5600,108 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 完成性判断：
   - 本目标的 review surface 漂移、function-map/mainline/wiki/manifest 机器锁、CI/local build gate、防复活 deleted/residue gate、瘦身候选表与当前安装态 smoke 均已有当前状态证据。
   - 当前不宣称 `__routecodex*` runtime 已清零；真实状态仍是 25 个 allowlisted runtime files，其中 10 个 `payload_side_channel` 属于后续 MetadataCenter/runtime side-channel migration 工作。
+
+## 2026-06-18 architecture review surface lockdown
+
+### 缺口 A: build wiring 拆层
+- `build:min` 重命名为 `build:base`
+- `build` 改为 `npm run build:base && npm run verify:architecture-ci`
+- `build:dev` / `build:dev:full` 用 `build:base`
+- `verify:function-map-build-wiring.mjs` 更新为检查 `build:base` + `build` + `build:dev/*` wiring
+- 验证：PASS
+
+### 缺口 C: mainline chain manifests + gate
+- 新 `generate-mainline-chain-manifests.mjs`：为 7 条 chains 生成 `docs/architecture/manifests/<chain_id>.yml`
+- 新 `verify-architecture-mainline-manifest-sync.mjs`：schema、owner、chain、node_ids、wiki_page、required_gates 一致性
+- render 脚本更新：`render:architecture-wiki-pages` 和 `render:architecture-mainline-mermaid` 自动先跑 chain manifests 生成
+- 验证：PASS
+
+### 缺口 D: wiki 节点 ID 一致性 gate
+- 新 `verify-architecture-wiki-node-id-consistency.mjs`：7 个 wiki 页面中的 Mermaid 节点 ID 与 mainline-call-map.yml 的 from_node/to_node 交叉比对
+- metadata.center.mainline 额外与 metadata-center-manifest.yml 的 node_ids 校验
+- 验证：PASS
+
+### 缺口 E: shared function binding state gate
+- 新 `verify-mainline-call-map-binding-state.mjs`：校验 shared_multi_reference_functions + split_bindings 有 binding_status（confirmed/pending/partial）
+- pending 阈值 3，当前 pending=0
+- 补全 9 个 shared functions + 2 个 split_bindings 的 binding_status 为 confirmed
+- 验证：PASS
+
+### 缺口 F: required_tests 反向引用完整性 gate
+- 新 `verify-function-map-test-coverage-integrity.mjs`：对每个 feature 的 required_tests，测试文件内容是否提及 feature 关键词
+- 检查 245 test entries，全部通过
+- 验证：PASS
+
+### 缺口 G: topology 文档 vs code type 一致性 gate
+- 新 `verify-architecture-topology-type-consistency.mjs`：H3 section header nodes 必须在 call map 中（除非 topology-only）
+- 识别 topology doc 中 43 个注册节点
+- `ProviderReqOutbound07TransportRequest` 加 `<-- topology-only -->`
+- `ErrorErr04RouterPolicyApplied` 和 `RequestExecutorErrorErr04RouterPolicyEnvelope` 在 call map shared functions 注册
+- topology-sync-manifest.yml 更新：ErrorErr04RouterPolicyApplied 从 allowlist 移除
+- 验证：PASS
+
+### 修复的 collateral damage
+- `function-map.yml` 和 `verification-map.yml` 中 `npm run build:min` → `npm run build:base`（2 个 gate 从 owner-queryability 检出，修复后绿）
+
+## 2026-06-18 internal metadata center migration plan topology
+
+- Jason 要求先做全局审计计划文档和 `/goal` 提示词，不继续抢正在进行的 `__routecodex*` 字段删除实现。
+- 计划文档：`docs/goals/internal-metadata-center-migration-plan.md`
+- 已补充：
+  - `Execution Topology And Locks`：`Topo01AuditCarrierDiscovery -> Topo02ManifestDispositionBudget -> Topo03LaneOwnerSelection -> Topo04RuntimeTruthMigration -> Topo05DeletedResidueLock -> Topo06ReviewSurfaceSync`
+  - `Source-To-Sink Migration Topology`：Route Control、Servertool Followup、Local Runtime Marker、Guard And Protocol 四条拓扑
+  - 明确 `response.metadata` 是标准 Responses SSE 事件，不能 blanket-ban；只禁止内部控制 key 混入
+- 校验：
+  - `rg -n "Execution Topology|Source-To-Sink|Route Control Topology|Servertool Followup Topology|Local Runtime Marker Topology|Guard And Protocol Topology|Completion Definition" docs/goals/internal-metadata-center-migration-plan.md` 命中预期章节
+  - `git diff --check -- docs/goals/internal-metadata-center-migration-plan.md` PASS
+
+## 2026-06-18 lane A request-route control slice
+
+- 本轮已完成：
+  - `src/server/runtime/http-server/index.ts`
+    - `__routecodexPreselectedRoute` / `__routecodexRetryProviderKey` flat 写入移除
+    - 通过 `MetadataCenter.writeRuntimeControl(...)` 写 `preselectedRoute` / `retryProviderKey`
+    - 通过 `__rt` 投影给 Rust NAPI，不再让 runtime truth 落在 normal payload 字段
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+    - preselected route 读取改为 `metadata.__rt.preselectedRoute`
+  - Rust route-control readers:
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/meta_error_carriers.rs`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs`
+- 验证证据：
+  - `tests/server/runtime/http-server/request-executor-attempt-state.contract.spec.ts` PASS
+  - `tests/server/http-server/executor-metadata.spec.ts` PASS
+  - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+  - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts` PASS
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` 的 429/502 retry focused cases PASS
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` PASS
+  - `npm run audit:custom-payload-carriers` 结果更新为 `runtime files=18`、`payload_side_channel=3`
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run build:min` PASS
+  - `git diff --check` PASS
+- 当前剩余：
+  - 仍有 3 个 `payload_side_channel` runtime hits，全部在 response followup semantics lane。
+  - `response.metadata` 仍保留标准协议与 guard/contract surface，不作为删除目标。
+
+## 2026-06-18 internal metadata migration plan closeout prompt
+
+- Jason 要求输出计划文档拓扑和可直接使用的 `/goal`，不是继续动迁移代码。
+- 已更新 `docs/goals/internal-metadata-center-migration-plan.md`：
+  - 校准最新 Lane A 后审计基线：`__routecodex* runtime files=18`、runtime hits=`55`、`payload_side_channel=3`、`__sse_* runtime files=0`。
+  - 补 `Current Execution Cursor`：Lane A done，下一步 Lane B response followup semantics，然后 Lane C guard/deleted-residue、Lane D local runtime marker、review surface sync。
+  - 补 Lane B 三跳拓扑：`Followup01Materializer -> Followup02ResponseConverterReader -> Followup03RustResidueContract`。
+  - 补 `Drift-Lock Gate Plan`：manifest budget、deleted residue、payload boundary、owner queryability、review surface、SSE wrapper 六类锁。
+- 复跑审计证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS。
+### 终验
+- wiring gate: `verify:function-map-build-wiring` PASS
+- review-surface-light: 10 sub-gates PASS
+- function-map-compile-gate: 13 sub-gates PASS
+- architecture-ci-longtail: PASS
+- 5 新 gate: mainline-manifest-sync / wiki-node-id-consistency / binding-state / test-coverage-integrity / topology-type-consistency — 全部 PASS
+- git diff --check PASS
+- 本轮新文件：6 个 gate 脚本 + 1 个 manifest 生成器 + 7 个 chain manifest YMLs + goal 文档

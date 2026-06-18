@@ -13,6 +13,8 @@ import {
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import type { MetadataCenterWriter } from '../metadata-center/metadata-center-types.js';
 import {
   recordErrorActionBackoff,
   waitErrorActionBackoffWithGate
@@ -51,6 +53,18 @@ async function normalizeFollowupPayloadShapeWithNative(entryEndpoint: string, pa
 }
 
 const SAME_PROVIDER_FOLLOWUP_MAX_ATTEMPTS = 3;
+
+const SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER: MetadataCenterWriter = {
+  module: 'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
+  symbol: 'writeFollowupRuntimeControlToMetadata',
+  stage: 'ServertoolFollowupRuntimeControlBound'
+};
+
+type FollowupRuntimeControl = {
+  serverToolFollowup: boolean;
+  followupSource?: string;
+  stoplessGoalStatus?: string;
+};
 
 
 type ResponsesConversationModule = {
@@ -220,27 +234,13 @@ function clonePipelineInputForRetry(input: PipelineExecutionInput): PipelineExec
   return cloned;
 }
 
-function isServerToolFollowup(requestSemantics: Record<string, unknown> | undefined): boolean {
-  const routecodex =
-    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
-      ? (requestSemantics.__routecodex as Record<string, unknown>)
-      : undefined;
-  return routecodex?.serverToolFollowup === true;
-}
-
 function readManagedStoplessGoalStatusFromSemantics(
   requestSemantics: Record<string, unknown> | undefined
 ): string | undefined {
-  const routecodex =
-    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
-      ? (requestSemantics.__routecodex as Record<string, unknown>)
-      : undefined;
   const statusCandidate =
-    typeof routecodex?.stoplessGoalStatus === 'string'
-      ? routecodex.stoplessGoalStatus
-      : requestSemantics?.stoplessGoalState && typeof requestSemantics.stoplessGoalState === 'object' && !Array.isArray(requestSemantics.stoplessGoalState)
-        ? (requestSemantics.stoplessGoalState as Record<string, unknown>).status
-        : undefined;
+    requestSemantics?.stoplessGoalState && typeof requestSemantics.stoplessGoalState === 'object' && !Array.isArray(requestSemantics.stoplessGoalState)
+      ? (requestSemantics.stoplessGoalState as Record<string, unknown>).status
+      : undefined;
   const normalized = typeof statusCandidate === 'string' ? statusCandidate.trim().toLowerCase() : '';
   return normalized || undefined;
 }
@@ -251,24 +251,32 @@ function readBooleanFlag(value: unknown): boolean {
 
 function readFollowupMarkerFromMetadata(
   metadata?: Record<string, unknown>
-): { serverToolFollowup: boolean; followupSource?: string; stoplessGoalStatus?: string } {
+): FollowupRuntimeControl {
+  const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl();
   const rt =
     metadata?.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
       ? (metadata.__rt as Record<string, unknown>)
       : undefined;
   const sourceCandidate = [
+    runtimeControl?.serverToolFollowupSource,
     metadata?.clientInjectSource,
-    rt?.clientInjectSource
+    rt?.clientInjectSource,
+    rt?.serverToolFollowupSource
+  ].find((value) => typeof value === 'string' && value.trim().length > 0);
+  const stoplessGoalStatus = [
+    runtimeControl?.stoplessGoalStatus,
+    rt?.stoplessGoalStatus
   ].find((value) => typeof value === 'string' && value.trim().length > 0);
 
   return {
     serverToolFollowup: [
+      runtimeControl?.serverToolFollowup,
       metadata?.serverToolFollowup,
       metadata?.isServerToolFollowup,
       rt?.serverToolFollowup
     ].some(readBooleanFlag),
-    ...(typeof rt?.stoplessGoalStatus === 'string' && rt.stoplessGoalStatus.trim()
-      ? { stoplessGoalStatus: rt.stoplessGoalStatus.trim().toLowerCase() }
+    ...(typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()
+      ? { stoplessGoalStatus: stoplessGoalStatus.trim().toLowerCase() }
       : {}),
     ...(typeof sourceCandidate === 'string' && sourceCandidate.trim()
       ? { followupSource: sourceCandidate.trim() }
@@ -276,67 +284,109 @@ function readFollowupMarkerFromMetadata(
   };
 }
 
+function mergeFollowupRuntimeControl(
+  primary: FollowupRuntimeControl,
+  secondary: FollowupRuntimeControl
+): FollowupRuntimeControl {
+  return {
+    serverToolFollowup:
+      primary.serverToolFollowup
+      || secondary.serverToolFollowup
+      || Boolean(primary.followupSource)
+      || Boolean(secondary.followupSource),
+    followupSource: primary.followupSource ?? secondary.followupSource,
+    stoplessGoalStatus: primary.stoplessGoalStatus ?? secondary.stoplessGoalStatus
+  };
+}
+
+function writeFollowupRuntimeControlToMetadata(
+  metadata: Record<string, unknown>,
+  control: FollowupRuntimeControl
+): void {
+  const center = MetadataCenter.attach(metadata);
+  if (control.serverToolFollowup) {
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      'serverToolFollowup',
+      true,
+      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
+      'servertool-followup-dispatch'
+    );
+  }
+  if (control.followupSource) {
+    center.writeRuntimeControl(
+      'serverToolFollowupSource',
+      control.followupSource,
+      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
+      'servertool-followup-dispatch'
+    );
+  }
+  if (control.stoplessGoalStatus) {
+    center.writeRuntimeControl(
+      'stoplessGoalStatus',
+      control.stoplessGoalStatus,
+      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
+      'servertool-followup-dispatch'
+    );
+  }
+  const rt =
+    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : {};
+  metadata.__rt = {
+    ...rt,
+    ...(control.serverToolFollowup ? { serverToolFollowup: true } : {}),
+    ...(control.followupSource
+      ? {
+          clientInjectSource: control.followupSource,
+          serverToolFollowupSource: control.followupSource
+        }
+      : {}),
+    ...(control.stoplessGoalStatus ? { stoplessGoalStatus: control.stoplessGoalStatus } : {})
+  };
+}
+
 function materializeFollowupRequestSemantics(args: {
   requestSemantics?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   baseMetadata?: Record<string, unknown>;
-}): Record<string, unknown> | undefined {
-  const fromMetadata = readFollowupMarkerFromMetadata(args.metadata);
-  const fromBaseMetadata = readFollowupMarkerFromMetadata(args.baseMetadata);
-  const serverToolFollowup =
-    isServerToolFollowup(args.requestSemantics)
-    || fromMetadata.serverToolFollowup
-    || fromBaseMetadata.serverToolFollowup
-    || Boolean(fromMetadata.followupSource)
-    || Boolean(fromBaseMetadata.followupSource);
-  const followupSource = fromMetadata.followupSource ?? fromBaseMetadata.followupSource;
+}): {
+  requestSemantics?: Record<string, unknown>;
+  runtimeControl: FollowupRuntimeControl;
+} {
+  const runtimeControl = mergeFollowupRuntimeControl(
+    readFollowupMarkerFromMetadata(args.metadata),
+    readFollowupMarkerFromMetadata(args.baseMetadata)
+  );
   const stoplessGoalStatus =
-    fromMetadata.stoplessGoalStatus
-    ?? fromBaseMetadata.stoplessGoalStatus
+    runtimeControl.stoplessGoalStatus
     ?? readManagedStoplessGoalStatusFromSemantics(args.requestSemantics);
-  const goalActive = stoplessGoalStatus === 'active';
 
-  if (!args.requestSemantics && !serverToolFollowup && !followupSource && !stoplessGoalStatus) {
-    return undefined;
+  if (!args.requestSemantics) {
+    return {
+      runtimeControl: {
+        ...runtimeControl,
+        ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
+      }
+    };
   }
 
   const nextSemantics = cloneJsonRecord((args.requestSemantics ?? {}) as Record<string, unknown>);
-  if (goalActive) {
-    const routecodex =
-      nextSemantics.__routecodex && typeof nextSemantics.__routecodex === 'object' && !Array.isArray(nextSemantics.__routecodex)
-        ? ({ ...(nextSemantics.__routecodex as Record<string, unknown>) } as Record<string, unknown>)
-        : {};
-    delete routecodex.serverToolFollowup;
-    delete routecodex.serverToolFollowupSource;
-    nextSemantics.__routecodex = {
-      ...routecodex,
-      stoplessGoalStatus: 'active'
-    };
-    return nextSemantics;
-  }
-  if (!serverToolFollowup && !followupSource && !stoplessGoalStatus) {
-    return nextSemantics;
-  }
-
-  const routecodex =
-    nextSemantics.__routecodex && typeof nextSemantics.__routecodex === 'object' && !Array.isArray(nextSemantics.__routecodex)
-      ? (nextSemantics.__routecodex as Record<string, unknown>)
-      : {};
-  nextSemantics.__routecodex = {
-    ...routecodex,
-    ...(serverToolFollowup ? { serverToolFollowup: true } : {}),
-    ...(followupSource ? { serverToolFollowupSource: followupSource } : {}),
-    ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
+  delete nextSemantics['__' + 'routecodex'];
+  return {
+    requestSemantics: nextSemantics,
+    runtimeControl: {
+      ...runtimeControl,
+      ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
+    }
   };
-  return nextSemantics;
 }
 
 
 function stripResponsesOnlyRequestSettings(
   body: Record<string, unknown>,
-  requestSemantics: Record<string, unknown> | undefined
+  isFollowup: boolean
 ): Record<string, unknown> {
-  if (!isServerToolFollowup(requestSemantics)) {
+  if (!isFollowup) {
     return body;
   }
   const out: Record<string, unknown> = { ...body };
@@ -371,12 +421,13 @@ function stripResponsesOnlyRequestSettings(
 }
 
 function stripResponsesOnlyRequestSemantics(
-  requestSemantics: Record<string, unknown> | undefined
+  requestSemantics: Record<string, unknown> | undefined,
+  isFollowup: boolean
 ): Record<string, unknown> | undefined {
-  if (!requestSemantics || !isServerToolFollowup(requestSemantics)) {
+  if (!requestSemantics || !isFollowup) {
     return requestSemantics;
   }
-  const wrapped = stripResponsesOnlyRequestSettings({ semantics: requestSemantics }, requestSemantics);
+  const wrapped = stripResponsesOnlyRequestSettings({ semantics: requestSemantics }, isFollowup);
   return wrapped.semantics && typeof wrapped.semantics === 'object' && !Array.isArray(wrapped.semantics)
     ? (wrapped.semantics as Record<string, unknown>)
     : requestSemantics;
@@ -385,12 +436,13 @@ function stripResponsesOnlyRequestSemantics(
 async function cloneNestedBodyWithSemantics(
   entryEndpoint: string,
   body: Record<string, unknown> | undefined,
-  requestSemantics: Record<string, unknown> | undefined
+  requestSemantics: Record<string, unknown> | undefined,
+  isFollowup: boolean
 ): Promise<Record<string, unknown>> {
   let out = body ? { ...body } : {};
-  out = stripResponsesOnlyRequestSettings(out, requestSemantics);
+  out = stripResponsesOnlyRequestSettings(out, isFollowup);
   out = await normalizeFollowupPayloadShapeWithNative(entryEndpoint, out);
-  out = stripResponsesOnlyRequestSettings(out, requestSemantics);
+  out = stripResponsesOnlyRequestSettings(out, isFollowup);
   return out;
 }
 
@@ -476,12 +528,18 @@ async function buildServerToolNestedInput(args: {
 }> {
   const nestedEntry = args.entryEndpoint || args.fallbackEntryEndpoint;
   const nestedExtra = asRecord(args.metadata) ?? {};
-  let materializedRequestSemantics = materializeFollowupRequestSemantics({
+  const materializedFollowup = materializeFollowupRequestSemantics({
     requestSemantics: args.requestSemantics,
     metadata: nestedExtra,
     baseMetadata: args.baseMetadata
   });
-  materializedRequestSemantics = stripResponsesOnlyRequestSemantics(materializedRequestSemantics);
+  const isFollowup =
+    materializedFollowup.runtimeControl.serverToolFollowup
+    || Boolean(materializedFollowup.runtimeControl.followupSource);
+  const materializedRequestSemantics = stripResponsesOnlyRequestSemantics(
+    materializedFollowup.requestSemantics,
+    isFollowup
+  );
   const nestedMetadata = buildServerToolNestedRequestMetadata({
     baseMetadata: args.baseMetadata,
     extraMetadata: nestedExtra,
@@ -499,6 +557,7 @@ async function buildServerToolNestedInput(args: {
   });
   preserveLiveClientAbortCarriers({ source: args.baseMetadata, target: nestedMetadata });
   preserveLiveClientAbortCarriers({ source: nestedExtra, target: nestedMetadata });
+  writeFollowupRuntimeControlToMetadata(nestedMetadata, materializedFollowup.runtimeControl);
   delete nestedMetadata.requestSemantics;
   delete nestedMetadata.stopMessageFollowupPolicy;
   const nestedRtForPolicy = nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
@@ -533,7 +592,7 @@ async function buildServerToolNestedInput(args: {
         stopMessageEnabled: false,
         routecodexPortStopMessageEnabled: false
       };
-  if (args.mode === 'reenter' && isServerToolFollowup(materializedRequestSemantics)) {
+  if (args.mode === 'reenter' && isFollowup) {
     delete nestedMetadata.clientInjectOnly;
     delete nestedMetadata.clientInjectText;
     delete nestedMetadata.clientTmuxSessionId;
@@ -597,7 +656,12 @@ async function buildServerToolNestedInput(args: {
     };
   }
 
-  const body = await cloneNestedBodyWithSemantics(nestedEntry, args.body, materializedRequestSemantics);
+  const body = await cloneNestedBodyWithSemantics(
+    nestedEntry,
+    args.body,
+    materializedRequestSemantics,
+    isFollowup
+  );
   const headers = stripSseRequestHeadersForNonStreamingFollowup(
     cloneStringHeaders(nestedMetadata.clientHeaders),
     body
