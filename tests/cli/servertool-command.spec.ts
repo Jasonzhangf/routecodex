@@ -112,10 +112,18 @@ describe('servertool CLI command', () => {
     expect(payload.requestId).toBeUndefined();
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
+    expect(typeof payload.modelGuidance).toBe('string');
+    expect(payload.modelGuidance).toContain('继续推进');
     expect(payload.schemaGuidance).toBeDefined();
     expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
     expect(payload.schemaGuidance.requiredFields).toContain('stopreason');
     expect(payload.schemaGuidance.stopreasonValues.finished).toBe(0);
+    expect(payload.schemaGuidance.decisionRules).toContain(
+      'If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.'
+    );
+    expect(payload.schemaGuidance.invalidExamples).toContain(
+      'Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.'
+    );
     for (const forbidden of [
       'schema',
       'hook',
@@ -209,10 +217,14 @@ describe('servertool CLI command', () => {
     expect(payload.requestId).toBeUndefined();
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
+    expect(typeof payload.modelGuidance).toBe('string');
     expect(payload.schemaGuidance).toBeDefined();
     expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
     expect(payload.schemaGuidance.requiredFields).toContain('next_step');
     expect(payload.schemaGuidance.stopreasonValues.blocked).toBe(1);
+    expect(payload.schemaGuidance.decisionRules).toContain(
+      'Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.'
+    );
     for (const forbidden of [
       'schema',
       'hook',
@@ -229,6 +241,40 @@ describe('servertool CLI command', () => {
     ]) {
       expect(String(payload.continuationPrompt ?? '')).not.toContain(forbidden);
     }
+  });
+
+  it('exposes second-round missing-schema guidance in visible CLI payload', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'reasoning_stop',
+      '--input-json',
+      JSON.stringify({
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        schemaFeedback: {
+          reasonCode: 'stop_schema_missing',
+          missingFields: ['stopreason', 'reason', 'next_step']
+        }
+      })
+    ]);
+
+    expect(errors).toEqual([]);
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload.modelGuidance).toContain('如果任务已经完成，补齐 stop schema');
+    expect(payload.modelGuidance).toContain('如果任务还没完成，不要停，继续执行当前任务');
   });
 
   it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
