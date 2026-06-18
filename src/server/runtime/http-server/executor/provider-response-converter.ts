@@ -1,4 +1,5 @@
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../handlers/types.js';
+// feature_id: server.provider_response_conversion_host
 import type { ProviderHandle } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
@@ -9,7 +10,8 @@ import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
   persistStoplessGoalStateSnapshot,
-  readStoplessGoalState
+  readStoplessGoalState,
+  resolveRelayResponsesClientSseStreamForHttp,
 } from '../../../../modules/llmswitch/bridge.js';
 import {
   normalizeProviderResponse
@@ -25,9 +27,6 @@ import {
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
-import {
-  buildServerToolSseWrapperBody
-} from './servertool-response-normalizer.js';
 import {
   buildServerToolAdapterContext
 } from './servertool-adapter-context.js';
@@ -56,7 +55,8 @@ import {
   extractBridgeProviderResponsePayload,
   TRUTHY_VALUES,
   FATAL_CONVERSION_ERROR_CODES,
-  STOPLESS_DIRECTIVE_PATTERN
+  STOPLESS_DIRECTIVE_PATTERN,
+  shouldAllowDirectResponsesPrebuiltSsePassthrough
 } from './provider-response-shared-pure-blocks.js';
 
 type StoplessGoalProjection = {
@@ -180,23 +180,6 @@ function asGoalProjection(value: unknown): StoplessGoalProjection | undefined {
 function readPersistedGoalState(adapterContext: Record<string, unknown>): StoplessGoalProjection | undefined {
   const persisted = asFlatRecord(readStoplessGoalState(adapterContext) as Record<string, unknown> | null);
   return asGoalProjection(persisted?.state);
-}
-
-function resolveGoalPersistenceScopeKey(adapterContext: Record<string, unknown>): string | undefined {
-  const explicitScope = readNonEmptyString(adapterContext.stopMessageClientInjectSessionScope)
-    ?? readNonEmptyString(adapterContext.stopMessageClientInjectScope);
-  if (explicitScope) {
-    return explicitScope;
-  }
-  const sessionId = readNonEmptyString(adapterContext.sessionId);
-  if (sessionId) {
-    return `session:${sessionId}`;
-  }
-  const conversationId = readNonEmptyString(adapterContext.conversationId);
-  if (conversationId) {
-    return `conversation:${conversationId}`;
-  }
-  return undefined;
 }
 
 function mergeGoalStateCandidates(candidates: StoplessGoalProjection[]): StoplessGoalProjection {
@@ -622,6 +605,20 @@ export async function convertProviderResponseIfNeeded(
       }
     };
   };
+  const isDirectResponsesPrebuiltSsePassthrough = shouldAllowDirectResponsesPrebuiltSsePassthrough({
+    entryEndpoint: options.entryEndpoint || entry,
+    providerProtocol: options.providerProtocol,
+    hasSseStream: options.response.sseStream !== undefined,
+    continuationOwner: options.response.continuationOwner
+  });
+  if (isDirectResponsesPrebuiltSsePassthrough) {
+    logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol,
+      continuationOwner: options.response.continuationOwner
+    });
+    return attachTimingBreakdown(options.response);
+  }
   let adapterContext: Record<string, unknown> | undefined;
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
@@ -747,7 +744,7 @@ export async function convertProviderResponseIfNeeded(
       requestId: string;
       body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
-    }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+    }): Promise<{ body?: Record<string, unknown>; sseStream?: unknown; format?: string }> => {
       throwIfClientCarrierAborted(options.pipelineMetadata);
       throwIfClientCarrierAborted(reenterOpts.metadata);
       const reenterStartMs = Date.now();
@@ -832,40 +829,6 @@ export async function convertProviderResponseIfNeeded(
     const bridgeProviderResponse =
       extractBridgeProviderResponsePayload(body as Record<string, unknown>)
       ?? (body as Record<string, unknown>);
-    if (
-      bridgeProviderResponse
-      && typeof bridgeProviderResponse === 'object'
-      && !Array.isArray(bridgeProviderResponse)
-      && '__sse_responses' in (bridgeProviderResponse as Record<string, unknown>)
-      && (options.entryEndpoint || entry).toLowerCase().includes('/v1/responses')
-      && options.providerProtocol === 'openai-responses'
-    ) {
-      const prebuiltSseFinishReason = deriveFinishReason(bridgeProviderResponse);
-      const prebuiltSseGoalState = readCurrentGoalState({
-        adapterContext,
-        pipelineMetadata: options.pipelineMetadata
-      });
-      const mustBridgePrebuiltSseForStopless =
-        serverToolsEnabled
-        && (prebuiltSseFinishReason === 'stop' || prebuiltSseFinishReason === undefined);
-      if (!mustBridgePrebuiltSseForStopless) {
-        logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
-          entryEndpoint: options.entryEndpoint || entry,
-          providerProtocol: options.providerProtocol,
-          ...(prebuiltSseFinishReason ? { finishReason: prebuiltSseFinishReason } : {})
-        });
-        return attachTimingBreakdown({
-          ...options.response,
-          body: bridgeProviderResponse as Record<string, unknown>
-        });
-      }
-      logPipelineStage('convert.bridge.prebuilt_sse_stopless_bridge', options.requestId, {
-        entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol: options.providerProtocol,
-        finishReason: prebuiltSseFinishReason,
-        goalStatus: prebuiltSseGoalState?.status
-      });
-    }
     const effectiveRequestSemantics = (() => {
       const existing = asFlatRecord(options.requestSemantics);
       const existingTools = asFlatRecord(existing?.tools);
@@ -904,7 +867,7 @@ export async function convertProviderResponseIfNeeded(
     logPipelineStage('convert.bridge.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: options.providerProtocol,
-      hasSse: Boolean(converted.__sse_responses),
+      hasSse: Boolean(converted.sseStream),
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
     });
@@ -917,7 +880,17 @@ export async function convertProviderResponseIfNeeded(
         entryEndpoint: options.entryEndpoint || entry
       });
     }
-    if (converted.__sse_responses) {
+    if (converted.sseStream) {
+      const projectedRelayResponsesSseStream = await resolveRelayResponsesClientSseStreamForHttp({
+        entryEndpoint: options.entryEndpoint || entry,
+        continuationOwner: options.response.continuationOwner,
+        sseStream: converted.sseStream,
+        body:
+          converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)
+            ? converted.body as Record<string, unknown>
+            : undefined,
+        requestId: options.requestId,
+      });
       const usage = converted.body
         ? extractUsageFromResult(
           { body: converted.body },
@@ -935,11 +908,13 @@ export async function convertProviderResponseIfNeeded(
       });
       return attachTimingBreakdown({
         ...options.response,
-        body: buildServerToolSseWrapperBody({
-          sseResponses: converted.__sse_responses,
-          convertedBody: converted.body,
-          usage
-        })
+        body: converted.body,
+        sseStream: projectedRelayResponsesSseStream,
+        usageLogInfo: {
+          ...(options.response.usageLogInfo ?? {}),
+          requestStartedAtMs: options.response.usageLogInfo?.requestStartedAtMs ?? Date.now(),
+          ...(usage ? { usage: usage as Record<string, unknown> } : {})
+        }
       });
     }
     const effectiveGoalState = adapterContext

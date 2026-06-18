@@ -31,6 +31,8 @@ import {
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeRequestTruthIdentifiers } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
 const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
@@ -108,11 +110,11 @@ export function resolveResponsesRequestContextForHttp(args: {
   metadata?: unknown;
   fallback?: ResponsesRequestContextForHttp;
 }): ResponsesRequestContextForHttp | undefined {
-  const metadata = args.metadata;
-  const fromMetadata =
-    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-      ? (metadata as Record<string, unknown>).responsesRequestContext
+  const metadata =
+    args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
+      ? args.metadata as Record<string, unknown>
       : undefined;
+  const fromMetadata = readMetadataCenterContinuationContextForHttp(metadata).responsesRequestContext;
   if (fromMetadata && typeof fromMetadata === 'object' && !Array.isArray(fromMetadata)) {
     return fromMetadata as ResponsesRequestContextForHttp;
   }
@@ -194,8 +196,12 @@ function asRecordForHttp(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export function hasResponsesSsePayloadForHttp(body: unknown): body is { __sse_responses?: unknown } {
-  return Boolean(body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>));
+function readMetadataCenterContinuationContextForHttp(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  return MetadataCenter.read(metadata)?.readContinuationContext() ?? {};
+}
+
+export function hasResponsesSsePayloadForHttp(value: unknown): value is { sseStream?: unknown } {
+  return Boolean(value && typeof value === 'object' && 'sseStream' in (value as Record<string, unknown>));
 }
 
 export function buildResponsesRequestLogContextForHttp(args: {
@@ -204,6 +210,7 @@ export function buildResponsesRequestLogContextForHttp(args: {
 }): Record<string, unknown> {
   const metadata = asRecordForHttp(args.metadata);
   const usageLogInfo = asRecordForHttp(args.usageLogInfo);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
   return {
     logSessionColorKey: usageLogInfo.logSessionColorKey ?? metadata.logSessionColorKey,
     clientTmuxSessionId: usageLogInfo.clientTmuxSessionId ?? metadata.clientTmuxSessionId,
@@ -214,10 +221,10 @@ export function buildResponsesRequestLogContextForHttp(args: {
       usageLogInfo.rccSessionClientTmuxSessionId ?? metadata.rccSessionClientTmuxSessionId,
     rcc_session_client_tmux_session_id:
       usageLogInfo.rcc_session_client_tmux_session_id ?? metadata.rcc_session_client_tmux_session_id,
-    sessionId: usageLogInfo.sessionId ?? metadata.sessionId,
-    session_id: usageLogInfo.session_id ?? metadata.session_id,
-    conversationId: usageLogInfo.conversationId ?? metadata.conversationId,
-    conversation_id: usageLogInfo.conversation_id ?? metadata.conversation_id
+    sessionId: usageLogInfo.sessionId ?? requestTruth.sessionId,
+    session_id: usageLogInfo.session_id ?? requestTruth.sessionId,
+    conversationId: usageLogInfo.conversationId ?? requestTruth.conversationId,
+    conversation_id: usageLogInfo.conversation_id ?? requestTruth.conversationId
   };
 }
 
@@ -235,7 +242,7 @@ export function normalizeChatUsagePayloadForHttp(
     return { payload: body, normalized: false };
   }
   const record = body as Record<string, unknown>;
-  if ('__sse_responses' in record) {
+  if ('sseStream' in record) {
     return { payload: body, normalized: false };
   }
   const resolved = resolveNormalizedChatUsageForHttp(body, options);
@@ -1069,20 +1076,28 @@ function resolveResponsesConversationPersistInputsForHttp(
     typeof args.providerKey === 'string' && args.providerKey.trim()
       ? args.providerKey.trim()
       : deriveResponsesConversationProviderKeyForHttp(args.usageLogInfo);
-  const continuationOwner =
-    args.continuationOwner
-    ?? (args.metadata?.__routecodexDirectPassthrough === true ? 'direct' : 'relay');
+  const metadataCenterContinuation = readMetadataCenterContinuationContextForHttp(args.metadata);
+  const metadataCenterOwner =
+    metadataCenterContinuation.continuationOwner === 'direct' || metadataCenterContinuation.continuationOwner === 'relay'
+      ? metadataCenterContinuation.continuationOwner
+      : undefined;
+  const continuationOwner = args.continuationOwner ?? metadataCenterOwner ?? 'relay';
+  const requestTruth = readRuntimeRequestTruthIdentifiers(args.metadata);
   const sessionId =
     typeof args.sessionId === 'string' && args.sessionId.trim()
       ? args.sessionId.trim()
       : typeof args.usageLogInfo?.sessionId === 'string' && args.usageLogInfo.sessionId.trim()
         ? args.usageLogInfo.sessionId.trim()
+        : requestTruth.sessionId
+          ? requestTruth.sessionId
         : undefined;
   const conversationId =
     typeof args.conversationId === 'string' && args.conversationId.trim()
       ? args.conversationId.trim()
       : typeof args.usageLogInfo?.conversationId === 'string' && args.usageLogInfo.conversationId.trim()
         ? args.usageLogInfo.conversationId.trim()
+        : requestTruth.conversationId
+          ? requestTruth.conversationId
         : undefined;
   return {
     timingRequestIds,
@@ -1276,6 +1291,47 @@ export async function finalizeResponsesConversationRequestRetentionForHttp(
 
 export async function createResponsesJsonToSseConverterForHttp() {
   return await createResponsesJsonToSseConverter();
+}
+
+export function shouldReprojectRelayResponsesSseForHttp(args: {
+  entryEndpoint?: string;
+  continuationOwner?: 'direct' | 'relay';
+  hasSseStream: boolean;
+}): boolean {
+  if (!args.hasSseStream) {
+    return false;
+  }
+  const entry = String(args.entryEndpoint || '').trim().toLowerCase();
+  if (entry !== '/v1/responses' && entry !== '/v1/responses.submit_tool_outputs') {
+    return false;
+  }
+  return args.continuationOwner !== 'direct';
+}
+
+export async function resolveRelayResponsesClientSseStreamForHttp(args: {
+  entryEndpoint?: string;
+  continuationOwner?: 'direct' | 'relay';
+  sseStream?: unknown;
+  body?: Record<string, unknown>;
+  requestId: string;
+  createConverter?: typeof createResponsesJsonToSseConverterForHttp;
+}): Promise<import('node:stream').Readable | undefined> {
+  if (!shouldReprojectRelayResponsesSseForHttp({
+    entryEndpoint: args.entryEndpoint,
+    continuationOwner: args.continuationOwner,
+    hasSseStream: args.sseStream !== undefined,
+  })) {
+    return args.sseStream as import('node:stream').Readable | undefined;
+  }
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    throw new Error(
+      `[server.response_projection] relay /v1/responses SSE requires standardized response body (requestId=${args.requestId})`
+    );
+  }
+  const converter = await (args.createConverter ?? createResponsesJsonToSseConverterForHttp)();
+  return await converter.convertResponseToJsonToSse(args.body, {
+    requestId: args.requestId,
+  }) as import('node:stream').Readable;
 }
 
 export function buildResponsesSseErrorPayloadForHttp(args: {
