@@ -137,6 +137,7 @@ function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runH
     || readString(target?.routeId);
 }
 
+
 function shouldRebindResponsesConversationForEntry(entryEndpoint: string | undefined): boolean {
   return typeof entryEndpoint === 'string' && entryEndpoint.startsWith('/v1/responses');
 }
@@ -580,7 +581,7 @@ export class HubRequestExecutor implements RequestExecutor {
         const hubStartedAtMs = Date.now();
         logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
-          stream: metadataForAttempt.stream,
+          streamIntent: readRuntimeControlProjection(metadataForAttempt).streamIntent ?? 'non_stream',
           attempt
         }));
         let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
@@ -930,12 +931,14 @@ export class HubRequestExecutor implements RequestExecutor {
           typeof (providerPayload as { stream?: unknown } | undefined)?.stream === 'boolean'
             ? Boolean((providerPayload as { stream?: unknown }).stream)
             : undefined;
+        const mergedRuntimeControl = readRuntimeControlProjection(mergedMetadata);
+        const attemptRuntimeControl = readRuntimeControlProjection(metadataForAttempt);
+        const metadataRequestedStream =
+          mergedRuntimeControl.streamIntent === 'stream'
+          || attemptRuntimeControl.streamIntent === 'stream';
         const providerRequestedStream =
           providerPayloadRequestedStream === true
-          || mergedMetadata.inboundStream === true
-          || mergedMetadata.stream === true
-          || metadataForAttempt.inboundStream === true
-          || metadataForAttempt.stream === true;
+          || metadataRequestedStream;
         const requestSemanticsForAttempt = resolveRequestSemantics(
           pipelineResult.processedRequest as Record<string, unknown> | undefined,
           pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
@@ -1040,8 +1043,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerLabel,
             providerRequestedStream,
             providerPayloadRequestedStream,
-            inboundStream: mergedMetadata.inboundStream === true || metadataForAttempt.inboundStream === true,
-            metadataStream: mergedMetadata.stream === true || metadataForAttempt.stream === true,
+            metadataStreamIntent: metadataRequestedStream ? 'stream' : 'non_stream',
             attempt
           }));
           throwIfClientAbortSignalAborted(clientAbortSignal);
@@ -1066,7 +1068,8 @@ export class HubRequestExecutor implements RequestExecutor {
             providerLabel,
             attempt
           });
-          const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
+          const wantsStreamBase =
+            readRuntimeControlProjection(input.metadata as Record<string, unknown> | undefined).streamIntent === 'stream';
           logStageLazy('provider.response_normalize.start', input.requestId, () => ({
             providerKey: target.providerKey,
             attempt
@@ -1151,16 +1154,13 @@ export class HubRequestExecutor implements RequestExecutor {
           const responseSemantics = responseMetadata?.responseSemantics && typeof responseMetadata.responseSemantics === 'object' && !Array.isArray(responseMetadata.responseSemantics)
             ? (responseMetadata.responseSemantics as Record<string, unknown>)
             : undefined;
-          const conversionPipelineMetadata = responseSemantics
-            ? {
-                ...mergedMetadata,
-                routeName: pipelineRouteName,
-                responseSemantics,
-              }
-            : {
-                ...mergedMetadata,
-                routeName: pipelineRouteName,
-              };
+          if (pipelineRouteName) {
+            mergedMetadata.routeName = pipelineRouteName;
+          }
+          if (responseSemantics) {
+            mergedMetadata.responseSemantics = responseSemantics;
+          }
+          const conversionPipelineMetadata = mergedMetadata;
           const converted = shouldBypassProviderResponseConversion(normalized, {
             entryEndpoint: input.entryEndpoint,
             providerProtocol: handle.providerProtocol || providerProtocol,

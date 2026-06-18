@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
 import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
+import { getClientConnectionAbortSignal } from '../../../src/server/utils/client-connection-state.js';
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
   createBridgeHttpServerMock({
@@ -53,7 +54,7 @@ describe('responses-handler request timeout blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: { metadata?: Record<string, unknown> }) => {
-          const signal = input.metadata?.clientAbortSignal as AbortSignal | undefined;
+          const signal = getClientConnectionAbortSignal(input.metadata);
           signal?.addEventListener('abort', () => {
             observedAbort = true;
             const reason = (signal as { reason?: unknown }).reason;
@@ -99,7 +100,7 @@ describe('responses-handler request timeout blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: { metadata?: Record<string, unknown> }) => {
-          const signal = input.metadata?.clientAbortSignal as AbortSignal | undefined;
+          const signal = getClientConnectionAbortSignal(input.metadata);
           signal?.addEventListener('abort', () => {
             observedAbort = true;
           }, { once: true });

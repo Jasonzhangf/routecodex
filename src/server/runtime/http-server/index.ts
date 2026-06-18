@@ -1885,7 +1885,7 @@ export class RouteCodexHttpServer {
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
           routeHint: typeof metadataForHub.routeHint === 'string' ? metadataForHub.routeHint : undefined,
           transientRetryTracker: retryState.transientRetryTracker,
-          isStreamingRequest: metadataForHub.stream === true || metadataForHub.inboundStream === true,
+          isStreamingRequest: readRuntimeControlProjection(metadataForHub).streamIntent === 'stream',
           logNonBlockingError: logRouterDirectNonBlockingError,
           metadata: {
             ...metadataForHub,
@@ -2346,7 +2346,7 @@ export class RouteCodexHttpServer {
             recordAttempt: () => {},
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
             routeHint: typeof metadata?.routeHint === 'string' ? metadata.routeHint : undefined,
-            isStreamingRequest: metadata?.stream === true || metadata?.inboundStream === true,
+            isStreamingRequest: readRuntimeControlProjection(metadata).streamIntent === 'stream',
             logNonBlockingError: logRouterDirectNonBlockingError,
             metadata: {
               ...(metadata ?? {}),

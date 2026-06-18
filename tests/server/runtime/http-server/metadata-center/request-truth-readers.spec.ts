@@ -213,6 +213,55 @@ describe('request-truth-readers', () => {
     });
   });
 
+  it('reads stopless runtime control from MetadataCenter only', () => {
+    const metadata: Record<string, unknown> = {
+      stopless: {
+        repeatCount: 99,
+        maxRepeats: 1
+      }
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        sessionId: 'sess-1',
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'no_schema',
+        continuationPrompt: '继续执行',
+        schemaFeedback: {
+          reasonCode: 'stop_schema_missing',
+          missingFields: ['stopreason']
+        },
+        active: true,
+        updatedAt: 123
+      },
+      {
+        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
+        symbol: 'reads stopless runtime control from MetadataCenter only',
+        stage: 'test'
+      }
+    );
+
+    expect(readRuntimeControlProjection(metadata)).toEqual({
+      stopless: {
+        sessionId: 'sess-1',
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'no_schema',
+        continuationPrompt: '继续执行',
+        schemaFeedback: {
+          reasonCode: 'stop_schema_missing',
+          missingFields: ['stopreason']
+        },
+        active: true,
+        updatedAt: 123
+      }
+    });
+  });
+
   it('builds servertool projection from request truth and provider observation', () => {
     const metadata: Record<string, unknown> = {
       modelId: 'flat-model-should-not-win'

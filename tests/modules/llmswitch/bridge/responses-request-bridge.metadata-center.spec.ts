@@ -74,7 +74,14 @@ describe('responses-request-bridge metadata center projection', () => {
       responsesRequestContext: requestContext,
       responsesResume: resumeMeta
     });
+    expect(center?.readRuntimeControl()).toMatchObject({
+      streamIntent: 'stream',
+      clientAbort: false
+    });
     expect(metadata.responsesRequestContext).toBeUndefined();
+    expect(metadata.inboundStream).toBeUndefined();
+    expect(metadata.outboundStream).toBeUndefined();
+    expect(metadata.clientAbortSignal).toBeUndefined();
     expect(center?.readRequestTruth().sessionId).toBeUndefined();
   });
 

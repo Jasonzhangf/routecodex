@@ -26,6 +26,7 @@ import {
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeControlProjection } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
@@ -97,13 +98,68 @@ export type PreparedResponsesRequestBodyForHttp = {
   pipelineBody: AnyRecord;
 };
 
+function buildStoplessInstructionsFromRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined
+): string | undefined {
+  const stopless = readRuntimeControlProjection(metadata).stopless;
+  if (!stopless || stopless.active !== true) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (typeof stopless.repeatCount === 'number') {
+    if (typeof stopless.maxRepeats === 'number') {
+      parts.push(`上一轮执行结果：repeatCount=${stopless.repeatCount}/${stopless.maxRepeats}。`);
+    } else {
+      parts.push(`上一轮执行结果：repeatCount=${stopless.repeatCount}。`);
+    }
+  }
+  const schemaFeedback =
+    stopless.schemaFeedback && typeof stopless.schemaFeedback === 'object' && !Array.isArray(stopless.schemaFeedback)
+      ? stopless.schemaFeedback
+      : undefined;
+  const reasonCode =
+    schemaFeedback && typeof schemaFeedback.reasonCode === 'string'
+      ? schemaFeedback.reasonCode.trim()
+      : '';
+  const missingFields = Array.isArray(schemaFeedback?.missingFields)
+    ? schemaFeedback?.missingFields.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  if (reasonCode) {
+    parts.push(`reasonCode=${reasonCode}。`);
+  }
+  if (missingFields.length > 0) {
+    parts.push(`missingFields=${missingFields.join(', ')}。`);
+  }
+  if (typeof stopless.continuationPrompt === 'string' && stopless.continuationPrompt.trim()) {
+    parts.push(stopless.continuationPrompt.trim());
+  }
+  if (reasonCode === 'stop_schema_missing') {
+    parts.push('如果任务已经完成，就按要求补齐收尾 schema；如果任务还没完成，不要停，继续执行当前任务。');
+    parts.push('stopreason 取值：0=finished，1=blocked，2=continue_needed。');
+  }
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return parts.join('\n');
+}
+
 export function prepareResponsesRequestBodyForHttp(
-  payload: AnyRecord
+  payload: AnyRecord,
+  runtimeMetadata?: Record<string, unknown>
 ): PreparedResponsesRequestBodyForHttp {
   const requestBodyMetadata = readRequestBodyMetadataForHttp(payload);
+  const pipelineBody = stripRequestBodyMetadataForPipelineForHttp(payload);
+  const stoplessInstructions = buildStoplessInstructionsFromRuntimeMetadata(runtimeMetadata);
+  if (
+    stoplessInstructions
+    && typeof pipelineBody.instructions !== 'string'
+    && Array.isArray(pipelineBody.input)
+  ) {
+    pipelineBody.instructions = stoplessInstructions;
+  }
   return {
     requestBodyMetadata,
-    pipelineBody: stripRequestBodyMetadataForPipelineForHttp(payload),
+    pipelineBody,
   };
 }
 
@@ -116,13 +172,9 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
   const metadata: Record<string, unknown> = {
-    stream: args.streamPlan.outboundStream,
     clientRequestId: args.clientRequestId,
     clientStream: args.streamPlan.acceptsSse || undefined,
-    inboundStream: args.streamPlan.inboundStream,
-    outboundStream: args.streamPlan.outboundStream,
     providerProtocol: 'openai-responses',
-    clientAbortSignal: readClientAbortSignalForHttp(args.clientConnectionState),
     clientHeaders: args.clientHeaders,
     clientConnectionState: args.clientConnectionState,
     ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
@@ -136,6 +188,26 @@ export function buildResponsesPipelineMetadataForHttp(args: {
       symbol: 'buildResponsesPipelineMetadataForHttp',
       stage: 'MetaReq03ContinuationAttached'
     }
+  );
+  center.writeRuntimeControl(
+    'streamIntent',
+    args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream',
+    {
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'buildResponsesPipelineMetadataForHttp',
+      stage: 'MetaReq04RuntimeControlBound'
+    },
+    'responses handler stream intent'
+  );
+  center.writeRuntimeControl(
+    'clientAbort',
+    readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
+    {
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'buildResponsesPipelineMetadataForHttp',
+      stage: 'MetaReq04RuntimeControlBound'
+    },
+    'responses handler client abort state'
   );
   if (args.resumeMeta) {
     center.writeContinuationContext(

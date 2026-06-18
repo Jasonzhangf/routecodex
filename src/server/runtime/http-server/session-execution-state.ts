@@ -1,4 +1,5 @@
 import { resolveEffectiveRequestId } from '../../utils/request-id-manager.js';
+import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 export type SessionExecutionDerivedState =
   | 'IDLE'
@@ -185,13 +186,14 @@ export class SessionExecutionStateTracker {
     tmuxRecord.lastRequestId = normalizedRequestId;
     tmuxRecord.lastRequestAtMs = nowMs;
     tmuxRecord.lastRequestSeq = this.nextSeq();
-    tmuxRecord.lastRequestWasStream = metadata?.stream === true;
+    const streamIntent = readRuntimeControlProjection(metadata ?? undefined).streamIntent === 'stream';
+    tmuxRecord.lastRequestWasStream = streamIntent;
 
     this.byRequestId.set(normalizedRequestId, {
       requestId: normalizedRequestId,
       tmuxSessionId,
       startedAtMs: nowMs,
-      stream: metadata?.stream === true,
+      stream: streamIntent,
       sseOpen: false
     });
   }

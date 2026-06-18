@@ -20,6 +20,7 @@ import {
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
 import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeControlProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 
@@ -40,6 +41,12 @@ const CLIENT_HEADER_DENYLIST = new Set([
 ]);
 
 type RequestLogMeta = Record<string, unknown> | undefined;
+
+const HANDLER_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/handlers/handler-utils.ts',
+  symbol: 'buildHandlerPipelineMetadata',
+  stage: 'handler_pipeline_runtime_control'
+} as const;
 
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
@@ -690,17 +697,43 @@ export function buildHandlerPipelineMetadata(
   internalMetadata: Record<string, unknown>
 ): Record<string, unknown> {
   const sanitizedRequestMetadata = sanitizeClientPipelineMetadata(requestBodyMetadata);
-  if (!sanitizedRequestMetadata || Object.keys(sanitizedRequestMetadata).length === 0) {
-    return internalMetadata;
+  const merged = sanitizedRequestMetadata && Object.keys(sanitizedRequestMetadata).length > 0
+    ? {
+        ...sanitizedRequestMetadata,
+        ...internalMetadata
+      }
+    : { ...internalMetadata };
+  const metadataCenter = MetadataCenter.read(internalMetadata) ?? MetadataCenter.attach(merged);
+  MetadataCenter.bind(merged, metadataCenter);
+  if (readRuntimeControlProjection(merged).streamIntent === undefined) {
+    const streamIntent =
+      internalMetadata.stream === true
+      || internalMetadata.inboundStream === true
+      || internalMetadata.outboundStream === true
+        ? 'stream'
+        : 'non_stream';
+    metadataCenter.writeRuntimeControl(
+      'streamIntent',
+      streamIntent,
+      HANDLER_RUNTIME_CONTROL_WRITER,
+      'handler stream intent'
+    );
   }
-  const merged = {
-    ...sanitizedRequestMetadata,
-    ...internalMetadata
-  };
-  const metadataCenter = MetadataCenter.read(internalMetadata);
-  if (metadataCenter) {
-    MetadataCenter.bind(merged, metadataCenter);
-  }
+  const clientAbortSignal =
+    internalMetadata.clientConnectionState
+    && typeof internalMetadata.clientConnectionState === 'object'
+    && !Array.isArray(internalMetadata.clientConnectionState)
+      ? (internalMetadata.clientConnectionState as { abortSignal?: AbortSignal }).abortSignal
+      : undefined;
+  metadataCenter.writeRuntimeControl(
+    'clientAbort',
+    clientAbortSignal?.aborted === true,
+    HANDLER_RUNTIME_CONTROL_WRITER,
+    'handler client abort state'
+  );
+  delete merged.stream;
+  delete merged.inboundStream;
+  delete merged.outboundStream;
   return merged;
 }
 

@@ -4,6 +4,11 @@ import http from 'node:http';
 import { Readable } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function readStreamIntent(metadata: Record<string, unknown> | undefined): string | undefined {
+  return MetadataCenter.read(metadata)?.readRuntimeControl().streamIntent;
+}
 
 describe('responses-handler accept header vs client stream contract', () => {
   async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -35,16 +40,15 @@ describe('responses-handler accept header vs client stream contract', () => {
         'x-provider-stream-requested': '1'
       },
       sseStream: Readable.from([
-          'event: response.output_text.delta\n',
-          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
-          'event: response.completed\n',
-          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
-        ]),
-        id: 'resp_accept_only',
-        object: 'response',
-        status: 'completed',
-        output: [{ type: 'output_text', text: 'OK' }]
-      }
+        'event: response.output_text.delta\n',
+        `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
+      ]),
+      id: 'resp_accept_only',
+      object: 'response',
+      status: 'completed',
+      output: [{ type: 'output_text', text: 'OK' }]
     }));
 
     await withServer(createApp(executePipeline), async (baseUrl) => {
@@ -67,8 +71,9 @@ describe('responses-handler accept header vs client stream contract', () => {
 
       const pipelineInput = executePipeline.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.body?.stream).toBe(true);
-      expect(pipelineInput.metadata?.stream).toBe(true);
-      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('stream');
+      expect(pipelineInput.metadata?.stream).toBeUndefined();
+      expect(pipelineInput.metadata?.outboundStream).toBeUndefined();
       expect(pipelineInput.metadata?.clientStream).toBe(true);
     });
   });
@@ -81,16 +86,15 @@ describe('responses-handler accept header vs client stream contract', () => {
         'x-provider-stream-requested': '1'
       },
       sseStream: Readable.from([
-          'event: response.output_text.delta\n',
-          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
-          'event: response.completed\n',
-          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
-        ]),
-        id: 'resp_accept_only',
-        object: 'response',
-        status: 'completed',
-        output: [{ type: 'output_text', text: 'OK' }]
-      }
+        'event: response.output_text.delta\n',
+        `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_accept_only', object: 'response', status: 'completed', model: 'gpt-5.4-medium' } })}\n\n`
+      ]),
+      id: 'resp_accept_only',
+      object: 'response',
+      status: 'completed',
+      output: [{ type: 'output_text', text: 'OK' }]
     }));
 
     await withServer(createApp(executePipeline), async (baseUrl) => {
@@ -109,12 +113,13 @@ describe('responses-handler accept header vs client stream contract', () => {
       const text = await response.text();
 
       expect(response.status).toBe(200);
-      expect(response.headers.get('content-type') || '').not.toContain('text/event-stream');
-      expect(() => JSON.parse(text)).not.toThrow();
+      expect(response.headers.get('content-type') || '').toContain('text/event-stream');
+      expect(text).toContain('event: response.completed');
 
       const pipelineInput = executePipeline.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.body?.stream).toBe(false);
-      expect(pipelineInput.metadata?.outboundStream).toBe(false);
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('non_stream');
+      expect(pipelineInput.metadata?.outboundStream).toBeUndefined();
       expect(pipelineInput.metadata?.clientStream).toBe(true);
     });
   });

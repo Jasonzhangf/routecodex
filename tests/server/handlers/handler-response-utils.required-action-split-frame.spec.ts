@@ -1,6 +1,7 @@
 import { PassThrough, Readable } from 'node:stream';
 import { rm } from 'node:fs/promises';
 import { describe, expect, it, jest } from '@jest/globals';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockBridgeModule = async () => ({
   createResponsesJsonToSseConverter: jest.fn(),
@@ -307,7 +308,7 @@ const mockBridgeModule = async () => ({
     if (args.forceSSE) {
       return true;
     }
-    return args.metadata?.outboundStream === true || args.metadata?.stream === true;
+    return MetadataCenter.read(args.metadata)?.readRuntimeControl().streamIntent === 'stream';
   }),
   shouldClearResponsesConversationOnClientCloseForHttp: jest.fn((args: {
     entryEndpoint?: string;

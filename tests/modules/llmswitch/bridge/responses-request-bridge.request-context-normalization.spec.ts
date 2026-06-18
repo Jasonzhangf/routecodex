@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();
@@ -32,7 +33,8 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 
 const {
   buildResponsesRequestContextForHttp,
-  prepareResponsesHandlerRuntimeForHttp
+  prepareResponsesHandlerRuntimeForHttp,
+  prepareResponsesRequestBodyForHttp
 } = await import(
   '../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts'
 );
@@ -253,5 +255,83 @@ describe('responses-request-bridge relay request-context normalization', () => {
 
     expect(context.payload.metadata).toBeUndefined();
     expect(JSON.stringify(context.payload)).not.toContain('persisted-context-must-not-leak');
+  });
+
+  it('materializes stopless metadata-center runtime control into responses instructions from side-channel metadata', () => {
+    const payload: Record<string, unknown> = {
+      model: 'gpt-5.4',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行当前任务' }]
+        }
+      ]
+    };
+    const runtimeMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(runtimeMetadata);
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        sessionId: 'sess-stopless-1',
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'stop_schema_missing',
+        continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+        schemaFeedback: {
+          reasonCode: 'stop_schema_missing',
+          missingFields: ['stopreason', 'reason']
+        },
+        active: true,
+        updatedAt: 123
+      },
+      {
+        module: 'tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts',
+        symbol: 'materializes stopless metadata-center runtime control into responses instructions from side-channel metadata',
+        stage: 'test'
+      }
+    );
+
+    const prepared = prepareResponsesRequestBodyForHttp(payload, runtimeMetadata);
+    expect(typeof prepared.pipelineBody.instructions).toBe('string');
+    expect(String(prepared.pipelineBody.instructions)).toContain('repeatCount=2/3');
+    expect(String(prepared.pipelineBody.instructions)).toContain('reasonCode=stop_schema_missing');
+    expect(String(prepared.pipelineBody.instructions)).toContain('missingFields=stopreason, reason');
+    expect(String(prepared.pipelineBody.instructions)).toContain('如果任务已经完成');
+    expect(String(prepared.pipelineBody.instructions)).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+  });
+
+  it('does not read stopless runtime control from request payload metadata', () => {
+    const payload: Record<string, unknown> = {
+      model: 'gpt-5.4',
+      metadata: {},
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行当前任务' }]
+        }
+      ]
+    };
+    const center = MetadataCenter.attach(payload.metadata as Record<string, unknown>);
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        repeatCount: 2,
+        maxRepeats: 3,
+        continuationPrompt: 'must-not-materialize-from-payload-metadata',
+        active: true
+      },
+      {
+        module: 'tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts',
+        symbol: 'does not read stopless runtime control from request payload metadata',
+        stage: 'test'
+      }
+    );
+
+    const prepared = prepareResponsesRequestBodyForHttp(payload);
+    expect(prepared.pipelineBody.instructions).toBeUndefined();
+    expect(prepared.pipelineBody.metadata).toBeUndefined();
   });
 });

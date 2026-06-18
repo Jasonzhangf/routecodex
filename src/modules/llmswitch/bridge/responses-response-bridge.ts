@@ -32,7 +32,10 @@ import {
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
-import { readRuntimeRequestTruthIdentifiers } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
+import {
+  readRuntimeControlProjection,
+  readRuntimeRequestTruthIdentifiers,
+} from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
 const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
@@ -270,8 +273,9 @@ export function shouldDispatchResponsesSseToClientForHttp(args: {
   if (args.forceSSE) {
     return true;
   }
-  const metadata = args.metadata;
-  return metadata?.outboundStream === true || metadata?.stream === true;
+  return readRuntimeControlProjection(args.metadata).streamIntent === 'stream'
+    || args.metadata?.stream === true
+    || args.metadata?.outboundStream === true;
 }
 
 type InspectResponsesTerminalStateFromSseChunkForHttpInput = {
@@ -531,6 +535,7 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(
         || parsedType === 'response.failed'
         || parsedType === 'response.error'
         || parsedType === 'response.cancelled'
+        || parsedType === 'message_stop'
       ) {
         result.pendingTerminalEvent = parsedType as InspectResponsesTerminalStateFromSseChunkForHttpResult['pendingTerminalEvent'];
       }
@@ -549,6 +554,11 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(
           result.sawAssistantMessageDoneTerminal = true;
           result.terminalSource = result.terminalSource ?? parsedType;
         }
+        if (parsedType === 'message_stop') {
+          result.seenTerminalEvent = true;
+          result.sawTerminalChunk = true;
+          result.terminalSource = result.terminalSource ?? parsedType;
+        }
         continue;
       }
       result.finishReason = derived;
@@ -563,7 +573,8 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(
         || parsedType === 'response.done'
         || parsedType === 'response.error'
         || parsedType === 'response.cancelled'
-        || parsedType === 'response.failed';
+        || parsedType === 'response.failed'
+        || parsedType === 'message_stop';
       if (trueTerminal) {
         result.seenTerminalEvent = true;
         result.sawTerminalChunk = true;
@@ -595,7 +606,7 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(
     const eventName = lines
       .filter((line) => line.startsWith('event:'))
       .map((line) => line.slice('event:'.length).trim())
-      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.failed' || name === 'response.error' || name === 'response.cancelled');
+      .find((name) => name === 'response.completed' || name === 'response.done' || name === 'response.failed' || name === 'response.error' || name === 'response.cancelled' || name === 'message_stop');
     const effectiveTerminalEvent = (eventName ?? result.pendingTerminalEvent ?? undefined) as string | undefined;
     if (!effectiveTerminalEvent) {
       continue;
@@ -627,7 +638,8 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(
       || effectiveTerminalEvent === 'response.done'
       || effectiveTerminalEvent === 'response.error'
       || effectiveTerminalEvent === 'response.cancelled'
-      || effectiveTerminalEvent === 'response.failed';
+      || effectiveTerminalEvent === 'response.failed'
+      || effectiveTerminalEvent === 'message_stop';
     if (trueTerminal) {
       result.seenTerminalEvent = true;
       result.sawTerminalChunk = true;

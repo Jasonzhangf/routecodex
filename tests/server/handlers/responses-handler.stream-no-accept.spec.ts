@@ -4,6 +4,11 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function readStreamIntent(metadata: Record<string, unknown> | undefined): string | undefined {
+  return MetadataCenter.read(metadata)?.readRuntimeControl().streamIntent;
+}
 
 describe('responses-handler stream compatibility without SSE accept header', () => {
   async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -23,12 +28,11 @@ describe('responses-handler stream compatibility without SSE accept header', () 
       status: 200,
       headers: {},
       sseStream: Readable.from([
-          'event: response.output_text.delta\n',
-          `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'stream-no-accept-ok' })}\n\n`,
-          'event: response.completed\n',
-          `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_stream_no_accept', object: 'response', status: 'completed' } })}\n\n`
-        ])
-      }
+        'event: response.output_text.delta\n',
+        `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'stream-no-accept-ok' })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_stream_no_accept', object: 'response', status: 'completed' } })}\n\n`
+      ])
     }));
 
     const app = express();
@@ -64,9 +68,10 @@ describe('responses-handler stream compatibility without SSE accept header', () 
       expect(executePipeline).toHaveBeenCalledTimes(1);
       const pipelineInput = executePipeline.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.entryEndpoint).toBe('/v1/responses');
-      expect(pipelineInput.metadata?.stream).toBe(true);
-      expect(pipelineInput.metadata?.inboundStream).toBe(true);
-      expect(pipelineInput.metadata?.outboundStream).toBe(true);
+      expect(readStreamIntent(pipelineInput.metadata)).toBe('stream');
+      expect(pipelineInput.metadata?.stream).toBeUndefined();
+      expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
+      expect(pipelineInput.metadata?.outboundStream).toBeUndefined();
       expect(pipelineInput.metadata?.clientStream).toBeUndefined();
       expect(pipelineInput.body?.stream).toBe(true);
     });

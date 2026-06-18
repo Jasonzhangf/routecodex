@@ -149,9 +149,20 @@ export async function handleResponses(
     isSubmitToolOutputs = preparedRuntime.isSubmitToolOutputs;
     pipelineEntryEndpoint = preparedRuntime.pipelineEntryEndpoint;
     resumeMeta = preparedRuntime.resumeMeta;
-    const preparedPipelineBody = prepareResponsesRequestBodyForHttp(payload as Record<string, unknown>);
-    const pipelineBody = preparedPipelineBody.pipelineBody;
     const requestContext = preparedRuntime.requestContext;
+    const responsesPipelineMetadata = buildResponsesPipelineMetadataForHttp({
+      streamPlan: preparedRuntime.streamPlan,
+      clientRequestId,
+      clientHeaders,
+      clientConnectionState,
+      resumeMeta,
+      requestContext,
+    });
+    const preparedPipelineBody = prepareResponsesRequestBodyForHttp(
+      payload as Record<string, unknown>,
+      responsesPipelineMetadata
+    );
+    const pipelineBody = preparedPipelineBody.pipelineBody;
     isVideoRequest = payloadContainsVideoInput(payload);
     if (isVideoRequest) {
       requestTimeoutMs = Math.max(configuredRequestTimeoutMs ?? 0, VIDEO_REQUEST_TIMEOUT_MS);
@@ -176,14 +187,7 @@ export async function handleResponses(
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
 	      body: pipelineBody,
-      metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, buildResponsesPipelineMetadataForHttp({
-        streamPlan: preparedRuntime.streamPlan,
-        clientRequestId,
-        clientHeaders,
-        clientConnectionState,
-        resumeMeta,
-        requestContext,
-      }))
+      metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, responsesPipelineMetadata)
 	    };
     await captureResponsesPipelineRequestContextForHttp({
       entryEndpoint: pipelineEntryEndpoint,

@@ -3,6 +3,7 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
@@ -303,7 +304,7 @@ const mockBridgeModule = async () => ({
     if (args.forceSSE) {
       return true;
     }
-    return args.metadata?.outboundStream === true || args.metadata?.stream === true;
+    return MetadataCenter.read(args.metadata)?.readRuntimeControl().streamIntent === 'stream';
   }),
   shouldClearResponsesConversationOnClientCloseForHttp: jest.fn((args: {
     entryEndpoint?: string;
