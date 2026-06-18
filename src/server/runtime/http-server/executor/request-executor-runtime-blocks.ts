@@ -3,6 +3,7 @@ import type { ProviderHandle } from '../types.js';
 import type { ProviderRuntimeProfile } from '../../../../providers/core/api/provider-types.js';
 import type { ProviderTrafficGovernorLike, ProviderTrafficPermit } from '../provider-traffic-governor.js';
 import { writeErrorsampleJson } from '../../../../utils/errorsamples.js';
+import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
 import { truncateReason } from './request-executor-error-shared.js';
 
 export const REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
@@ -230,12 +231,7 @@ export function isServerToolFollowupRequest(metadata: Record<string, unknown> | 
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return false;
   }
-  const rt =
-    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-      ? (metadata.__rt as Record<string, unknown>)
-      : undefined;
-  const raw = rt?.serverToolFollowup;
-  return raw === true || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
+  return readRuntimeControlProjection(metadata).serverToolFollowup === true;
 }
 
 export function logProviderRetrySwitchCompact(args: {

@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { createBridgeHttpServerMock } from '../../../../helpers/bridge-http-server-mock.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -34,6 +35,7 @@ const mockBridgeModule = () => createBridgeHttpServerMock({
   importCoreDist: mockImportCoreDist,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],
+  resolveRelayResponsesClientSseStreamForHttp: () => undefined,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
 });
 
@@ -67,6 +69,32 @@ function buildBaseOptions(pipelineMetadata: Record<string, unknown>, requestId =
     },
     pipelineMetadata,
   };
+}
+
+function bindPipelineMetadataFollowupTruth(
+  pipelineMetadata: Record<string, unknown>,
+  sessionId: string
+): MetadataCenter {
+  const center = MetadataCenter.attach(pipelineMetadata);
+  center.writeRequestTruth(
+    'sessionId',
+    sessionId,
+    {
+      module: 'tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts',
+      symbol: 'bindPipelineMetadataFollowupTruth',
+      stage: 'test'
+    }
+  );
+  center.writeRuntimeControl(
+    'serverToolFollowup',
+    true,
+    {
+      module: 'tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts',
+      symbol: 'bindPipelineMetadataFollowupTruth',
+      stage: 'test'
+    }
+  );
+  return center;
 }
 
 async function loadConverter() {
@@ -121,6 +149,7 @@ describe('provider-response-converter goal active stopless guard', () => {
         createdAt: Date.now(),
       },
     };
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http400');
 
     for (let index = 1; index <= 4; index += 1) {
       await expect(
@@ -128,6 +157,7 @@ describe('provider-response-converter goal active stopless guard', () => {
       ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
       expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
       expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(index);
+      expect(center.readRuntimeControl().stoplessGoalStatus).toBe('active');
     }
 
     await expect(
@@ -137,6 +167,7 @@ describe('provider-response-converter goal active stopless guard', () => {
     expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
     expect((pipelineMetadata.stoplessGoalState as any)?.errorClass).toBe('repeated_irrecoverable_error');
     expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(5);
+    expect(center.readRuntimeControl().stoplessGoalStatus).toBe('stopped');
     expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalled();
   });
 
@@ -169,6 +200,7 @@ describe('provider-response-converter goal active stopless guard', () => {
         createdAt: Date.now(),
       },
     };
+    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http502');
 
     for (let index = 1; index <= 5; index += 1) {
       await expect(
@@ -218,6 +250,7 @@ describe('provider-response-converter goal active stopless guard', () => {
         createdAt: Date.now(),
       },
     };
+    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-reset-errors');
 
     await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_1'), createDeps() as any)).rejects.toThrow('bad request');
     await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_2'), createDeps() as any)).rejects.toThrow('bad request');
@@ -260,6 +293,7 @@ describe('provider-response-converter goal active stopless guard', () => {
         createdAt: Date.now(),
       },
     };
+    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-streak');
 
     for (let index = 1; index <= 4; index += 1) {
       const result = await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_stop_${index}`), createDeps() as any);
@@ -312,6 +346,7 @@ describe('provider-response-converter goal active stopless guard', () => {
         createdAt: Date.now(),
       },
     };
+    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-reset');
 
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_1'), createDeps() as any);
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_2'), createDeps() as any);

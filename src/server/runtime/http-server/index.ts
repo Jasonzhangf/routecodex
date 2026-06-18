@@ -203,6 +203,7 @@ import { mapProviderProtocol } from './provider-utils.js';
 import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 import { emitRequestExecutorProviderRetryTelemetry } from './executor/request-executor-retry-telemetry.js';
 import {
+  isServerToolFollowupRequest,
   logProviderRetrySwitchCompact,
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
@@ -1310,19 +1311,13 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : undefined;
       const runtimeControl = readRuntimeControlProjection(metadata);
       const mustRelayLocalResponsesContinuation =
         portConfig?.mode === 'router'
         && resumeContinuationOwner === 'relay';
       const mustRelayServerToolFollowup =
         portConfig?.mode === 'router'
-        && (
-          runtimeControl.serverToolFollowup === true
-          || rt?.serverToolFollowup === true
-        );
+        && isServerToolFollowupRequest(metadata);
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'

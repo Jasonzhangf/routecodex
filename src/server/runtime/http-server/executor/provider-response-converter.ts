@@ -108,6 +108,11 @@ const GOAL_NO_PROGRESS_STOP_THRESHOLD = 5;
 const REPEATED_VALIDATION_FAILURE_ERROR_CLASS = 'repeated_validation_failure';
 const REPEATED_IRRECOVERABLE_ERROR_CLASS = 'repeated_irrecoverable_error';
 const REPEATED_NO_PROGRESS_STOP_ERROR_CLASS = 'repeated_no_progress_stop';
+const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
+  symbol: 'writeProjectedGoalState',
+  stage: 'provider_response_runtime_control'
+} as const;
 
 type NativeRespSemanticsModule = {
   normalizeResponsesToolCallArgumentsForClientWithNative?: (
@@ -238,11 +243,12 @@ function writeProjectedGoalState(args: {
   state: StoplessGoalProjection;
 }): StoplessGoalProjection {
   args.adapterContext.stoplessGoalState = args.state;
-  const rt = asFlatRecord(args.adapterContext.__rt) ?? {};
-  args.adapterContext.__rt = {
-    ...rt,
-    stoplessGoalStatus: args.state.status
-  };
+  MetadataCenter.attach(args.adapterContext).writeRuntimeControl(
+    'stoplessGoalStatus',
+    args.state.status,
+    PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+    'provider response goal-state projection'
+  );
   if (hasGoalPersistenceScope(args.adapterContext)) {
     persistStoplessGoalStateSnapshot(args.adapterContext, args.state);
   }
@@ -490,6 +496,21 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   if (!pipelineMetadata) {
     return;
   }
+  const adapterCenter = MetadataCenter.read(options.adapterContext);
+  const pipelineCenter = MetadataCenter.read(pipelineMetadata);
+  if (adapterCenter && !pipelineCenter) {
+    MetadataCenter.bind(pipelineMetadata, adapterCenter);
+  } else if (adapterCenter && pipelineCenter && pipelineCenter !== adapterCenter) {
+    const stoplessGoalStatus = adapterCenter.readRuntimeControl().stoplessGoalStatus;
+    if (typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()) {
+      pipelineCenter.writeRuntimeControl(
+        'stoplessGoalStatus',
+        stoplessGoalStatus.trim(),
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response goal-state pipeline sync'
+      );
+    }
+  }
   const adapterRt = asRecord((options.adapterContext as Record<string, unknown>).__rt);
   const adapterGoalState = asRecord((options.adapterContext as Record<string, unknown>).stoplessGoalState);
   if (
@@ -503,9 +524,6 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
     ...metadataRt,
     ...(Array.isArray(adapterRt?.hubStageTop) && adapterRt.hubStageTop.length > 0
       ? { hubStageTop: adapterRt.hubStageTop }
-      : {}),
-    ...(typeof adapterRt?.stoplessGoalStatus === 'string' && adapterRt.stoplessGoalStatus.trim()
-      ? { stoplessGoalStatus: adapterRt.stoplessGoalStatus.trim() }
       : {}),
     ...(Array.isArray(adapterRt?.stoplessGoalDirectiveTypes) ? { stoplessGoalDirectiveTypes: adapterRt.stoplessGoalDirectiveTypes } : {})
   };
@@ -521,6 +539,26 @@ function readRuntimeControlForProviderResponseConverter(
   return {
     serverToolFollowup: runtimeControl?.serverToolFollowup === true
   };
+}
+
+export function buildResponseMetadataBagForProviderResponseConverter(args: {
+  metadata?: Record<string, unknown>;
+  providerFamily?: string;
+}): Record<string, unknown> {
+  const metadataBag = asRecord(args.metadata) ?? {};
+  const providerFamily = typeof args.providerFamily === 'string' ? args.providerFamily.trim() : '';
+  if (!providerFamily) {
+    return metadataBag;
+  }
+  const responseMetadataBag: Record<string, unknown> = {
+    ...metadataBag,
+    providerFamily
+  };
+  const metadataCenter = MetadataCenter.read(metadataBag);
+  if (metadataCenter) {
+    MetadataCenter.bind(responseMetadataBag, metadataCenter);
+  }
+  return responseMetadataBag;
 }
 
 export type ConvertProviderResponseOptions = {
@@ -655,11 +693,10 @@ export async function convertProviderResponseIfNeeded(
   }
   let adapterContext: Record<string, unknown> | undefined;
   try {
-    const metadataBag = asRecord(options.pipelineMetadata);
-    const responseMetadataBag =
-      options.providerFamily && options.providerFamily.trim()
-        ? { ...metadataBag, providerFamily: options.providerFamily.trim() }
-        : metadataBag;
+    const responseMetadataBag = buildResponseMetadataBagForProviderResponseConverter({
+      metadata: asRecord(options.pipelineMetadata),
+      providerFamily: options.providerFamily
+    });
     const baseContext = buildServerToolAdapterContext({
       metadata: responseMetadataBag,
       entryOriginRequest: options.entryOriginRequest,
@@ -792,7 +829,7 @@ export async function convertProviderResponseIfNeeded(
         requestId: reenterOpts.requestId,
         body: reenterOpts.body,
         metadata: reenterOpts.metadata,
-        baseMetadata: metadataBag,
+        baseMetadata: responseMetadataBag,
         requestSemantics: options.requestSemantics,
         executeNested: deps.executeNested,
         onMergeRuntimeMetaError: (error, details) => {
@@ -827,7 +864,7 @@ export async function convertProviderResponseIfNeeded(
         requestId: injectOpts.requestId,
         body: injectOpts.body,
         metadata: injectOpts.metadata,
-        baseMetadata: metadataBag,
+        baseMetadata: responseMetadataBag,
         requestSemantics: options.requestSemantics,
         onMergeRuntimeMetaError: (error, details) => {
           logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {

@@ -454,6 +454,7 @@ describe('direct passthrough route-level', () => {
   it('router same-protocol direct relays stop_message followup through Hub before direct send', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
 
     const server = new RouteCodexHttpServer({
       configPath: '/tmp/routecodex-test-config.json',
@@ -484,6 +485,26 @@ describe('direct passthrough route-level', () => {
       ['gateway_priority_5555', (server as any).hubPipeline]
     ]);
 
+    const metadata: Record<string, unknown> = {};
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      'serverToolFollowup',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts',
+        symbol: 'router same-protocol direct relays stop_message followup through Hub before direct send',
+        stage: 'test'
+      }
+    );
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      'serverToolFollowupSource',
+      'stop_message_auto',
+      {
+        module: 'tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts',
+        symbol: 'router same-protocol direct relays stop_message followup through Hub before direct send',
+        stage: 'test'
+      }
+    );
+
     const result = await (server as any).executePortAwarePipeline(5555, {
       requestId: 'openai-responses-provider-20260602T213049095-247628-1139:stop_followup',
       entryEndpoint: '/v1/responses',
@@ -495,7 +516,7 @@ describe('direct passthrough route-level', () => {
         instructions: 'continue',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
       },
-      metadata: { __rt: { serverToolFollowup: true, followupSource: 'stop_message_auto' } },
+      metadata,
     });
 
     expect(routerDirectSpy).not.toHaveBeenCalled();

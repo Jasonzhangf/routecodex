@@ -1,3 +1,34 @@
+## 2026-06-19 MetadataCenter followup/goal-state slice
+
+- 当前 slice 目标：继续把 Hub pipeline / followup 控制语义从 legacy `__rt` 收口到 `MetadataCenter.runtime_control`，保持功能不变，只移除 active mainline 对旧内部字段的依赖。
+- 代码收口：
+  - `request-executor-runtime-blocks.ts` 的 `isServerToolFollowupRequest(...)` 只认 `readRuntimeControlProjection(metadata).serverToolFollowup === true`，不再读 `metadata.__rt.serverToolFollowup`。
+  - `index.ts` router direct 的 `mustRelayServerToolFollowup` 改为复用 `isServerToolFollowupRequest(metadata)`，去掉本地 `__rt` fallback 读取。
+  - `servertool-adapter-context.ts` 会把已绑定的 `MetadataCenter` 继续绑定到 adapter context；adapter `__rt.serverToolFollowup` 仅作为本地兼容投影，由 `runtime_control.serverToolFollowup === true` 派生，不再从 flat metadata / legacy `__rt` 读取真相。
+  - `provider-response-converter.ts` 的 `stoplessGoalStatus` 改为通过 `MetadataCenter.attach(...).writeRuntimeControl(...)` 写入和同步；不再把 `adapterContext.__rt.stoplessGoalStatus` 当成 authoritative runtime truth。
+  - `buildResponseMetadataBagForProviderResponseConverter(...)` 在补 `providerFamily` 时保留 request-local `MetadataCenter` binding，避免响应侧 bridge 丢失 side-channel。
+- 测试锁定：
+  - `request-executor-runtime-blocks.spec.ts` 新增正向测试：`MetadataCenter.runtime_control.serverToolFollowup=true` 会激活 followup request truth。
+  - 同文件新增反向测试：仅 `metadata.__rt.serverToolFollowup=true` 不会复活 followup truth。
+  - `provider-response-converter.contract.spec.ts` 断言源码不再读 `requestSemantics.__routecodex` / `adapterRt?.stoplessGoalStatus`，并断言 `providerFamily` 包装后仍保留 `MetadataCenter`。
+  - `provider-response-converter.goal-followup-http400.spec.ts` 统一通过 `MetadataCenter` 绑定 followup truth，并断言 `stoplessGoalStatus` 在 active->stopped 之间按错误阈值推进。
+  - `direct-passthrough-route-level.spec.ts` 的 stop followup relay case 改为通过 `MetadataCenter.runtime_control.serverToolFollowup/serverToolFollowupSource` 提供 truth；本文件另有并行脏改动，提交时必须只 stage 当前 hunk。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts --runInBand` PASS（4 suites / 32 tests）
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts --runInBand` PASS（4 suites / 49 tests；有既存 open handles 提示，但测试本身通过）
+  - `npm run audit:custom-payload-carriers` PASS：`__routecodex* runtime=14 files=9`，`__sse_* runtime files=0`，`response.metadata runtime files=4`
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS：`routecodex_prefix unique-owner=9 ambiguous=0 missing=0`
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-ci` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run build:min` PASS
+  - `git diff --check` PASS
+- 当前残留：
+  - 本 slice 只清 active mainline followup / stoplessGoalStatus 对 legacy `__rt` 的依赖，没有减少 `__routecodex* runtime=14 files=9` 的 guard/contract 残留总数。
+  - 下一步仍需继续做 request-route control（如 retry/preselected route）向 `MetadataCenter.runtime_control` 的迁移和剩余 runtime residue 审计。
+
 ## 2026-06-18 MetadataCenter stopless runtime-control slice
 
 - Goal slice implemented: stopless/servertool followup control semantics now write `runtime_control.stopless` through the bound `MetadataCenter` side-channel; the write is fail-fast when the request-local MetadataCenter binding is absent.

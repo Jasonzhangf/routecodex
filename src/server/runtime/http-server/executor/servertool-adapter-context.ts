@@ -7,6 +7,7 @@ import {
   readRuntimeControlProjection,
   readRuntimeServerToolProjection
 } from '../metadata-center/request-truth-readers.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -84,6 +85,10 @@ export function buildServerToolAdapterContext(args: {
   const baseContext: Record<string, unknown> = {
     ...metadataBag
   };
+  const metadataCenter = MetadataCenter.read(metadataBag);
+  if (metadataCenter) {
+    MetadataCenter.bind(baseContext, metadataCenter);
+  }
   const originRequest = args.entryOriginRequest;
   const originRecord = asFlatRecord(originRequest);
   if (!asFlatRecord(baseContext.capturedEntryRequest) && asFlatRecord(originRequest)) {
@@ -133,17 +138,13 @@ export function buildServerToolAdapterContext(args: {
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const rt = asFlatRecord(baseContext.__rt) ?? {};
-  const followupFlag =
-    metadataBag.isServerToolFollowup === true
-    || metadataBag.serverToolFollowup === true
-    || rt.serverToolFollowup === true;
   const providerFamily = readNonEmptyString(metadataBag.providerFamily)?.toLowerCase();
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol)
     ?? readNonEmptyString(rt.clientProtocol)
     ?? (args.entryEndpoint.includes('/v1/responses') ? 'openai-responses' : undefined);
   baseContext.__rt = {
     ...rt,
-    ...(followupFlag ? { serverToolFollowup: true } : {}),
+    ...(runtimeControl.serverToolFollowup === true ? { serverToolFollowup: true } : {}),
     ...(clientProtocol ? { clientProtocol } : {}),
     ...(providerFamily ? { providerFamily } : {}),
     ...(typeof stopMessagePortEnabled === 'boolean' ? { stopMessagePortEnabled } : {}),

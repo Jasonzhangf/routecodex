@@ -1,8 +1,10 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
+  isServerToolFollowupRequest,
   logProviderRetrySwitchCompact,
   shouldBypassProviderResponseConversion
 } from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('request-executor-runtime-blocks', () => {
   test('caps attempt counters in provider-switch log when blocking recoverable retries exceed budget', () => {
@@ -180,5 +182,28 @@ describe('request-executor-runtime-blocks', () => {
       providerProtocol: 'anthropic-messages',
       serverToolsEnabled: false
     })).toBe(true);
+  });
+
+  test('reads servertool followup request truth from MetadataCenter runtime_control', () => {
+    const metadata: Record<string, unknown> = {};
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      'serverToolFollowup',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts',
+        symbol: 'reads servertool followup request truth from MetadataCenter runtime_control',
+        stage: 'test'
+      }
+    );
+
+    expect(isServerToolFollowupRequest(metadata)).toBe(true);
+  });
+
+  test('does not revive servertool followup request truth from legacy __rt fallback', () => {
+    const metadata: Record<string, unknown> = {
+      __rt: { serverToolFollowup: true }
+    };
+
+    expect(isServerToolFollowupRequest(metadata)).toBe(false);
   });
 });
