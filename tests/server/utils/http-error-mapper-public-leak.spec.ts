@@ -51,10 +51,11 @@ describe('http-error-mapper public payload leak guard', () => {
 
     const summary = mapErrorToPublicLogSummary(err);
 
-    expect(summary).toBe('Upstream authentication failed');
+    expect(summary).toBe('Upstream provider error');
     expect(summary).not.toContain('Invalid token');
     expect(summary).not.toContain('202606071512468498407098268d9d6mBARM7HT');
     expect(summary).not.toContain('new_api_error');
+    expect(summary).not.toContain('HTTP_401');
   });
 
   it('projects upstream 403 quota payload to public stage-log summary', () => {
@@ -72,9 +73,10 @@ describe('http-error-mapper public payload leak guard', () => {
 
     const summary = mapErrorToPublicLogSummary(err);
 
-    expect(summary).toBe('Upstream authentication failed');
+    expect(summary).toBe('Upstream provider error');
     expect(summary).not.toContain('余额和订阅额度均不足');
     expect(summary).not.toContain('permission_error');
     expect(summary).not.toContain('insufficient_quota');
+    expect(summary).not.toContain('HTTP_403');
   });
 });

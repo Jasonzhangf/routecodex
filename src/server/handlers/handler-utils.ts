@@ -295,7 +295,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
       ? formatted.text
       : summaryFromRaw;
   const publicSummary = resolvePrimaryErrorLogSummary(error, summary);
-  const fields = extractErrorLogFields(error, publicSummary);
+  const fields = extractErrorLogFields(error, summary);
   const fieldSuffix = [
     typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
     fields.errorCode ? `code=${fields.errorCode}` : undefined,
@@ -590,7 +590,8 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
     args.onReportError?.(error);
   }
   const requestId = typeof args.routePayload.requestId === 'string' ? args.routePayload.requestId : undefined;
-  if (requestId && mapped.body?.error && !mapped.body.error.request_id) {
+  const shouldAttachRequestId = mapped.body?.error?.code !== 'upstream_error';
+  if (requestId && shouldAttachRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = requestId;
   }
   return mapped;

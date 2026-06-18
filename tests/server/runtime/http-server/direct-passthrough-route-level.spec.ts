@@ -1711,8 +1711,11 @@ describe('direct passthrough route-level', () => {
       });
       const bodyText = await response.text();
 
-      expect(response.status).toBe(401);
-      expect(bodyText).toContain('Upstream authentication failed');
+      expect(response.status).toBe(502);
+      expect(bodyText).toContain('Upstream provider error');
+      expect(bodyText).toContain('upstream_error');
+      expect(bodyText).not.toContain('Upstream authentication failed');
+      expect(bodyText).not.toContain('HTTP_401');
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondStandardSend).not.toHaveBeenCalled();
       expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();

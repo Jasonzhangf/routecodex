@@ -221,10 +221,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   }
 
   if (status === 401 || status === 403) {
-    return formatPayload(status, {
-      message: 'Upstream authentication failed',
-      code: upstreamCode || effectiveCode || 'authentication_error',
-      request_id: requestId,
+    return formatPayload(502, {
+      message: 'Upstream provider error',
+      code: 'upstream_error',
       ...validationFields,
       ...detailField
     });
@@ -358,6 +357,9 @@ export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): s
     throw err;
   }
   const message = projected.body.error.message;
+  if (projected.body.error.code === 'upstream_error') {
+    return message || 'Upstream provider error';
+  }
   if (fallback !== undefined && projected.status !== 401 && projected.status !== 403 && projected.status !== 429) {
     return fallback;
   }

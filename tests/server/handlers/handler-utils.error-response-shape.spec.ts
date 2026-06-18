@@ -89,13 +89,14 @@ describe('resolveReportedRouteErrorHttpResponse', () => {
     });
 
     const publicJson = JSON.stringify(mapped.body);
-    expect(mapped.status).toBe(401);
-    expect(mapped.body?.error?.code).toBe('HTTP_401');
-    expect(mapped.body?.error?.message).toBe('Upstream authentication failed');
-    expect(mapped.body?.error?.request_id).toBe('req_test_unsafe_http');
+    expect(mapped.status).toBe(502);
+    expect(mapped.body?.error?.code).toBe('upstream_error');
+    expect(mapped.body?.error?.message).toBe('Upstream provider error');
+    expect(mapped.body?.error?.request_id).toBeUndefined();
     expect(publicJson).not.toContain('Invalid token');
     expect(publicJson).not.toContain('202606071512465023321438268d9d6fRB1TBuk');
     expect(publicJson).not.toContain('new_api_error');
+    expect(publicJson).not.toContain('HTTP_401');
   });
 
   it('sanitizes provider quota payload for forced SSE error responses', async () => {
@@ -155,10 +156,13 @@ describe('resolveReportedRouteErrorHttpResponse', () => {
     );
 
     const rendered = writes.join('');
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(502);
     expect(rendered).toContain('event: error');
-    expect(rendered).toContain('Upstream authentication failed');
-    expect(rendered).toContain('HTTP_403');
+    expect(rendered).toContain('Upstream provider error');
+    expect(rendered).toContain('upstream_error');
+    expect(rendered).not.toContain('Upstream authentication failed');
+    expect(rendered).not.toContain('HTTP_403');
+    expect(rendered).not.toContain('req_test_sse_unsafe_http');
     expect(rendered).not.toContain('余额和订阅额度均不足');
     expect(rendered).not.toContain('insufficient_quota');
     expect(rendered).not.toContain('permission_error');
