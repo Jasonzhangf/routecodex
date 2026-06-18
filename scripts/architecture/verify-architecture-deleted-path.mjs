@@ -102,6 +102,10 @@ const deletedPathDenylist = [
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts',
   'src/server/runtime/http-server/executor/servertool-response-normalizer.ts',
   'src/server/runtime/http-server/executor/servertool-request-normalizer.ts',
+  'src/server/runtime/http-server/metadata-center/metadata-center.js',
+  'src/server/runtime/http-server/metadata-center/metadata-center.d.ts',
+  'src/server/runtime/http-server/metadata-center/metadata-center-types.js',
+  'src/server/runtime/http-server/metadata-center/metadata-center-types.d.ts',
 ];
 const deletedContentDenylist = [
   {

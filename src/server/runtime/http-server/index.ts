@@ -92,7 +92,10 @@ import {
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
-import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
+import {
+  readRuntimeControlProjection,
+  readRuntimeRequestTruthIdentifiers,
+} from './metadata-center/request-truth-readers.js';
 import {
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
@@ -216,6 +219,12 @@ const ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const routerDirectProviderSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
 const routerDirectNonBlockingLogState = new Map<string, number>();
 
+const HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/index.ts',
+  symbol: 'HttpServerV2.executePipelineForPort',
+  stage: 'ServerReqInbound01ClientRaw'
+} as const;
+
 type RouterDirectRetryState = {
   maxAttempts: number;
   excludedProviderKeys: Set<string>;
@@ -238,6 +247,50 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
     transientRetryTracker: createRequestLocalTransientRetryTracker(),
     poolExhaustedBackoffAttempts: 0,
   };
+}
+
+function ensureRuntimeMetadataRecord(metadata: Record<string, unknown>): Record<string, unknown> {
+  const existingRt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? (metadata.__rt as Record<string, unknown>)
+    : {};
+  metadata.__rt = existingRt;
+  return existingRt;
+}
+
+function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
+  metadata: Record<string, unknown>,
+  key: K,
+  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' ? string : boolean,
+  reason: string
+): void {
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    key,
+    value as never,
+    HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER,
+    reason
+  );
+  if (key === 'preselectedRoute' || key === 'retryProviderKey') {
+    const rt = ensureRuntimeMetadataRecord(metadata);
+    rt[key] = value;
+  }
+}
+
+function readRoutingDecisionProviderPool(
+  routingDecision: unknown,
+  currentProviderKey: string
+): string[] {
+  const decision = routingDecision && typeof routingDecision === 'object' && !Array.isArray(routingDecision)
+    ? (routingDecision as Record<string, unknown>)
+    : {};
+  const rawPool = Array.isArray(decision.routePool)
+    ? decision.routePool
+    : Array.isArray(decision.pool)
+      ? decision.pool
+      : [];
+  const pool = rawPool
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+  return pool.length > 0 ? pool : [currentProviderKey];
 }
 
 function logRouterDirectNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
@@ -1207,12 +1260,21 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
       routecodexServerId: this.resolvePortServerId(portConfig, localPort),
       entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
-      stopMessageEnabled: effectiveStopMessageEnabled,
-      stopMessageExcludeDirect: effectiveStopMessageExcludeDirect,
-      routecodexPortStopMessageEnabled: effectiveStopMessageEnabled,
       ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    writeMetadataCenterRuntimeControl(
+      metadata,
+      'stopMessageEnabled',
+      effectiveStopMessageEnabled,
+      'port stop-message enablement'
+    );
+    writeMetadataCenterRuntimeControl(
+      metadata,
+      'stopMessageExcludeDirect',
+      effectiveStopMessageExcludeDirect,
+      'port stop-message direct exclusion'
+    );
     const portSessionDir = this.resolvePortSessionDir(portConfig, localPort);
     if (portSessionDir) {
       const existingRt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
@@ -1248,13 +1310,24 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : undefined;
+      const runtimeControl = readRuntimeControlProjection(metadata);
       const mustRelayLocalResponsesContinuation =
         portConfig?.mode === 'router'
         && resumeContinuationOwner === 'relay';
+      const mustRelayServerToolFollowup =
+        portConfig?.mode === 'router'
+        && (
+          runtimeControl.serverToolFollowup === true
+          || rt?.serverToolFollowup === true
+        );
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
         && !mustRelayLocalResponsesContinuation
+        && !mustRelayServerToolFollowup
       ) {
         const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         this.logStage('router-direct.entry', input.requestId, {
@@ -1307,17 +1380,22 @@ export class RouteCodexHttpServer {
         this.logStage('router-direct.relay', input.requestId, {
           reason: directResult.reason,
         });
-        return await this.executePipeline(
-          directResult.preselectedRoute
-            ? {
-                ...nextInput,
-                metadata: {
-                  ...(nextInput.metadata ?? {}),
-                  __routecodexPreselectedRoute: directResult.preselectedRoute,
-                },
-              }
-            : nextInput
-        );
+        if (directResult.preselectedRoute) {
+          const relayMetadata = {
+            ...(nextInput.metadata ?? {}),
+          };
+          writeMetadataCenterRuntimeControl(
+            relayMetadata,
+            'preselectedRoute',
+            directResult.preselectedRoute,
+            'router-direct relay preselected route'
+          );
+          return await this.executePipeline({
+            ...nextInput,
+            metadata: relayMetadata,
+          });
+        }
+        return await this.executePipeline(nextInput);
       }
       if (mustRelayLocalResponsesContinuation) {
         this.logStage('router-direct.skipped', input.requestId, {
@@ -1325,6 +1403,13 @@ export class RouteCodexHttpServer {
           routingPolicyGroup: portConfig?.routingPolicyGroup,
           sameProtocolBehavior: portConfig?.sameProtocolBehavior,
           continuationOwner: resumeContinuationOwner,
+        });
+      }
+      if (mustRelayServerToolFollowup) {
+        this.logStage('router-direct.skipped', input.requestId, {
+          reason: 'servertool_followup_requires_hub_relay',
+          routingPolicyGroup: portConfig?.routingPolicyGroup,
+          sameProtocolBehavior: portConfig?.sameProtocolBehavior,
         });
       }
       return await this.executePipeline(nextInput);
@@ -1379,16 +1464,24 @@ export class RouteCodexHttpServer {
       routecodexPortMode: portConfig.mode,
       routecodexPortBinding: portConfig.providerBinding,
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
-      stopMessageEnabled:
-        typeof portConfig?.stopMessage?.enabled === 'boolean'
-          ? portConfig.stopMessage.enabled
-          : true,
-      stopMessageExcludeDirect:
-        portConfig?.stopMessage?.includeDirect === true
-          ? false
-          : true,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
+    writeMetadataCenterRuntimeControl(
+      metadataForHub,
+      'stopMessageEnabled',
+      typeof portConfig?.stopMessage?.enabled === 'boolean'
+        ? portConfig.stopMessage.enabled
+        : true,
+      'router-direct stop-message enablement'
+    );
+    writeMetadataCenterRuntimeControl(
+      metadataForHub,
+      'stopMessageExcludeDirect',
+      portConfig?.stopMessage?.includeDirect === true
+        ? false
+        : true,
+      'router-direct stop-message direct exclusion'
+    );
     const portSessionDir = this.resolvePortSessionDir(portConfig, portConfig.port);
     if (portSessionDir) {
       const existingRt = metadataForHub.__rt && typeof metadataForHub.__rt === 'object' && !Array.isArray(metadataForHub.__rt)
@@ -1400,14 +1493,17 @@ export class RouteCodexHttpServer {
       };
     }
     if (retryState.retryProviderKey) {
-      metadataForHub.__routecodexRetryProviderKey = retryState.retryProviderKey;
+      writeMetadataCenterRuntimeControl(
+        metadataForHub,
+        'retryProviderKey',
+        retryState.retryProviderKey,
+        'router-direct retry provider pin'
+      );
       delete metadataForHub.excludedProviderKeys;
     } else if (retryState.excludedProviderKeys.size > 0) {
       metadataForHub.excludedProviderKeys = Array.from(retryState.excludedProviderKeys);
-      delete metadataForHub.__routecodexRetryProviderKey;
     } else {
       delete metadataForHub.excludedProviderKeys;
-      delete metadataForHub.__routecodexRetryProviderKey;
     }
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
@@ -1749,6 +1845,10 @@ export class RouteCodexHttpServer {
           ? retryError.statusCode
           : extractStatusCodeFromError(error);
         const publicErrorMessage = mapErrorToPublicLogSummary(error);
+        const routingDecisionProviderPool = readRoutingDecisionProviderPool(
+          ctx.routingDecision,
+          ctx.providerKey
+        );
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1779,9 +1879,7 @@ export class RouteCodexHttpServer {
           stage: 'provider.send',
           logicalRequestChainKey: input.requestId,
           logicalChainRetryLimitStageRequestId: input.requestId,
-          routePool: Array.isArray((ctx.routingDecision as { routePool?: unknown } | undefined)?.routePool)
-            ? ((ctx.routingDecision as { routePool?: string[] }).routePool)
-            : undefined,
+          routePool: routingDecisionProviderPool,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
@@ -1811,9 +1909,7 @@ export class RouteCodexHttpServer {
           directAttempt,
           maxAttempts: retryState.maxAttempts,
           providerKey: ctx.providerKey,
-          pool: Array.isArray((ctx.routingDecision as { routePool?: unknown } | undefined)?.routePool)
-            ? ((ctx.routingDecision as { routePool?: string[] }).routePool ?? [ctx.providerKey])
-            : [ctx.providerKey],
+          pool: routingDecisionProviderPool,
           error,
         });
         if (retryDecision.action === 'rethrow') {

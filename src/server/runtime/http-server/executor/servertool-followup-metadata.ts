@@ -1,4 +1,8 @@
 // feature_id: server.servertool_followup_metadata_surface
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
+
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
   'conversationid',
@@ -62,6 +66,12 @@ const PROVIDER_SELECTION_METADATA_KEYS = [
   'assignedModelId'
 ] as const;
 
+const STOP_MESSAGE_CONTROL_METADATA_KEYS = [
+  'stopMessageEnabled',
+  'stopMessageExcludeDirect',
+  'routecodexPortStopMessageEnabled'
+] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -119,6 +129,23 @@ function stripMappableSemanticsMetadataFields(metadata: Record<string, unknown>)
 function stripProviderSelectionMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of PROVIDER_SELECTION_METADATA_KEYS) {
     delete metadata[key];
+  }
+}
+
+function stripStopMessageControlMetadataFields(metadata: Record<string, unknown>): void {
+  for (const key of STOP_MESSAGE_CONTROL_METADATA_KEYS) {
+    delete metadata[key];
+  }
+}
+
+function readBoundMetadataCenter(value: Record<string, unknown>): unknown {
+  const center = Reflect.get(value, METADATA_CENTER_SYMBOL);
+  return center && typeof center === 'object' ? center : undefined;
+}
+
+function bindMetadataCenter(target: Record<string, unknown>, center: unknown): void {
+  if (center && typeof center === 'object') {
+    Reflect.set(target, METADATA_CENTER_SYMBOL, center);
   }
 }
 
@@ -210,8 +237,17 @@ export function buildServerToolNestedRequestMetadata(args: {
     direction: 'request',
     stage: 'inbound'
   };
+  const sourceMetadataCenter =
+    readBoundMetadataCenter(extraMetadata)
+    ?? readBoundMetadataCenter(baseMetadata)
+    ?? MetadataCenter.read(extraMetadata)
+    ?? MetadataCenter.read(baseMetadata);
+  if (sourceMetadataCenter) {
+    bindMetadataCenter(out, sourceMetadataCenter);
+  }
   stripMappableSemanticsMetadataFields(out);
   stripProviderSelectionMetadataFields(out);
+  stripStopMessageControlMetadataFields(out);
 
   if (
     args.requestSemantics &&
@@ -241,6 +277,7 @@ export function buildServerToolNestedRequestMetadata(args: {
       (out as Record<string, unknown>).__rt = { ...baseRt, ...extraRt };
       stripMappableSemanticsMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
       stripProviderSelectionMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
+      stripStopMessageControlMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);

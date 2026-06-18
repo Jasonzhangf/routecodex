@@ -21,22 +21,16 @@ function sliceBetween(source: string, startMarker: string, endMarker: string): s
 }
 
 describe('servertool followup dispatch contract', () => {
-  it('keeps requestSemantics routecodex residue localized to the followup materializer helper band', () => {
+  it('does not materialize followup control through requestSemantics routecodex residue', () => {
     const source = fs.readFileSync(FOLLOWUP_DISPATCH_PATH, 'utf8');
-    const residueBand = sliceBetween(
-      source,
-      `function ${'isServerToolFollowup'}`,
-      `function ${'stripResponsesOnlyRequestSettings'}`
-    );
-    const afterBand = source.slice(source.indexOf(`function ${'stripResponsesOnlyRequestSettings'}`));
 
-    expect(countMatches(source, '__routecodex')).toBe(18);
-    expect(countMatches(residueBand, '__routecodex')).toBe(18);
-    expect(afterBand).not.toContain('__routecodex');
-    expect(residueBand).not.toContain('metadata?.__routecodex');
+    expect(countMatches(source, '__routecodex')).toBe(0);
+    expect(source).not.toContain('requestSemantics?.__routecodex');
+    expect(source).not.toContain('nextSemantics.__routecodex');
+    expect(source).not.toContain('metadata?.__routecodex');
   });
 
-  it('materializes followup routecodex semantics only through the cloned nextSemantics helper path', () => {
+  it('materializes followup control through MetadataCenter/runtime side-channel only', () => {
     const source = fs.readFileSync(FOLLOWUP_DISPATCH_PATH, 'utf8');
     const materializeBlock = sliceBetween(
       source,
@@ -44,17 +38,28 @@ describe('servertool followup dispatch contract', () => {
       `function ${'stripResponsesOnlyRequestSettings'}`
     );
 
-    expect(materializeBlock).toContain(
-      "delete routecodex.serverToolFollowup;"
+    expect(materializeBlock).toContain('readFollowupMarkerFromMetadata(args.metadata)');
+    expect(materializeBlock).toContain('readFollowupMarkerFromMetadata(args.baseMetadata)');
+    expect(materializeBlock).not.toContain('__routecodex');
+    expect(source).toContain('MetadataCenter.attach(metadata).writeRuntimeControl');
+  });
+
+  it('does not write stopMessage enablement into flat metadata or __rt fallback control', () => {
+    const source = fs.readFileSync(FOLLOWUP_DISPATCH_PATH, 'utf8');
+    const nestedBuilderBlock = sliceBetween(
+      source,
+      `async function ${'buildServerToolNestedInput'}`,
+      `export async function ${'executeServerToolReenterPipeline'}`
     );
-    expect(materializeBlock).toContain(
-      "delete routecodex.serverToolFollowupSource;"
-    );
-    expect(materializeBlock).toContain(
-      "nextSemantics.__routecodex = {"
-    );
-    expect(materializeBlock).toContain(
-      "stoplessGoalStatus: 'active'"
-    );
+
+    expect(nestedBuilderBlock).not.toContain('nestedRuntime.stopMessageEnabled');
+    expect(nestedBuilderBlock).not.toContain('nestedMetadata.stopMessageEnabled');
+    expect(nestedBuilderBlock).not.toContain('nestedMetadata.routecodexPortStopMessageEnabled');
+    expect(nestedBuilderBlock).not.toContain('stopMessageEnabled: false');
+    expect(nestedBuilderBlock).not.toContain('routecodexPortStopMessageEnabled: false');
+    expect(nestedBuilderBlock).toContain('readRuntimeControlProjection(nestedMetadata)');
+    expect(nestedBuilderBlock).toContain('writeStopMessageEnabledRuntimeControl(');
+    expect(source).toContain("'stopMessageEnabled'");
+    expect(source).toContain('writeRuntimeControl(');
   });
 });

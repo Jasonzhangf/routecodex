@@ -1,9 +1,30 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockRunClientInjectionFlowBeforeReenter = jest.fn();
 const mockGetDefaultServertoolSkeletonDocumentWithNative = jest.fn();
 const mockCaptureResponsesRequestContext = jest.fn();
 const mockRebindResponsesConversationRequestId = jest.fn();
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+function metadataWithStopMessageRuntimeControl(enabled: boolean): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'stopMessageEnabled',
+    enabled,
+    {
+      module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+      symbol: 'metadataWithStopMessageRuntimeControl',
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
+
+function readBoundRuntimeControl(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  const center = metadata ? Reflect.get(metadata, METADATA_CENTER_SYMBOL) as { readRuntimeControl?: () => Record<string, unknown> } | undefined : undefined;
+  return typeof center?.readRuntimeControl === 'function' ? center.readRuntimeControl() : {};
+}
 
 jest.unstable_mockModule(
   '../../../../../src/server/runtime/http-server/executor/client-injection-flow.js',
@@ -473,7 +494,8 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        stopMessageEnabled: input.metadata?.stopMessageEnabled,
+        stopMessageEnabled: readBoundRuntimeControl(input.metadata).stopMessageEnabled,
+        flatStopMessageEnabled: input.metadata?.stopMessageEnabled,
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled
@@ -490,13 +512,14 @@ describe('servertool followup dispatch helper', () => {
       requestId: 'req_followup_dispatch_stopmessage_disabled_nested',
       body: { input: 'continue' },
       metadata: { __rt: { serverToolFollowup: true } },
-      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
     expect(result.body).toEqual({
       stopMessageEnabled: true,
-      routecodexPortStopMessageEnabled: true,
+      flatStopMessageEnabled: undefined,
+      routecodexPortStopMessageEnabled: undefined,
       rtStopMessageEnabled: undefined,
       rtPortStopMessageEnabled: undefined
     });
@@ -507,7 +530,8 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        stopMessageEnabled: input.metadata?.stopMessageEnabled,
+        stopMessageEnabled: readBoundRuntimeControl(input.metadata).stopMessageEnabled,
+        flatStopMessageEnabled: input.metadata?.stopMessageEnabled,
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
@@ -533,15 +557,16 @@ describe('servertool followup dispatch helper', () => {
           routecodexPortStopMessageEnabled: false
         }
       },
-      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
     expect(result.body).toEqual({
       stopMessageEnabled: false,
-      routecodexPortStopMessageEnabled: false,
-      rtStopMessageEnabled: false,
-      rtPortStopMessageEnabled: false,
+      flatStopMessageEnabled: undefined,
+      routecodexPortStopMessageEnabled: undefined,
+      rtStopMessageEnabled: undefined,
+      rtPortStopMessageEnabled: undefined,
       flowId: 'stop_message_flow'
     });
   });
@@ -551,7 +576,8 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        stopMessageEnabled: input.metadata?.stopMessageEnabled,
+        stopMessageEnabled: readBoundRuntimeControl(input.metadata).stopMessageEnabled,
+        flatStopMessageEnabled: input.metadata?.stopMessageEnabled,
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
@@ -578,15 +604,16 @@ describe('servertool followup dispatch helper', () => {
           routecodexPortStopMessageEnabled: false
         }
       },
-      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
     expect(result.body).toEqual({
       stopMessageEnabled: false,
-      routecodexPortStopMessageEnabled: false,
-      rtStopMessageEnabled: false,
-      rtPortStopMessageEnabled: false,
+      flatStopMessageEnabled: undefined,
+      routecodexPortStopMessageEnabled: undefined,
+      rtStopMessageEnabled: undefined,
+      rtPortStopMessageEnabled: undefined,
       flowId: 'stop_message_flow',
       policy: undefined
     });
@@ -618,7 +645,7 @@ describe('servertool followup dispatch helper', () => {
           serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
         }
       },
-      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
@@ -633,7 +660,8 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        stopMessageEnabled: input.metadata?.stopMessageEnabled,
+        stopMessageEnabled: readBoundRuntimeControl(input.metadata).stopMessageEnabled,
+        flatStopMessageEnabled: input.metadata?.stopMessageEnabled,
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled
@@ -650,15 +678,16 @@ describe('servertool followup dispatch helper', () => {
       requestId: 'req_followup_dispatch_non_stopmessage_disabled_nested',
       body: { input: 'continue' },
       metadata: { __rt: { serverToolFollowup: true, clientInjectSource: 'servertool.apply_patch_read_before_retry' } },
-      baseMetadata: { stopMessageEnabled: true, routecodexPortStopMessageEnabled: true },
+      baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
     expect(result.body).toEqual({
       stopMessageEnabled: false,
-      routecodexPortStopMessageEnabled: false,
-      rtStopMessageEnabled: false,
-      rtPortStopMessageEnabled: false
+      flatStopMessageEnabled: undefined,
+      routecodexPortStopMessageEnabled: undefined,
+      rtStopMessageEnabled: undefined,
+      rtPortStopMessageEnabled: undefined
     });
   });
 

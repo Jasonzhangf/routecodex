@@ -23,20 +23,40 @@ describe('http-server index request truth contract', () => {
     expect(source).toContain('conversationId: readConversationIdForUsageLog(inputMetadata)');
   });
 
-  it('keeps the remaining preselected-route flat residue localized to the router-direct relay edge', () => {
+  it('does not write preselected route into flat routecodex payload metadata', () => {
     const source = fs.readFileSync(INDEX_PATH, 'utf8');
     const matches = source.match(/__routecodexPreselectedRoute/g) ?? [];
-    expect(matches).toHaveLength(1);
-    expect(source).toContain('__routecodexPreselectedRoute: directResult.preselectedRoute');
+    expect(matches).toHaveLength(0);
+    expect(source).toContain('writeMetadataCenterRuntimeControl(');
+    expect(source).toContain("'preselectedRoute'");
   });
 
-  it('keeps retry provider pin residue localized to metadataForHub request-route control writes', () => {
+  it('does not write retry provider pin into flat routecodex payload metadata', () => {
     const source = fs.readFileSync(INDEX_PATH, 'utf8');
     const matches = source.match(/__routecodexRetryProviderKey/g) ?? [];
-    expect(matches).toHaveLength(3);
-    expect(source).toContain(
-      'metadataForHub.__routecodexRetryProviderKey = retryState.retryProviderKey;'
+    expect(matches).toHaveLength(0);
+    expect(source).toContain('writeMetadataCenterRuntimeControl(');
+    expect(source).toContain("'retryProviderKey'");
+  });
+
+  it('does not write stopMessage control into flat request metadata', () => {
+    const source = fs.readFileSync(INDEX_PATH, 'utf8');
+    const metadataBlock = source.slice(
+      source.indexOf('const metadata: Record<string, unknown> = {'),
+      source.indexOf('const portSessionDir = this.resolvePortSessionDir', source.indexOf('const metadata: Record<string, unknown> = {'))
     );
-    expect(source).toContain("delete metadataForHub.__routecodexRetryProviderKey;");
+    const directMetadataBlock = source.slice(
+      source.indexOf('const metadataForHub: Record<string, unknown> = {'),
+      source.indexOf('const portSessionDir = this.resolvePortSessionDir', source.indexOf('const metadataForHub: Record<string, unknown> = {'))
+    );
+
+    expect(metadataBlock).not.toContain('stopMessageEnabled:');
+    expect(metadataBlock).not.toContain('stopMessageExcludeDirect:');
+    expect(metadataBlock).not.toContain('routecodexPortStopMessageEnabled:');
+    expect(directMetadataBlock).not.toContain('stopMessageEnabled:');
+    expect(directMetadataBlock).not.toContain('stopMessageExcludeDirect:');
+    expect(source).toContain("'stopMessageEnabled'");
+    expect(source).toContain("'stopMessageExcludeDirect'");
+    expect(source).toContain('writeMetadataCenterRuntimeControl(');
   });
 });

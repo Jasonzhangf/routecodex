@@ -90,6 +90,24 @@ function transitionSlotStatus<T>(args: {
   };
 }
 
+function isMetadataCenterLike(value: unknown): value is MetadataCenter {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as {
+    readRequestTruth?: unknown;
+    writeRequestTruth?: unknown;
+    readRuntimeControl?: unknown;
+    writeRuntimeControl?: unknown;
+  };
+  return (
+    typeof candidate.readRequestTruth === 'function'
+    && typeof candidate.writeRequestTruth === 'function'
+    && typeof candidate.readRuntimeControl === 'function'
+    && typeof candidate.writeRuntimeControl === 'function'
+  );
+}
+
 export class MetadataCenter {
   private readonly state: MetadataCenterState;
 
@@ -105,8 +123,8 @@ export class MetadataCenter {
   }
 
   static attach(target: Record<string, unknown>): MetadataCenter {
-    const existing = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenter | undefined;
-    if (existing instanceof MetadataCenter) {
+    const existing = Reflect.get(target, METADATA_CENTER_SYMBOL);
+    if (isMetadataCenterLike(existing)) {
       return existing;
     }
     const created = new MetadataCenter();
@@ -123,7 +141,7 @@ export class MetadataCenter {
       return undefined;
     }
     const existing = Reflect.get(target, METADATA_CENTER_SYMBOL);
-    return existing instanceof MetadataCenter ? existing : undefined;
+    return isMetadataCenterLike(existing) ? existing : undefined;
   }
 
   writeRequestTruth<K extends keyof MetadataCenterRequestTruth>(

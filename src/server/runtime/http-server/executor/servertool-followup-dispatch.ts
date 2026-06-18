@@ -12,7 +12,10 @@ import {
   throwIfNestedFollowupAborted
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
-import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
+import {
+  readRuntimeControlProjection,
+  readRuntimeRequestTruthIdentifiers
+} from '../metadata-center/request-truth-readers.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from '../metadata-center/metadata-center-types.js';
 import {
@@ -231,6 +234,10 @@ function clonePipelineInputForRetry(input: PipelineExecutionInput): PipelineExec
       ? (cloned.metadata as Record<string, unknown>)
       : undefined;
   preserveLiveClientAbortCarriers({ source: sourceMetadata, target: targetMetadata });
+  const sourceMetadataCenter = MetadataCenter.read(sourceMetadata);
+  if (sourceMetadataCenter && targetMetadata) {
+    MetadataCenter.bind(targetMetadata, sourceMetadataCenter);
+  }
   return cloned;
 }
 
@@ -343,6 +350,19 @@ function writeFollowupRuntimeControlToMetadata(
       : {}),
     ...(control.stoplessGoalStatus ? { stoplessGoalStatus: control.stoplessGoalStatus } : {})
   };
+}
+
+function writeStopMessageEnabledRuntimeControl(
+  metadata: Record<string, unknown>,
+  enabled: boolean,
+  reason: string
+): void {
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'stopMessageEnabled',
+    enabled,
+    SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
+    reason
+  );
 }
 
 function materializeFollowupRequestSemantics(args: {
@@ -572,26 +592,25 @@ async function buildServerToolNestedInput(args: {
       : {};
   const followupSource = [nestedMetadata.clientInjectSource, nestedRuntime.clientInjectSource]
     .find((value) => typeof value === 'string' && value.trim().length > 0);
-  const isNonStopMessageFollowup = typeof followupSource === 'string' && !followupSource.includes('stop_message');
-  const runtimeStopMessageDisabled =
-    nestedRuntime.stopMessageEnabled === false
-    || nestedRuntime.routecodexPortStopMessageEnabled === false;
+  const hasExplicitFollowupSource = typeof followupSource === 'string';
+  const hasExplicitFollowupFlow =
+    nestedRuntime.serverToolLoopState
+    && typeof nestedRuntime.serverToolLoopState === 'object'
+    && !Array.isArray(nestedRuntime.serverToolLoopState);
+  const nestedRuntimeControl = readRuntimeControlProjection(nestedMetadata);
+  const runtimeStopMessageDisabled = nestedRuntimeControl.stopMessageEnabled === false;
   const keepStopMessageEnabled =
-    !isNonStopMessageFollowup
+    !hasExplicitFollowupSource
+    && !hasExplicitFollowupFlow
     && !runtimeStopMessageDisabled
-    && nestedMetadata.stopMessageEnabled === true
-    && nestedMetadata.routecodexPortStopMessageEnabled === true;
+    && nestedRuntimeControl.stopMessageEnabled === true;
   if (!keepStopMessageEnabled) {
-    nestedMetadata.stopMessageEnabled = false;
-    nestedMetadata.routecodexPortStopMessageEnabled = false;
+    writeStopMessageEnabledRuntimeControl(
+      nestedMetadata,
+      false,
+      'servertool nested followup stop-message disabled'
+    );
   }
-  nestedMetadata.__rt = keepStopMessageEnabled
-    ? nestedRuntime
-    : {
-        ...nestedRuntime,
-        stopMessageEnabled: false,
-        routecodexPortStopMessageEnabled: false
-      };
   if (args.mode === 'reenter' && isFollowup) {
     delete nestedMetadata.clientInjectOnly;
     delete nestedMetadata.clientInjectText;

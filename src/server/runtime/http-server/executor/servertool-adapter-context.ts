@@ -3,7 +3,10 @@ import { applyClientConnectionStateToContext } from '../../../utils/client-conne
 import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
-import { readRuntimeServerToolProjection } from '../metadata-center/request-truth-readers.js';
+import {
+  readRuntimeControlProjection,
+  readRuntimeServerToolProjection
+} from '../metadata-center/request-truth-readers.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -123,11 +126,10 @@ export function buildServerToolAdapterContext(args: {
 
   applyClientConnectionStateToContext(metadataBag, baseContext);
 
-  const stopMessagePortEnabled = typeof metadataBag.stopMessageEnabled === 'boolean'
-    ? metadataBag.stopMessageEnabled
-    : typeof metadataBag.routecodexPortStopMessageEnabled === 'boolean'
-      ? metadataBag.routecodexPortStopMessageEnabled
-      : undefined;
+  const runtimeControl = readRuntimeControlProjection(metadataBag);
+  const stopMessagePortEnabled = typeof runtimeControl.stopMessageEnabled === 'boolean'
+    ? runtimeControl.stopMessageEnabled
+    : undefined;
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const rt = asFlatRecord(baseContext.__rt) ?? {};

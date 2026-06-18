@@ -28,6 +28,7 @@ import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
 } from './executor/provider-response-converter.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
+import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 // Import from new executor submodules
 import {
@@ -1126,18 +1127,8 @@ export class HubRequestExecutor implements RequestExecutor {
             hasSemantics: Boolean(requestSemantics && Object.keys(requestSemantics).length),
             attempt
           });
-          const metadataServerToolsDisabled =
-            mergedMetadata.stopMessageEnabled === false
-            || mergedMetadata.routecodexPortStopMessageEnabled === false
-            || (
-              mergedMetadata.__rt
-              && typeof mergedMetadata.__rt === 'object'
-              && !Array.isArray(mergedMetadata.__rt)
-              && (
-                (mergedMetadata.__rt as Record<string, unknown>).stopMessageEnabled === false
-                || (mergedMetadata.__rt as Record<string, unknown>).routecodexPortStopMessageEnabled === false
-              )
-            );
+          const runtimeControl = readRuntimeControlProjection(mergedMetadata);
+          const metadataServerToolsDisabled = runtimeControl.stopMessageEnabled === false;
           const serverToolsEnabled = isServerToolEnabled() && !metadataServerToolsDisabled;
           logStageLazy('provider.response_convert.start', input.requestId, () => ({
             providerKey: target.providerKey,

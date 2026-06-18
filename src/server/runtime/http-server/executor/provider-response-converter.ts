@@ -18,6 +18,7 @@ import {
 } from './provider-response-utils.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 import {
@@ -511,6 +512,15 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   if (adapterGoalState) {
     (pipelineMetadata as Record<string, unknown>).stoplessGoalState = adapterGoalState;
   }
+}
+
+function readRuntimeControlForProviderResponseConverter(
+  metadata?: Record<string, unknown>
+): { serverToolFollowup?: boolean } {
+  const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl();
+  return {
+    serverToolFollowup: runtimeControl?.serverToolFollowup === true
+  };
 }
 
 export type ConvertProviderResponseOptions = {
@@ -1067,8 +1077,8 @@ export async function convertProviderResponseIfNeeded(
         : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
           ? detailRecord.requestExecutorProviderErrorStage
           : requestExecutorProviderErrorStage;
-    const routecodexSemantics = asFlatRecord(options.requestSemantics?.__routecodex);
-    const isServerToolFollowupRequest = routecodexSemantics?.serverToolFollowup === true;
+    const isServerToolFollowupRequest =
+      readRuntimeControlForProviderResponseConverter(options.pipelineMetadata).serverToolFollowup === true;
     const isServerToolFollowupFailure =
       effectiveErrorStage === 'provider.followup' || isServerToolFollowupRequest;
     const followupLogDetails = isServerToolFollowupFailure
