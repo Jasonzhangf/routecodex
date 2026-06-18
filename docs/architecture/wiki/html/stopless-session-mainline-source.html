@@ -126,6 +126,12 @@
         <h2>Purpose</h2>
         <p>This page is the review surface for the stopless runtime-metadata continuation mainline. It is the only canonical place to read the current owner binding, mainline edges, gate coverage, and the current &quot;no file / no tmux / no sessionDir dependency&quot; closure status proved by <code>tests/servertool/stopless-cli-continuation.spec.ts</code>.</p>
         <p>This is not a second source of truth. The mechanical edges live in <code>docs/architecture/mainline-call-map.yml</code> (<code>chain_id: stopless.session.mainline</code>) and the owner / gate policy lives in <code>docs/architecture/function-map.yml</code> and <code>docs/architecture/verification-map.yml</code> (<code>feature_id: hub.servertool_stopless_cli_continuation</code>). The Mermaid figure below is a render artifact and must not be hand-edited.</p>
+        <p>Continuation behavior around stopless must now converge on the standardized continuation contract:</p>
+        <ul>
+          <li><code>docs/design/continuation-metadata-center-standard-contract.md</code></li>
+          <li><code>docs/architecture/wiki/continuation-standard-contract.md</code></li>
+        </ul>
+        <p>That means further stopless continuation work must be framed as canonical <code>save / restore / materialize / release</code>, not as one-off field patches on <code>responsesResume</code>-adjacent shapes.</p>
         <h2>Stopless Session Mainline</h2>
         <pre class="mermaid">flowchart LR
           StoplessResp01StopDetected[&quot;StoplessResp01StopDetected&quot;]
@@ -196,6 +202,7 @@
           <li>next-turn restoration is now locked to current request <code>tool_outputs</code> / runtime metadata.</li>
           <li>continuation / restore / materialize must collapse completed stopless <code>function_call + function_call_output</code> pairs into a single guidance message and keep only the latest guidance.</li>
           <li><code>/v1/responses</code> stopless turns now have an explicit two-owner contract: req owner preserves schema contract in <code>instructions</code>, bridge owner materializes it back into the outbound system message.</li>
+          <li>next-step closeout is no longer &quot;patch whichever continuation field is missing&quot;; stopless continuation must converge on the standardized <code>MetadataCenter.continuation_context</code> contract for <code>save / restore / materialize / release</code>.</li>
           <li>stopless is not treated as protocol-independent continuation; it must stay out of persisted continuation/file-state owners.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation context only for <code>/v1/responses</code> owner flows; it must not be upgraded into request session truth, stopless activation input, stop-message scope, or state-key material.</li>
         </ul>

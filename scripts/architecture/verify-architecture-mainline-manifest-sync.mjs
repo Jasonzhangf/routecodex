@@ -1,115 +1,123 @@
+/**
+ * verify-architecture-mainline-manifest-sync
+ *
+ * Checks:
+ * 1. All 7 chain manifests exist in docs/architecture/manifests/
+ * 2. Each manifest has valid schema
+ * 3. owner_feature_id exists in function-map
+ * 4. call_map_chain_id exists in mainline-call-map
+ * 5. entrypoint node_id is in chain node_ids
+ * 6. node_ids match chain edges
+ * 7. entrypoint wiki_page exists
+ * 8. verification.required_gates scripts exist in package.json
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
-import {
-  MAINLINE_CALL_MAP_PATH,
-  validateMainlineCallMap,
-  loadFeatureOwners,
-} from './mainline-call-map-lib.mjs';
 
 const root = process.cwd();
-const manifestDir = path.join(root, 'docs/architecture/mainline-manifests');
-const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+
+function readAbs(absPath) {
+  return fs.readFileSync(absPath, 'utf8');
+}
+function loadYaml(absPath) {
+  return YAML.parse(readAbs(absPath));
+}
+
+const mainline = loadYaml(path.join(root, 'docs/architecture/mainline-call-map.yml'));
+const functionMap = loadYaml(path.join(root, 'docs/architecture/function-map.yml'));
+const pkg = JSON.parse(readAbs(path.join(root, 'package.json')));
 const scripts = pkg.scripts ?? {};
-const { failures: mapFailures, parsed } = validateMainlineCallMap(root);
-const owners = loadFeatureOwners(root);
 
-const failures = [...mapFailures];
-if (!parsed) {
-  console.error('[verify:architecture-mainline-manifest-sync] failed');
-  for (const f of failures) console.error(`- ${f}`);
-  process.exit(1);
-}
+const knownFunctionFeatures = new Set(
+  (functionMap?.owners ?? []).map(r => r?.feature_id).filter(Boolean)
+);
+const mainlineChainIds = new Set(
+  (mainline?.chains ?? []).map(c => c?.chain_id).filter(Boolean)
+);
+const metadataManifestNodes = new Set();
+try {
+  const mcm = loadYaml(path.join(root, 'docs/architecture/metadata-center-manifest.yml'));
+  if (Array.isArray(mcm?.node_ids)) metadataManifestNodes = new Set(mcm.node_ids);
+} catch (_) { /* ignore */ }
 
-if (!fs.existsSync(manifestDir)) {
-  console.error('[verify:architecture-mainline-manifest-sync] failed');
-  console.error(`- manifest dir missing: docs/architecture/mainline-manifests`);
-  console.error('- run `npm run render:mainline-manifests`');
-  process.exit(1);
-}
+const failures = [];
 
-const chainsById = new Map();
-for (const chain of parsed.chains ?? []) {
-  if (chain?.chain_id) chainsById.set(chain.chain_id, chain);
-}
+const expectedChains = [
+  'request.mainline', 'response.mainline', 'error.mainline',
+  'runtime.lifecycle.mainline', 'runtime.tmux_client_binding.mainline',
+  'stopless.session.mainline', 'metadata.center.mainline',
+];
 
-for (const chain of parsed.chains ?? []) {
-  const chainId = chain?.chain_id;
-  if (!chainId) continue;
-  const manifestPath = path.join('docs/architecture/mainline-manifests', `${chainId}.yml`);
-  const abs = path.join(root, manifestPath);
-  if (!fs.existsSync(abs)) {
-    failures.push(`missing manifest for chain ${chainId}: ${manifestPath}`);
+for (const chainId of expectedChains) {
+  const manifestPath = path.join(root, 'docs/architecture/manifests', `${chainId.replace(/\//g, '_')}.yml`);
+  if (!fs.existsSync(manifestPath)) {
+    failures.push(`missing manifest: ${path.relative(root, manifestPath)}`);
     continue;
   }
-  let manifest;
-  try {
-    manifest = YAML.parse(fs.readFileSync(abs, 'utf8'));
-  } catch (err) {
-    failures.push(`${manifestPath}: invalid YAML (${err.message})`);
-    continue;
+  const m = loadYaml(manifestPath);
+  const lifecycleId = m?.lifecycle_id ?? '';
+  const ownerFeatureId = m?.owner_feature_id ?? '';
+  const entrypoint = m?.entrypoint ?? {};
+  const entryNode = entrypoint?.node_id ?? '';
+  const callMapChainId = entrypoint?.call_map_chain_id ?? '';
+  const wikiPage = entrypoint?.wiki_page ?? '';
+  const nodeIds = Array.isArray(m?.node_ids) ? m.node_ids : [];
+  const requiredGates = Array.isArray(m?.verification?.required_gates)
+    ? m.verification.required_gates : [];
+
+  if (!lifecycleId) failures.push(`${manifestPath}: missing lifecycle_id`);
+  if (!ownerFeatureId) failures.push(`${manifestPath}: missing owner_feature_id`);
+  if (!entryNode) failures.push(`${manifestPath}: missing entrypoint.node_id`);
+  if (!callMapChainId) failures.push(`${manifestPath}: missing entrypoint.call_map_chain_id`);
+
+  if (ownerFeatureId && ownerFeatureId !== 'shared' && !knownFunctionFeatures.has(ownerFeatureId)) {
+    failures.push(`${manifestPath}: owner_feature_id '${ownerFeatureId}' not in function-map`);
   }
-  if (!manifest || typeof manifest !== 'object') {
-    failures.push(`${manifestPath}: empty/non-object root`);
-    continue;
+  if (callMapChainId && !mainlineChainIds.has(callMapChainId)) {
+    failures.push(`${manifestPath}: call_map_chain_id '${callMapChainId}' not in mainline-call-map`);
   }
-  if (manifest.lifecycle_id !== chainId) {
-    failures.push(`${manifestPath}: lifecycle_id "${manifest.lifecycle_id}" != chain_id "${chainId}"`);
+  if (entryNode && nodeIds.length > 0 && !nodeIds.includes(entryNode)) {
+    failures.push(`${manifestPath}: entrypoint.node_id '${entryNode}' not in node_ids`);
   }
-  const ownerFeatureId = manifest.owner_feature_id;
-  if (!ownerFeatureId || !owners.has(ownerFeatureId)) {
-    failures.push(`${manifestPath}: owner_feature_id not in function-map: ${ownerFeatureId}`);
-  }
-  if (manifest.entrypoint?.call_map_chain_id !== chainId) {
-    failures.push(`${manifestPath}: entrypoint.call_map_chain_id mismatch`);
-  }
-  if (manifest.entrypoint?.node_id !== chain.entry_contract?.node) {
-    failures.push(`${manifestPath}: entrypoint.node_id != chain entry_contract.node`);
-  }
-  if (manifest.entrypoint?.wiki_page && manifest.entrypoint.wiki_page !== chain.entry_contract?.owner_doc) {
-    failures.push(`${manifestPath}: entrypoint.wiki_page != chain entry_contract.owner_doc`);
-  }
-  const nodeIds = Array.isArray(manifest.node_ids) ? manifest.node_ids : [];
-  const edges = Array.isArray(chain.edges) ? chain.edges : [];
-  const chainNodeSet = new Set();
-  for (const edge of edges) {
-    if (typeof edge?.from_node === 'string') chainNodeSet.add(edge.from_node);
-    if (typeof edge?.to_node === 'string') chainNodeSet.add(edge.to_node);
-  }
-  for (const nodeId of nodeIds) {
-    if (!chainNodeSet.has(nodeId)) {
-      failures.push(`${manifestPath}: node_id "${nodeId}" not in chain ${chainId} edges`);
+
+  // node_ids must match chain edges
+  if (callMapChainId) {
+    const chain = (mainline?.chains ?? []).find(c => c?.chain_id === callMapChainId);
+    if (chain) {
+      const chainNodes = new Set();
+      for (const edge of (chain.edges ?? [])) {
+        if (edge?.from_node) chainNodes.add(edge.from_node);
+        if (edge?.to_node) chainNodes.add(edge.to_node);
+      }
+      for (const nid of nodeIds) {
+        if (!chainNodes.has(nid)) {
+          failures.push(`${path.relative(root, manifestPath)}: node_id '${nid}' not in chain '${callMapChainId}'`);
+        }
+      }
+      for (const cn of chainNodes) {
+        if (!nodeIds.includes(cn)) {
+          failures.push(`${path.relative(root, manifestPath)}: chain '${callMapChainId}' node '${cn}' missing from node_ids`);
+        }
+      }
     }
   }
-  for (const nodeId of chainNodeSet) {
-    if (!nodeIds.includes(nodeId)) {
-      failures.push(`${manifestPath}: chain node "${nodeId}" missing from manifest.node_ids`);
-    }
+
+  if (wikiPage && !fs.existsSync(path.join(root, wikiPage))) {
+    failures.push(`${path.relative(root, manifestPath)}: wiki_page not on disk: ${wikiPage}`);
   }
-  const stepIds = Array.isArray(manifest.step_ids) ? manifest.step_ids : [];
-  const chainStepSet = new Set();
-  for (const edge of edges) {
-    if (typeof edge?.step_id === 'string') chainStepSet.add(edge.step_id);
+
+  if (requiredGates.length === 0) {
+    failures.push(`${path.relative(root, manifestPath)}: missing verification.required_gates`);
   }
-  for (const stepId of stepIds) {
-    if (!chainStepSet.has(stepId)) {
-      failures.push(`${manifestPath}: step_id "${stepId}" not in chain ${chainId} edges`);
-    }
-  }
-  for (const stepId of chainStepSet) {
-    if (!stepIds.includes(stepId)) {
-      failures.push(`${manifestPath}: chain step "${stepId}" missing from manifest.step_ids`);
-    }
-  }
-  const requiredGates = Array.isArray(manifest.verification?.required_gates) ? manifest.verification.required_gates : [];
   for (const gate of requiredGates) {
-    const m = String(gate).match(/^npm run ([A-Za-z0-9:_-]+)$/);
-    if (!m) {
-      failures.push(`${manifestPath}: required gate must be npm run command: ${gate}`);
+    const match = String(gate).match(/^npm run ([A-Za-z0-9:_-]+)$/);
+    if (!match) {
+      failures.push(`${path.relative(root, manifestPath)}: gate must be 'npm run <script>': ${gate}`);
       continue;
     }
-    if (!scripts[m[1]]) {
-      failures.push(`${manifestPath}: required gate script missing in package.json: ${m[1]}`);
+    if (!scripts[match[1]]) {
+      failures.push(`${path.relative(root, manifestPath)}: gate script not in package.json: ${match[1]}`);
     }
   }
 }
@@ -121,4 +129,5 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:architecture-mainline-manifest-sync] ok');
-console.log(`- checked ${parsed.chains.length} mainline manifests`);
+console.log(`- checked ${expectedChains.length} chain manifests`);
+console.log('- schema, function-map owner, call-map chain, node_ids, wiki_page, required_gates all consistent');

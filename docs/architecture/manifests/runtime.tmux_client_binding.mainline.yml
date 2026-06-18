@@ -1,0 +1,49 @@
+lifecycle_id: runtime.tmux_client_binding.mainline
+summary: "tmux/client attachment registry: daemon registration persists records,
+  conversation binding narrows to tmux session, executor/runtime lookup consumes
+  binding without turning it into request identity truth."
+owner_feature_id: runtime.tmux_client_binding
+entrypoint:
+  node_id: SessionClientRegisterRequest
+  wiki_page: docs/architecture/wiki/stopless-session-mainline-source.md
+  call_map_chain_id: runtime.tmux_client_binding.mainline
+node_ids:
+  - ConversationSessionBindRequest
+  - ConversationTmuxBindingResolved
+  - SessionBindingsPersisted
+  - SessionClientRegisterRequest
+  - TmuxBindingLookupConsumed
+  - TmuxClientRecordRegistered
+edges:
+  - step_id: scb-01
+    from_node: SessionClientRegisterRequest
+    to_node: TmuxClientRecordRegistered
+    status: anchored
+    owner_feature_id: runtime.tmux_client_binding
+    binding_pending: null
+    split_binding_id: null
+  - step_id: scb-02
+    from_node: TmuxClientRecordRegistered
+    to_node: SessionBindingsPersisted
+    status: anchored
+    owner_feature_id: runtime.tmux_client_binding
+    binding_pending: null
+    split_binding_id: null
+  - step_id: scb-03
+    from_node: ConversationSessionBindRequest
+    to_node: ConversationTmuxBindingResolved
+    status: anchored
+    owner_feature_id: runtime.tmux_client_binding
+    binding_pending: null
+    split_binding_id: null
+  - step_id: scb-04
+    from_node: ConversationTmuxBindingResolved
+    to_node: TmuxBindingLookupConsumed
+    status: anchored
+    owner_feature_id: runtime.tmux_client_binding
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

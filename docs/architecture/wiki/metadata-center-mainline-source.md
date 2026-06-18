@@ -14,6 +14,13 @@ This is not a second source of truth. Current boundary/gate policy still lives i
 
 This page exists because the current repo already proved that "metadata passed as plain object and repeatedly merged" is not queryable enough for long-lived maintenance. The current goal is to keep the human review surface aligned with the real implementation while the remaining partial families migrate.
 
+For continuation specifically, the implementation target is now explicitly standardized in:
+
+- `docs/design/continuation-metadata-center-standard-contract.md`
+- `docs/architecture/wiki/continuation-standard-contract.md`
+
+That contract is the rule for `save / restore / materialize / release`. Field-level fixes that do not move toward that contract are temporary debugging evidence only, not architecture closeout.
+
 ## Main Rule
 
 - Metadata must converge into one request-scoped center, not continue as free-floating `Record<string, unknown>` merges.

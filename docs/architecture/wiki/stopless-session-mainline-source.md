@@ -6,6 +6,13 @@ This page is the review surface for the stopless runtime-metadata continuation m
 
 This is not a second source of truth. The mechanical edges live in `docs/architecture/mainline-call-map.yml` (`chain_id: stopless.session.mainline`) and the owner / gate policy lives in `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` (`feature_id: hub.servertool_stopless_cli_continuation`). The Mermaid figure below is a render artifact and must not be hand-edited.
 
+Continuation behavior around stopless must now converge on the standardized continuation contract:
+
+- `docs/design/continuation-metadata-center-standard-contract.md`
+- `docs/architecture/wiki/continuation-standard-contract.md`
+
+That means further stopless continuation work must be framed as canonical `save / restore / materialize / release`, not as one-off field patches on `responsesResume`-adjacent shapes.
+
 ## Stopless Session Mainline
 
 ```mermaid
@@ -78,6 +85,7 @@ flowchart LR
 - next-turn restoration is now locked to current request `tool_outputs` / runtime metadata.
 - continuation / restore / materialize must collapse completed stopless `function_call + function_call_output` pairs into a single guidance message and keep only the latest guidance.
 - `/v1/responses` stopless turns now have an explicit two-owner contract: req owner preserves schema contract in `instructions`, bridge owner materializes it back into the outbound system message.
+- next-step closeout is no longer "patch whichever continuation field is missing"; stopless continuation must converge on the standardized `MetadataCenter.continuation_context` contract for `save / restore / materialize / release`.
 - stopless is not treated as protocol-independent continuation; it must stay out of persisted continuation/file-state owners.
 - `responsesRequestContext.sessionId/conversationId` is continuation context only for `/v1/responses` owner flows; it must not be upgraded into request session truth, stopless activation input, stop-message scope, or state-key material.
 

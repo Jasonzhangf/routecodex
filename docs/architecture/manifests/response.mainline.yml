@@ -1,0 +1,47 @@
+lifecycle_id: response.mainline
+summary: Provider response enters Hub, gets governed, then projects to client
+  protocol and server frame.
+owner_feature_id: hub.response_provider_sse_materialization
+entrypoint:
+  node_id: ProviderRespInbound01Raw
+  wiki_page: docs/architecture/wiki/response-mainline-call-graph.md
+  call_map_chain_id: response.mainline
+node_ids:
+  - HubRespChatProcess03Governed
+  - HubRespInbound02Parsed
+  - HubRespOutbound04ClientSemantic
+  - ProviderRespInbound01Raw
+  - ServerRespOutbound05ClientFrame
+edges:
+  - step_id: resp-01
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    status: anchored
+    owner_feature_id: hub.response_provider_sse_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: resp-02
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespChatProcess03Governed
+    status: anchored
+    owner_feature_id: hub.response_responses_chat_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: resp-03
+    from_node: HubRespChatProcess03Governed
+    to_node: HubRespOutbound04ClientSemantic
+    status: anchored
+    owner_feature_id: hub.response_responses_client_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: resp-04
+    from_node: HubRespOutbound04ClientSemantic
+    to_node: ServerRespOutbound05ClientFrame
+    status: anchored
+    owner_feature_id: server.responses_response_handler_bridge_surface
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -1,0 +1,47 @@
+lifecycle_id: error.mainline
+summary: Provider/runtime/direct failures enter unified ErrorErr chain and only
+  then project to client-visible error.
+owner_feature_id: error.pipeline_contract
+entrypoint:
+  node_id: ErrorErr01SourceRaised
+  wiki_page: docs/architecture/wiki/error-mainline-call-graph.md
+  call_map_chain_id: error.mainline
+node_ids:
+  - ErrorErr01SourceRaised
+  - ErrorErr02HostCaptured
+  - ErrorErr03RuntimeClassified
+  - ErrorErr05ExecutionDecision
+  - ErrorErr06ClientProjected
+edges:
+  - step_id: err-01
+    from_node: ErrorErr01SourceRaised
+    to_node: ErrorErr02HostCaptured
+    status: anchored
+    owner_feature_id: error.pipeline_contract
+    binding_pending: null
+    split_binding_id: null
+  - step_id: err-02
+    from_node: ErrorErr02HostCaptured
+    to_node: ErrorErr03RuntimeClassified
+    status: anchored
+    owner_feature_id: error.provider_failure_policy
+    binding_pending: null
+    split_binding_id: null
+  - step_id: err-03
+    from_node: ErrorErr03RuntimeClassified
+    to_node: ErrorErr05ExecutionDecision
+    status: partial
+    owner_feature_id: error.execution_decision_consumer
+    binding_pending: null
+    split_binding_id: null
+  - step_id: err-04
+    from_node: ErrorErr05ExecutionDecision
+    to_node: ErrorErr06ClientProjected
+    status: anchored
+    owner_feature_id: error.client_projection
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -11,6 +11,7 @@
 - Architecture truth synced:
   - `docs/architecture/metadata-center-manifest.yml` declares `runtime_control.stopless`.
   - function-map / mainline-call-map / verification-map now distinguish completed stopless writer migration from still-partial request-route writer migration.
+  - architecture wiki HTML regenerated.
 - Verification:
   - `cargo test -p router-hotpath-napi chat_servertool_orchestration --lib -- --nocapture` PASS (43 tests)
   - `cargo test -p router-hotpath-napi chat_node_result_semantics --lib -- --nocapture` PASS (14 tests)
@@ -33,6 +34,65 @@
   - request-route runtime-control writer lane (`retryProviderKey`, `preselectedRoute`) remains partial and should be migrated in a separate slice.
   - broader Rust `__rt` runtime side-channel still exists for non-payload internal metadata carrier lanes; this slice only locks stopless/followup control semantics.
 
+## 2026-06-18 MetadataCenter stopMessage/runtime-control followup closeout
+
+- 本轮继续执行 internal metadata cleanup goal：`stopMessageEnabled` / `stopMessageExcludeDirect` 从 request metadata / nested followup metadata 的 flat 字段和 `__rt` 控制语义迁到 `MetadataCenter.runtime_control`。
+- 代码收口：
+  - `index.ts` 入口写 `runtime_control.stopMessageEnabled/stopMessageExcludeDirect`，不再把 stopMessage 控制写入 normal metadata payload。
+  - `request-executor.ts`、`servertool-adapter-context.ts` 只通过 `readRuntimeControlProjection(...)` 消费 stopMessage enablement。
+  - `servertool-followup-dispatch.ts` nested followup 只写 `MetadataCenter.runtime_control.stopMessageEnabled=false` 禁用递归，不写 flat/`__rt` fallback；retry JSON clone 显式保留 `MetadataCenter` symbol binding。
+  - `servertool-followup-metadata.ts` 复制 request-local MetadataCenter side-channel 并剥离 stopMessage flat / `__rt` 控制字段。
+  - `provider-response-converter.ts` servertool followup 错误判定不再读 `requestSemantics.__routecodex`，只读 MetadataCenter runtime-control。
+  - `MetadataCenter.attach/read` 从 `instanceof` 改为结构化 duck-type，避免 Jest/ESM 多实例或 side-by-side emit 导致 side-channel 读不到。
+- 发现并物理删除了 `src/server/runtime/http-server/metadata-center/*.js/*.d.ts` 陈旧生成残留；这些文件会抢占 `.js` import，导致旧 `instanceof` 实现复活。已加入 `verify:architecture-deleted-path` gate 防复活。
+- 验证：
+  - focused Jest 5 suites PASS，50 tests。
+  - `npx tsc --noEmit --pretty false` PASS。
+  - `git diff --check` PASS。
+  - `npm run audit:custom-payload-carriers` PASS：`payload_side_channel=0`，`__sse_* runtime files=0`。
+  - `audit:custom-payload-carrier-owner-queryability` PASS：`__routecodex* unique-owner=9 ambiguous=0`。
+  - custom payload manifest / containment / function-map compile / deleted-path gates PASS。
+  - `npm run build:min` PASS。
+  - `npm run verify:architecture-ci` PASS。
+
+## 2026-06-18 continuation contract local green, but 5555 live probe still not entering stopless activation
+
+- 本轮已完成本地 contract 收口并确认运行态版本切到 `0.90.3145`：
+  - `build:min` PASS；
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run install:global` PASS；
+  - `routecodex --version` => `0.90.3145`；
+  - `curl http://127.0.0.1:5555/health` => `version=0.90.3145`。
+- continuation contract 相关本地验证已绿：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts -t "preserves restored tools"` PASS；
+  - `tests/responses/responses-openai-bridge.spec.ts` PASS；
+  - `tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts` PASS。
+- 在线 probe 现状不能宣称闭环：
+  - `scripts/tests/stopless-5555-final-probe.mjs` 首轮未拿到 `exec_command`，直接 FAIL；
+  - `scripts/tests/stopless-5555-live-probe.mjs` 三次尝试均未进入 stopless followup，最终 `finalStatus=no_live_stopless_path`。
+- 已锁在线样本事实：
+  - 5555 新样本使用新版本 `0.90.3145`，说明不是旧包未刷新；
+  - `req_1781788334947_d34fc5f8` / `req_1781788340375_07897c6c` / `req_1781788352221_32be85ef` 的 `provider-request.json` 都只是把 probe 提示词原样发给上游；
+  - 对应 `provider-response.json` 里模型按提示词直接输出 stop schema JSON（`stopreason=2`），没有工具调用，也没有 stopless servertool followup；
+  - 所以这批 live probe 失败不是 continuation restore 再次坏了，而是 probe prompt 本身把模型引导成“直接输出 stop schema”，根本没有进入 stopless 激活路径。
+- 下一步要做的不是继续看 continuation contract，而是重审 5555 online probe 设计：
+  - 构造一个真实会先自然 `finish_reason=stop` 且不直接输出 stop schema 的 managed relay 样本；
+  - 再检查该样本是否触发 stopless exec_command；
+  - 之后再看 followup request 里 schema feedback / guidance / restoredTools 是否闭环。
+
+## 2026-06-18 continuation contract closeout in progress: relay restore + restoredTools bridge
+
+- 当前标准 contract 收口继续沿两条红测推进：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts -t "preserves restored tools"`；
+  - `tests/responses/responses-openai-bridge.spec.ts -t "restores tools from canonical responses resume contract when caller tools are empty"`。
+- 已锁事实：
+  - TS bridge 之前没有把 canonical `semantics.responses.resume.restoredTools` 纳入 `buildChatRequestFromResponses()` 的初始 tools 恢复链；
+  - relay `resumeLatestResponsesContinuationByScope()` 命中 scope 后，native `restore_responses_continuation_payload()` 仍把 `previous_response_id + delta-only user input` 拒绝为 `null`，与新 contract 不符；
+  - 本轮先做最小 owner 修正，不扩散到 SSE / protocol / direct。
+- 当前进度：
+  - 已补 `buildChatRequestFromResponses()` 从 canonical `restoredTools` 恢复 chat tools；
+  - 已尝试在 Rust restore 放行 canonical relay delta-only resume；
+  - 首轮 native build 因一处 Rust 调用签名错误未完成，已修正，待重新 build + 复跑 focused tests。
+
 ## 2026-06-18 internal metadata request-write topology plan
 
 - Jason clarified the next cleanup rule: request nodes should not perform unnecessary metadata writes; only necessary request-scoped control truth may be written to `MetadataCenter`, especially `runtime_control`.
@@ -42,6 +102,26 @@
   - old payload-side-channel fields must be physically removed, not renamed into generic metadata;
   - new gates must fail old `__routecodex*`, `requestSemantics.__routecodex`, `__sse_*`, internal payload metadata/options writes, and undeclared `MetadataCenter.writeRuntimeControl(...)` slots.
 - This is a planning/doc update only; runtime migration and final verification remain pending.
+
+## 2026-06-18 stopless provider-request blackbox closure pivot
+
+- Jason 明确纠正：当前最该做的是直接离线验证最终 provider 请求，不要继续围着中间 metadata 和样本目录绕。
+- 已锁事实：
+  - host 最终发送的是 `request-executor -> pipelineResult.providerPayload`；
+  - `pipelineResult.providerPayload` 来自 `HubPipeline.execute() -> executeRequestStagePipeline() -> runHubPipelineLibWithNative(...)`；
+  - 所以 stopless 是否真正进入 provider 请求，必须在 hub pipeline/native orchestration 黑盒上直接断言 `providerPayload`。
+- 本轮新增了一条 `sharedmodule/llmswitch-core/test/hub/hub-pipeline.spec.ts` 的 stopless providerPayload 红测草案，内容是 `/v1/responses + stopless tool result + schemaFeedback` 必须在最终 `providerPayload.messages` 中出现：
+  - stopless system instruction
+  - `上一轮执行结果`
+  - `repeatCount=2/3`
+  - `reasonCode=stop_schema_missing`
+  - `missingFields=stopreason, reason`
+  - `如果任务已经完成`
+- 但根仓 Jest 不收 `sharedmodule/llmswitch-core/test/*`，所以这条测试还没有进入当前实际测试 harness。
+- 下一步收口：
+  - 把同样的 providerPayload 黑盒红测迁到根仓会执行的 `tests/sharedmodule/` 或 `tests/responses/`；
+  - 直接打 `HubPipeline.execute()` 或等价 native orchestration 入口；
+  - 若红，根因锁在 native hub pipeline/providerPayload build；若绿，再查 build/install/live version 差异。
 
 
 ## 2026-06-18 internal metadata cleanup closeout
@@ -350,6 +430,35 @@
 - 当前最可疑的非必要链路点：
   - `req_process_stage1_tool_governance_blocks/request_result.rs` 会把外部 metadata 与 governed metadata 再 merge 一次，必须加 trace / 红测确认 stopless control 没被覆盖。
   - `hub_req_inbound_tool_call_normalization.rs` 与 `shared_responses_conversation_utils.rs` 都会把 stopless tool output 翻译成模型可见文本；后续需要锁“谁负责翻译，谁只负责折叠历史”，避免双 owner。
+
+## 2026-06-18 Jason 新规则收口：direct 不执行 stopless + 非 owner metadata 不得覆盖
+
+- Jason 最新明确两条规则：
+  1. direct 路径不应该执行 stopless；
+  2. 不应该覆盖的地方要移除。
+- 已落实到代码：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+    - 删除 `evaluate_responses_direct_route_decision(...)` 中 stopless/servertool followup 强制 relay 逻辑。
+    - 物理删除死代码 helper：
+      - `has_stop_message_cli_result`
+      - `scan_stop_message_cli_result`
+      - `is_stop_message_cli_result_object`
+      - `collect_direct_stop_message_text`
+      - `stop_message_include_direct`
+      - `has_servertool_followup_marker`
+    - 新 direct 语义：responses same-protocol direct 上，stopless / generic servertool followup metadata 都不再触发 relay 判定。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/request_result.rs`
+    - `build_processed_request(...)` metadata merge 从覆盖式 `insert` 改为 `entry(...).or_insert(...)`，只补缺失键，不允许 governed metadata 覆盖已有 metadata truth。
+- 新/更新验证：
+  - Rust focused:
+    - `cargo test -p router-hotpath-napi responses_direct_route_decision_tests --lib -- --nocapture` PASS
+    - `cargo test -p router-hotpath-napi request_result --lib -- --nocapture` PASS
+  - request_result 新测试：
+    - `build_processed_request_does_not_override_existing_metadata_truth`
+- 当前收口后结论：
+  - direct 不再被 stopless/servertool followup 元数据拽进 relay。
+  - req_process 尾部不再允许局部 governed metadata 覆盖请求已有 metadata 真相。
+  - 下一步仍需继续锁 fresh request 翻译 owner 与 continuation/history 折叠 owner 的单一职责，并在线复核 provider-request 是否真正带出 stopless feedback。
 
 ## 2026-06-18 stopless MetadataCenter staged bridge: request-local control truth to provider-request blackbox
 
@@ -5740,3 +5849,80 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 5 新 gate: mainline-manifest-sync / wiki-node-id-consistency / binding-state / test-coverage-integrity / topology-type-consistency — 全部 PASS
 - git diff --check PASS
 - 本轮新文件：6 个 gate 脚本 + 1 个 manifest 生成器 + 7 个 chain manifest YMLs + goal 文档
+## 2026-06-18 continuation metadata center standardization rule
+
+- Jason 明确纠正：`MetadataCenter` 上的 continuation 不能继续靠零散补丁推进；`save / restore / materialize / release` 必须先定义成按协议约束的标准行为，再按这个 contract 收代码。
+- 当前已锁到的反模式：
+  - Rust restore/materialize 返回 `meta.fullInput`，TS bridge 又单独期待 `responsesResume.restoredTools`，造成“部分恢复、部分猜测”的拼接式 contract。
+  - continuation 相关标准字段目前分散在 `responsesResume / fullInput / deltaInput / restoredFromResponseId / restoredTools / previous_response_id` 多个局部 shape，缺少统一 family contract 和 provenance。
+  - stopless 当前暴露出来的 `schemaFeedback 已进 provider request，但 tools 丢失`，本质上不是单个文案问题，而是 continuation 标准恢复 contract 不完整。
+- 后续收口原则：
+  - continuation 必须进入 `MetadataCenter.continuation_context` 作为唯一 request-scoped truth family；
+  - 必须明确定义按协议的 canonical continuation contract：至少区分 `responses remote resume`、`responses local materialize`、`chat/messages none`；
+  - 标准 contract 需要统一回答四件事：保存什么、恢复什么、何时 materialize full input、何时释放；
+  - bridge / req_chatprocess / VR / stopless 只能读中心化 continuation projection，不允许各自再猜 `responsesResume.*` 局部字段；
+  - 在 contract 落稳前，继续对单个字段打补丁风险很高，只能作为临时红测定位证据，不能当最终设计。
+
+## 2026-06-18 error client projection red-test pass 1
+
+- User要求先补黑盒红测再修复 provider 错误泄漏。
+- 已改红测：handler-utils.error-response-shape 和 http-error-mapper-public-leak，目标是不再向客户端/SSE暴露 `Upstream authentication failed`、`HTTP_401/403`、provider routed request id。
+- 首轮 red evidence：`pnpm exec jest tests/server/utils/http-error-mapper-public-leak.spec.ts --runInBand` 失败，401/403 summary 仍返回旧值 `Upstream authentication failed`。
+- 修复落点：
+  - `src/server/utils/http-error-mapper.ts`：provider 401/403 client projection 改为 generic `502 upstream_error / Upstream provider error`，不带 `request_id`。
+  - `src/server/handlers/handler-utils.ts`：`upstream_error` 不再自动补 request_id；错误日志 summary 用 public mapper，字段解析仍读原始 error 以保留内部 status/code。
+- 已转绿：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-utils.error-response-shape.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/utils/http-error-mapper-public-leak.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/request-error-log.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts --runInBand` PASS，但 Jest 报 open-handle 未自动退出
+  - `npm run verify:error-pipeline-contract` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 未闭合验证：
+  - `npm run verify:provider-failure-ban-blackbox` 失败在脚本读取临时 `sessions/provider-health.json` ENOENT。
+  - `tests/server/runtime/http-server/request-executor.spec.ts` 失败主要为 `[llmswitch-bridge] native-failure-policy not available` 与既有 session/backoff 断言，不作为本修复绿证。
+
+## 2026-06-18 provider health persistence scope closeout
+
+- 已提交：
+  - `2c5cc22 fix(error): mask provider auth failures`
+  - `ff0a0d1 fix(error): scope provider health persistence`
+- 新红测/黑盒闭环：
+  - `scripts/tests/provider-failure-ban-blackbox.mjs` 现在隔离 `RCC_HOME`，扫描 tmp 下所有 `provider-health.json`，并断言只能出现在 port-scoped runtime truth path：`RCC_HOME/sessions/<serverId>/ports/<routingPolicyGroup>/provider-health.json`。
+  - 同一黑盒验证 503 三击后 runtime health 为 `tripped`、第四次跳过 primary、restart 后重新 probe primary、port 5555 group A cooldown 不影响 port 6666 group B。
+- 根因：
+  - Provider ErrorErr 事件进入 Rust VirtualRouter 后，provider-health 持久化此前没有按 event runtime `sessionDir` 套 state store override，导致写到 ambient/root `RCC_HOME/sessions/provider-health.json`。
+- 修复：
+  - Rust `engine/events.rs` 的 provider success/failure/error handler 改为从 `event.runtime.sessionDir/session_dir` 进入 scoped state store；无 sessionDir 时用 disabled guard fail-closed，不继承 ambient root。
+  - `routing_state_store.rs` 增加 `with_session_dir_persistence_disabled`。
+  - `provider-error-reporter.ts` 只负责从 provider context 投影 request-scoped runtime hints；不在 TS 层重新拼 port path。
+- 验证：
+  - `cargo test -p router-hotpath-napi provider_error_persistence_uses_event_runtime_session_dir --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi provider_error_without_runtime_session_dir_does_not_persist_to_root_session --lib -- --nocapture` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/providers/core/utils/provider-error-reporter.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:base` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:provider-failure-ban-blackbox` PASS
+  - `npm run verify:error-pipeline-contract` PASS
+  - public leak focused Jest 3 suites PASS
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` PASS (19 tests, still reports Jest open-handle warning)
+  - `git diff --check` PASS for touched files.
+
+## 2026-06-18 stopless live closure trace
+- 当前 live probe 失真原因已确认：scripts/tests/stopless-5555-live-probe.mjs 首轮 prompt 明确要求“没有 function_call_output 就直接输出 stop schema JSON”，会主动压死 stopless 激活，不是功能 owner 自身证据。
+- 已锁真正 owner 主线：sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts 写 stopless runtime control；sharedmodule/llmswitch-core/src/servertool/engine.ts 决定 CLI projection；下一步追 request-side submit_tool_outputs/continuation 翻译链，查 schemaFeedback、上一轮执行结果、tools 恢复是否丢失。
+
+- Jason 最新要求：仅审计/验证 relay 主线；direct 路径不再作为 stopless 闭环解释或验证分支。
+
+- Jason 新要求：servertool 当前不需要走 tmux 路径；stopless/relay 不能再被 tmux_session_missing 阻断。
+
+- 修复：relay stopless system instruction 注入不再绑定 clientInjectReady/tmux；唯一 owner 为 req_process_stage1_tool_governance_blocks/orchestrator.rs。
+- focused rust tests 通过：clientInjectReady=true/false 两类 /v1/responses stopless instruction materialize。
+
+- 安装态已到 0.90.3147，但 5555 health 仍是 0.90.3145；已执行 scoped restart 让线上 relay 复核命中新版本。
+
+- 5555 在线复核（0.90.3147）结果：tmux gate 已去掉，但 client-request metadata 本身已不再携带 stopMessageEnabled / routecodexPortStopMessageEnabled，导致 req_process 仍无法判定应注入 stopless instructions；当前唯一 owner 前移到入站 metadata 写入阶段。
+
+- 更正：client-request snapshot 不是 MetadataCenter runtimeControl 的完整真相；sample writer 不会把 runtimeControl 投影回普通 metadata 字段。stopless 是否生效仍以 provider-request 是否出现 instructions 为准。
+
+- 根因二修复：request-stage bridge 之前只投影 __rt，不投影 MetadataCenter.runtimeControl，导致 native req_process 看不到 stopMessageEnabled；已在 hub-pipeline-execute-request-stage.ts 补 runtimeControl -> __rt 投影，并加 preselected-route focused test 锁住。

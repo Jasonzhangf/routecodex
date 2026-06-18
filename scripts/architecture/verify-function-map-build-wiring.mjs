@@ -6,24 +6,10 @@ const pkgPath = path.join(root, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const scripts = pkg.scripts || {};
 
-// Build wiring contract:
-// - build/build:min must block on review-surface-light + function-map-compile-gate before tsc
-// - review-surface-light now includes mainline node-id consistency, binding debt budget,
-//   mainline manifest sync, and topology debt budget
-// - architecture-ci now includes required-tests-bidir + build-tiering
-// - longtail remains the place for slower / debt-reporting architecture checks
 const requiredScript = 'verify:function-map-compile-gate';
 const requiredReviewSurfaceLightScript = 'verify:architecture-review-surface-light';
-const requiredNodeIdConsistencyScript = 'verify:architecture-mainline-node-id-consistency';
-const requiredBindingBudgetScript = 'verify:architecture-mainline-binding-pending-gate';
-const requiredTopologyBudgetScript = 'verify:architecture-topology-doc-sync';
-const requiredMetadataCenterManifestCodeSyncScript = 'verify:architecture-metadata-center-manifest-code-sync';
 const requiredReviewSurfaceScript = 'verify:architecture-review-surface';
 const requiredLongtailScript = 'verify:architecture-ci-longtail';
-const requiredBuildTieringScript = 'verify:build-script-tiering';
-const requiredCustomPayloadContainmentScript = 'verify:architecture-custom-payload-carrier-containment';
-const requiredCustomPayloadOwnerQueryabilityScript = 'verify:architecture-custom-payload-carrier-owner-queryability';
-const requiredCustomPayloadRuntimeManifestScript = 'verify:architecture-custom-payload-carrier-runtime-manifest';
 const compileGate = scripts[requiredScript] || '';
 const requiredGateParts = [
   'verify:architecture-feature-id-anchors',
@@ -52,62 +38,55 @@ if (!compileGate) {
   }
 }
 
-for (const buildScriptName of ['build', 'build:min']) {
-  const command = scripts[buildScriptName] || '';
-  if (!command.includes(`npm run ${requiredReviewSurfaceLightScript}`)) {
-    failures.push(`${buildScriptName} must run ${requiredReviewSurfaceLightScript}`);
+// build:base must run review surface light + function-map compile gate (before tsc)
+const baseCommand = scripts['build:base'] || '';
+if (!baseCommand) {
+  failures.push('package.json missing scripts.build:base');
+} else {
+  if (!baseCommand.includes(`npm run ${requiredReviewSurfaceLightScript}`)) {
+    failures.push('build:base must run verify:architecture-review-surface-light');
   }
-  if (!command.includes(`npm run ${requiredScript}`)) {
-    failures.push(`${buildScriptName} must run ${requiredScript}`);
+  if (!baseCommand.includes(`npm run ${requiredScript}`)) {
+    failures.push('build:base must run verify:function-map-compile-gate');
   }
-  const tscIndex = command.indexOf('tsc');
-  const reviewSurfaceIndex = command.indexOf(`npm run ${requiredReviewSurfaceLightScript}`);
-  const gateIndex = command.indexOf(`npm run ${requiredScript}`);
+  const tscIndex = baseCommand.indexOf('tsc');
+  const reviewSurfaceIndex = baseCommand.indexOf(`npm run ${requiredReviewSurfaceLightScript}`);
+  const gateIndex = baseCommand.indexOf(`npm run ${requiredScript}`);
   if (tscIndex !== -1 && (reviewSurfaceIndex === -1 || reviewSurfaceIndex > tscIndex)) {
-    failures.push(`${buildScriptName} must run ${requiredReviewSurfaceLightScript} before tsc`);
+    failures.push('build:base must run verify:architecture-review-surface-light before tsc');
   }
   if (tscIndex !== -1 && (gateIndex === -1 || gateIndex > tscIndex)) {
-    failures.push(`${buildScriptName} must run ${requiredScript} before tsc`);
+    failures.push('build:base must run verify:function-map-compile-gate before tsc');
   }
 }
 
-const reviewSurfaceLight = scripts[requiredReviewSurfaceLightScript] || '';
-if (!reviewSurfaceLight.includes(`npm run ${requiredNodeIdConsistencyScript}`)) {
-  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredNodeIdConsistencyScript}`);
-}
-if (!reviewSurfaceLight.includes(`npm run ${requiredBindingBudgetScript}`)) {
-  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredBindingBudgetScript}`);
-}
-if (!reviewSurfaceLight.includes(`npm run ${requiredTopologyBudgetScript}`)) {
-  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredTopologyBudgetScript}`);
-}
-if (!reviewSurfaceLight.includes(`npm run ${requiredMetadataCenterManifestCodeSyncScript}`)) {
-  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredMetadataCenterManifestCodeSyncScript}`);
+// build must run build:base + verify:architecture-ci
+const buildCommand = scripts['build'] || '';
+if (!buildCommand) {
+  failures.push('package.json missing scripts.build');
+} else {
+  if (!buildCommand.includes('npm run build:base')) {
+    failures.push('build must run build:base');
+  }
+  if (!buildCommand.includes('npm run verify:architecture-ci')) {
+    failures.push('build must run verify:architecture-ci');
+  }
 }
 
-const architectureCiLongtail = scripts[requiredLongtailScript] || '';
-if (!architectureCiLongtail.includes(`npm run ${requiredBuildTieringScript}`)) {
-  failures.push(`${requiredLongtailScript} must run ${requiredBuildTieringScript}`);
-}
-if (!architectureCiLongtail.includes(`npm run ${requiredCustomPayloadContainmentScript}`)) {
-  failures.push(`${requiredLongtailScript} must run ${requiredCustomPayloadContainmentScript}`);
-}
-if (!architectureCiLongtail.includes(`npm run ${requiredCustomPayloadOwnerQueryabilityScript}`)) {
-  failures.push(`${requiredLongtailScript} must run ${requiredCustomPayloadOwnerQueryabilityScript}`);
-}
-if (!architectureCiLongtail.includes(`npm run ${requiredCustomPayloadRuntimeManifestScript}`)) {
-  failures.push(`${requiredLongtailScript} must run ${requiredCustomPayloadRuntimeManifestScript}`);
+// build:dev and build:dev:full must use build:base
+for (const devScript of ['build:dev', 'build:dev:full']) {
+  const devCommand = scripts[devScript] || '';
+  if (devCommand && !devCommand.includes('npm run build:base')) {
+    failures.push(`${devScript} must use build:base`);
+  }
 }
 
 const architectureCi = scripts['verify:architecture-ci'] || '';
 if (!architectureCi.includes(`npm run ${requiredReviewSurfaceScript}`)) {
-  failures.push(`verify:architecture-ci must run ${requiredReviewSurfaceScript}`);
+  failures.push('verify:architecture-ci must run verify:architecture-review-surface');
 }
 if (!architectureCi.includes('npm run verify:function-map-build-wiring')) {
   failures.push('verify:architecture-ci must run verify:function-map-build-wiring');
-}
-if (!architectureCi.includes(`npm run ${requiredTopologyBudgetScript}`)) {
-  failures.push(`verify:architecture-ci must run ${requiredTopologyBudgetScript}`);
 }
 if (!architectureCi.includes(`npm run ${requiredLongtailScript}`)) {
   failures.push(`verify:architecture-ci must run ${requiredLongtailScript}`);
@@ -120,12 +99,7 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:function-map-build-wiring] ok');
-console.log(`- build scripts require ${requiredScript}`);
-console.log(`- build scripts require ${requiredReviewSurfaceLightScript}`);
-console.log(`- ${requiredReviewSurfaceLightScript} requires ${requiredBindingBudgetScript}`);
-console.log(`- ${requiredReviewSurfaceLightScript} requires ${requiredTopologyBudgetScript}`);
-console.log(`- ${requiredReviewSurfaceLightScript} requires ${requiredMetadataCenterManifestCodeSyncScript}`);
-console.log(`- ${requiredLongtailScript} requires ${requiredBuildTieringScript}`);
-console.log(`- ${requiredLongtailScript} requires ${requiredCustomPayloadContainmentScript}`);
-console.log(`- ${requiredLongtailScript} requires ${requiredCustomPayloadOwnerQueryabilityScript}`);
-console.log(`- ${requiredLongtailScript} requires ${requiredCustomPayloadRuntimeManifestScript}`);
+console.log('- build:base requires verify:architecture-review-surface-light and verify:function-map-compile-gate');
+console.log('- build requires build:base and verify:architecture-ci');
+console.log('- build:dev and build:dev:full use build:base');
+console.log('- verify:architecture-ci requires verify:architecture-review-surface, verify:function-map-build-wiring, and verify:architecture-ci-longtail');

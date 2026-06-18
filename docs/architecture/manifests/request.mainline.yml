@@ -1,0 +1,62 @@
+lifecycle_id: request.mainline
+summary: HTTP request enters host, standardizes in Hub, routes via VR, exits
+  through provider wire build.
+owner_feature_id: hub.req_inbound_responses_context_capture
+entrypoint:
+  node_id: ServerReqInbound01ClientRaw
+  wiki_page: docs/architecture/wiki/mainline-call-graph.md
+  call_map_chain_id: request.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubReqOutbound05ProviderSemantic
+  - ProviderReqOutbound06WirePayload
+  - ServerReqInbound01ClientRaw
+  - VrRoute04SelectedTarget
+edges:
+  - step_id: req-00
+    from_node: ServerReqInbound01ClientRaw
+    to_node: HubReqInbound02Standardized
+    status: anchored
+    owner_feature_id: server.responses_request_handler_bridge_surface
+    binding_pending: null
+    split_binding_id: null
+  - step_id: req-01
+    from_node: ServerReqInbound01ClientRaw
+    to_node: HubReqInbound02Standardized
+    status: anchored
+    owner_feature_id: hub.req_inbound_responses_context_capture
+    binding_pending: null
+    split_binding_id: null
+  - step_id: req-02
+    from_node: HubReqInbound02Standardized
+    to_node: HubReqChatProcess03Governed
+    status: anchored
+    owner_feature_id: hub.req_inbound_responses_context_capture
+    binding_pending: null
+    split_binding_id: null
+  - step_id: req-03
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRoute04SelectedTarget
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: request.route_selection.runtime_vs_typed
+  - step_id: req-04
+    from_node: VrRoute04SelectedTarget
+    to_node: HubReqOutbound05ProviderSemantic
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: request.req_outbound_05.runtime_vs_typed
+  - step_id: req-05
+    from_node: HubReqOutbound05ProviderSemantic
+    to_node: ProviderReqOutbound06WirePayload
+    status: partial
+    owner_feature_id: responses.request_compat_normalization
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -1,0 +1,80 @@
+lifecycle_id: metadata.center.mainline
+summary: "request-scoped metadata center mainline: request truth is materialized
+  once, continuation/runtime/provider observation attach as separate families,
+  and response/servertool consume read-only projections before closeout
+  release."
+owner_feature_id: hub.metadata_center_mainline
+entrypoint:
+  node_id: MetaReq01InboundSeeded
+  wiki_page: docs/architecture/wiki/metadata-center-mainline-source.md
+  call_map_chain_id: metadata.center.mainline
+node_ids:
+  - MetaReq01InboundSeeded
+  - MetaReq02TruthMaterialized
+  - MetaReq03ContinuationAttached
+  - MetaReq04RuntimeControlBound
+  - MetaReq05ProviderObservationProjected
+  - MetaResp06ResponseObserved
+  - MetaResp07ServertoolContextProjected
+  - MetaResp08CloseoutReleased
+edges:
+  - step_id: mtc-01
+    from_node: MetaReq01InboundSeeded
+    to_node: MetaReq02TruthMaterialized
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-02
+    from_node: MetaReq02TruthMaterialized
+    to_node: MetaReq03ContinuationAttached
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-02-result
+    from_node: MetaReq02TruthMaterialized
+    to_node: MetaReq03ContinuationAttached
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-03
+    from_node: MetaReq03ContinuationAttached
+    to_node: MetaReq04RuntimeControlBound
+    status: partial
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-04
+    from_node: MetaReq04RuntimeControlBound
+    to_node: MetaReq05ProviderObservationProjected
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-05
+    from_node: MetaReq05ProviderObservationProjected
+    to_node: MetaResp06ResponseObserved
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-06
+    from_node: MetaResp06ResponseObserved
+    to_node: MetaResp07ServertoolContextProjected
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-07
+    from_node: MetaResp07ServertoolContextProjected
+    to_node: MetaResp08CloseoutReleased
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

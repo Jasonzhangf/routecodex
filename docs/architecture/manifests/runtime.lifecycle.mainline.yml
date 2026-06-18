@@ -1,0 +1,110 @@
+lifecycle_id: runtime.lifecycle.mainline
+summary: "Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is
+  only the runtime workdir root; pid cache writes on start, stop-intent writes
+  on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay
+  separate namespaces rather than directory-derived identity."
+owner_feature_id: runtime.lifecycle.instance_registry
+entrypoint:
+  node_id: ServerStartCommand
+  wiki_page: docs/architecture/wiki/runtime-lifecycle-call-graph.md
+  call_map_chain_id: runtime.lifecycle.mainline
+node_ids:
+  - DaemonRestartLoop
+  - DaemonSupervisorLoop
+  - RuntimeInstanceRecord
+  - ServerPidCacheRecord
+  - ServerStartCommand
+  - ServerStopCommand
+  - StartShutdownHandler
+  - StopIntentRecord
+  - TokenDaemonBootstrap
+  - TokenDaemonPidRecord
+edges:
+  - step_id: rtl-01
+    from_node: ServerStartCommand
+    to_node: ServerPidCacheRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.pid_cache
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-02
+    from_node: ServerStartCommand
+    to_node: ServerPidCacheRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.pid_cache
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-03
+    from_node: ServerStopCommand
+    to_node: StopIntentRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.stop_intent
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-04
+    from_node: ServerStartCommand
+    to_node: StopIntentRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.stop_intent
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-05
+    from_node: TokenDaemonBootstrap
+    to_node: TokenDaemonPidRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.pid_cache
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-06
+    from_node: TokenDaemonBootstrap
+    to_node: TokenDaemonPidRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.pid_cache
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-07
+    from_node: ServerStartCommand
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-08
+    from_node: DaemonSupervisorLoop
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-09
+    from_node: DaemonRestartLoop
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-10
+    from_node: ServerStartCommand
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-11
+    from_node: StartShutdownHandler
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-12
+    from_node: ServerStopCommand
+    to_node: RuntimeInstanceRecord
+    status: anchored
+    owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

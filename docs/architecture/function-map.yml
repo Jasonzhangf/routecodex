@@ -194,7 +194,7 @@ owners:
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     required_gates:
-      - npm run build:min
+      - npm run build:base
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
@@ -727,7 +727,7 @@ owners:
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-      - npm run build:min
+      - npm run build:base
     migration_target: rust
     notes:
       - "Host must consume Rust plan only; no local synthesis of default-pool chain."

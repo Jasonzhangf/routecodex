@@ -568,6 +568,7 @@ chains:
 
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture
+    binding_status: confirmed
     symbol: captureReqInboundResponsesContextSnapshotJson
     file: src/modules/llmswitch/bridge/native-exports.ts
     owner_feature_id: hub.req_inbound_responses_context_capture
@@ -575,6 +576,7 @@ shared_multi_reference_functions:
       - request.mainline
     note: "Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture."
   - function_id: native.responses_client_projection
+    binding_status: confirmed
     symbol: projectResponsesClientPayloadForClientNative
     file: src/modules/llmswitch/bridge/native-exports.ts
     owner_feature_id: hub.response_responses_client_projection
@@ -582,6 +584,7 @@ shared_multi_reference_functions:
       - response.mainline
     note: "Thin host/native facade; truth owner remains Rust."
   - function_id: error.execution_decision_consumer
+    binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan
     file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
     owner_feature_id: error.execution_decision_consumer
@@ -589,6 +592,7 @@ shared_multi_reference_functions:
       - error.mainline
     note: "Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision."
   - function_id: runtime.lifecycle.pid_cache_writer
+    binding_status: confirmed
     symbol: writeServerPidCache
     file: src/utils/server-runtime-pid.ts
     owner_feature_id: runtime.lifecycle.pid_cache
@@ -596,6 +600,7 @@ shared_multi_reference_functions:
       - runtime.lifecycle.mainline
     note: "Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity."
   - function_id: runtime.lifecycle.stop_intent_signal
+    binding_status: confirmed
     symbol: writeServerStopIntent
     file: src/utils/server-runtime-stop-intent.ts
     owner_feature_id: runtime.lifecycle.stop_intent
@@ -603,6 +608,7 @@ shared_multi_reference_functions:
       - runtime.lifecycle.mainline
     note: "Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade."
   - function_id: runtime.lifecycle.stop_intent_consumer
+    binding_status: confirmed
     symbol: consumeServerStopIntent
     file: src/utils/server-runtime-stop-intent.ts
     owner_feature_id: runtime.lifecycle.stop_intent
@@ -610,6 +616,7 @@ shared_multi_reference_functions:
       - runtime.lifecycle.mainline
     note: "Consumes and TTL-gates stop-intent.json; same owner truth as the writer."
   - function_id: runtime.lifecycle.instance_registry_writer
+    binding_status: confirmed
     symbol: writeRuntimeInstance
     file: src/utils/runtime-instance-registry.ts
     owner_feature_id: runtime.lifecycle.instance_registry
@@ -617,6 +624,7 @@ shared_multi_reference_functions:
       - runtime.lifecycle.mainline
     note: "Atomic write via temp file + rename; authoritative description of the instance, not the pid cache."
   - function_id: runtime.lifecycle.instance_registry_status
+    binding_status: confirmed
     symbol: updateRuntimeInstanceStatus
     file: src/utils/runtime-instance-registry.ts
     owner_feature_id: runtime.lifecycle.instance_registry
@@ -624,6 +632,7 @@ shared_multi_reference_functions:
       - runtime.lifecycle.mainline
     note: "Promotes instance.json status; caller must already have a record via writeRuntimeInstance."
   - function_id: runtime.tmux_client_binding_lookup
+    binding_status: confirmed
     symbol: resolveBoundTmuxSession
     file: src/server/runtime/http-server/session-client-registry.ts
     owner_feature_id: runtime.tmux_client_binding
@@ -631,8 +640,25 @@ shared_multi_reference_functions:
       - runtime.tmux_client_binding.mainline
     note: "Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership."
 
+  - function_id: error.err_04_router_policy_applied
+    symbol: ErrorErr04RouterPolicyApplied
+    file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+    owner_feature_id: error.pipeline_contract
+    binding_status: confirmed
+    reused_by_chains:
+      - error.mainline
+    note: "Router policy applied between ErrorErr03 and ErrorErr05; type is registered in topology doc table."
+  - function_id: error.err_04_executor_envelope
+    symbol: RequestExecutorErrorErr04RouterPolicyEnvelope
+    file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+    owner_feature_id: error.execution_decision_consumer
+    binding_status: confirmed
+    reused_by_chains:
+      - error.mainline
+    note: "Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract."
 split_bindings:
   - binding_id: request.route_selection.runtime_vs_typed
+    binding_status: confirmed
     from_node: HubReqChatProcess03Governed
     to_node: VrRoute04SelectedTarget
     owner_feature_id: vr.route_selection
@@ -646,6 +672,7 @@ split_bindings:
         file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
     note: "Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge."
   - binding_id: request.req_outbound_05.runtime_vs_typed
+    binding_status: confirmed
     from_node: VrRoute04SelectedTarget
     to_node: HubReqOutbound05ProviderSemantic
     runtime_symbols:

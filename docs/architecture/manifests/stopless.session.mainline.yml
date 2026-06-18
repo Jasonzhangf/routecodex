@@ -1,0 +1,80 @@
+lifecycle_id: stopless.session.mainline
+summary: "Stopless runtime-metadata continuation: stop response is evaluated,
+  projected as client exec_command, executed by CLI, then restored from current
+  request tool_output/runtime metadata into the next model turn."
+owner_feature_id: hub.servertool_stopless_cli_continuation
+entrypoint:
+  node_id: StoplessResp01StopDetected
+  wiki_page: docs/architecture/wiki/stopless-session-mainline-source.md
+  call_map_chain_id: stopless.session.mainline
+node_ids:
+  - StoplessCli04ProjectionPlanned
+  - StoplessCli06ClientExecuted
+  - StoplessReq07ContinuationRestored
+  - StoplessReq08GuidanceRewritten
+  - StoplessReq09SchemaContractInjected
+  - StoplessResp01StopDetected
+  - StoplessResp02SchemaGateEvaluated
+  - StoplessState03RuntimeSnapshotResolved
+  - VrRoute04SelectedTarget
+edges:
+  - step_id: stl-01
+    from_node: StoplessResp01StopDetected
+    to_node: StoplessResp02SchemaGateEvaluated
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-02
+    from_node: StoplessResp02SchemaGateEvaluated
+    to_node: StoplessState03RuntimeSnapshotResolved
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-03
+    from_node: StoplessState03RuntimeSnapshotResolved
+    to_node: StoplessCli04ProjectionPlanned
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-04
+    from_node: StoplessCli04ProjectionPlanned
+    to_node: StoplessCli06ClientExecuted
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-05
+    from_node: StoplessCli06ClientExecuted
+    to_node: StoplessReq07ContinuationRestored
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-06
+    from_node: StoplessReq07ContinuationRestored
+    to_node: StoplessReq08GuidanceRewritten
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-07
+    from_node: StoplessReq08GuidanceRewritten
+    to_node: StoplessReq09SchemaContractInjected
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stl-08
+    from_node: StoplessReq09SchemaContractInjected
+    to_node: VrRoute04SelectedTarget
+    status: anchored
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

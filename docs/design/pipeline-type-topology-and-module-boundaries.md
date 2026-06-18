@@ -154,6 +154,7 @@ ServerReqInbound01ClientRaw
 
 ### 3.7 ProviderReqOutbound07TransportRequest
 
+<!-- topology-only: this is an internal transport detail, not a mainline call map node -->
 - 作用：auth、headers、timeout、HTTP/SDK transport options。
 - owning module：`src/providers/core/runtime/` 与 provider-specific runtime。
 - 禁止：Hub 工具治理、route 重选、metadata 进入 SDK options。
@@ -291,7 +292,7 @@ ErrorErr01SourceRaised
   -> ErrorErr06ClientProjected
 ```
 
-### 5.0 错误链连接矩阵
+### 5.0 错误链连接矩阵 <!-- topology-only: ErrorErr04RouterPolicyApplied is a Router internal policy node, not a mainline call map edge -->
 
 | 节点 | 输入 | 输出 | 唯一职责 | 禁止连接 |
 |---|---|---|---|---|

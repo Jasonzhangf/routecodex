@@ -135,6 +135,12 @@
           <li><code>docs/architecture/mainline-call-map.yml</code></li>
         </ul>
         <p>This page exists because the current repo already proved that &quot;metadata passed as plain object and repeatedly merged&quot; is not queryable enough for long-lived maintenance. The current goal is to keep the human review surface aligned with the real implementation while the remaining partial families migrate.</p>
+        <p>For continuation specifically, the implementation target is now explicitly standardized in:</p>
+        <ul>
+          <li><code>docs/design/continuation-metadata-center-standard-contract.md</code></li>
+          <li><code>docs/architecture/wiki/continuation-standard-contract.md</code></li>
+        </ul>
+        <p>That contract is the rule for <code>save / restore / materialize / release</code>. Field-level fixes that do not move toward that contract are temporary debugging evidence only, not architecture closeout.</p>
         <h2>Main Rule</h2>
         <ul>
           <li>Metadata must converge into one request-scoped center, not continue as free-floating <code>Record&lt;string, unknown&gt;</code> merges.</li>

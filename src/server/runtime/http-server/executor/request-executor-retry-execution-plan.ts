@@ -33,6 +33,7 @@ import type {
 export const ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID = 'feature_id: error.execution_decision_consumer';
 
 export type RequestExecutorErrorErr04RouterPolicyEnvelope = {
+// topology-node: ErrorErr04RouterPolicyApplied (executor-side envelope alias)
   retryExecutionPlan: ProviderRetryExecutionPlan;
 };
 

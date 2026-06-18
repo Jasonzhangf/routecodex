@@ -18,7 +18,7 @@ verification:
     smoke:
       - npm run verify:servertool-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "If provider/client protocol shape changes, add targeted followup entry smoke."
       - "Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers."
@@ -41,7 +41,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "servertool-core owns pending-session and pending-injection persist planning; TS may only execute explicit runtime-workdir file IO from native plans and must not infer session identity from env/top-level fallback."
 
@@ -60,7 +60,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO."
 
@@ -79,7 +79,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "servertool-core owns primary auto-hook first-pass and rerun selection; TS may only execute runEngine calls from native plans."
 
@@ -99,7 +99,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Phase 1 must prove intercepted servertools return reasoning + exec_command CLI call and do not invoke server-side followup/reenter."
       - "Ticket-backed submit restoration is removed; submitted exec_command results remain standard client tool outputs."
@@ -132,7 +132,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
@@ -168,7 +168,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; TS is a native wrapper only."
 
@@ -187,7 +187,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Rust/followup-core owns warning text and repeat-count policy; TS must stay native payload/callback glue."
 
@@ -209,7 +209,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "servertool-core owns timeout watcher, client disconnect detection/watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans."
 
@@ -233,7 +233,7 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans."
 
@@ -259,7 +259,7 @@ verification:
       - pnpm exec jest tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
       - pnpm exec jest tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Run broader executor retry stack when classification semantics change."
 
@@ -282,7 +282,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
@@ -301,7 +301,7 @@ verification:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:repo-sanity
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "If route instruction parsing changes, include routing instruction regression set."
 
@@ -317,7 +317,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Request-route metadata input must stay queryable as a dedicated Rust route-control surface and must not be hidden behind broad crate ownership."
 
@@ -335,7 +335,7 @@ verification:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "VR retry-provider-pin reading and forced-target selection must stay queryable as a dedicated file-scoped surface."
 
@@ -351,7 +351,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Hub route-control and response.metadata contract descriptors must stay queryable as a dedicated Rust contract surface."
 
@@ -367,7 +367,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Server contract descriptors must stay queryable as a dedicated Rust contract surface instead of falling back to broad crate ownership."
 
@@ -394,7 +394,7 @@ verification:
       - pnpm exec jest tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Primary exhausted -> default pool contract must stay Rust-owned; host only consumes plan."
       - "Host verification must prove real route-tier extraction stays ordered, route-scoped, and unflattened before calling Rust."
@@ -413,7 +413,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint."
 
@@ -434,7 +434,7 @@ verification:
       - npm run verify:architecture-ci
       - npm run verify:llmswitch-rustification-audit
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Empty-pool closeout belongs to Rust VR selection only; no TS-side policy recovery or fallback is allowed."
       - "Singleton/default hold decision must be exported from Rust and consumed by TS executor shell only."
@@ -453,7 +453,7 @@ verification:
       - npm run verify:vr-forwarder-runtime
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics."
       - "Startup cooldown truth must give each real target one selected hit and must not be consumed by availability scans."
@@ -483,7 +483,7 @@ verification:
       - npm run verify:architecture-custom-payload-carrier-runtime-manifest
       - npm run verify:repo-sanity
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Any provider outbound metadata change must rerun provider metadata boundary suite."
       - "Hub/VR contract help must expose standard `controlIn` / `controlOut` and `dataIn` / `dataOut` interfaces for every typed node."
@@ -522,7 +522,7 @@ verification:
     smoke: []
     build:
       - npm run verify:architecture-metadata-center-manifest-code-sync
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Registry core and response closeout release remain here; request capture, attempt merge, and servertool adapter context each moved to file-scoped sub-features."
       - "Manifest/code sync must prove every metadata-center family and slot is backed by a real type, state bucket, writer, reader, and release path."
@@ -554,7 +554,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
 
@@ -569,7 +569,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Attempt merge must preserve metadata-center truth over pipeline-result drift and must not recreate flat metadata backfill."
       - "Validation must prove provider target/model compatibility observation stays in `MetadataCenter.provider_observation` and is still readable by servertool/provider context readers without reviving flat `metadata.target` / `metadata.compatibilityProfile`."
@@ -584,7 +584,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Servertool adapter context must project request-local truth and captured origin request only; relay-only continuation state must not become request truth."
 
@@ -601,7 +601,7 @@ verification:
       - npm run verify:function-map-compile-gate
     build:
       - npx tsc --noEmit --pretty false
-      - npm run build:min
+      - npm run build:base
     notes:
       - "HubPipeline runtime ingress bridge is TS glue only; native lifecycle/deps call failures must be surfaced, not logged as non-blocking."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel."
@@ -618,7 +618,7 @@ verification:
       - npm run verify:function-map-compile-gate
     build:
       - npm run verify:llmswitch-core-tsc
-      - npm run build:min
+      - npm run build:base
     notes:
       - "This TS shell may only preserve preselected-route handoff and execute the native request/chat_process plan."
       - "Any route-selection or payload-semantics change still belongs to Rust/native Hub mainline owners."
@@ -725,7 +725,7 @@ verification:
     smoke:
       - npm run verify:llmswitch-core-tsc
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust."
 
@@ -830,7 +830,7 @@ verification:
       - npm run verify:apply-patch-regressions
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together."
       - "apply_patch must not have a servertool handler; it remains native/freeform client tooling."
@@ -854,7 +854,7 @@ verification:
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests."
       - "Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue."
@@ -875,7 +875,7 @@ verification:
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Buffered provider snapshots are runtime-local error-spill state only; they must not become normal payload carriers."
       - "Queue bounds and flush-on-error behavior should be validated together with snapshot release gating."
@@ -891,7 +891,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Debug example hooks are observation/demo surface only; changes must not silently widen normal response metadata ownership."
       - "Focused tests should cover response metadata observation plus debug-mode toggle wiring through BidirectionalHookManager."
@@ -917,7 +917,7 @@ verification:
       - npm run verify:responses-direct-tool-shape-no-ts-fallback
       - npm run test:ci:jest
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Rust now owns the contract; direct/provider guards must remain thin shells around the native validator, shared direct passthrough body builder, shared direct route decision helper, shared `apply_patch` relay detector, and shared direct routeParams override helper."
       - "same-protocol direct skip/relay regressions for `apply_patch` servertool mode and Responses custom `apply_patch` declarations must remain in CI, not local-only route tests."
@@ -936,7 +936,7 @@ verification:
     smoke:
       - npm run verify:responses-request-compat-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "c4m/crs request compat and chat-style function tool normalization must stay inside Rust stage3 compat; TS bridge may only call the native stage runner."
 
@@ -952,7 +952,7 @@ verification:
     smoke:
       - npm run verify:responses-function-tool-normalization-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
@@ -968,7 +968,7 @@ verification:
     smoke:
       - npm run verify:responses-tool-parameters-normalization-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Shared tool parameters normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
@@ -984,7 +984,7 @@ verification:
     smoke:
       - npm run verify:responses-instructions-to-input-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
@@ -1000,7 +1000,7 @@ verification:
     smoke:
       - npm run verify:responses-token-limit-field-normalization-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Shared token-limit field stripping must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
@@ -1015,7 +1015,7 @@ verification:
     smoke:
       - npm run verify:responses-c4m-request-compat-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "c4m closeout is now a thin composition shell over shared token-limit/instructions/tool normalization units."
       - "Shared token-limit stripping is verified under `responses.token_limit_field_normalization`."
@@ -1035,7 +1035,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Missing config must fail fast; no fallback path result is allowed."
 
@@ -1050,7 +1050,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "User config JSON/TOML decode must stay centralized in shared codec."
 
@@ -1067,7 +1067,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Provider config JSON/TOML decode must stay centralized in shared codec."
 
@@ -1083,7 +1083,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Runtime materialization must remain the only place that validates v2 single-source layout and projects VR/provider profiles."
 
@@ -1098,7 +1098,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "User config write/patch must stay in shared writer owner."
 
@@ -1113,7 +1113,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Provider config writes must stay in shared writer owner."
 
@@ -1129,7 +1129,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Routing state store truth lives in Rust; TS RoutingStateManagerModule is bridge only."
 
@@ -1144,7 +1144,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Provider health / cooldown / runtime 503 family must stay in Rust; TS is persistence bridge."
 
@@ -1159,7 +1159,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "token-daemon is the unique owner; no Rust twin."
 
@@ -1176,7 +1176,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "lifecycle axis (hydration/persist/prune); control axis is quota.unified_control_surface."
 
@@ -1193,7 +1193,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "handler family must not own quota/health/routing state; calls into manager or llmswitch-core."
 
@@ -1209,7 +1209,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Auth/local gate shell must reject non-local access before sub-handler dispatch and must not own daemon state mutation semantics."
 
@@ -1225,7 +1225,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "index shell only: port registry, per-port dispatch, and runtime manager wiring."
 
@@ -1240,7 +1240,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Lifecycle shell owns init/restart/start/stop and handler-context assembly only; per-request semantics stay outside."
 
@@ -1259,7 +1259,7 @@ verification:
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Host converter must stay on stream/body capture plus Rust handoff; TS fallback projection must not reappear."
 
@@ -1273,7 +1273,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Inspection helpers must stay pure reads; payload mutation or recovery logic belongs elsewhere."
 
@@ -1291,7 +1291,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Followup dispatch host may execute nested reenter/client-inject glue only; no TS followup semantics or fallback."
 
@@ -1305,7 +1305,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Nested followup metadata projection must preserve continuity headers without upgrading relay-only context into request truth."
 
@@ -1320,7 +1320,7 @@ verification:
       - npm run verify:models-capability-contract
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "`/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
       - "Drift on capability-signaling fields is a release blocker because Codex client behavior depends on these flags."
@@ -1330,6 +1330,7 @@ verification:
     unit:
       - src/server/handlers/responses-handler.ts
       - src/server/handlers/chat-handler.ts
+      - src/server/handlers/handler-response-common.ts
       - src/server/handlers/handler-utils.ts
     contract:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
@@ -1342,7 +1343,7 @@ verification:
       - npm run verify:server-function-map-boundary
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Server handlers are HTTP transport adapters only; protocol semantics must stay out of server TS."
   - feature_id: server.responses_request_handler_bridge_surface
@@ -1361,7 +1362,7 @@ verification:
       - npm run verify:responses-handler-single-bridge-surface
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Timeout/error-side continuation-store clear policy is covered by the same request-bridge gate; responses-handler may only call `clearResponsesConversationOnHandlerFailureForHttp(...)`."
       - "Request bridge must stay facade-only and must not grow TS protocol semantics."
@@ -1394,7 +1395,7 @@ verification:
       - npm run verify:responses-handler-single-bridge-surface
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Response SSE bridge must stay facade-only and must not grow TS response protocol semantics."
       - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
@@ -1413,7 +1414,7 @@ verification:
       - npm run verify:server-function-map-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Response lifecycle bridge must stay facade-only and must not grow TS response protocol semantics."
       - "Continuation lifecycle orchestration for capture/record/finalize and conversation clear-policy semantics stay behind the lifecycle bridge surface."
@@ -1434,7 +1435,7 @@ verification:
     smoke:
       - npm run verify:architecture-ci
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "CLI surface is dispatch only; all actions go through http-server or manager modules."
 
@@ -1449,7 +1450,7 @@ verification:
     smoke:
       - npm run verify:responses-crs-request-compat-rust-only
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "crs closeout focuses on temperature stripping only."
       - "Shared tool normalization is verified under `responses.function_tool_normalization`."
@@ -1468,7 +1469,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Registry is dispatch-only; no payload repair, hidden protocol fallback, provider policy, or metadata mutation."
 
@@ -1485,7 +1486,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "TS parser wrapper may only call native parser helpers and maintain stream buffering."
 
@@ -1503,7 +1504,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Decode projection surfaces provider SSE decode failure; provider retry/reroute policy remains outside SSE."
 
@@ -1523,7 +1524,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden."
 
@@ -1540,7 +1541,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
@@ -1560,7 +1561,7 @@ verification:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
 
@@ -1583,7 +1584,7 @@ verification:
       - npm run verify:provider-failure-ban-blackbox
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Completion requires provider/runtime/direct/executor errors to enter ErrorErr01-06 and direct passthrough to preserve payload semantics while reporting failures."
 
@@ -1613,7 +1614,7 @@ verification:
       - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Executor/direct code consumes ErrorErr04 policy into ErrorErr05 decisions only; classification stays in Error module/provider policy owners."
 
@@ -1642,7 +1643,7 @@ verification:
       - pnpm exec jest tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
       - pnpm exec jest tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Client projection is ErrorErr06 only and must not mutate provider health, cooldown, or router policy."
 
@@ -1657,7 +1658,7 @@ verification:
     smoke:
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "PID cache is only a runtime-lifecycle cache file; verification must prove writes moved under state/runtime-lifecycle and legacy root pid files stay deleted."
 
@@ -1673,7 +1674,7 @@ verification:
     smoke:
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Stop intent remains best-effort cross-process signaling; verification must prove runtime-lifecycle pathing and stale intent cleanup."
 
@@ -1688,7 +1689,7 @@ verification:
     smoke:
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Instance registry is the authoritative local declaration of managed runtime state; verification must prove instance.json write/read/update/remove under runtime-lifecycle path."
 
@@ -1714,7 +1715,7 @@ verification:
     smoke:
       - npm run verify:function-map-compile-gate
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Validation must prove tmux/client binding persists under its own owner, not as request session or continuation truth."
       - "Validation must prove conversation->tmux mapping and workdir narrowing survive reload, cleanup, and executor binding lookups."
@@ -1733,6 +1734,6 @@ verification:
       - npm run verify:function-map-compile-gate
       - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
     build:
-      - npm run build:min
+      - npm run build:base
     notes:
       - "Provider-mode single-binding rethrow exemption is a port spec; router-mode must not declare it."
