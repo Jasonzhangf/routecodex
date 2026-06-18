@@ -135,7 +135,6 @@ describe('responses-handler SSE terminal contract', () => {
             }
           })}\n\n`
         ])
-      }
     }));
 
     const app = express();
@@ -199,9 +198,8 @@ describe('responses-handler SSE terminal contract', () => {
               required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
             }
           })}\n\n`
-          // NOTE: No response.done — simulates upstream timeout/close before terminal event
+          // NOTE: No response.done - simulates upstream timeout/close before terminal event
         ])
-      }
     }));
 
     const app = express();
@@ -241,23 +239,18 @@ describe('responses-handler SSE terminal contract', () => {
       headers: {},
       metadata: { outboundStream: true, stream: true },
       body: {
-        __routecodex_stream_finish_reason: 'tool_calls',
-        __routecodex_stream_contract_probe_body: {
-          id: 'resp_required_only',
-          object: 'response',
-          status: 'requires_action',
-          output: [{ id: 'fc_1', type: 'function_call', status: 'completed', name: 'shell', call_id: 'call_1', arguments: '{}' }],
-          required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
-        },
-        sseStream: Readable.from([
-          'event: response.required_action\n',
-          `data: ${JSON.stringify({
-            type: 'response.required_action',
-            response: { id: 'resp_required_only', object: 'response', status: 'requires_action' },
-            required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
-          })}\n\n`
-        ])
+        id: 'resp_required_only',
+        object: 'response',
+        status: 'requires_action',
       },
+      sseStream: Readable.from([
+        'event: response.required_action\n',
+        `data: ${JSON.stringify({
+          type: 'response.required_action',
+          response: { id: 'resp_required_only', object: 'response', status: 'requires_action' },
+          required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
+        })}\n\n`
+      ]),
       usageLogInfo: { finishReason: 'tool_calls' }
     }));
 
@@ -330,7 +323,6 @@ describe('responses-handler SSE terminal contract', () => {
             response: { id: 'resp_text_1', object: 'response', status: 'completed', output_text: 'firstsecond' }
           })}\n\n`
         ])
-      }
     }));
 
     const app = express();

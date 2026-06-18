@@ -206,24 +206,11 @@ describe('Responses SSE client contract blackbox', () => {
           status: 200,
           metadata: { outboundStream: true, stream: true },
           body: {
-            sseStream: upstream,
-            __routecodex_finish_reason: 'tool_calls',
-            __routecodex_stream_contract_probe_body: {
-              id: 'resp_tool_call_contract',
-              object: 'response',
-              status: 'requires_action',
-              required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: {
-                  tool_calls: [{
-                    id: 'call_contract_1',
-                    type: 'function_call',
-                    function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
-                  }]
-                }
-              }
-            }
+            id: 'resp_tool_call_contract',
+            object: 'response',
+            status: 'requires_action',
           },
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'tool_calls'
@@ -238,6 +225,11 @@ describe('Responses SSE client contract blackbox', () => {
       );
       upstream.write('event: response.output_item.done\n');
       upstream.write('data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_contract_1","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}\n\n');
+      upstream.write('event: response.completed\n');
+      upstream.write('data: {"type":"response.completed","response":{"id":"resp_tool_call_contract","object":"response","status":"completed","output":[{"type":"function_call","id":"call_contract_1","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}]}}\n\n');
+      upstream.write('event: response.done\n');
+      upstream.write('data: {"type":"response.done","response":{"id":"resp_tool_call_contract","object":"response","status":"completed"}}\n\n');
+      upstream.end();
     });
 
     await withServer(app, async (baseUrl) => {
@@ -276,13 +268,11 @@ describe('Responses SSE client contract blackbox', () => {
           status: 200,
           metadata: { outboundStream: true, stream: true },
           body: {
-            sseStream: upstream,
-            __routecodex_stream_contract_probe_body: {
-              id: 'resp_text_contract',
-              object: 'response',
-              status: 'in_progress'
-            }
+            id: 'resp_text_contract',
+            object: 'response',
+            status: 'in_progress'
           },
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'stop'

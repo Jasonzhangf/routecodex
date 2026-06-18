@@ -1020,24 +1020,20 @@ describe('HubRequestExecutor failover', () => {
 </tool_call>`;
 
     await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      __sse_responses: true,
-      __routecodex_finish_reason: 'stop',
-      __routecodex_stream_contract_probe_body: {
-        status: 'completed',
-        output_text: malformedToolWrapperText,
-        output: [
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [
-              {
-                type: 'output_text',
-                text: malformedToolWrapperText
-              }
-            ]
-          }
-        ]
-      }
+      status: 'completed',
+      output_text: malformedToolWrapperText,
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: malformedToolWrapperText
+            }
+          ]
+        }
+      ]
     }, {
       tools: {
         clientToolsRaw: [

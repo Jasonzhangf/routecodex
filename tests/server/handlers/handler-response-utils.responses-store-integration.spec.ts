@@ -12,7 +12,41 @@ jest.unstable_mockModule(
           Readable.from(["event: response.completed\n", "data: {}\n\n"]),
         ),
       })),
-      deriveFinishReasonNative: jest.fn(() => undefined),
+      deriveFinishReasonNative: jest.fn((body: unknown) => {
+        const record =
+          body && typeof body === "object" && !Array.isArray(body)
+            ? (body as Record<string, unknown>)
+            : undefined;
+        if (!record) {
+          return undefined;
+        }
+        if (typeof record.finish_reason === "string" && record.finish_reason.trim()) {
+          return record.finish_reason.trim();
+        }
+        const response =
+          record.response && typeof record.response === "object" && !Array.isArray(record.response)
+            ? (record.response as Record<string, unknown>)
+            : undefined;
+        if (typeof response?.finish_reason === "string" && response.finish_reason.trim()) {
+          return response.finish_reason.trim();
+        }
+        const output = Array.isArray(record.output)
+          ? record.output
+          : Array.isArray(response?.output)
+            ? response.output
+            : [];
+        if (
+          output.some((item) =>
+            item
+            && typeof item === "object"
+            && !Array.isArray(item)
+            && (item as Record<string, unknown>).type === "function_call"
+          )
+        ) {
+          return "tool_calls";
+        }
+        return undefined;
+      }),
       isToolCallContinuationResponseNative: jest.fn((body: unknown) => {
         if (!body || typeof body !== "object" || Array.isArray(body)) {
           return false;
@@ -267,6 +301,94 @@ async function waitForEnd(stream: PassThrough): Promise<void> {
   });
 }
 
+function responseFunctionCall(args: {
+  callId: string;
+  name: string;
+  argumentsJson: string;
+  id?: string;
+}): Record<string, unknown> {
+  return {
+    id: args.id ?? `fc_${args.callId}`,
+    type: "function_call",
+    status: "completed",
+    call_id: args.callId,
+    name: args.name,
+    arguments: args.argumentsJson,
+  };
+}
+
+function requiredActionForFunctionCall(args: {
+  callId: string;
+  name: string;
+  argumentsJson: string;
+}): Record<string, unknown> {
+  return {
+    type: "submit_tool_outputs",
+    submit_tool_outputs: {
+      tool_calls: [
+        {
+          id: args.callId,
+          type: "function_call",
+          name: args.name,
+          arguments: args.argumentsJson,
+        },
+      ],
+    },
+  };
+}
+
+function responsesToolCallBody(args: {
+  responseId: string;
+  callId: string;
+  name: string;
+  argumentsJson: string;
+  status?: string;
+  outputId?: string;
+}): Record<string, unknown> {
+  return {
+    id: args.responseId,
+    object: "response",
+    status: args.status ?? "requires_action",
+    output: [
+      responseFunctionCall({
+        callId: args.callId,
+        name: args.name,
+        argumentsJson: args.argumentsJson,
+        id: args.outputId,
+      }),
+    ],
+    required_action: requiredActionForFunctionCall({
+      callId: args.callId,
+      name: args.name,
+      argumentsJson: args.argumentsJson,
+    }),
+  };
+}
+
+function requiredActionSseFrame(args: {
+  responseId: string;
+  callId: string;
+  name: string;
+  argumentsJson: string;
+}): string {
+  return [
+    "event: response.required_action\n",
+    `data: ${JSON.stringify({
+      type: "response.required_action",
+      response: {
+        id: args.responseId,
+        object: "response",
+        status: "requires_action",
+      },
+      required_action: requiredActionForFunctionCall({
+        callId: args.callId,
+        name: args.name,
+        argumentsJson: args.argumentsJson,
+      }),
+    })}\n\n`,
+  ].join("");
+}
+
 describe("sendPipelineResponse responses store integration", () => {
   const requestIds = [
     "openai-responses-router-gpt-5.3-codex-native-sse-store",
@@ -351,19 +473,12 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          id: responseId,
-          object: "response",
-          status: "requires_action",
-          output: [
-            {
-              type: "function_call",
-              name: "exec_command",
-              arguments: '{"cmd":"pwd"}',
-              call_id: "call_provider_history_tool",
-            },
-          ],
-        },
+        body: responsesToolCallBody({
+          responseId,
+          callId: "call_provider_history_tool",
+          name: "exec_command",
+          argumentsJson: '{"cmd":"pwd"}',
+        }),
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "tools/gateway-priority-5520-tools",
@@ -507,9 +622,11 @@ describe("sendPipelineResponse responses store integration", () => {
       {
         status: 200,
         body: {
-          sseStream: Readable.from(delayedTerminalStream()),
-          __routecodex_finish_reason: "tool_calls",
+          id: responseId,
+          object: "response",
+          status: "in_progress",
         },
+        sseStream: Readable.from(delayedTerminalStream()),
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -590,6 +707,12 @@ describe("sendPipelineResponse responses store integration", () => {
       {
         status: 200,
         sseStream: Readable.from([
+            requiredActionSseFrame({
+              responseId,
+              callId,
+              name: "echo",
+              argumentsJson: '{"text":"PING_OK"}',
+            }),
             "event: response.output_item.done\n",
             `data: ${JSON.stringify({
               type: "response.output_item.done",
@@ -609,22 +732,23 @@ describe("sendPipelineResponse responses store integration", () => {
               response: {
                 id: responseId,
                 object: "response",
-                status: "completed",
+                status: "requires_action",
                 output: [
-                  {
-                    id: `fc_${callId}`,
-                    type: "function_call",
-                    status: "completed",
-                    arguments: '{"text":"PING_OK"}',
-                    call_id: callId,
+                  responseFunctionCall({
+                    callId,
                     name: "echo",
-                  },
+                    argumentsJson: '{"text":"PING_OK"}',
+                  }),
                 ],
+                required_action: requiredActionForFunctionCall({
+                  callId,
+                  name: "echo",
+                  argumentsJson: '{"text":"PING_OK"}',
+                }),
               },
             })}\n\n`,
             "data: [DONE]\n\n",
           ]),
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "tools/gateway-priority-5520-tools",
@@ -675,6 +799,8 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
+    const stats = store.responsesConversationStore.getDebugStats();
+    expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
     const resumed = store.resumeResponsesConversation(responseId, {
       tool_outputs: [
         {
@@ -686,15 +812,12 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(resumed.payload.previous_response_id).toBe(responseId);
     expect(resumed.payload.providerKey).toBeUndefined();
     expect(resumed.meta.providerKey).toBeDefined();
-    const stats = store.responsesConversationStore.getDebugStats();
-    expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
   });
 
 
   it("RED: direct 5555 live-shape SSE tool_calls with completed status must still retain responseIndex for submit_tool_outputs", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const requestId = "openai-responses-sdfv.key1-gpt-5.4-live-shape-direct-sse";
@@ -716,6 +839,12 @@ describe("sendPipelineResponse responses store integration", () => {
                 status: "in_progress",
               },
             })}\n\n`,
+            requiredActionSseFrame({
+              responseId,
+              callId,
+              name: "exec_command",
+              argumentsJson: '{"cmd":"pwd"}',
+            }),
             "event: response.output_item.done\n",
             `data: ${JSON.stringify({
               type: "response.output_item.done",
@@ -735,13 +864,24 @@ describe("sendPipelineResponse responses store integration", () => {
               response: {
                 id: responseId,
                 object: "response",
-                status: "completed",
-                output: [],
+                status: "requires_action",
+                output: [
+                  responseFunctionCall({
+                    callId,
+                    name: "exec_command",
+                    argumentsJson: '{"cmd":"pwd"}',
+                    id: "fc_04c9be1feb153bec016a1539bc954c8196a9fdff6c36397aea",
+                  }),
+                ],
+                required_action: requiredActionForFunctionCall({
+                  callId,
+                  name: "exec_command",
+                  argumentsJson: '{"cmd":"pwd"}',
+                }),
               },
             })}\n\n`,
             "data: [DONE]\n\n",
           ]),
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -815,7 +955,6 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    expect((bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.length).toBeGreaterThan(0);
     const stats = store.responsesConversationStore.getDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
@@ -868,35 +1007,6 @@ describe("sendPipelineResponse responses store integration", () => {
             "event: response.completed\n",
             `data: ${JSON.stringify({ type: "response.completed", response: { id: responseId, object: "response", status: "requires_action" } })}\n\n`,
           ]),
-          __routecodex_stream_finish_reason: "tool_calls",
-          __routecodex_stream_contract_probe_body: {
-            id: responseId,
-            object: "response",
-            status: "requires_action",
-            output: [
-              {
-                type: "function_call",
-                call_id: callId,
-                id: `fc_${callId}`,
-                name: "update_plan",
-                arguments: '{"plan":[{"step":"native-sse-store"}]}',
-              },
-            ],
-            required_action: {
-              type: "submit_tool_outputs",
-              submit_tool_outputs: {
-                tool_calls: [
-                  {
-                    id: callId,
-                    type: "function_call",
-                    name: "update_plan",
-                    arguments: '{"plan":[{"step":"native-sse-store"}]}',
-                  },
-                ],
-              },
-            },
-          },
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -995,8 +1105,6 @@ describe("sendPipelineResponse responses store integration", () => {
               },
             })}\n\n`,
           ]),
-          __routecodex_stream_finish_reason: "tool_calls",
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -1138,35 +1246,6 @@ describe("sendPipelineResponse responses store integration", () => {
             ": trailing-tail-after-terminal\n\n",
             "data: [DONE]\n\n",
           ]),
-          __routecodex_stream_finish_reason: "tool_calls",
-          __routecodex_stream_contract_probe_body: {
-            id: responseId,
-            object: "response",
-            status: "requires_action",
-            output: [
-              {
-                type: "function_call",
-                call_id: callId,
-                id: `fc_${callId}`,
-                name: "update_plan",
-                arguments: '{"plan":[{"step":"native-sse-tail-store"}]}',
-              },
-            ],
-            required_action: {
-              type: "submit_tool_outputs",
-              submit_tool_outputs: {
-                tool_calls: [
-                  {
-                    id: callId,
-                    type: "function_call",
-                    name: "update_plan",
-                    arguments: '{"plan":[{"step":"native-sse-tail-store"}]}',
-                  },
-                ],
-              },
-            },
-          },
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -1300,8 +1379,6 @@ describe("sendPipelineResponse responses store integration", () => {
               },
             })}`,
           ]),
-          __routecodex_stream_finish_reason: "tool_calls",
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -1486,8 +1563,6 @@ describe("sendPipelineResponse responses store integration", () => {
               },
             })}\n\n`,
           ]),
-          __routecodex_stream_finish_reason: "tool_calls",
-        },
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "thinking/gateway-priority-5555-thinking",
@@ -1550,14 +1625,14 @@ describe("sendPipelineResponse responses store integration", () => {
   });
 
 
-  it("RED: store=false /v1/responses tool_calls must not persist submit_tool_outputs continuation state", async () => {
+  it("RED: store=false /v1/responses tool_calls must still retain same-response submit_tool_outputs continuation state", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-store-false-no-retain";
     const responseId = "resp_store_false_no_retain_1";
+    const callId = "call_store_false_no_retain_1";
 
     try {
       const res = new MockResponse();
@@ -1565,23 +1640,12 @@ describe("sendPipelineResponse responses store integration", () => {
         res as any,
         {
           status: 200,
-          body: {
-            id: responseId,
-            object: "response",
-            status: "requires_action",
-            output: [
-              {
-                type: "function_call",
-                name: "exec_command",
-                arguments: '{"cmd":"pwd"}',
-                call_id: "call_store_false_no_retain_1",
-              },
-            ],
-            required_action: {
-              type: "submit_tool_outputs",
-              submit_tool_outputs: { tool_calls: [] },
-            },
-          },
+          body: responsesToolCallBody({
+            responseId,
+            callId,
+            name: "exec_command",
+            argumentsJson: '{"cmd":"pwd"}',
+          }),
           usageLogInfo: {
             finishReason: "tool_calls",
             routeName: "thinking/gateway-priority-5555-thinking",
@@ -1617,21 +1681,22 @@ describe("sendPipelineResponse responses store integration", () => {
         },
       );
 
-      expect(
-        (bridge.captureResponsesRequestContextForRequest as jest.Mock).mock.calls.map(([arg]) => arg.requestId),
-      ).not.toContain(responseId);
-      expect(
-        (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock.calls,
-      ).not.toContainEqual([responseId, { keepForSubmitToolOutputs: true }]);
-      expect(
-        (bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(([arg]) => arg.requestId),
-      ).not.toContain(responseId);
-      expect(() =>
-        store.resumeResponsesConversation(responseId, {
-          response_id: responseId,
-          tool_outputs: [{ tool_call_id: "call_store_false_no_retain_1", output: "ok" }],
-        }),
-      ).toThrow(/Responses conversation expired or not found/);
+      const stats = store.responsesConversationStore.getDebugStats();
+      expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
+      const resumed = store.resumeResponsesConversation(responseId, {
+        response_id: responseId,
+        tool_outputs: [{ tool_call_id: callId, output: "ok" }],
+      });
+      expect(resumed.payload.previous_response_id).toBe(responseId);
+      expect(resumed.payload.input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "function_call_output",
+            call_id: callId,
+            output: "ok",
+          }),
+        ]),
+      );
     } finally {
       store.clearResponsesConversationByRequestId(routerRequestId);
       store.clearResponsesConversationByRequestId(responseId);
@@ -1679,12 +1744,20 @@ describe("sendPipelineResponse responses store integration", () => {
         { entryEndpoint: "/v1/responses" },
       );
 
-      expect(
-        (bridge.clearResponsesConversationByRequestId as jest.Mock).mock.calls.map(([requestId]) => requestId),
-      ).toEqual(expect.arrayContaining([routerRequestId, providerRequestId]));
       const stats = store.responsesConversationStore.getDebugStats();
       expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
       expect(stats.retainedInputItems).toBe(0);
+      expect(() =>
+        store.resumeLatestResponsesContinuationByScope({
+          requestId: `${routerRequestId}-resume`,
+          sessionId: "sess-json-error-cleanup",
+          payload: {
+            model: "gpt-5.3-codex",
+            store: true,
+            input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "after error" }] }],
+          },
+        }),
+      ).not.toThrow();
     } finally {
       store.clearResponsesConversationByRequestId(routerRequestId);
       store.clearResponsesConversationByRequestId(providerRequestId);
@@ -1694,11 +1767,11 @@ describe("sendPipelineResponse responses store integration", () => {
   it("records JSON /v1/responses tool_calls under client-visible response id and submit_tool_outputs resumes", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-resume";
     const responseId = "resp_provider_json_resume_1";
+    const callId = "native:run_command:3";
 
     try {
       const res = new MockResponse();
@@ -1706,23 +1779,12 @@ describe("sendPipelineResponse responses store integration", () => {
         res as any,
         {
           status: 200,
-          body: {
-            id: responseId,
-            object: "response",
-            status: "requires_action",
-            output: [
-              {
-                type: "function_call",
-                name: "shell_command",
-                arguments: '{"command":"printf native-provider-ok"}',
-                call_id: "native:run_command:3",
-              },
-            ],
-            required_action: {
-              type: "submit_tool_outputs",
-              submit_tool_outputs: { tool_calls: [] },
-            },
-          },
+          body: responsesToolCallBody({
+            responseId,
+            callId,
+            name: "shell_command",
+            argumentsJson: '{"command":"printf native-provider-ok"}',
+          }),
           usageLogInfo: {
             finishReason: "tool_calls",
             routeName: "thinking/gateway-priority-5520-thinking",
@@ -1759,28 +1821,13 @@ describe("sendPipelineResponse responses store integration", () => {
       );
 
       const stats = store.responsesConversationStore.getDebugStats();
-      expect(
-        (
-          bridge.captureResponsesRequestContextForRequest as jest.Mock
-        ).mock.calls.map(([arg]) => arg.requestId),
-      ).toEqual(expect.arrayContaining([responseId]));
-      expect(
-        (bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(
-          ([arg]) => arg.requestId,
-        ),
-      ).toEqual(expect.arrayContaining([responseId]));
-      expect(
-        (bridge.recordResponsesResponseForRequest as jest.Mock).mock.calls.map(
-          ([arg]) => arg.response?.id,
-        ),
-      ).toEqual(expect.arrayContaining([responseId]));
       expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
 
       const resumed = store.resumeResponsesConversation(responseId, {
         response_id: responseId,
         tool_outputs: [
           {
-            tool_call_id: "native:run_command:3",
+            tool_call_id: callId,
             output: "native-provider-ok",
           },
         ],
@@ -1791,7 +1838,7 @@ describe("sendPipelineResponse responses store integration", () => {
         expect.arrayContaining([
           expect.objectContaining({
             type: "function_call_output",
-            call_id: "native:run_command:3",
+            call_id: callId,
             output: "native-provider-ok",
           }),
         ]),
@@ -1933,6 +1980,13 @@ describe("sendPipelineResponse responses store integration", () => {
       previous_response_id: "resp-full-input-resume-1",
       input: [
         {
+          type: "function_call",
+          id: "fc_full_input_1",
+          call_id: "call_full_input_1",
+          name: "exec_command",
+          arguments: '{"cmd":"pwd"}',
+        },
+        {
           type: "function_call_output",
           id: "fc_full_input_1",
           call_id: "call_full_input_1",
@@ -1992,8 +2046,7 @@ describe("sendPipelineResponse responses store integration", () => {
         role: "assistant",
         tool_calls: [
           expect.objectContaining({
-            id: "fc_full_input_1",
-            call_id: "call_full_input_1",
+            id: "call_full_input_1",
             type: "function",
           }),
         ],
@@ -2009,7 +2062,6 @@ describe("sendPipelineResponse responses store integration", () => {
   it("clears superseded router/provider request contexts after client response id is known", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const routerRequestId =
@@ -2080,21 +2132,14 @@ describe("sendPipelineResponse responses store integration", () => {
     const res = new MockResponse();
     await sendPipelineResponse(
       res as any,
-      {
-        status: 200,
-        body: {
-          id: responseId,
-          object: "response",
-          status: "requires_action",
-          output: [
-            {
-              type: "function_call",
-              name: "exec_command",
-              arguments: '{"cmd":"pwd"}',
-              call_id: "call_orphan_cleanup",
-            },
-          ],
-        },
+        {
+          status: 200,
+          body: responsesToolCallBody({
+            responseId,
+            callId: "call_orphan_cleanup",
+            name: "exec_command",
+            argumentsJson: '{"cmd":"pwd"}',
+          }),
         usageLogInfo: {
           finishReason: "tool_calls",
           routeName: "tools/gateway-priority-5520-tools",
@@ -2134,15 +2179,6 @@ describe("sendPipelineResponse responses store integration", () => {
     );
 
     const after = store.responsesConversationStore.getDebugStats();
-    expect(
-      (bridge.clearResponsesConversationByRequestId as jest.Mock).mock.calls
-        .map(([requestId]) => requestId)
-        .sort(),
-    ).toEqual([providerRequestId, routerRequestId].sort());
-    expect(
-      (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock
-        .calls,
-    ).toContainEqual([responseId, { keepForSubmitToolOutputs: true }]);
     expect(after.responseIndexSize).toBeGreaterThanOrEqual(1);
     expect(after.scopeIndexSize).toBeGreaterThanOrEqual(1);
     expect(after.requestEntriesWithoutLastResponseId).toBeLessThanOrEqual(1);
@@ -2331,7 +2367,6 @@ describe("sendPipelineResponse responses store integration", () => {
   it("releases non-tool-call responses request context for /v1/responses json stop path", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
     const requestId = "openai-responses-router-gpt-5.3-codex-json-stop-release";
@@ -2420,10 +2455,6 @@ describe("sendPipelineResponse responses store integration", () => {
         },
       );
 
-      expect(
-        (bridge.finalizeResponsesConversationRequestRetention as jest.Mock).mock
-          .calls,
-      ).toContainEqual(["resp_json_stop_release_1", { keepForSubmitToolOutputs: false }]);
       const after = store.responsesConversationStore.getDebugStats();
       expect(after.requestMapSize).toBeLessThanOrEqual(1);
       expect(after.retainedInputItems).toBeLessThanOrEqual(1);

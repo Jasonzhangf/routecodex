@@ -765,7 +765,7 @@ async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): P
 
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
   const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint, requestLogContext } = args;
-  if (forceSSE && !expectsStream) {
+  if (forceSSE && result.sseStream === undefined) {
     const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     if (await dispatchResponsesJsonAsSse({
       res,

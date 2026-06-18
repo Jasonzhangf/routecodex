@@ -1,11 +1,30 @@
 import { describe, expect, it } from '@jest/globals';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
+const legacyPrefix = '__routecodex';
+const legacyStreamProbeKey = `${legacyPrefix}_stream_contract_probe_body`;
+const legacyStreamFinishReasonKey = `${legacyPrefix}_stream_finish_reason`;
 
 function readRepoFile(path: string): string {
   return readFileSync(resolve(root, path), 'utf8');
+}
+
+function collectFiles(path: string): string[] {
+  const absolute = resolve(root, path);
+  const stat = statSync(absolute);
+  if (stat.isFile()) {
+    return [absolute];
+  }
+  const files: string[] = [];
+  for (const entry of readdirSync(absolute)) {
+    if (entry === 'node_modules' || entry === 'dist' || entry === 'build') {
+      continue;
+    }
+    files.push(...collectFiles(`${path}/${entry}`));
+  }
+  return files;
 }
 
 describe('response SSE wrapper contract', () => {
@@ -66,5 +85,22 @@ describe('response SSE wrapper contract', () => {
       'req-illegal-body-sse-stream',
       { entryEndpoint: '/v1/responses' },
     )).rejects.toThrow('sseStream');
+  });
+
+  it('does not model legacy RouteCodex stream probe wrappers in server tests or fixtures', () => {
+    const scannedFiles = [
+      ...collectFiles('tests/server/handlers'),
+      ...collectFiles('tests/server/runtime'),
+      ...collectFiles('tests/fixtures/conversion-matrix'),
+    ].filter((path) => /\.(json|ts)$/.test(path));
+
+    const offenders = scannedFiles.flatMap((file) => {
+      const source = readFileSync(file, 'utf8');
+      return [legacyStreamProbeKey, legacyStreamFinishReasonKey]
+        .filter((legacyKey) => source.includes(legacyKey))
+        .map((legacyKey) => `${file.replace(`${root}/`, '')}: ${legacyKey}`);
+    });
+
+    expect(offenders).toEqual([]);
   });
 });

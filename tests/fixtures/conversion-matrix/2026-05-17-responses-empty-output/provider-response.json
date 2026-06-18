@@ -1,42 +1,15 @@
 {
   "body": {
-    "__sse_responses": {
-      "_events": {},
-      "_readableState": {
-        "highWaterMark": 16,
-        "buffer": [
-          "event: response.created\ndata: {\"response\":{\"id\":\"chatcmpl-0000000000006e95\",\"object\":\"response\",\"created_at\":1779008419,\"status\":\"in_progress\",\"model\":\"gpt-5.3-codex\",\"output\":[],\"usage\":{\"input_tokens\":169693,\"output_tokens\":0,\"total_tokens\":169693},\"background\":false,\"error\":null,\"incomplete_details\":null},\"type\":\"response.created\",\"sequence_number\":0}\nid: 1779008422905\n\n",
-          "event: response.in_progress\ndata: {\"response\":{\"id\":\"chatcmpl-0000000000006e95\",\"object\":\"response\",\"created_at\":1779008419,\"status\":\"in_progress\",\"model\":\"gpt-5.3-codex\",\"output\":[],\"usage\":{\"input_tokens\":169693,\"output_tokens\":0,\"total_tokens\":169693},\"background\":false,\"error\":null,\"incomplete_details\":null},\"type\":\"response.in_progress\",\"sequence_number\":1}\nid: 1779008422905\n\n",
-          "event: response.completed\ndata: {\"response\":{\"id\":\"chatcmpl-0000000000006e95\",\"object\":\"response\",\"created_at\":1779008419,\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"output\":[],\"usage\":{\"input_tokens\":169693,\"output_tokens\":0,\"total_tokens\":169693},\"background\":false,\"error\":null,\"incomplete_details\":null},\"type\":\"response.completed\",\"sequence_number\":2}\nid: 1779008422916\n\n"
-        ],
-        "bufferIndex": 0,
-        "length": 3,
-        "pipes": [],
-        "awaitDrainWriters": null
-      },
-      "_writableState": {
-        "highWaterMark": 16,
-        "length": 0,
-        "corked": 0,
-        "writelen": 0,
-        "bufferedIndex": 0,
-        "pendingcb": 1
-      },
-      "allowHalfOpen": true,
-      "_eventsCount": 3,
-      "protocol": "responses",
-      "direction": "json_to_sse",
-      "requestId": "req_1779008395574_b8afd6d9"
-    },
+    "id": "chatcmpl-0000000000006e95",
+    "object": "response",
+    "created_at": 1779008419,
+    "status": "completed",
+    "model": "gpt-5.3-codex",
+    "output": [],
     "usage": {
-      "prompt_tokens": 169693,
-      "completion_tokens": 0,
+      "input_tokens": 169693,
+      "output_tokens": 0,
       "total_tokens": 169693
-    },
-    "__routecodex_finish_reason": "stop",
-    "__routecodex_stream_contract_probe_body": {
-      "status": "completed",
-      "output": []
     }
   }
 }

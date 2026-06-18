@@ -66,6 +66,9 @@ function readStopMessageUsed(sessionId: string): number | undefined {
 }
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-request-executor-single-attempt-sessions');
+const LEGACY_ROUTE_CODEX_PREFIX = '__routecodex';
+const LEGACY_ROUTE_CODEX_FINISH_REASON_KEY = `${LEGACY_ROUTE_CODEX_PREFIX}_finish_reason`;
+const LEGACY_ROUTE_CODEX_STREAM_PROBE_KEY = `${LEGACY_ROUTE_CODEX_PREFIX}_stream_contract_probe_body`;
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
@@ -280,8 +283,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(nested).toHaveBeenCalledTimes(0);
     expect(response.status).toBe(200);
-    expect((response.body as any).__routecodex_finish_reason).toBe('tool_calls');
-    const output = ((response.body as any).__routecodex_stream_contract_probe_body.output ?? []) as Array<Record<string, unknown>>;
+    const responseBody = response.body as Record<string, unknown>;
+    expect(responseBody[LEGACY_ROUTE_CODEX_FINISH_REASON_KEY]).toBeUndefined();
+    expect(responseBody[LEGACY_ROUTE_CODEX_STREAM_PROBE_KEY]).toBeUndefined();
+    const output = (responseBody.output ?? []) as Array<Record<string, unknown>>;
     const toolCall = output.find((item) => item.type === 'function_call') as Record<string, unknown> | undefined;
     expect(toolCall?.name).toBe('exec_command');
     expect(String(toolCall?.arguments)).toContain('routecodex servertool run stop_message_auto');
@@ -395,8 +400,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     });
 
     expect(response.status).toBe(200);
-    expect((response.body as any).__routecodex_finish_reason).toBe('tool_calls');
-    const output = ((response.body as any).__routecodex_stream_contract_probe_body.output ?? []) as Array<Record<string, unknown>>;
+    const responseBody = response.body as Record<string, unknown>;
+    expect(responseBody[LEGACY_ROUTE_CODEX_FINISH_REASON_KEY]).toBeUndefined();
+    expect(responseBody[LEGACY_ROUTE_CODEX_STREAM_PROBE_KEY]).toBeUndefined();
+    const output = (responseBody.output ?? []) as Array<Record<string, unknown>>;
     const toolCall = output.find((item) => item.type === 'function_call') as Record<string, unknown> | undefined;
     expect(toolCall?.name).toBe('exec_command');
     expect(String(toolCall?.arguments)).toContain('routecodex servertool run stop_message_auto');

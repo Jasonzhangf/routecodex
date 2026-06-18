@@ -12,6 +12,23 @@
   - focused Jest：SSE wrapper contract + forceSSE JSON bridge + split required_action + MetadataCenter closeout PASS（4 suites / 16 tests）。
 - 剩余审计项：历史 tests/fixtures 与若干老测试仍含 `__routecodex_stream_*` wrapper residue；未混入本 slice，下一步单独审计迁移或删除。
 
+## 2026-06-19 legacy __routecodex_stream residue removal slice
+
+- 当前 slice 目标：清理上一 slice 留下的 `__routecodex_stream_finish_reason` / `__routecodex_stream_contract_probe_body` 测试与 fixture 残留，不恢复 body-level stream wrapper，功能不变。
+- 代码/测试收口：
+  - `handler-response-sse.ts` 修正 forceSSE JSON 分支：`forceSSE && result.sseStream === undefined` 时先走标准 JSON->SSE bridge，避免移除 body wrapper 后误落 missing-stream。
+  - `handler-response-utils.responses-store-integration.spec.ts` 改为标准 Responses JSON body 与标准 SSE frame helper；continuation 断言改看 store/resume 行为，不锁过时 barrel mock 调用。
+  - `handler-response-sse-wrapper-contract.spec.ts` 新增静态扫描，禁止 legacy stream probe/finish-reason key 在 server tests/runtime tests/conversion-matrix fixtures 复活。
+  - conversion-matrix fixture 删除 `__sse_responses`/`__routecodex_stream_contract_probe_body`/`__routecodex_finish_reason` wrapper，保留标准 response object + usage。
+- 验证：
+  - handler focused Jest 4 suites / 34 tests PASS（用 `--forceExit`，测试本身全绿；suite 仍有既存 open handle 噪音）。
+  - `npx tsc --noEmit --pretty false --skipLibCheck` PASS。
+  - `rg "__routecodex_stream" tests/server tests/fixtures/conversion-matrix scripts/architecture/verify-no-custom-payload-carriers.mjs` 只剩 deny gate 脚本命中。
+  - `audit:custom-payload-carriers` PASS：`__sse_* runtime files=0`。
+  - owner-queryability / runtime-manifest / containment / `verify:function-map-compile-gate` PASS。
+  - `git diff --check` PASS。
+- 剩余风险：本 slice 未安装/重启/live；`__sse_responses` 历史残留仍在 tests/scripts/docs，作为后续单独切片处理，runtime=0。
+
 ## 2026-06-19 MetadataCenter followup-dispatch legacy control removal slice
 
 - 当前 slice 目标：清理 `servertool-followup-dispatch` / nested metadata builder 中最后一段 active legacy followup control 读取与 promotion，避免 `metadata.__rt.serverToolFollowup/clientInjectSource/stoplessGoalStatus` 或 flat `metadata.serverToolFollowup/isServerToolFollowup/clientInjectSource` 继续作为真源。
