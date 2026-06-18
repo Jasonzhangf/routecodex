@@ -1280,6 +1280,7 @@ fn resume_responses_conversation_payload(
             "toolOutputsDetailed": submitted_details,
             "fullInputItems": full_input.len(),
             "fullInput": full_input,
+            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
         }
     }))
@@ -1770,6 +1771,7 @@ fn restore_responses_continuation_payload(
     };
     let submitted_details = collect_submitted_tool_output_details(&input_items);
     let prefix = normalize_responses_history_items(clone_array(entry_obj.get("input")));
+    let incoming_previous_response_id = read_trimmed_string(incoming_obj.get("previous_response_id"));
     let delta_input = if prefix.is_empty() {
         let released_pending_call_ids = read_released_pending_tool_call_ids(&entry_obj);
         if !released_pending_call_ids.is_empty() {
@@ -1788,6 +1790,15 @@ fn restore_responses_continuation_payload(
     } else {
         let Some(delta_input) = find_exact_prefix_delta(&prefix, &input_items)
             .or_else(|| find_prefix_delta_allowing_pending_tool_call_replay(&prefix, &input_items))
+            .or_else(|| {
+                if continuation_owner != Some("direct")
+                    && incoming_previous_response_id.as_deref() == Some(response_id.as_str())
+                {
+                    Some(input_items.clone())
+                } else {
+                    None
+                }
+            })
         else {
             return Value::Null;
         };
@@ -1838,6 +1849,7 @@ fn restore_responses_continuation_payload(
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
             "fullInput": normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(input_items.clone())),
+            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1931,6 +1943,7 @@ fn materialize_responses_continuation_payload(
                 "continuationDeltaItems": suffix_delta.len(),
                 "fullInputItems": full_input.len(),
                 "fullInput": full_input,
+                "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
                 "toolOutputsDetailed": submitted_details,
             }
         });
@@ -2002,6 +2015,7 @@ fn materialize_responses_continuation_payload(
             "continuationDeltaItems": continuation_delta.len(),
             "fullInputItems": full_input.len(),
             "fullInput": full_input,
+            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
             "toolOutputsDetailed": submitted_details,
         }
     })

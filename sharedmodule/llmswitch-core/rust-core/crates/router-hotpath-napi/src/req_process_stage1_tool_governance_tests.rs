@@ -37,7 +37,9 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
-          "clientInjectReady": true
+          "clientInjectReady": true,
+          "stopMessageEnabled": true,
+          "routecodexPortStopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction".to_string(),
@@ -74,7 +76,9 @@ fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
-          "clientInjectReady": true
+          "clientInjectReady": true,
+          "stopMessageEnabled": true,
+          "routecodexPortStopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction_dedup".to_string(),
@@ -104,10 +108,47 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
-          "clientInjectReady": true
+          "clientInjectReady": true,
+          "stopMessageEnabled": true,
+          "routecodexPortStopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_input".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let instructions = result.processed_request["instructions"]
+        .as_str()
+        .expect("responses instructions");
+    assert!(instructions.contains("简洁 summary"));
+    assert!(instructions.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+    assert!(result.processed_request["input"].is_array());
+}
+
+#[test]
+fn test_req_process_responses_input_materializes_stopless_instructions_without_client_inject_ready() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.5",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{"type": "input_text", "text": "请直接回复一句“阶段完成”，然后结束。<**stopless:on**>"}]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "clientInjectReady": false,
+          "clientInjectReason": "tmux_session_missing",
+          "stopMessageEnabled": true,
+          "routecodexPortStopMessageEnabled": true
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_responses_no_tmux_inject".to_string(),
         has_active_stop_message_for_continue_execution: None,
     };
 
@@ -653,8 +694,24 @@ fn test_servertool_orchestration_uses_explicit_stop_message_flag_instead_of_runt
     assert!(!names.contains("continue_execution"));
 }
 
+fn assert_apply_patch_custom_freeform_tool(tool: &serde_json::Value) {
+    assert_eq!(tool["type"].as_str(), Some("custom"));
+    assert_eq!(tool["name"].as_str(), Some("apply_patch"));
+    assert!(tool.get("function").is_none());
+    assert!(tool.get("parameters").is_none());
+    let definition = tool["format"]["definition"]
+        .as_str()
+        .expect("apply_patch grammar definition");
+    assert!(definition.contains("begin_patch: \"*** Begin Patch\" LF"));
+    assert!(definition.contains("end_patch: \"*** End Patch\" LF?"));
+    let serialized = serde_json::to_string(tool).expect("serialize apply_patch tool");
+    assert!(!serialized.contains("\"input\""));
+    assert!(!serialized.contains("\"filePath\""));
+    assert!(!serialized.contains("\"fileContent\""));
+}
+
 #[test]
-fn test_chat_process_apply_patch_declared_legacy_fields_no_longer_rewrite_in_servertool_mode() {
+fn test_chat_process_apply_patch_declared_legacy_fields_projects_custom_freeform_tool() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "MiniMax-M2.7",
@@ -702,22 +759,12 @@ fn test_chat_process_apply_patch_declared_legacy_fields_no_longer_rewrite_in_ser
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let tool = result.processed_request["tools"][0]["function"]
-        .as_object()
-        .unwrap();
-    let properties = tool["parameters"]["properties"].as_object().unwrap();
-    let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("*** Begin Patch"));
-    assert!(properties.contains_key("patch"));
-    assert!(!properties.contains_key("input"));
-    assert!(!properties.contains_key("filePath"));
-    assert!(!properties.contains_key("fileContent"));
-    let required = tool["parameters"]["required"].as_array().unwrap();
-    assert_eq!(required, &vec![serde_json::json!("patch")]);
+    assert_apply_patch_custom_freeform_tool(&result.processed_request["tools"][0]);
 }
 
 #[test]
-fn test_chat_process_apply_patch_without_internal_fields_keeps_client_contract_by_default() {
+fn test_chat_process_apply_patch_without_internal_fields_projects_custom_freeform_tool_by_default()
+{
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "MiniMax-M2.7",
@@ -752,19 +799,11 @@ fn test_chat_process_apply_patch_without_internal_fields_keeps_client_contract_b
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let tool = result.processed_request["tools"][0]["function"]
-        .as_object()
-        .unwrap();
-    let properties = tool["parameters"]["properties"].as_object().unwrap();
-    assert!(properties.contains_key("patch"));
-    assert!(!properties.contains_key("filePath"));
-    assert!(!properties.contains_key("fileContent"));
-    let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("*** Begin Patch"));
+    assert_apply_patch_custom_freeform_tool(&result.processed_request["tools"][0]);
 }
 
 #[test]
-fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_in_servertool_mode()
+fn test_chat_process_apply_patch_direct_responses_tool_shape_projects_custom_freeform_tool()
 {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
@@ -812,13 +851,7 @@ fn test_chat_process_apply_patch_direct_responses_tool_shape_no_longer_rewrites_
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let tool = result.processed_request["tools"][0].as_object().unwrap();
-    let properties = tool["parameters"]["properties"].as_object().unwrap();
-    let patch_desc = properties["patch"]["description"].as_str().unwrap_or("");
-    assert!(patch_desc.contains("*** Begin Patch"));
-    assert!(!properties.contains_key("input"));
-    assert!(!properties.contains_key("filePath"));
-    assert!(!properties.contains_key("fileContent"));
+    assert_apply_patch_custom_freeform_tool(&result.processed_request["tools"][0]);
 }
 
 #[test]

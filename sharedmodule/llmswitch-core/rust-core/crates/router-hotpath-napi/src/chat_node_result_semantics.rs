@@ -443,6 +443,13 @@ fn is_provider_native_resume_continuation_value(request_semantics: &Value) -> bo
     else {
         return false;
     };
+    let continuation_owner = read_string(continuation.get("continuationOwner"))
+        .or_else(|| read_string(continuation.get("continuation_owner")))
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if continuation_owner == "relay" {
+        return false;
+    }
     let resume_from = continuation
         .get("resumeFrom")
         .or_else(|| continuation.get("resume_from"))
@@ -936,6 +943,7 @@ mod request_semantics_tests {
     fn classifies_provider_native_previous_response_resume_in_rust() {
         let semantics = json!({
             "continuation": {
+                "continuationOwner": "direct",
                 "resumeFrom": {
                     "previousResponseId": "resp_1"
                 }
@@ -948,11 +956,37 @@ mod request_semantics_tests {
     fn classifies_provider_native_submit_tool_outputs_resume_in_rust() {
         let semantics = json!({
             "continuation": {
+                "continuationOwner": "direct",
                 "mode": "submit_tool_outputs",
                 "responseId": "resp_1"
             }
         });
         assert!(is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn does_not_classify_relay_previous_response_resume_as_provider_native() {
+        let semantics = json!({
+            "continuation": {
+                "continuationOwner": "relay",
+                "resumeFrom": {
+                    "previousResponseId": "resp_relay_1"
+                }
+            }
+        });
+        assert!(!is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn does_not_classify_relay_submit_tool_outputs_resume_as_provider_native() {
+        let semantics = json!({
+            "continuation": {
+                "continuationOwner": "relay",
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_relay_1"
+            }
+        });
+        assert!(!is_provider_native_resume_continuation_value(&semantics));
     }
 
     #[test]

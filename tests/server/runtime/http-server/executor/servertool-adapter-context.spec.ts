@@ -196,6 +196,44 @@ describe('servertool adapter context builder', () => {
 
     expect(context.sessionId).toBe('sess-center-truth');
     expect(context.conversationId).toBe('conv-center-truth');
+    expect(MetadataCenter.read(context)).toBe(center);
+  });
+
+  it('preserves the bound MetadataCenter on the servertool adapter context', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'stopMessageEnabled',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'preserves the bound MetadataCenter on the servertool adapter context',
+        stage: 'test'
+      }
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        input: 'continue'
+      },
+      requestId: 'req-preserve-center',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(MetadataCenter.read(context)).toBe(center);
+    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(true);
   });
 
   it('reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent', async () => {

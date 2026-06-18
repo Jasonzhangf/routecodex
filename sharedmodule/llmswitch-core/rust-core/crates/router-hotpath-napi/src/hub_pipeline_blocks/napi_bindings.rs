@@ -59,16 +59,6 @@ fn evaluate_responses_direct_route_decision(
 ) -> Result<Value, String> {
     let _ = apply_patch_mode;
     let has_declared_apply_patch_tool = has_declared_apply_patch_tool(payload);
-    if inbound_protocol == "openai-responses"
-        && requires_hub_relay_for_servertool_followup(payload, metadata)
-    {
-        return Ok(serde_json::json!({
-            "providerWireValid": true,
-            "requiresHubRelay": true,
-            "reason": "servertool_followup_requires_hub_relay",
-            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
-        }));
-    }
     if inbound_protocol == "openai-responses" {
         if let Some(reason) = find_responses_function_call_output_content_violation(payload) {
             return Ok(serde_json::json!({
@@ -85,101 +75,6 @@ fn evaluate_responses_direct_route_decision(
         "reason": null,
         "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
     }))
-}
-
-fn requires_hub_relay_for_servertool_followup(payload: &Value, metadata: &Value) -> bool {
-    if stop_message_include_direct(metadata) {
-        return true;
-    }
-    if has_stop_message_cli_result(payload) {
-        return true;
-    }
-    if has_stop_message_cli_result(metadata) {
-        return true;
-    }
-    has_servertool_followup_marker(metadata)
-}
-
-fn has_stop_message_cli_result(value: &Value) -> bool {
-    let mut seen = 0usize;
-    scan_stop_message_cli_result(value, 0, &mut seen)
-}
-
-fn scan_stop_message_cli_result(value: &Value, depth: usize, seen: &mut usize) -> bool {
-    if depth > 10 {
-        return false;
-    }
-    *seen += 1;
-    if *seen > 2000 {
-        return false;
-    }
-    if is_stop_message_cli_result_object(value) {
-        return true;
-    }
-    if let Some(items) = value.as_array() {
-        return items
-            .iter()
-            .any(|item| scan_stop_message_cli_result(item, depth + 1, seen));
-    }
-    let Some(record) = value.as_object() else {
-        return false;
-    };
-    record
-        .values()
-        .any(|item| scan_stop_message_cli_result(item, depth + 1, seen))
-}
-
-fn is_stop_message_cli_result_object(value: &Value) -> bool {
-    let Some(record) = value.as_object() else {
-        return false;
-    };
-    let type_value = record
-        .get("type")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    let role = record
-        .get("role")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    let tool_result_like = type_value == "function_call_output"
-        || type_value == "tool_result"
-        || type_value == "tool_message"
-        || role == "tool"
-        || record.contains_key("call_id")
-        || record.contains_key("tool_call_id");
-    if !tool_result_like {
-        return false;
-    }
-    let mut parts = Vec::<String>::new();
-    for key in ["output", "content", "text", "arguments"] {
-        collect_direct_stop_message_text(record.get(key), &mut parts);
-    }
-    parts.iter().any(|text| {
-        text.contains("routecodex servertool run stop_message_auto")
-            || (text.contains("\"toolName\"")
-                && text.contains("\"stop_message_auto\"")
-                && text.contains("\"flowId\"")
-                && text.contains("\"stop_message_flow\""))
-    })
-}
-
-fn collect_direct_stop_message_text(value: Option<&Value>, out: &mut Vec<String>) {
-    match value {
-        Some(Value::String(text)) => out.push(text.clone()),
-        Some(Value::Array(items)) => {
-            for item in items {
-                collect_direct_stop_message_text(Some(item), out);
-            }
-        }
-        Some(Value::Object(record)) => {
-            collect_direct_stop_message_text(record.get("text"), out);
-            collect_direct_stop_message_text(record.get("output_text"), out);
-            collect_direct_stop_message_text(record.get("content"), out);
-        }
-        _ => {}
-    }
 }
 
 fn read_boolish(value: Option<&Value>) -> bool {
@@ -219,76 +114,6 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
             })
         })
         .unwrap_or(false)
-}
-
-fn stop_message_include_direct(metadata: &Value) -> bool {
-    let Some(root) = metadata.as_object() else {
-        return false;
-    };
-    let rt = root.get("__rt").and_then(Value::as_object);
-    let stop_message_enabled = root
-        .get("stopMessageEnabled")
-        .map(|value| read_boolish(Some(value)))
-        .or_else(|| {
-            rt.and_then(|record| {
-                record
-                    .get("stopMessageEnabled")
-                    .map(|value| read_boolish(Some(value)))
-            })
-        })
-        .unwrap_or(false);
-    if !stop_message_enabled {
-        return false;
-    }
-    !root
-        .get("stopMessageExcludeDirect")
-        .map(|value| read_boolish(Some(value)))
-        .or_else(|| {
-            rt.and_then(|record| {
-                record
-                    .get("stopMessageExcludeDirect")
-                    .map(|value| read_boolish(Some(value)))
-            })
-        })
-        .unwrap_or(false)
-}
-
-fn has_servertool_followup_marker(metadata: &Value) -> bool {
-    let Some(root) = metadata.as_object() else {
-        return false;
-    };
-    let rt = root.get("__rt").and_then(Value::as_object);
-    if read_boolish(root.get("serverToolFollowup"))
-        || rt
-            .map(|record| read_boolish(record.get("serverToolFollowup")))
-            .unwrap_or(false)
-    {
-        return true;
-    }
-    let followup_source = read_trimmed_lower(root.get("followupSource"))
-        .or_else(|| read_trimmed_lower(root.get("serverToolFollowupSource")))
-        .or_else(|| read_trimmed_lower(root.get("clientInjectSource")))
-        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("followupSource"))))
-        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("clientInjectSource"))))
-        .or_else(|| {
-            rt.and_then(|record| read_trimmed_lower(record.get("serverToolFollowupSource")))
-        });
-    if followup_source.is_some() {
-        return true;
-    }
-    let stopless_goal_status = read_trimmed_lower(root.get("stoplessGoalStatus"))
-        .or_else(|| rt.and_then(|record| read_trimmed_lower(record.get("stoplessGoalStatus"))))
-        .or_else(|| {
-            root.get("stoplessGoalState")
-                .and_then(Value::as_object)
-                .and_then(|record| read_trimmed_lower(record.get("status")))
-        })
-        .or_else(|| {
-            rt.and_then(|record| record.get("stoplessGoalState"))
-                .and_then(Value::as_object)
-                .and_then(|record| read_trimmed_lower(record.get("status")))
-        });
-    stopless_goal_status.as_deref() == Some("active")
 }
 
 fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
@@ -416,7 +241,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn responses_request_relays_when_stop_message_includes_direct() {
+    fn responses_request_stays_direct_when_stop_message_is_enabled() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -436,11 +261,11 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("stopless-enabled direct requests must become relay decisions");
+        .expect("direct requests must stay direct even when stopless is enabled");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 
     #[test]
@@ -501,7 +326,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn stop_message_cli_result_requires_hub_relay_on_responses_direct() {
+    fn stop_message_cli_result_stays_direct_on_responses_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -517,15 +342,15 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("stopless CLI result should be a direct decision");
+        .expect("stopless CLI result direct decision should stay direct");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 
     #[test]
-    fn stop_message_followup_metadata_requires_hub_relay_on_responses_direct() {
+    fn stop_message_followup_metadata_stays_direct_on_responses_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -540,15 +365,15 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("stopless followup metadata should be a direct decision");
+        .expect("stopless followup metadata direct decision should stay direct");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 
     #[test]
-    fn generic_servertool_followup_metadata_requires_hub_relay_on_responses_direct() {
+    fn generic_servertool_followup_metadata_stays_direct_on_responses_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -563,11 +388,11 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("generic servertool followup metadata should be a direct decision");
+        .expect("generic servertool followup metadata direct decision should stay direct");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 }
 

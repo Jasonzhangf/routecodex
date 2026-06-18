@@ -2,6 +2,7 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { HubPipeline } from './types.js';
 import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
+import { MetadataCenter } from './metadata-center/metadata-center.js';
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 
@@ -50,6 +51,23 @@ export function ensureHubPipeline(getHubPipeline: () => HubPipeline | null): Hub
   return pipeline;
 }
 
+function buildHubPipelineMetadata(
+  metadata: Record<string, unknown>,
+  stageRecorder: unknown
+): Record<string, unknown> {
+  const pipelineMetadata = { ...metadata };
+  const center = MetadataCenter.read(metadata);
+  if (center) {
+    MetadataCenter.bind(pipelineMetadata, center);
+  }
+  if (stageRecorder && typeof stageRecorder === 'object') {
+    pipelineMetadata.__hubStageRecorder = stageRecorder;
+  } else {
+    delete pipelineMetadata.__hubStageRecorder;
+  }
+  return pipelineMetadata;
+}
+
 export async function runHubPipeline(
   hubPipeline: HubPipeline,
   input: PipelineExecutionInput,
@@ -79,6 +97,7 @@ export async function runHubPipeline(
   }
 
   const payload = asRecord(input.body);
+  const pipelineMetadata = buildHubPipelineMetadata(metadata, stageRecorder);
   const pipelineInput: PipelineExecutionInput & {
     payload: Record<string, unknown>;
     endpoint: string;
@@ -87,13 +106,7 @@ export async function runHubPipeline(
     ...input,
     id: input.requestId,
     endpoint: input.entryEndpoint,
-    metadata:
-      stageRecorder && typeof stageRecorder === 'object'
-        ? {
-            ...metadata,
-            __hubStageRecorder: stageRecorder
-          }
-        : metadata,
+    metadata: pipelineMetadata,
     payload
   };
   const result = await hubPipeline.execute(pipelineInput);

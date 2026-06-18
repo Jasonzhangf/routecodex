@@ -337,7 +337,7 @@ function assertStoplessSessionIdLock() {
     'stopless-session-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     stoplessSpec,
-    "expect(command).not.toContain('--session-id')"
+    "expect(command).toContain(`--session-id '${adapterContext.sessionId}'`)"
   );
   assertContains(
     'stopless-session-lock',
@@ -351,13 +351,13 @@ function assertStoplessSessionIdLock() {
     'stopless-session-lock',
     `${ROOT}/tests/cli/servertool-command.spec.ts`,
     cliSpec,
-    'expect(payload.sessionId).toBeUndefined()'
+    'expect(payload.sessionId).toBe(sessionId)'
   );
   assertContains(
     'stopless-session-lock',
     `${ROOT}/tests/cli/servertool-command.spec.ts`,
     cliSpec,
-    'expect(payload.requestId).toBeUndefined()'
+    'expect(payload.requestId).toBe(requestId)'
   );
   for (const file of STOPLESS_SESSION_LOCK_FILES) {
     const content = readRequired(file);

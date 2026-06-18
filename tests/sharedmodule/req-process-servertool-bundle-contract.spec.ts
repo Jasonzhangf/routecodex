@@ -212,9 +212,43 @@ describe('req_process servertool bundle contract', () => {
 
     normalizeReqInboundShellLikeToolCallsWithNative(payload);
     const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('上一轮执行结果');
     expect(serialized).toContain('repeatCount=2/3');
     expect(serialized).toContain('reasonCode=stop_schema_missing');
     expect(serialized).toContain('missingFields=stopreason, reason');
     expect(serialized).toContain('继续做下一步');
+    expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(serialized).toContain('如果任务已经完成');
+  });
+
+  it('injects relay stopless instructions even when tmux client inject is unavailable', () => {
+    const result = applyReqProcessToolGovernanceWithNative({
+      request: {
+        model: 'gpt-5.5',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]
+          }
+        ],
+        stream: false
+      },
+      rawPayload: {},
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        clientInjectReady: false,
+        clientInjectReason: 'tmux_session_missing',
+        stopMessageEnabled: true,
+        routecodexPortStopMessageEnabled: true
+      },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-process-stopless-relay-no-tmux',
+      hasActiveStopMessageForContinueExecution: false
+    });
+
+    expect(typeof result.processedRequest.instructions).toBe('string');
+    expect(String(result.processedRequest.instructions)).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(Array.isArray(result.processedRequest.input)).toBe(true);
   });
 });

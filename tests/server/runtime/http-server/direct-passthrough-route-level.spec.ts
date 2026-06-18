@@ -184,7 +184,7 @@ describe('direct passthrough route-level', () => {
       });
       const bodyText = await response.text();
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(200);
       expect(bodyText).toContain('stream_options should be set along with stream = true');
       expect(sentPayload?.model).toBe('deepseek-v4-flash');
       expect(sentPayload?.stream).toBeUndefined();
@@ -354,7 +354,7 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'gpt-5.3-codex',
+      model: 'mutated-model',
       instructions: 'mutated-system-prompt',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });

@@ -143,4 +143,18 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
     expect(response.text).toContain('sse_stream_error');
     expect(response.text).not.toContain('routeHint');
   });
+
+  it('rejects wrapper response.metadata without standard response event semantics', async () => {
+    const response = await requestSse({
+      response: {
+        id: 'resp_wrapper_meta_1',
+        metadata: { provider_event_id: 'wrapper-metadata-must-not-pass' }
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('event: error');
+    expect(response.text).toContain('sse_stream_error');
+    expect(response.text).not.toContain('wrapper-metadata-must-not-pass');
+  });
 });

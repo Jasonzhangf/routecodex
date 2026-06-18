@@ -7,6 +7,7 @@ import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertoo
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 function buildStopChatResponse(content: string = 'need continue'): JsonObject {
   return {
@@ -25,7 +26,7 @@ function buildStopChatResponse(content: string = 'need continue'): JsonObject {
 
 function buildAdapterContext(overrides: Partial<AdapterContext> = {}): AdapterContext {
   const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return {
+  return bindMetadataCenter({
     requestId: overrides.requestId ?? `req-stopless-cli-${unique}`,
     entryEndpoint: overrides.entryEndpoint ?? '/v1/chat/completions',
     providerProtocol: overrides.providerProtocol ?? 'openai-chat',
@@ -35,7 +36,12 @@ function buildAdapterContext(overrides: Partial<AdapterContext> = {}): AdapterCo
       messages: [{ role: 'user', content: 'diagnose this' }]
     },
     ...(overrides as object)
-  } as AdapterContext;
+  } as AdapterContext);
+}
+
+function bindMetadataCenter<T extends Record<string, unknown>>(context: T): T {
+  MetadataCenter.attach(context);
+  return context;
 }
 
 function extractExecCommand(resultChat: any): string {
@@ -54,7 +60,7 @@ function maybeExtractExecCommand(resultChat: any): string | undefined {
 }
 
 function extractInput(command: string): Record<string, unknown> {
-  const inputJson = command.match(/--input-json '([^']+)'(?=\s--repeat-count|\s--max-repeats|$)/)?.[1];
+  const inputJson = command.match(/--input-json '([^']+)'(?=\s--|$)/)?.[1];
   expect(inputJson).toBeDefined();
   return JSON.parse(inputJson ?? '{}') as Record<string, unknown>;
 }
@@ -63,6 +69,8 @@ async function runStoplessCliStdout(command: string) {
   const input = extractInput(command);
   const repeatCount = command.match(/--repeat-count '([^']+)'/)?.[1];
   const maxRepeats = command.match(/--max-repeats '([^']+)'/)?.[1];
+  const sessionId = command.match(/--session-id '([^']+)'/)?.[1];
+  const requestId = command.match(/--request-id '([^']+)'/)?.[1];
   const output: string[] = [];
   const errors: string[] = [];
   const program = new Command();
@@ -86,6 +94,8 @@ async function runStoplessCliStdout(command: string) {
     'stop_message_auto',
     '--input-json',
     JSON.stringify(input),
+    ...(sessionId ? ['--session-id', sessionId] : []),
+    ...(requestId ? ['--request-id', requestId] : []),
     ...(repeatCount ? ['--repeat-count', repeatCount] : []),
     ...(maxRepeats ? ['--max-repeats', maxRepeats] : [])
   ]);
@@ -146,13 +156,13 @@ describe('stopless CLI continuation', () => {
     });
     const command = extractExecCommand(result.chat);
     expect(command).not.toContain('--session-dir');
-    expect(command).not.toContain('--session-id');
-    expect(command).not.toContain('--request-id');
+    expect(command).toContain(`--session-id '${adapterContext.sessionId}'`);
+    expect(command).toContain(`--request-id '${adapterContext.requestId}'`);
     const first = await runStoplessCliStdout(command);
 
     expect(first.repeatCount).toBe(2);
-    expect(first.sessionId).toBeUndefined();
-    expect(first.requestId).toBeUndefined();
+    expect(first.sessionId).toBe(adapterContext.sessionId);
+    expect(first.requestId).toBe(adapterContext.requestId);
     expect(first.schemaGuidance).toBeDefined();
     expect(first.schemaGuidance.requiredFields).toContain('stopreason');
     expect(first.schemaGuidance.requiredFields).toContain('next_step');
@@ -211,8 +221,8 @@ describe('stopless CLI continuation', () => {
     const secondCommand = extractExecCommand(second.chat);
     expect(extractInput(secondCommand).repeatCount).toBe(2);
     expect(secondCommand).not.toContain('--session-dir');
-    expect(secondCommand).not.toContain('--session-id');
-    expect(secondCommand).not.toContain('--request-id');
+    expect(secondCommand).toContain(`--session-id '${sessionId}'`);
+    expect(secondCommand).toContain(`--request-id '${secondAdapterContext.requestId}'`);
   });
 
   test('missing session makes stopless terminal instead of projecting CLI', async () => {
@@ -245,7 +255,7 @@ describe('stopless CLI continuation', () => {
   test('sentinel unknown session makes stopless terminal instead of projecting CLI', async () => {
     const result = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: {
+      adapterContext: bindMetadataCenter({
         ...buildAdapterContext({
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses',
@@ -260,7 +270,7 @@ describe('stopless CLI continuation', () => {
             sessionId: 'unknown'
           }
         }
-      } as any,
+      } as any),
       requestId: `req-stopless-unknown-session-${Date.now()}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -277,7 +287,7 @@ describe('stopless CLI continuation', () => {
   test('responsesRequestContext-only session makes stopless terminal instead of projecting CLI', async () => {
     const result = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: {
+      adapterContext: bindMetadataCenter({
         ...buildAdapterContext({
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses',
@@ -295,7 +305,7 @@ describe('stopless CLI continuation', () => {
             conversationId: 'conv-hidden-relay-rt'
           }
         }
-      } as any,
+      } as any),
       requestId: `req-stopless-hidden-relay-session-${Date.now()}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -329,7 +339,7 @@ describe('stopless CLI continuation', () => {
 
     const second = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: {
+      adapterContext: bindMetadataCenter({
         ...buildAdapterContext({
           requestId: `req-stopless-terminal-second-${Date.now()}`,
           entryEndpoint: '/v1/responses',
@@ -343,7 +353,7 @@ describe('stopless CLI continuation', () => {
             output: JSON.stringify(firstOutput)
           }]
         }
-      } as any,
+      } as any),
       requestId: `req-stopless-terminal-second-${Date.now()}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -355,7 +365,7 @@ describe('stopless CLI continuation', () => {
 
     const third = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: {
+      adapterContext: bindMetadataCenter({
         ...buildAdapterContext({
           requestId: `req-stopless-terminal-third-${Date.now()}`,
           entryEndpoint: '/v1/responses',
@@ -369,7 +379,7 @@ describe('stopless CLI continuation', () => {
             output: JSON.stringify(secondOutput)
           }]
         }
-      } as any,
+      } as any),
       requestId: `req-stopless-terminal-third-${Date.now()}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',

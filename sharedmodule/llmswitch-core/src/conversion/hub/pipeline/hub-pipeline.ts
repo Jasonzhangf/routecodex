@@ -12,6 +12,7 @@ import {
   extractModelHintFromMetadataWithNative,
   resolveSseProtocolWithNative,
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
+import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { isRecord } from "../../../shared/common-utils.js";
 import type {
   HubPipelineConfig,
@@ -95,6 +96,15 @@ type HubPipelineProviderProtocol =
   | "anthropic-messages"
   | "gemini-chat";
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+function preserveMetadataCenterBinding(source: Record<string, unknown>, target: Record<string, unknown>): void {
+  const center = Reflect.get(source, METADATA_CENTER_SYMBOL);
+  if (center !== undefined) {
+    Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+  }
+}
+
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -174,10 +184,12 @@ function buildMaterializedRequest(args: {
     : undefined;
   const disableSnapshots = args.metadata.__disableHubSnapshots === true;
   const metadata = { ...args.metadata };
+  preserveMetadataCenterBinding(args.metadata, metadata);
   delete metadata.__hubEntry;
   delete metadata.__hubPolicyOverride;
   delete metadata.__hubShadowCompare;
   delete metadata.__disableHubSnapshots;
+  ensureRuntimeMetadata(metadata);
   return {
     id: args.id,
     endpoint,
@@ -204,6 +216,9 @@ async function materializeHubPipelineRequest(request: HubPipelineRequest): Promi
   }
   const id = request.id || `req_${Date.now()}`;
   const metadataRecord: Record<string, unknown> = { ...(request.metadata ?? {}) };
+  if (request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)) {
+    preserveMetadataCenterBinding(request.metadata as Record<string, unknown>, metadataRecord);
+  }
   const externalStageRecorder = readStageRecorder(metadataRecord);
   const providerProtocol = readProviderProtocol(metadataRecord);
   const streamCandidate = readStreamCandidate(request.payload);
@@ -214,20 +229,22 @@ async function materializeHubPipelineRequest(request: HubPipelineRequest): Promi
     throw new Error("HubPipeline requires JSON object payload");
   }
   const stream = Boolean(metadataRecord.stream === true || payload.stream === true || streamCandidate);
+  const materializedMetadata: Record<string, unknown> = {
+    ...metadataRecord,
+    endpoint: request.endpoint,
+    entryEndpoint: readString(metadataRecord.entryEndpoint) ?? request.endpoint,
+    providerProtocol,
+    stream,
+    processMode: "chat",
+    direction: metadataRecord.direction === "response" ? "response" : "request",
+    stage: metadataRecord.stage === "outbound" ? "outbound" : "inbound",
+  };
+  preserveMetadataCenterBinding(metadataRecord, materializedMetadata);
   return buildMaterializedRequest({
     id,
     endpoint: request.endpoint,
     payload,
-    metadata: {
-      ...metadataRecord,
-      endpoint: request.endpoint,
-      entryEndpoint: readString(metadataRecord.entryEndpoint) ?? request.endpoint,
-      providerProtocol,
-      stream,
-      processMode: "chat",
-      direction: metadataRecord.direction === "response" ? "response" : "request",
-      stage: metadataRecord.stage === "outbound" ? "outbound" : "inbound",
-    },
+    metadata: materializedMetadata,
     externalStageRecorder,
   });
 }

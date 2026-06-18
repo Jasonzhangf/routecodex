@@ -45,9 +45,6 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     const originalStream = payload?.stream === true;
     const wantsSSE = acceptsSse || originalStream;
     const outboundStream = originalStream;
-    if (acceptsSse && !originalStream) {
-      payload.stream = true;
-    }
     applySystemPromptOverride(entryEndpoint, payload);
 
     logRequestStart(entryEndpoint, requestId, {

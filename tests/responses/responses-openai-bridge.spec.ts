@@ -269,6 +269,61 @@ describe('buildChatRequestFromResponses (responses bridge)', () => {
     });
   });
 
+  it('restores tools from canonical responses resume contract when caller tools are empty', () => {
+    const payload = {
+      model: 'gpt-test',
+      previous_response_id: 'resp_restore_tools_1',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行下一步' }]
+        }
+      ],
+      tools: [],
+      semantics: {
+        responses: {
+          resume: {
+            restoredFromResponseId: 'resp_restore_tools_1',
+            restored: true,
+            fullInput: [
+              {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: '继续执行下一步' }]
+              }
+            ],
+            restoredTools: [
+              {
+                type: 'function',
+                name: 'exec_command',
+                parameters: { type: 'object', properties: {} }
+              }
+            ]
+          }
+        }
+      }
+    };
+
+    const ctx = captureResponsesContext(payload as any, { route: { requestId: 'req_restore_tools_bridge' } } as any);
+    const result = buildChatRequestFromResponses(payload as any, ctx);
+
+    expect(Array.isArray((result.request as any)?.tools)).toBe(true);
+    expect(((result.request as any)?.tools as any)?.[0]).toMatchObject({
+      type: 'function',
+      function: expect.objectContaining({
+        name: 'exec_command'
+      })
+    });
+    expect(Array.isArray((result as any)?.toolsNormalized)).toBe(true);
+    expect(((result as any)?.toolsNormalized as any)?.[0]).toMatchObject({
+      type: 'function',
+      function: expect.objectContaining({
+        name: 'exec_command'
+      })
+    });
+  });
+
   it('fails fast when previous_response_id history contains a dangling tool call before ordinary user content', () => {
     const payload = {
       model: 'gpt-test',

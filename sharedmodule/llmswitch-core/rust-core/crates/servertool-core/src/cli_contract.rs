@@ -358,15 +358,24 @@ fn build_stopless_cli_model_guidance(
 ) -> String {
     let mut parts = Vec::<String>::new();
     if let Some(feedback) = schema_feedback {
-        let missing = if feedback.missing_fields.is_empty() {
-            String::from("[]")
+        if feedback.reason_code == "stop_schema_missing" {
+            if feedback.missing_fields.is_empty() {
+                parts.push("这次收尾未通过：缺少 stop schema 必填字段。".to_string());
+            } else {
+                parts.push(format!(
+                    "这次收尾未通过：缺少 stop schema 必填字段：{}。",
+                    feedback.missing_fields.join(", ")
+                ));
+            }
+        } else if feedback.missing_fields.is_empty() {
+            parts.push(format!("这次收尾未通过：{}。", feedback.reason_code));
         } else {
-            format!("[{}]", feedback.missing_fields.join(", "))
-        };
-        parts.push(format!(
-            "schemaFeedback: reasonCode={}, missingFields={}",
-            feedback.reason_code, missing
-        ));
+            parts.push(format!(
+                "这次收尾未通过：{}；缺少字段：{}。",
+                feedback.reason_code,
+                feedback.missing_fields.join(", ")
+            ));
+        }
     }
     let prompt = continuation_prompt.trim();
     if !prompt.is_empty() {
@@ -724,19 +733,25 @@ fn build_client_exec_cli_projection_output_with_identity(
             tool_name,
             &input_json,
             None,
-            None,
-            None,
+            session_id,
+            request_id,
             Some(repeat_count),
             Some(max_repeats),
         );
         validate_no_denied_cli_marker(&cmd)?;
-        let output = serde_json::json!({
+        let mut output = serde_json::json!({
             "toolName": tool_name,
             "flowId": flow_id,
             "repeatCount": repeat_count,
             "maxRepeats": max_repeats,
             "execCommand": cmd
         });
+        if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
+            output["sessionId"] = Value::String(session_id);
+        }
+        if let Some(request_id) = request_id.and_then(read_optional_trimmed) {
+            output["requestId"] = Value::String(request_id);
+        }
         return Ok(output);
     }
 
@@ -916,8 +931,8 @@ pub fn plan_client_exec_cli_projection_output(
             repeat_count,
             max_repeats,
             None,
-            None,
-            None,
+            input.session_id.as_deref(),
+            input.request_id.as_deref(),
         );
     }
 
@@ -1331,8 +1346,8 @@ mod tests {
         .expect("second round stop_message_auto output");
         assert!(output.model_guidance.contains("如果任务已经完成，补齐 stop schema"));
         assert!(output.model_guidance.contains("如果任务还没完成，不要停，继续执行当前任务"));
-        assert!(output.model_guidance.contains("schemaFeedback: reasonCode=stop_schema_missing"));
-        assert!(output.model_guidance.contains("missingFields=[stopreason, reason, next_step]"));
+        assert!(output.model_guidance.contains("这次收尾未通过：缺少 stop schema 必填字段：stopreason, reason, next_step。"));
+        assert!(!output.model_guidance.contains("schemaFeedback: reasonCode="));
     }
 
     #[test]
@@ -1433,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_projection_command_omits_identity_and_session_dir_flags() {
+    fn stop_message_projection_command_carries_identity_but_not_session_dir_flags() {
         let output = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
             tool_name: Some("stop_message_auto".to_string()),
             flow_id: Some("stop_message_flow".to_string()),
@@ -1460,14 +1475,22 @@ mod tests {
             .and_then(Value::as_str)
             .expect("execCommand");
         assert!(!command.contains("--session-dir"));
-        assert!(!command.contains("--session-id"));
-        assert!(!command.contains("--request-id"));
+        assert!(command.contains("--session-id 'sess-stop-proj'"));
+        assert!(command.contains("--request-id 'req-stop-proj'"));
         let command_input = output
             .get("execCommand")
             .and_then(Value::as_str)
             .expect("execCommand");
         assert!(command_input.contains("\"schemaFeedback\""));
         assert!(command_input.contains("\"reasonCode\":\"stop_schema_reason_missing\""));
+        assert_eq!(
+            output.get("sessionId").and_then(Value::as_str),
+            Some("sess-stop-proj")
+        );
+        assert_eq!(
+            output.get("requestId").and_then(Value::as_str),
+            Some("req-stop-proj")
+        );
     }
 
     #[test]

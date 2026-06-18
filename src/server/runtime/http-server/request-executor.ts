@@ -811,95 +811,146 @@ export class HubRequestExecutor implements RequestExecutor {
           retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
           continue;
         }
-        const previousRequestId = input.requestId;
-        if (providerContext.requestId !== input.requestId) {
-          input.requestId = providerContext.requestId;
-          if (shouldRebindResponsesConversationForEntry(input.entryEndpoint)) {
-            try {
-              await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
-            } catch (error) {
-              logStage('responsesConversation.rebindRequestId.error', input.requestId, {
-                previousRequestId,
-                providerKey: target.providerKey,
-                runtimeKey,
-                message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
-                attempt
-              });
-              throw error;
+        let providerProtocol: ProviderProtocol;
+        let providerModel: string | undefined;
+        let providerLabel: string | undefined;
+        try {
+          const previousRequestId = input.requestId;
+          if (providerContext.requestId !== input.requestId) {
+            input.requestId = providerContext.requestId;
+            if (shouldRebindResponsesConversationForEntry(input.entryEndpoint)) {
+              try {
+                await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
+              } catch (error) {
+                logStage('responsesConversation.rebindRequestId.error', input.requestId, {
+                  previousRequestId,
+                  providerKey: target.providerKey,
+                  runtimeKey,
+                  message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+                  attempt
+                });
+                throw error;
+              }
             }
           }
-        }
-        logStage('provider.context_resolve.completed', input.requestId, {
-          providerKey: target.providerKey,
-          runtimeKey,
-          providerProtocol: providerContext.providerProtocol,
-          model: providerContext.providerModel,
-          requestIdChanged: previousRequestId !== input.requestId,
-          previousRequestId,
-          requestId: input.requestId,
-          attempt
-        });
-        const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
-        registerRequestLogContext(providerContext.requestId, {
-          logSessionColorKey: mergedMetadata.logSessionColorKey,
-          clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
-          client_tmux_session_id: mergedMetadata.client_tmux_session_id,
-          tmuxSessionId: mergedMetadata.tmuxSessionId,
-          tmux_session_id: mergedMetadata.tmux_session_id,
-          sessionId: requestTruth.sessionId,
-          session_id: requestTruth.sessionId,
-          conversationId: requestTruth.conversationId,
-          conversation_id: requestTruth.conversationId
-        });
-        const { providerProtocol, providerModel, providerLabel } = providerContext;
-        if (clientHeadersForAttempt) {
-          ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
-        }
-        const entryPortFromMetadata = readEntryPort(metadataRecord);
-        this.deps.stats.bindProvider(statsRequestId, {
-          providerKey: target.providerKey,
-          providerType: handle.providerType,
-          model: providerModel,
-          ...(typeof entryPortFromMetadata === 'number' ? { entryPort: entryPortFromMetadata } : {})
-        });
+          logStage('provider.context_resolve.completed', input.requestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            providerProtocol: providerContext.providerProtocol,
+            model: providerContext.providerModel,
+            requestIdChanged: previousRequestId !== input.requestId,
+            previousRequestId,
+            requestId: input.requestId,
+            attempt
+          });
+          const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
+          registerRequestLogContext(providerContext.requestId, {
+            logSessionColorKey: mergedMetadata.logSessionColorKey,
+            clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
+            client_tmux_session_id: mergedMetadata.client_tmux_session_id,
+            tmuxSessionId: mergedMetadata.tmuxSessionId,
+            tmux_session_id: mergedMetadata.tmux_session_id,
+            sessionId: requestTruth.sessionId,
+            session_id: requestTruth.sessionId,
+            conversationId: requestTruth.conversationId,
+            conversation_id: requestTruth.conversationId
+          });
+          providerProtocol = providerContext.providerProtocol;
+          providerModel = providerContext.providerModel;
+          providerLabel = providerContext.providerLabel;
+          if (clientHeadersForAttempt) {
+            ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
+          }
+          const entryPortFromMetadata = readEntryPort(metadataRecord);
+          this.deps.stats.bindProvider(statsRequestId, {
+            providerKey: target.providerKey,
+            providerType: handle.providerType,
+            model: providerModel,
+            ...(typeof entryPortFromMetadata === 'number' ? { entryPort: entryPortFromMetadata } : {})
+          });
 
-        logStageLazy('provider.prepare', input.requestId, () => ({
-          providerKey: target.providerKey,
-          runtimeKey,
-          protocol: providerProtocol,
-          providerType: handle.providerType,
-          providerFamily: handle.providerFamily,
-          model: providerModel,
-          providerLabel,
-          attempt
-        }));
-        throwIfClientAbortSignalAborted(clientAbortSignal);
+          logStageLazy('provider.prepare', input.requestId, () => ({
+            providerKey: target.providerKey,
+            runtimeKey,
+            protocol: providerProtocol,
+            providerType: handle.providerType,
+            providerFamily: handle.providerFamily,
+            model: providerModel,
+            providerLabel,
+            attempt
+          }));
+          throwIfClientAbortSignalAborted(clientAbortSignal);
 
-        logStageLazy('provider.metadata_attach.start', input.requestId, () => ({
-          providerKey: target.providerKey,
-          runtimeKey,
-          attempt
-        }));
-        attachProviderRuntimeMetadata(providerPayload, {
-          requestId: input.requestId,
-          providerId: handle.providerId,
-          providerKey: target.providerKey,
-          providerType: handle.providerType,
-          providerFamily: handle.providerFamily,
-          providerProtocol,
-          pipelineId: target.providerKey,
-          routeName: pipelineResult.routingDecision?.routeName,
-          runtimeKey,
-          target,
-          metadata: mergedMetadata,
-          compatibilityProfile: target.compatibilityProfile,
-          abortSignal: getClientConnectionAbortSignal(mergedMetadata)
-        });
-        logStage('provider.metadata_attach.completed', input.requestId, {
-          providerKey: target.providerKey,
-          runtimeKey,
-          attempt
-        });
+          logStageLazy('provider.metadata_attach.start', input.requestId, () => ({
+            providerKey: target.providerKey,
+            runtimeKey,
+            attempt
+          }));
+          attachProviderRuntimeMetadata(providerPayload, {
+            requestId: input.requestId,
+            providerId: handle.providerId,
+            providerKey: target.providerKey,
+            providerType: handle.providerType,
+            providerFamily: handle.providerFamily,
+            providerProtocol,
+            pipelineId: target.providerKey,
+            routeName: pipelineResult.routingDecision?.routeName,
+            runtimeKey,
+            target,
+            metadata: mergedMetadata,
+            compatibilityProfile: target.compatibilityProfile,
+            abortSignal: getClientConnectionAbortSignal(mergedMetadata)
+          });
+          logStage('provider.metadata_attach.completed', input.requestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            attempt
+          });
+        } catch (error) {
+          const resolveFailure = await processProviderResolveFailure({
+            error,
+            requestId: input.requestId,
+            providerKey: target.providerKey,
+            providerType:
+              typeof (target as { providerType?: unknown }).providerType === 'string'
+                ? String((target as { providerType?: string }).providerType)
+                : undefined,
+            providerProtocol: target.outboundProfile as ProviderProtocol,
+            routeName: pipelineResult.routingDecision?.routeName,
+            runtimeKey,
+            target: target as unknown as Record<string, unknown>,
+            dependencies: this.deps.getModuleDependencies(),
+            attempt,
+            maxAttempts,
+            logicalRequestChainKey,
+            routePoolForAttempt,
+            excludedProviderKeys,
+            transientRetryTracker,
+            recordAttempt,
+            logStage: (stage, requestId, details) => logStage(stage, requestId, details),
+            logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
+            forcedRouteHint,
+            abortSignal: clientAbortSignal,
+            metadata: metadataForAttempt,
+            logNonBlockingError: logRequestExecutorNonBlockingError,
+            extractRetryErrorSnapshot
+          });
+          const failureState = applyResolveFailureState({
+            lastError,
+            blockingRecoverableRouteHoldState,
+            allowBlockingRecoverableRetryBeyondAttemptBudget,
+            forcedRouteHint,
+            contextOverflowRetries,
+            cumulativeExternalLatencyMs
+          } satisfies RequestExecutorFailureState, resolveFailure);
+          lastError = failureState.lastError;
+          blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
+          allowBlockingRecoverableRetryBeyondAttemptBudget =
+            failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
+          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
+          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
+          continue;
+        }
         const emptyProviderRequestSignal = detectEmptyProviderRequestPayload(providerPayload);
         if (emptyProviderRequestSignal) {
           queuePayloadContractErrorsample({

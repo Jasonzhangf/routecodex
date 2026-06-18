@@ -226,4 +226,84 @@ describe('HubPipeline orchestration', () => {
       effort: 'high'
     });
   });
+
+  test('RED: /v1/responses stopless schema feedback must survive into final provider payload', async () => {
+    const result = await pipeline.execute({
+      endpoint: '/v1/responses',
+      metadata: {
+        providerProtocol: 'openai-responses',
+        clientInjectReady: true,
+      },
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续执行原任务' }]
+          },
+          {
+            type: 'function_call',
+            call_id: 'call_servertool_cli_stop_1',
+            name: 'exec_command',
+            arguments: JSON.stringify({
+              cmd: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+            })
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_servertool_cli_stop_1',
+            output: JSON.stringify({
+              ok: true,
+              toolName: 'stop_message_auto',
+              flowId: 'stop_message_flow',
+              repeatCount: 2,
+              maxRepeats: 3,
+              continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+              schemaFeedback: {
+                reasonCode: 'stop_schema_missing',
+                missingFields: ['stopreason', 'reason']
+              },
+              schemaGuidance: {
+                requiredFields: ['stopreason', 'reason', 'next_step'],
+                stopreasonValues: {
+                  finished: 0,
+                  blocked: 1,
+                  continueNeeded: 2
+                },
+                triggerHint: 'no_schema'
+              }
+            })
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                }
+              }
+            }
+          }
+        ],
+        stream: false
+      }
+    });
+
+    const providerMessages = Array.isArray((result.providerPayload as Record<string, unknown>).messages)
+      ? ((result.providerPayload as Record<string, unknown>).messages as Array<Record<string, unknown>>)
+      : [];
+    const providerText = JSON.stringify(providerMessages);
+
+    expect(providerText).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(providerText).toContain('上一轮执行结果');
+    expect(providerText).toContain('repeatCount=2/3');
+    expect(providerText).toContain('reasonCode=stop_schema_missing');
+    expect(providerText).toContain('missingFields=stopreason, reason');
+    expect(providerText).toContain('如果任务已经完成');
+  });
 });

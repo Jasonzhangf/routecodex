@@ -278,9 +278,18 @@ export function buildChatRequestFromResponses(
     typeof context.requestId === 'string' && context.requestId.trim().length
       ? context.requestId
       : 'unknown';
+  const resumeToolsFromSemantics = readResumeToolsFromChatSemantics(chat as Record<string, unknown>);
   const toolsNormalized = Array.isArray(context.toolsNormalized) && context.toolsNormalized.length
     ? (context.toolsNormalized as unknown as ChatToolDefinition[])
-    : (mapReqInboundBridgeToolsToChatWithNative((payload as any).tools) as unknown as ChatToolDefinition[]);
+    : (
+      Array.isArray((payload as any).tools) && (payload as any).tools.length
+        ? (mapReqInboundBridgeToolsToChatWithNative((payload as any).tools) as unknown as ChatToolDefinition[])
+        : (
+          Array.isArray(resumeToolsFromSemantics) && resumeToolsFromSemantics.length
+            ? (mapReqInboundBridgeToolsToChatWithNative(resumeToolsFromSemantics) as unknown as ChatToolDefinition[])
+            : []
+        )
+    );
   const topLevelPreviousResponseId =
     typeof (payload as Record<string, unknown>).previous_response_id === 'string'
       && String((payload as Record<string, unknown>).previous_response_id).trim().length > 0

@@ -65,17 +65,32 @@ fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
     if request_already_has_stopless_system_instruction(request) {
         return;
     }
-    if !request
+    let has_supported_turns = request
         .get("input")
         .map(|value| matches!(value, Value::Array(_)))
         .unwrap_or(false)
-    {
+        || request
+            .get("messages")
+            .map(|value| matches!(value, Value::Array(_)))
+            .unwrap_or(false);
+    if !has_supported_turns {
         return;
     }
     request.insert(
         "instructions".to_string(),
         Value::String(STOPLESS_SYSTEM_INSTRUCTION.to_string()),
     );
+}
+
+fn should_inject_stopless_system_instruction(metadata: &Map<String, Value>) -> bool {
+    metadata
+        .get("stopMessageEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || metadata
+            .get("routecodexPortStopMessageEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 pub fn apply_req_process_tool_governance(
@@ -88,9 +103,8 @@ pub fn apply_req_process_tool_governance(
     let metadata = normalize_record(input.metadata);
     let request_metadata = Value::Object(metadata.clone());
     let mut request = normalize_record(input.request);
-    let client_inject_ready = resolve_client_inject_ready(&metadata);
     apply_chat_process_request_sanitizer(&mut request);
-    if client_inject_ready {
+    if should_inject_stopless_system_instruction(&metadata) {
         inject_stopless_system_instruction(&mut request);
     }
     normalize_apply_patch_freeform_tool_schema(&mut request);

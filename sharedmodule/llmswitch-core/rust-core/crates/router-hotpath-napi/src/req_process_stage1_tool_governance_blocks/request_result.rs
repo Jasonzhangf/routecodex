@@ -177,7 +177,7 @@ pub(crate) fn build_processed_request(governed: Value, metadata: &Map<String, Va
         .cloned()
         .unwrap_or_default();
     for (key, value) in governed_metadata {
-        merged_metadata.insert(key, value);
+        merged_metadata.entry(key).or_insert(value);
     }
     processed.insert("metadata".to_string(), Value::Object(merged_metadata));
 
@@ -264,5 +264,42 @@ mod tests {
         }));
 
         assert!(!output.as_object().unwrap().contains_key("tool_choice"));
+    }
+
+    #[test]
+    fn build_processed_request_does_not_override_existing_metadata_truth() {
+        let metadata = json!({
+            "serverToolFollowup": false,
+            "clientInjectReady": true,
+            "requestId": "req_meta_truth_1"
+        })
+        .as_object()
+        .cloned()
+        .expect("metadata object");
+        let processed = build_processed_request(
+            json!({
+                "model": "gpt-4.1",
+                "messages": [],
+                "metadata": {
+                    "serverToolFollowup": true,
+                    "clientInjectReady": false,
+                    "chatProcessSanitizer": { "removedAssistantTurns": 1 }
+                },
+                "parameters": {}
+            }),
+            &metadata,
+        );
+
+        let processed_metadata = processed["metadata"].as_object().expect("processed metadata");
+        assert_eq!(processed_metadata.get("serverToolFollowup"), Some(&json!(false)));
+        assert_eq!(processed_metadata.get("clientInjectReady"), Some(&json!(true)));
+        assert_eq!(processed_metadata.get("requestId"), Some(&json!("req_meta_truth_1")));
+        assert_eq!(
+            processed_metadata
+                .get("chatProcessSanitizer")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("removedAssistantTurns")),
+            Some(&json!(1))
+        );
     }
 }

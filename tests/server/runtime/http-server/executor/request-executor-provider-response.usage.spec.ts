@@ -35,6 +35,41 @@ function baseArgs(overrides: Record<string, unknown>) {
 }
 
 describe('processSuccessfulProviderResponse usage protocol accounting', () => {
+  it('escalates 200 business error payloads into provider failure path instead of treating them as success', async () => {
+    const { processSuccessfulProviderResponse } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-executor-provider-response.js'
+    );
+
+    await expect(processSuccessfulProviderResponse(baseArgs({
+      providerProtocol: 'openai-responses',
+      normalized: {
+        status: 200,
+        body: {
+          error: {
+            message: 'usage limit exceeded, weekly usage limit reached',
+            code: 'PROVIDER_STATUS_2056',
+            statusCode: 2056
+          }
+        }
+      } as any,
+      converted: {
+        status: 200,
+        body: {
+          error: {
+            message: 'usage limit exceeded, weekly usage limit reached',
+            code: 'PROVIDER_STATUS_2056',
+            statusCode: 2056
+          }
+        }
+      } as any
+    }) as any)).rejects.toMatchObject({
+      statusCode: 429,
+      code: 'HTTP_429_2056',
+      upstreamCode: 'PROVIDER_STATUS_2056',
+      requestExecutorProviderErrorStage: 'provider.http'
+    });
+  });
+
   it('uses providerProtocol when extracting OpenAI Responses usage cache metrics', async () => {
     const { processSuccessfulProviderResponse } = await import(
       '../../../../../src/server/runtime/http-server/executor/request-executor-provider-response.js'

@@ -348,6 +348,12 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default();
+    let source_instructions = payload
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     if payload.get("input").is_some() {
         let chat = crate::responses_openai_codec::run_responses_openai_request_codec_json(
@@ -365,8 +371,9 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
             None,
         )
         .map_err(|error| error.to_string())?;
-        let anthropic_value: Value =
+        let mut anthropic_value: Value =
             serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        apply_anthropic_system_from_instructions(&mut anthropic_value, source_instructions.as_deref());
         return Ok(strip_private_fields(&anthropic_value));
     }
     if source_format != "anthropic-messages" && payload.get("messages").is_some() {
@@ -375,11 +382,31 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
             None,
         )
         .map_err(|error| error.to_string())?;
-        let anthropic_value: Value =
+        let mut anthropic_value: Value =
             serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
+        apply_anthropic_system_from_instructions(&mut anthropic_value, source_instructions.as_deref());
         return Ok(strip_private_fields(&anthropic_value));
     }
     Ok(strip_private_fields(&payload))
+}
+
+fn apply_anthropic_system_from_instructions(payload: &mut Value, instructions: Option<&str>) {
+    let Some(instructions) = instructions.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let Some(obj) = payload.as_object_mut() else {
+        return;
+    };
+    if obj
+        .get("system")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+    {
+        return;
+    }
+    obj.insert("system".to_string(), Value::String(instructions.to_string()));
 }
 
 fn build_gemini_chat_request(format_envelope: &Value) -> Result<Value, String> {
@@ -601,6 +628,33 @@ mod tests {
             "search latest"
         );
         assert!(result.payload.get("metadata").is_none());
+    }
+
+    #[test]
+    fn test_build_anthropic_messages_request_preserves_responses_instructions_as_system() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M2.7",
+                    "instructions": "stopreason 取值：0=finished，1=blocked，2=continue_needed",
+                    "input": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "search latest"}]
+                    }]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        assert_eq!(
+            result.payload["system"],
+            "stopreason 取值：0=finished，1=blocked，2=continue_needed"
+        );
+        assert!(result.payload.get("instructions").is_none());
     }
 
     #[test]

@@ -5,6 +5,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { PreparedHttpRequest } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
+import { normalizeKnownProviderError, PROVIDER_NETWORK_CODES } from './provider-error-catalog.js';
 import { OAuthRecoveryHandler } from './transport/oauth-recovery-handler.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -112,6 +113,12 @@ export async function normalizeProviderHttpError(options: {
   const normalized: ProviderErrorAugmented = options.error as ProviderErrorAugmented;
   try {
     const statusCode = extractStatusCodeFromError(normalized);
+    const inferredCatalog = normalizeKnownProviderError({
+      statusCode,
+      code: normalized.code,
+      upstreamCode: normalized.response?.data?.error?.code,
+      message: normalized.message
+    });
     if (statusCode && !Number.isNaN(statusCode)) {
       normalized.statusCode = statusCode;
       if (!normalized.status) {
@@ -119,6 +126,23 @@ export async function normalizeProviderHttpError(options: {
       }
       if (!normalized.code) {
         normalized.code = `HTTP_${statusCode}`;
+      }
+    }
+    if (inferredCatalog) {
+      if (!normalized.code) {
+        normalized.code = inferredCatalog.key;
+      }
+      if (
+        (!normalized.statusCode || Number.isNaN(normalized.statusCode))
+        && (!normalized.status || Number.isNaN(normalized.status))
+      ) {
+        if (typeof inferredCatalog.status === 'number') {
+          normalized.statusCode = inferredCatalog.status;
+          normalized.status = inferredCatalog.status;
+        } else if (PROVIDER_NETWORK_CODES.has(inferredCatalog.key)) {
+          normalized.statusCode = 502;
+          normalized.status = 502;
+        }
       }
     }
     if (!normalized.response) {

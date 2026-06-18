@@ -161,6 +161,51 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['1token.key1.gpt-5.5']);
   });
 
+  it('keeps reroute enabled for relay continuation recoverable failures when an alternative provider exists', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const transientRetryTracker = createRequestLocalTransientRetryTracker();
+    const error = Object.assign(new Error('HTTP 502: fetch failed'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: fetch failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'relay.key1.gpt-5.5',
+      runtimeKey: 'relay.key1',
+      logicalRequestChainKey: 'req-relay-continuation-reroute',
+      logicalChainRetryLimitStageRequestId: 'req-relay-continuation-reroute',
+      routePool: ['relay.key1.gpt-5.5', 'relay.key2.gpt-5.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      transientRetryTracker,
+      isStreamingRequest: true,
+      providerOwnedContinuation: false
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan).toEqual(expect.objectContaining({
+      switchAction: 'exclude_and_reroute',
+      decisionLabel: 'provider_backoff_then_reroute'
+    }));
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryBackoffMs).toBe(0);
+    expect(plan.recoverableBackoffMs).toBe(0);
+    expect(Array.from(excludedProviderKeys)).toEqual(['relay.key1.gpt-5.5']);
+  });
+
   it('does not retry the same provider for streaming recoverable pre-response failures', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();

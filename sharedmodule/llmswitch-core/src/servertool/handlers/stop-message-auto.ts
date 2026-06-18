@@ -58,6 +58,8 @@ import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../stopless-me
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
 /** Pluggable decision function — default calls native, overridable for tests. */
 let decideOverride: ((ctx: StopMessageDecisionContext) => StopMessageDecision) | null = null;
 
@@ -269,6 +271,19 @@ function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown
     reason: 'stopless-runtime-state',
     required: true
   });
+}
+
+function bindMetadataCenterFromRecordToMetadata(
+  record: Record<string, unknown>,
+  metadata: Record<string, unknown>
+): void {
+  if (Reflect.has(metadata, METADATA_CENTER_SYMBOL)) {
+    return;
+  }
+  const center = Reflect.get(record, METADATA_CENTER_SYMBOL);
+  if (center) {
+    Reflect.set(metadata, METADATA_CENTER_SYMBOL, center);
+  }
 }
 
 function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
@@ -550,6 +565,7 @@ const handler: ServerToolHandler = async (
         if (metadata !== record.metadata) {
           record.metadata = metadata;
         }
+        bindMetadataCenterFromRecordToMetadata(record, metadata);
         attachStoplessRuntimeControlToMetadata(metadata, {
           sessionId: typeof record.sessionId === 'string' ? record.sessionId : undefined,
           flowId: FLOW_ID,

@@ -498,6 +498,7 @@ export async function runServerToolOrchestration(
       options: { requestId: options.requestId, adapterContext: options.adapterContext },
       flowId,
       reasoningText: extractStoplessReasoningText(engineResult.finalChatResponse),
+      ...(stoplessSessionId ? { sessionId: stoplessSessionId } : {}),
       input: {
         flowId,
         repeatCount: loopState.repeatCount,

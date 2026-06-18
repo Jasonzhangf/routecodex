@@ -157,10 +157,106 @@ async function observeSuccessfulOutcome(args: ObserveSuccessArgs): Promise<void>
   });
 }
 
+function normalizeProviderBusinessStatusCode(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 1000) {
+    return Math.floor(value);
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const match = trimmed.match(/provider_status_(\d+)/i);
+  if (match) {
+    return Number.parseInt(match[1] || '', 10);
+  }
+  if (/^\d{4,}$/.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+  return undefined;
+}
+
+function readStructuredProviderBusinessError(
+  converted: PipelineExecutionResult
+): {
+  message: string;
+  providerStatusCode: number;
+  upstreamCode: string;
+  canonicalCode: string;
+  statusCode: number;
+  reason: string;
+} | null {
+  const bodyForError =
+    converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)
+      ? (converted.body as Record<string, unknown>)
+      : undefined;
+  if (!bodyForError) {
+    return null;
+  }
+  const errorNode =
+    bodyForError.error && typeof bodyForError.error === 'object' && !Array.isArray(bodyForError.error)
+      ? (bodyForError.error as Record<string, unknown>)
+      : undefined;
+  if (!errorNode) {
+    return null;
+  }
+  const rawCode = typeof errorNode.code === 'string' ? errorNode.code.trim() : '';
+  const providerStatusCode =
+    normalizeProviderBusinessStatusCode(rawCode)
+    ?? normalizeProviderBusinessStatusCode(errorNode.statusCode)
+    ?? normalizeProviderBusinessStatusCode(errorNode.status_code);
+  if (!providerStatusCode) {
+    return null;
+  }
+  const message =
+    typeof errorNode.message === 'string' && errorNode.message.trim()
+      ? errorNode.message.trim()
+      : `provider business error ${providerStatusCode}`;
+  const upstreamCode = `PROVIDER_STATUS_${providerStatusCode}`;
+  if (providerStatusCode === 2056) {
+    return {
+      message,
+      providerStatusCode,
+      upstreamCode,
+      canonicalCode: 'HTTP_429_2056',
+      statusCode: 429,
+      reason: 'provider_business_error'
+    };
+  }
+  return {
+    message,
+    providerStatusCode,
+    upstreamCode,
+    canonicalCode: 'MALFORMED_RESPONSE',
+    statusCode: 200,
+    reason: 'provider_business_error'
+  };
+}
+
 function throwProviderHttpError(converted: PipelineExecutionResult): never {
   const bodyForError = converted.body && typeof converted.body === 'object'
     ? (converted.body as Record<string, unknown>)
     : undefined;
+  const structuredBusinessError = readStructuredProviderBusinessError(converted);
+  if (structuredBusinessError) {
+    const errorToThrow: any = new Error(structuredBusinessError.message);
+    errorToThrow.statusCode = structuredBusinessError.statusCode;
+    errorToThrow.status = structuredBusinessError.statusCode;
+    errorToThrow.code = structuredBusinessError.canonicalCode;
+    errorToThrow.upstreamCode = structuredBusinessError.upstreamCode;
+    errorToThrow.response = { data: bodyForError };
+    errorToThrow.requestExecutorProviderErrorStage = 'provider.http';
+    errorToThrow.details = {
+      detected: 'provider_business_error',
+      reason: structuredBusinessError.reason,
+      upstreamCode: structuredBusinessError.upstreamCode.toLowerCase(),
+      providerStatusCode: structuredBusinessError.providerStatusCode,
+      providerStatusMessage: structuredBusinessError.message
+    };
+    throw errorToThrow;
+  }
   const errorNode =
     bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
       ? (bodyForError.error as Record<string, unknown>)
@@ -281,7 +377,7 @@ export async function processSuccessfulProviderResponse(args: {
       convertedStatus === 408 ||
       convertedStatus === 425 ||
       convertedStatus >= 500);
-  if (isGlobalRetryableStatus) {
+  if (isGlobalRetryableStatus || readStructuredProviderBusinessError(args.converted)) {
     throwProviderHttpError(args.converted);
   }
 

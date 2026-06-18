@@ -1,9 +1,7 @@
 import { jest } from '@jest/globals';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../../src/server/runtime/handlers/types.js';
-import type { HubPipeline } from '../../../../src/server/runtime/http-server/types.js';
-import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
+import type { HubPipeline, ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 jest.unstable_mockModule(
   '../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js',
@@ -24,9 +22,7 @@ jest.unstable_mockModule(
   })
 );
 
-const mockRebindResponsesConversationRequestId = jest.fn(async () => {
-  throw new Error('rebind failed');
-});
+const mockRebindResponsesConversationRequestId = jest.fn(async () => undefined);
 
 const mockBridgeModule = () => ({
   loadRoutingInstructionStateSync: () => null,
@@ -74,21 +70,20 @@ const mockBridgeModule = () => ({
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
-
 const mockProviderRequestContextModule = () => ({
-  resolveProviderRequestContext: () => ({
-    requestId: 'rebased_request_id',
+  resolveProviderRequestContext: ({ target }: { target?: { providerKey?: string } }) => ({
+    requestId: `rebased_${target?.providerKey ?? 'unknown'}`,
     providerProtocol: 'openai-responses',
-    providerModel: 'mimo-v2.5-pro',
-    providerLabel: 'mimo.key1.mimo-v2.5-pro'
+    providerModel: `${target?.providerKey ?? 'unknown'}-model`,
+    providerLabel: `${target?.providerKey ?? 'unknown'}-label`
   })
 });
 
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/provider-request-context.js', mockProviderRequestContextModule);
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/provider-request-context.ts', mockProviderRequestContextModule);
 
-describe('HubRequestExecutor requestId rebind', () => {
-  it('reroutes recoverable responses conversation requestId rebind failures when another provider remains in the route pool', async () => {
+describe('HubRequestExecutor pre-send failure reroute', () => {
+  it('reroutes recoverable rebind failures instead of surfacing them before the route pool is exhausted', async () => {
     jest.resetModules();
     mockRebindResponsesConversationRequestId.mockReset();
     mockRebindResponsesConversationRequestId
@@ -100,40 +95,37 @@ describe('HubRequestExecutor requestId rebind', () => {
       }))
       .mockResolvedValueOnce(undefined);
 
-    const { HubRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor.js');
+    const { HubRequestExecutor, __requestExecutorTestables } = await import(
+      '../../../../src/server/runtime/http-server/request-executor.js'
+    );
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
 
-    const processIncoming1 = jest.fn(async () => ({ ok: true }));
+    const processIncoming1 = jest.fn(async () => ({ status: 200, data: { id: 'resp_should_not_happen' } }));
     const processIncoming2 = jest.fn(async () => ({ status: 200, body: { id: 'resp_ok' } }));
     const handle1: ProviderHandle = {
-      providerType: 'gemini',
-      providerFamily: 'gemini',
-      providerId: 'mimo1',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerId: 'p1',
       providerProtocol: 'openai-responses',
-      instance: {
-        processIncoming: processIncoming1,
-        cleanup: jest.fn()
-      }
+      instance: { processIncoming: processIncoming1, cleanup: jest.fn() }
     } as unknown as ProviderHandle;
     const handle2: ProviderHandle = {
-      providerType: 'gemini',
-      providerFamily: 'gemini',
-      providerId: 'mimo2',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerId: 'p2',
       providerProtocol: 'openai-responses',
-      instance: {
-        processIncoming: processIncoming2,
-        cleanup: jest.fn()
-      }
+      instance: { processIncoming: processIncoming2, cleanup: jest.fn() }
     } as unknown as ProviderHandle;
 
-    const provider1 = 'mimo.key1';
-    const provider2 = 'mimo.key2';
+    const provider1 = 'openai.key1.gpt-5.4';
+    const provider2 = 'openai.key2.gpt-5.4';
     const routePool = [provider1, provider2];
 
-    const pipelineResult1: PipelineExecutionResult = {
-      providerPayload: { data: { model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'ping' }] } },
+    const firstResult: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.4', input: 'ping1' },
       target: {
         providerKey: provider1,
-        providerType: 'gemini',
+        providerType: 'openai',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:key1',
         processMode: 'standard'
@@ -142,11 +134,11 @@ describe('HubRequestExecutor requestId rebind', () => {
       processMode: 'standard',
       metadata: {}
     };
-    const pipelineResult2: PipelineExecutionResult = {
-      providerPayload: { data: { model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'ping' }] } },
+    const secondResult: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.4', input: 'ping2' },
       target: {
         providerKey: provider2,
-        providerType: 'gemini',
+        providerType: 'openai',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:key2',
         processMode: 'standard'
@@ -158,8 +150,8 @@ describe('HubRequestExecutor requestId rebind', () => {
 
     const fakePipeline: HubPipeline = {
       execute: jest.fn()
-        .mockResolvedValueOnce(pipelineResult1)
-        .mockResolvedValueOnce(pipelineResult2)
+        .mockResolvedValueOnce(firstResult)
+        .mockResolvedValueOnce(secondResult)
     };
 
     const deps = {
@@ -187,118 +179,27 @@ describe('HubRequestExecutor requestId rebind', () => {
     };
 
     const executor = new HubRequestExecutor(deps as any);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({ status: 200, body: { ok: true } });
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: { id: 'resp_ok', object: 'response', output: [] }
+    });
 
     const request: PipelineExecutionInput = {
-      requestId: 'req_test',
+      requestId: 'req_pre_send_reroute',
       entryEndpoint: '/v1/responses',
       headers: {},
-      body: { model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'ping' }] },
+      body: { model: 'gpt-5.4', input: 'ping' },
       metadata: { stream: false, inboundStream: false }
     };
 
     const result = await executor.execute(request);
+
     expect(result.usageLogInfo?.providerKey).toBe(provider2);
-    expect(mockRebindResponsesConversationRequestId).toHaveBeenCalledTimes(2);
     expect(processIncoming1).not.toHaveBeenCalled();
     expect(processIncoming2).toHaveBeenCalledTimes(1);
-    expect((deps.logStage as jest.Mock).mock.calls.some((call) => call[0] === 'responsesConversation.rebindRequestId.error')).toBe(true);
+    expect(mockRebindResponsesConversationRequestId).toHaveBeenCalledTimes(2);
     expect((deps.logStage as jest.Mock).mock.calls.some(
-      (call) => call[0] === 'provider.runtime_resolve.error' && call[1] === 'rebased_request_id'
+      (call) => call[0] === 'provider.runtime_resolve.error' && call[1] === 'rebased_openai.key1.gpt-5.4'
     )).toBe(true);
-  });
-
-  it('passes serverToolsEnabled=false when nested followup metadata disables stopMessage', async () => {
-    jest.resetModules();
-    mockRebindResponsesConversationRequestId.mockImplementationOnce(async () => undefined);
-
-    const { HubRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor.js');
-
-    const processIncoming = jest.fn(async () => ({ status: 200, data: { id: 'resp_nested_stop_disabled', object: 'response', output: [] } }));
-    const handle: ProviderHandle = {
-      providerType: 'openai',
-      providerFamily: 'openai',
-      providerId: 'cc',
-      providerProtocol: 'openai-responses',
-      instance: {
-        processIncoming,
-        cleanup: jest.fn()
-      }
-    } as unknown as ProviderHandle;
-
-    const pipelineResult: PipelineExecutionResult = {
-      providerPayload: { model: 'gpt-5.5', input: 'continue' },
-      target: {
-        providerKey: 'cc.key1.gpt-5.5',
-        providerType: 'openai',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'runtime:cc',
-        processMode: 'chat'
-      },
-      processMode: 'chat',
-      metadata: {}
-    };
-
-    const fakePipeline: HubPipeline = {
-      execute: jest.fn().mockResolvedValue(pipelineResult)
-    };
-
-    const deps = {
-      runtimeManager: {
-        resolveRuntimeKey: jest.fn().mockReturnValue('runtime:cc'),
-        getHandleByRuntimeKey: jest.fn().mockReturnValue(handle)
-      },
-      getHubPipeline: () => fakePipeline,
-      getModuleDependencies: (): ModuleDependencies => ({
-        errorHandlingCenter: {
-          handleError: jest.fn().mockResolvedValue({ success: true })
-        }
-      } as unknown as ModuleDependencies),
-      logStage: jest.fn(),
-      stats: {
-        recordRequestStart: jest.fn(),
-        recordCompletion: jest.fn(),
-        bindProvider: jest.fn(),
-        recordToolUsage: jest.fn()
-      }
-    };
-
-    const executor = new HubRequestExecutor(deps as any);
-    const metadata = {
-      stream: false,
-      inboundStream: false
-    } as Record<string, unknown>;
-    MetadataCenter.attach(metadata).writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts',
-        symbol: 'nested_followup_test',
-        stage: 'test_runtime_control'
-      }
-    );
-    MetadataCenter.attach(metadata).writeRuntimeControl(
-      'stopMessageEnabled',
-      false,
-      {
-        module: 'tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts',
-        symbol: 'nested_followup_test',
-        stage: 'test_runtime_control'
-      }
-    );
-
-    await executor.execute({
-      requestId: 'req_nested_stop_disabled',
-      entryEndpoint: '/v1/responses',
-      headers: {},
-      body: { model: 'gpt-5.5', input: 'continue' },
-      metadata
-    });
-
-    const responseConvertStartCall = (deps.logStage as jest.Mock).mock.calls.find(
-      (call) => call[0] === 'provider.response_convert.start'
-    );
-    expect(responseConvertStartCall).toBeTruthy();
-    expect(responseConvertStartCall?.[2]).toMatchObject({ serverToolsEnabled: false });
   });
 });

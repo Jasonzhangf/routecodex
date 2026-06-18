@@ -95,6 +95,10 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
+      '--session-id',
+      sessionId,
+      '--request-id',
+      requestId,
       '--input-json',
       '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}'
     ]);
@@ -108,8 +112,8 @@ describe('servertool CLI command', () => {
       repeatCount: 3,
       maxRepeats: 3
     });
-    expect(payload.sessionId).toBeUndefined();
-    expect(payload.requestId).toBeUndefined();
+    expect(payload.sessionId).toBe(sessionId);
+    expect(payload.requestId).toBe(requestId);
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
     expect(typeof payload.modelGuidance).toBe('string');
@@ -142,7 +146,8 @@ describe('servertool CLI command', () => {
     }
   });
 
-  it('runs stopless CLI without session identity flags', async () => {
+  it('runs stopless CLI with explicit session identity flags', async () => {
+    const { sessionId, requestId } = uniqueStoplessIdentity();
     const output: string[] = [];
     const errors: string[] = [];
     const program = new Command();
@@ -161,6 +166,10 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
+      '--session-id',
+      sessionId,
+      '--request-id',
+      requestId,
       '--input-json',
       '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}'
     ]);
@@ -168,8 +177,8 @@ describe('servertool CLI command', () => {
     expect(errors).toEqual([]);
     const payload = JSON.parse(output[0] ?? '{}');
     expect(payload.repeatCount).toBe(2);
-    expect(payload.sessionId).toBeUndefined();
-    expect(payload.requestId).toBeUndefined();
+    expect(payload.sessionId).toBe(sessionId);
+    expect(payload.requestId).toBe(requestId);
   });
 
   it('passes explicit repeat flags through to the standalone Rust binary', async () => {
@@ -192,6 +201,10 @@ describe('servertool CLI command', () => {
       'servertool',
       'run',
       'stop_message_auto',
+      '--session-id',
+      sessionId,
+      '--request-id',
+      requestId,
       '--repeat-count',
       '2',
       '--max-repeats',
@@ -213,8 +226,8 @@ describe('servertool CLI command', () => {
         maxRepeats: 5
       }
     });
-    expect(payload.sessionId).toBeUndefined();
-    expect(payload.requestId).toBeUndefined();
+    expect(payload.sessionId).toBe(sessionId);
+    expect(payload.requestId).toBe(requestId);
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
     expect(typeof payload.modelGuidance).toBe('string');

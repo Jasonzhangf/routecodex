@@ -8,9 +8,31 @@ describe('request executor request semantics', () => {
     })).resolves.toBe(false);
   });
 
+  it('does not mark relay previous response resume as provider-owned continuation', async () => {
+    await expect(isProviderNativeResumeContinuation({
+      continuation: {
+        continuationOwner: 'relay',
+        resumeFrom: {
+          previousResponseId: 'resp_relay_1'
+        }
+      }
+    })).resolves.toBe(false);
+  });
+
+  it('does not mark relay submit_tool_outputs response id resume as provider-owned continuation', async () => {
+    await expect(isProviderNativeResumeContinuation({
+      continuation: {
+        continuationOwner: 'relay',
+        mode: 'submit_tool_outputs',
+        responseId: 'resp_relay_1'
+      }
+    })).resolves.toBe(false);
+  });
+
   it('marks previous response resume as provider-owned continuation', async () => {
     await expect(isProviderNativeResumeContinuation({
       continuation: {
+        continuationOwner: 'direct',
         resumeFrom: {
           previousResponseId: 'resp_1'
         }
@@ -21,6 +43,7 @@ describe('request executor request semantics', () => {
   it('marks submit_tool_outputs response id resume as provider-owned continuation', async () => {
     await expect(isProviderNativeResumeContinuation({
       continuation: {
+        continuationOwner: 'direct',
         mode: 'submit_tool_outputs',
         responseId: 'resp_1'
       }

@@ -120,6 +120,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(command).not.toContain('继续执行');
     expect(command).toContain('schemaFeedback');
     expect(command).toContain('stopreason');
+    expect(command).toContain("--session-id 'sess-stop-cli-lifecycle'");
+    expect(command).toContain("--request-id 'req_stop_cli_lifecycle'");
     for (const forbidden of [
       'stopless',
       'servertool',

@@ -751,6 +751,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).not.toContain('event: error');
+    expect(output).not.toContain('upstream_stream_incomplete');
     expect(output).not.toContain('STOPLESS_FINALIZATION_MISSING');
   });
 

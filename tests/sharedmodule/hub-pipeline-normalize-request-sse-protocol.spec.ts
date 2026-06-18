@@ -1,5 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
+import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const resolveSseProtocolWithNative = jest.fn();
 const extractModelHintFromMetadataWithNative = jest.fn(() => 'gpt-test');
@@ -121,4 +123,72 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
       expect(result.providerPayload).toMatchObject({ model: 'gpt-test' });
     });
   }
+
+  it('preserves MetadataCenter binding through HubPipeline request materialization', async () => {
+    resolveSseProtocolWithNative.mockReturnValueOnce('openai-responses');
+    convertSseToJson.mockResolvedValueOnce({
+      model: 'gpt-test',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '请继续执行。<**stopless:on**>' }],
+        },
+      ],
+      stream: false,
+    });
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req_hub_pipeline_metadata_center_binding',
+      headers: {},
+      query: {},
+      body: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '请继续执行。<**stopless:on**>' }],
+          },
+        ],
+        stream: false,
+      },
+      metadata: {},
+    } as any);
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
+      stopMessageEnabled: true,
+    });
+
+    const pipeline = new HubPipeline({
+      virtualRouter: {},
+    } as any);
+
+    await pipeline.execute({
+      id: 'req_hub_pipeline_metadata_center_binding',
+      endpoint: '/v1/responses',
+      payload: { readable: Readable.from(['event: message\ndata: {}\n\n']) },
+      metadata: {
+        ...metadata,
+        __routecodexPreselectedRoute: {
+          target: {
+            providerKey: 'test.key1.MiniMax-M2.7',
+            providerType: 'anthropic',
+            outboundProfile: 'anthropic-messages',
+            modelId: 'MiniMax-M2.7',
+          },
+          decision: { routeName: 'search/gateway-priority-5555-priority-search' },
+          diagnostics: {},
+        },
+      },
+    } as any);
+
+    expect(runHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          stopMessageEnabled: true,
+          routecodexPortStopMessageEnabled: true,
+        }),
+      }),
+    }));
+  });
 });

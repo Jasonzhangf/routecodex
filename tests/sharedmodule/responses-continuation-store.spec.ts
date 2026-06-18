@@ -150,6 +150,183 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
+  it('preserves restored tools for relay continuation resume when caller tools are empty', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-stopless-tools-1'),
+      sessionId: 'sess-stopless-tools',
+      conversationId: 'conv-stopless-tools',
+      providerKey: 'XL.key1.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续执行' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-stopless-tools-1'),
+      providerKey: 'XL.key1.gpt-5.4',
+      response: {
+        id: 'resp-stopless-tools-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '继续做下一步' }]
+          }
+        ]
+      }
+    });
+
+    const restored = resumeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-stopless-tools-2'),
+      sessionId: 'sess-stopless-tools',
+      conversationId: 'conv-stopless-tools',
+      entryKind: 'responses',
+      continuationOwner: 'relay',
+      payload: {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp-stopless-tools-1',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续执行下一步' }]
+          }
+        ]
+      }
+    });
+
+    expect(restored).not.toBeNull();
+    expect(restored?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-stopless-tools-1',
+      restored: true
+    });
+    expect(Array.isArray((restored?.meta as any)?.restoredTools)).toBe(true);
+    expect((restored?.meta as any)?.restoredTools?.[0]).toMatchObject({
+      type: 'function',
+      name: 'exec_command'
+    });
+
+    const chatRequest = buildChatRequestFromResponses(
+      {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp-stopless-tools-1',
+        input: (restored as any).payload.input,
+        semantics: {
+          responses: {
+            resume: restored?.meta
+          }
+        },
+        tools: []
+      },
+      {
+        requestId: 'req-resp-store-stopless-tools-bridge',
+        input: (restored as any).payload.input,
+        toolsNormalized: [] as any
+      } as any
+    );
+
+    expect(Array.isArray((chatRequest as any)?.toolsNormalized)).toBe(true);
+    expect((chatRequest as any)?.toolsNormalized?.[0]).toMatchObject({
+      type: 'function',
+      function: expect.objectContaining({
+        name: 'exec_command'
+      })
+    });
+  });
+
+  it('preserves restored tools for relay continuation materialize after request release', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-materialize-tools-1'),
+      sessionId: 'sess-materialize-tools',
+      conversationId: 'conv-materialize-tools',
+      providerKey: 'XL.key1.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '先执行第一步' }]
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-resp-store-materialize-tools-1'),
+      providerKey: 'XL.key1.gpt-5.4',
+      response: {
+        id: 'resp-materialize-tools-1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: '第一步完成' }]
+          }
+        ]
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-resp-store-materialize-tools-1');
+
+    const materialized = materializeLatestResponsesContinuationByScope({
+      requestId: track('req-resp-store-materialize-tools-2'),
+      sessionId: 'sess-materialize-tools',
+      conversationId: 'conv-materialize-tools',
+      entryKind: 'responses',
+      continuationOwner: 'relay',
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续第二步' }]
+          }
+        ]
+      }
+    });
+
+    expect(materialized).not.toBeNull();
+    expect(materialized?.meta).toMatchObject({
+      restoredFromResponseId: 'resp-materialize-tools-1',
+      materialized: true,
+      materializedMode: 'local_full_input'
+    });
+    expect(Array.isArray((materialized?.meta as any)?.restoredTools)).toBe(true);
+    expect((materialized?.meta as any)?.restoredTools?.[0]).toMatchObject({
+      type: 'function',
+      name: 'exec_command'
+    });
+  });
+
   it('records response message output_text as legal request history input_text instead of replaying response-only content types', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-output-text-1'),
@@ -2807,6 +2984,8 @@ describe('responses conversation store plain continuation restore', () => {
     const resumed2Guidance = (resumed2.payload.input as Array<any>)[1]?.content?.[0]?.text ?? '';
     expect(String(resumed1Guidance)).toContain('上一轮执行结果：repeatCount=2/3');
     expect(String(resumed2Guidance)).toContain('上一轮执行结果：repeatCount=3/3');
+    expect(String(resumed2Guidance)).toContain('stopreason');
+    expect(String(resumed2Guidance)).toContain('0=finished，1=blocked，2=continue_needed');
     expect(resumed2.payload.input).toEqual([
       {
         type: 'message',

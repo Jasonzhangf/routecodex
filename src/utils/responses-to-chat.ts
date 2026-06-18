@@ -1,7 +1,33 @@
 import { convertResponsesRequestToChatNative } from '../modules/llmswitch/bridge.js';
 
 export function normalizeResponsesToChatBody(body: Record<string, unknown>): void {
-  if (!Array.isArray(body.input) && typeof body.instructions !== 'string') {
+  const hasInput = Array.isArray(body.input);
+  const hasMessages = Array.isArray(body.messages) && body.messages.length > 0;
+  const rawInstructions =
+    typeof body.instructions === 'string' && body.instructions.trim().length > 0
+      ? body.instructions.trim()
+      : undefined;
+
+  if (!hasInput && !rawInstructions) {
+    return;
+  }
+
+  if (!hasInput && hasMessages) {
+    if (rawInstructions) {
+      const messages = body.messages as Array<Record<string, unknown>>;
+      const hasSystemInstruction = messages.some(
+        (message) => message && typeof message === 'object' && String((message as Record<string, unknown>).role).toLowerCase() === 'system'
+      );
+      if (!hasSystemInstruction) {
+        body.messages = [
+          { role: 'system', content: rawInstructions },
+          ...messages
+        ];
+      }
+    }
+    delete body.instructions;
+    delete body.previous_response_id;
+    delete body.include;
     return;
   }
 
@@ -11,7 +37,18 @@ export function normalizeResponsesToChatBody(body: Record<string, unknown>): voi
   const request = native.request && typeof native.request === 'object' && !Array.isArray(native.request)
     ? (native.request as Record<string, unknown>)
     : {};
-  const messages = Array.isArray(request.messages) ? request.messages : undefined;
+  let messages = Array.isArray(request.messages) ? request.messages : undefined;
+  if (messages && rawInstructions) {
+    const hasSystemInstruction = messages.some(
+      (message) => message && typeof message === 'object' && String((message as Record<string, unknown>).role).toLowerCase() === 'system'
+    );
+    if (!hasSystemInstruction) {
+      messages = [
+        { role: 'system', content: rawInstructions },
+        ...messages
+      ];
+    }
+  }
   if (messages && messages.length > 0) {
     body.messages = messages;
   }

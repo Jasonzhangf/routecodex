@@ -101,6 +101,18 @@
   - 本 slice 只清 active mainline followup / stoplessGoalStatus 对 legacy `__rt` 的依赖，没有减少 `__routecodex* runtime=14 files=9` 的 guard/contract 残留总数。
   - 下一步仍需继续做 request-route control（如 retry/preselected route）向 `MetadataCenter.runtime_control` 的迁移和剩余 runtime residue 审计。
 
+## 2026-06-19 metadata-center stream/client-abort slice gate closeout
+
+- `verify:architecture-ci` 的唯一阻塞不是 runtime 语义回归，而是 `src/server/handlers/handler-utils.ts` 的本地 `MetadataCenter.writeRuntimeControl(...)` writer stage 误用了 canonical 节点名 `MetaReq04RuntimeControlBound`，触发 `hub.metadata_center_request_capture` / `hub.metadata_center_attempt_merge` 的 forbidden-path-growth。
+- 最小修复：把 handler 本地 writer stage 改成 `handler_pipeline_runtime_control`，不改写入语义、不改 owner、不改 runtime_control 内容，只消除 handler 路径对 canonical hub stage id 的泄漏。
+- 验证：
+  - `npm run verify:architecture-ci` PASS
+  - `npm run verify:architecture-forbidden-path-growth` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 审计事实：当前 `MetaReq04RuntimeControlBound` 只剩 function-map 真源和 `src/modules/llmswitch/bridge/responses-request-bridge.ts` 的桥层 owner 写入；`src/server/handlers/**` 已无命中。
+
 ## 2026-06-18 MetadataCenter stopless runtime-control slice
 
 - Goal slice implemented: stopless/servertool followup control semantics now write `runtime_control.stopless` through the bound `MetadataCenter` side-channel; the write is fail-fast when the request-local MetadataCenter binding is absent.
@@ -5812,6 +5824,12 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 
 ## 2026-06-18 active goal post-commit closure audit
 
+## 2026-06-18 stopless MetadataCenter relay binding red tests
+- 当前继续收口 relay stopless MetadataCenter：两个红测已复现。
+- `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` 当前失败在 `keeps followup stopMessage enabled only when flow policy preserves eligibility`：baseMetadata 的 `MetadataCenter.runtime_control.stopMessageEnabled=true` 进入 nested metadata 后被 `servertool-followup-dispatch.ts` 覆盖成 `false`。
+- `tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts` 当前失败在真实 entrypoint metadata path：`buildRequestMetadata()` 写入的 MetadataCenter symbol 被普通 metadata spread 丢失，最终 provider payload 没有 stop schema instruction。
+- 本轮唯一修复方向：不在 followup nested builder 里无资格覆盖 stopless control；request-stage bridge 需要在当前请求 body 明确有 stopless directive 时确保 MetadataCenter 绑定并写 runtime_control，而不是走 payload 字段或 direct/SSE 补丁。
+
 - 当前远端状态：
   - `HEAD == origin/main == 4b3451cb964e96a5c5104123a5367608976e621c`
   - 仅剩未跟踪过程样本目录：`tests/fixtures/goal-request-user-input-real-samples/runs/`
@@ -6029,3 +6047,121 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 更正：client-request snapshot 不是 MetadataCenter runtimeControl 的完整真相；sample writer 不会把 runtimeControl 投影回普通 metadata 字段。stopless 是否生效仍以 provider-request 是否出现 instructions 为准。
 
 - 根因二修复：request-stage bridge 之前只投影 __rt，不投影 MetadataCenter.runtimeControl，导致 native req_process 看不到 stopMessageEnabled；已在 hub-pipeline-execute-request-stage.ts 补 runtimeControl -> __rt 投影，并加 preselected-route focused test 锁住。
+
+## 2026-06-18 stopless MetadataCenter response binding hotfix
+- 线上报错：`[convert.bridge] MetadataCenter runtime_control.stopless writer requires a bound MetadataCenter`。
+- 根因：`provider-response-converter.ts` 在给 response metadata 增加 `providerFamily` 时使用 `{ ...metadataBag }`，以及 `servertool-adapter-context.ts` 内部再展开 metadata，都会丢失 `Symbol.for("routecodex.metadataCenter")` 绑定；stop_message_auto 写 `runtime_control.stopless` 时收到无 center 的 adapterContext，因此 fail-fast。
+- 修复：`buildResponseMetadataBagForProviderResponseConverter()` 在复制 providerFamily 后重新绑定同一个 MetadataCenter；`buildServerToolAdapterContext()` 在生成 baseContext 后绑定同一个 MetadataCenter。
+- 防复活测试：`provider-response-converter.contract.spec.ts` 锁 providerFamily 分支保留 center；`servertool-adapter-context.spec.ts` 锁 adapterContext 保留 center。
+## 2026-06-19 SSE business-module hard lock slice
+
+- Jason 要求：SSE 不能再被业务顺手改坏，必须作为业务模块锁死，而不是只靠口头约束。
+- 本轮收口方向：
+  - 新增 `verify:responses-sse-business-module` 静态 gate；
+  - `server.responses_sse_bridge_surface` function-map / verification-map 明确升级为 locked business module；
+  - 新增 `tests/red-tests/server_responses_sse_business_module_contract.test.ts`，锁 `handler-response-sse.ts` 只能依赖 `responses-sse-bridge`，不得本地重长 terminal/probe/repair/error builder owner。
+- 这轮先锁边界，不宣称已修完 `tool_calls + [DONE] -> response.done/required_action` 的 runtime 误判；后续要继续用黑盒样本修主逻辑。
+## 2026-06-19 responses SSE chat-chunk tool_calls terminal repair slice
+
+- 线上 5555 `stream closed before response.completed` 的一类真根因已锁定：并非真正的 Responses SSE 缺 `response.completed`，而是部分上游返回的是 `object:"chat.completion.chunk"` + `finish_reason:"tool_calls"` + `data:[DONE]`。
+- 样本证据：`/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781818137643_fc4e29ab/provider-response_1.json`。该样本没有 `response.completed/response.done`，最后 terminal truth 来自 chat chunk 的 `tool_calls` finish。
+- owner 修复点在 Rust native SSE contract probe：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs`
+  - `update_responses_contract_probe_from_sse_chunk_json(...)` 现已识别 chat chunk `delta.tool_calls[].function.name/arguments`，累积后在 `finish_reason:"tool_calls"` 时 materialize probe `output[]` 为 standard responses `function_call` items，并把 `status` 置为 `requires_action`。
+- 新增 native helper：
+  - `ensure_probe_chat_tool_call_buffers`
+  - `upsert_probe_chat_tool_call_delta`
+  - `materialize_probe_output_from_chat_tool_call_buffers`
+- 测试/验证状态：
+  - `cargo test -p router-hotpath-napi chat_completion_tool_call_chunks_materialize_required_action_terminal_frames --lib -- --nocapture` PASS。
+  - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts` 在重新 build 后 PASS，确认之前 Jest 红是旧 native 产物，不是修复逻辑失效。
+  - `tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts` PASS，SSE handler 现有 repair regression 未回归。
+- 架构锁：
+  - `scripts/architecture/verify-responses-sse-business-module.mjs` + `tests/red-tests/server_responses_sse_business_module_contract.test.ts` 已把 `/v1/responses` SSE 业务 owner 锁到 `src/modules/llmswitch/bridge/responses-sse-bridge.ts`，防止 `handler-response-sse.ts` 复长 terminal/probe/repair 语义。
+- 剩余闭环：
+  - 仍需 `build:base -> install:global -> restart --port 5555 -> live sample` 复核安装态；
+  - 若线上仍报 incomplete，则下一刀不是继续改 handler，而是抓最新 provider sample 对比 native probe 输出与实际 projected terminal frames。
+## 2026-06-19 relay continuation misclassified as provider-owned continuation
+
+- 当前用户问题子链：5555 live 中存在“route pool 还没耗尽，就提前向客户端返回错误”的现象；已先锁一条高概率根因，不能再靠猜。
+- 已验证根因：
+  - `request-executor` 的 reroute 禁止条件只看 `providerOwnedContinuation === true`；
+  - native `is_provider_native_resume_continuation` 之前只看 `previousResponseId/responseId`，没有尊重 `continuationOwner`；
+  - 这会把 relay/local continuation 误判成 provider-owned continuation，导致 recoverable failure 下 `exclude_and_reroute` 被硬停。
+- 唯一 owner 修复：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs`
+  - 新逻辑：`continuationOwner/continuation_owner === "relay"` 时，`is_provider_native_resume_continuation_value(...)` 直接返回 `false`。
+- 红测/绿测证据：
+  - 新增 JS focused tests：
+    - `tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts`
+    - `relay previous response resume` -> false
+    - `relay submit_tool_outputs responseId resume` -> false
+  - 新增 JS owner-level retry gate：
+    - `tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+    - `providerOwnedContinuation=true` 仍然禁止 reroute
+    - `providerOwnedContinuation=false` 且 recoverable + alternative provider 存在时，必须继续 `exclude_and_reroute`
+  - 新增 Rust tests：
+    - relay previous response resume -> false
+    - relay submit_tool_outputs resume -> false
+- 一个关键排障事实：
+  - 首次 JS spec 失败不代表修复无效，原因是 Jest/ts-jest/native cache 假红；
+  - 同一 native binding 直接调用已经返回 `relay=false/direct=true`；
+  - 使用 `--no-cache` 后，JS focused suites 转绿，说明逻辑已生效，旧失败是缓存问题，不是 owner 修复失效。
+- 本轮验证：
+  - `cargo test -p router-hotpath-napi chat_node_result_semantics --lib -- --nocapture` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts --runInBand --no-cache` PASS
+  - 直接调用 source/dist native binding：
+    - relay previous response -> false
+    - relay submit_tool_outputs -> false
+    - direct previous response -> true
+- 当前未宣称完成的点：
+  - 这只锁住了一条“pool 未耗尽前提前失败”的真因；
+  - live 里仍可能存在第二条独立早退路径，例如 `pipeline_or_pre_provider_failure` catch / error projection flatten / provider failure report chain 的前置抛出；
+  - `tests/server/runtime/http-server/request-executor.spec.ts` 这组 focused 现在暴露 `native-failure-policy not available` 测试基座噪音，暂不把它作为这轮主证据。
+- 下一步：
+  - 继续追 `request-executor.ts` 的 `pipeline_or_pre_provider_failure` 早退链；
+  - 核对在 route pool 尚有候选时，哪些错误还会在 provider failure plan 之前被直接投影给客户端；
+  - 若需要，补更高层但稳定的 focused test，而不是依赖当前带 native-failure-policy 装配噪音的 request-executor 集成基座。
+
+## 2026-06-19 provider error does not switch provider: success-path leak confirmed and closed
+
+- 用户新反馈“现在出现错误也不会切换 provider”里，已锁到一条明确流程漏口：
+  - `request-executor` 只有 throw-path 才会进入 `processProviderSendFailure(...) -> resolveRequestExecutorProviderFailurePlan(...) -> retry/reroute`
+  - 但 `processSuccessfulProviderResponse(...)` 之前只把 `401/402/403/408/425/429/>=500` 升级成 failure；
+  - `200 + provider business error body` 会被当成功返回，根本不进切 provider 主链。
+- 唯一 owner 修复：
+  - `src/server/runtime/http-server/executor/request-executor-provider-response.ts`
+  - 新增 structured business error 识别：
+    - 读取 `body.error.code/statusCode/status_code`
+    - 命中 `PROVIDER_STATUS_<code>` / 四位 business status 时，不再返回 success
+    - 2056 按仓内现有 canonical shape 升级为 `HTTP_429_2056 + upstreamCode=PROVIDER_STATUS_2056 + statusCode=429`
+    - 其余 business status 先统一升成 `MALFORMED_RESPONSE + details.detected=provider_business_error`
+  - `provider.response_status_check` 现在除 HTTP retryable status 外，也会对 structured business error 直接 `throwProviderHttpError(...)`
+- 红测/绿测：
+  - 新增 focused red/green：
+    - `tests/server/runtime/http-server/executor/request-executor-provider-response.usage.spec.ts`
+    - `200 + error.code=PROVIDER_STATUS_2056` 之前 resolve 成 success；现已 reject 成 `provider.http`
+  - 同时复核未回退：
+    - `tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts`
+    - `tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+- 本轮验证：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-provider-response.usage.spec.ts tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts --runInBand --no-cache` PASS
+- 当前剩余真问题：
+  - `pipeline_or_pre_provider_failure` 最外层 catch 仍可能绕过 provider failure reroute 主链，直接把错误抛给客户端；
+  - `tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts` / `request-executor.spec.ts` focused 受 `native-failure-policy not available` 测试基座噪音影响，暂不作为本轮 blocker，也不作为在线闭环证据。
+
+## 2026-06-19 pre-send failure bypass reroute: rebind / metadata_attach escaped outer catch
+
+- 新锁事实：
+  - `request-executor.ts` 在 `processProviderResolveFailure(...)` 之后、`processProviderSendFailure(...)` 之前，还存在一段 pre-send 主线：
+    - `rebindResponsesConversationRequestId(...)`
+    - `registerRequestLogContext(...)`
+    - `ensureClientHeadersOnPayload(...)`
+    - `attachProviderRuntimeMetadata(...)`
+  - 这段之前不在任何 provider failure owner catch 内；一旦抛错，会直接落最外层 `pipeline_or_pre_provider_failure`，从而在 route pool 还有候选 provider 时提前向客户端报错，不触发 reroute。
+- 修复策略：
+  - 不新增第二套 failure policy；
+  - 直接把上述 pre-send 主线并入现有 `processProviderResolveFailure(...)` owner catch，语义统一视为 `provider.runtime_resolve` 阶段失败。
+- 红绿测试：
+  - 新增 `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts`
+  - 场景：第一个 provider 在 `rebindResponsesConversationRequestId` 抛 `HTTP_502`，route pool 还有第二个 provider；预期不向客户端报错，而是 reroute 到第二个 provider 成功完成。
