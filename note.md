@@ -1,3 +1,17 @@
+## 2026-06-19 SSE body wrapper custom semantics removal slice
+
+- 当前 slice 目标：按 MetadataCenter/internal-payload 规则清理 response SSE wrapper 自定义语义，禁止 normal response body 上的 `sseStream` 驱动 SSE 或泄给客户端；SSE stream 只能走 `PipelineExecutionResult.sseStream` 这种内部执行结果 side-channel，forceSSE JSON bridge 只消费标准 Responses/chat JSON。
+- 代码收口：
+  - `sendSsePipelineResponse(...)` 只用 `result.sseStream` 取流，删除 `body.sseStream` fallback。
+  - `shouldDispatchResponsesSseToClientForHttp(...)` 不再检查 body wrapper / flat stream metadata，只保留 forceSSE 显式投影；普通 streaming 由 result-level `sseStream` 触发。
+  - 删除 `hasResponsesSsePayloadForHttp` canonical builder/export/barrel，删除 JSON projection/bridge plan 的 `hasSsePayload` 参数。
+  - `assertClientResponseHasNoInternalCarriers(...)` 把 `sseStream` 列为 client normal payload forbidden field，body wrapper 到 JSON 分支会 fail-fast。
+  - 更新旧 focused mocks，把 split required_action stream 测试从 body wrapper 改成 `sseStream` result field + 标准 Responses body。
+- 测试锁定：
+  - 新增 `tests/server/handlers/handler-response-sse-wrapper-contract.spec.ts`，静态禁止 `bodyRecord?.sseStream` / `hasResponsesSsePayloadForHttp` / `hasSsePayload` 复活，并断言 client JSON normal payload 中 `sseStream` fail-fast。
+  - focused Jest：SSE wrapper contract + forceSSE JSON bridge + split required_action + MetadataCenter closeout PASS（4 suites / 16 tests）。
+- 剩余审计项：历史 tests/fixtures 与若干老测试仍含 `__routecodex_stream_*` wrapper residue；未混入本 slice，下一步单独审计迁移或删除。
+
 ## 2026-06-19 MetadataCenter followup-dispatch legacy control removal slice
 
 - 当前 slice 目标：清理 `servertool-followup-dispatch` / nested metadata builder 中最后一段 active legacy followup control 读取与 promotion，避免 `metadata.__rt.serverToolFollowup/clientInjectSource/stoplessGoalStatus` 或 flat `metadata.serverToolFollowup/isServerToolFollowup/clientInjectSource` 继续作为真源。

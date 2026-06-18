@@ -61,9 +61,6 @@ const mockBridgeModule = async () => ({
   })),
   deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
-  hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
-    body && typeof body === 'object' && 'sseStream' in (body as Record<string, unknown>)
-  )),
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
     fallback?: Record<string, unknown>;
@@ -160,13 +157,11 @@ const mockBridgeModule = async () => ({
   prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn(async ({
     body,
     entryEndpoint,
-    hasSsePayload,
   }: {
     body: unknown;
     entryEndpoint?: string;
-    hasSsePayload: (value: unknown) => boolean;
   }) => {
-    if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return null;
     }
     const record = body as Record<string, unknown>;
@@ -521,27 +516,24 @@ describe('handler-response-utils required_action split frame regression', () => 
       res as any,
       {
         status: 200,
+        sseStream: Readable.from(splitRequiredActionStream()),
         body: {
-          sseStream: Readable.from(splitRequiredActionStream()),
-          __routecodex_stream_finish_reason: 'tool_calls',
-          __routecodex_stream_contract_probe_body: {
-            id: responseId,
-            object: 'response',
-            status: 'requires_action',
-            output: [
-              {
-                type: 'function_call',
-                call_id: callId,
-                id: `fc_${callId}`,
-                name: 'update_plan',
-                arguments: '{"plan":[{"step":"split-frame"}]}'
-              }
-            ],
-            required_action: {
-              type: 'submit_tool_outputs',
-              submit_tool_outputs: {
-                tool_calls: [{ id: callId, type: 'function_call', name: 'update_plan', arguments: '{"plan":[{"step":"split-frame"}]}' }]
-              }
+          id: responseId,
+          object: 'response',
+          status: 'requires_action',
+          output: [
+            {
+              type: 'function_call',
+              call_id: callId,
+              id: `fc_${callId}`,
+              name: 'update_plan',
+              arguments: '{"plan":[{"step":"split-frame"}]}'
+            }
+          ],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [{ id: callId, type: 'function_call', name: 'update_plan', arguments: '{"plan":[{"step":"split-frame"}]}' }]
             }
           }
         },

@@ -121,9 +121,6 @@ const mockBridgeModule = async () => ({
     }
   })),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
-  hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
-    body && typeof body === 'object' && 'sseStream' in (body as Record<string, unknown>)
-  )),
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
     fallback?: Record<string, unknown>;
@@ -354,14 +351,12 @@ const mockBridgeModule = async () => ({
     body,
     entryEndpoint,
     requestLabel,
-    hasSsePayload,
   }: {
     body: unknown;
     entryEndpoint?: string;
     requestLabel?: string;
-    hasSsePayload: (value: unknown) => boolean;
   }) => {
-    if (!body || typeof body !== 'object' || Array.isArray(body) || hasSsePayload(body)) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return null;
     }
     const record = body as Record<string, unknown>;

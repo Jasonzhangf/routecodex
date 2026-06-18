@@ -134,7 +134,6 @@ const createResponsesBridgeMock = () => ({
   shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false),
   shouldDispatchResponsesSseToClientForHttp: jest.fn(() => false),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),
-  hasResponsesSsePayloadForHttp: jest.fn(() => false),
   shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn(() => false),
   shouldPersistResponsesConversationStateForHttp: jest.fn(() => false),
   shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),

@@ -19,7 +19,6 @@ import { registerRequestLogContext } from '../utils/request-log-color.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildResponsesRequestLogContextForHttp,
-  hasResponsesSsePayloadForHttp,
   importResponsesHandlerCoreDist,
   normalizeChatUsagePayloadForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
@@ -156,7 +155,7 @@ export async function sendPipelineResponse(
     stream: expectsStream,
     forced: forceSSE,
     entryEndpoint,
-    hasSsePayload: result.sseStream !== undefined,
+    hasResultSseStream: result.sseStream !== undefined,
     continuationOwner: result.continuationOwner,
   });
 
@@ -222,7 +221,6 @@ export async function sendPipelineResponse(
     requestLabel,
     requestContext: effectiveResponsesRequestContext,
     metadata: resultMetadata,
-    hasSsePayload: hasResponsesSsePayloadForHttp,
     resolveBridge: importResponsesHandlerCoreDist,
   });
   const usageNormalized = normalizeChatUsagePayloadForHttp(jsonDispatchPlan.clientBody, {

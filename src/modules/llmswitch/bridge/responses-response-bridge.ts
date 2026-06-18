@@ -6,7 +6,7 @@
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: hasResponsesSsePayloadForHttp, shouldDispatchResponsesSseToClientForHttp, resolveResponsesRequestContextForHttp, assertDirectPassthroughResponsesSseMetadataIsolationForHttp, updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: shouldDispatchResponsesSseToClientForHttp, resolveResponsesRequestContextForHttp, assertDirectPassthroughResponsesSseMetadataIsolationForHttp, updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -203,10 +203,6 @@ function readMetadataCenterContinuationContextForHttp(metadata: Record<string, u
   return MetadataCenter.read(metadata)?.readContinuationContext() ?? {};
 }
 
-export function hasResponsesSsePayloadForHttp(value: unknown): value is { sseStream?: unknown } {
-  return Boolean(value && typeof value === 'object' && 'sseStream' in (value as Record<string, unknown>));
-}
-
 export function buildResponsesRequestLogContextForHttp(args: {
   metadata?: unknown;
   usageLogInfo?: Record<string, unknown> | null;
@@ -245,9 +241,6 @@ export function normalizeChatUsagePayloadForHttp(
     return { payload: body, normalized: false };
   }
   const record = body as Record<string, unknown>;
-  if ('sseStream' in record) {
-    return { payload: body, normalized: false };
-  }
   const resolved = resolveNormalizedChatUsageForHttp(body, options);
   if (!resolved.usage) {
     return { payload: body, normalized: false };
@@ -267,15 +260,7 @@ export function shouldDispatchResponsesSseToClientForHttp(args: {
   forceSSE: boolean;
   metadata?: Record<string, unknown>;
 }): boolean {
-  if (!hasResponsesSsePayloadForHttp(args.body)) {
-    return false;
-  }
-  if (args.forceSSE) {
-    return true;
-  }
-  return readRuntimeControlProjection(args.metadata).streamIntent === 'stream'
-    || args.metadata?.stream === true
-    || args.metadata?.outboundStream === true;
+  return args.forceSSE;
 }
 
 type InspectResponsesTerminalStateFromSseChunkForHttpInput = {
@@ -1424,9 +1409,8 @@ export async function prepareResponsesJsonBodyForSseBridgeForHttp(args: {
   body: unknown;
   entryEndpoint?: string;
   requestLabel?: string;
-  hasSsePayload: (value: unknown) => boolean;
 }): Promise<Record<string, unknown> | null> {
-  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body) || args.hasSsePayload(args.body)) {
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
     return null;
   }
   const record = args.body as Record<string, unknown>;
@@ -1589,7 +1573,6 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
     routingPolicyGroup?: string;
   };
   metadata?: Record<string, unknown>;
-  hasSsePayload: (value: unknown) => boolean;
 }): Promise<unknown> {
   if (
     args.entryEndpoint !== '/v1/responses'
@@ -1597,7 +1580,7 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   ) {
     return args.payload;
   }
-  if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload) || args.hasSsePayload(args.payload)) {
+  if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
     return args.payload;
   }
   const projectedPayload = await projectResponsesClientPayloadForClientForHttp({
@@ -1628,7 +1611,6 @@ export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
     matchedPort?: number;
     routingPolicyGroup?: string;
   };
-  hasSsePayload: (value: unknown) => boolean;
 }): Promise<{
   normalizedPayload: Record<string, unknown>;
   sanitizedPayload: Record<string, unknown>;
@@ -1659,7 +1641,6 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     routingPolicyGroup?: string;
   };
   metadata?: Record<string, unknown>;
-  hasSsePayload: (value: unknown) => boolean;
   resolveBridge?: typeof importResponsesHandlerCoreDist;
 }): Promise<{
   clientBody: unknown;
@@ -1677,7 +1658,6 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     entryEndpoint: args.entryEndpoint,
     requestContext: args.requestContext,
     metadata: args.metadata,
-    hasSsePayload: args.hasSsePayload,
   });
   return {
     clientBody,

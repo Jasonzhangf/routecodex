@@ -26,6 +26,7 @@ const CLIENT_RESPONSE_FORBIDDEN_FIELDS: ReadonlySet<string> = new Set([
   'internalDetails',
   'upstreamRequestId',
   'providerStack',
+  'sseStream',
 ]);
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);

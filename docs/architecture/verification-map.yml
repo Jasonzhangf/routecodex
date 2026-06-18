@@ -1387,6 +1387,7 @@ verification:
       - src/server/handlers/handler-response-utils.ts
     contract:
       - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
+      - tests/server/handlers/handler-response-sse-wrapper-contract.spec.ts
     integration:
       - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts

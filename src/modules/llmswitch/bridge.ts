@@ -65,7 +65,6 @@ export {
   buildResponsesStructuredSseErrorPayloadForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
   createResponsesJsonToSseConverterForHttp,
-  hasResponsesSsePayloadForHttp,
   importResponsesHandlerCoreDist,
   inspectResponsesContinuationProbeForHttp,
   inspectResponsesTerminalStateFromSseChunkForHttp,

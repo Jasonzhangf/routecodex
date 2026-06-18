@@ -37,7 +37,6 @@ import {
   buildResponsesStructuredSseErrorPayloadForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
   createResponsesJsonToSseConverterForHttp,
-  hasResponsesSsePayloadForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
   inspectResponsesTerminalStateFromSseChunkForHttp,
   normalizeResponsesSseFrameForClientForHttp,
@@ -670,7 +669,6 @@ async function streamResponsesJsonAsSse(
           ? args.result.metadata as Record<string, unknown>
           : undefined,
       requestContext: responsesRequestContext,
-      hasSsePayload: hasResponsesSsePayloadForHttp,
     });
     await persistResponsesConversationLifecycleForHttp({
       entryEndpoint: args.entryEndpoint,
@@ -755,7 +753,6 @@ async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): P
     body: args.result.body,
     entryEndpoint: args.entryEndpoint,
     requestLabel: args.requestLabel,
-    hasSsePayload: hasResponsesSsePayloadForHttp,
   });
   if (!responsesPayload) {
     return false;

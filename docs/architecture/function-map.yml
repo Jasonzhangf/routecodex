@@ -2728,7 +2728,6 @@ owners:
       - buildResponsesStructuredSseErrorPayloadForHttp
       - buildResponsesTerminalSseFramesFromProbeForHttp
       - createResponsesJsonToSseConverterForHttp
-      - hasResponsesSsePayloadForHttp
       - importResponsesHandlerCoreDist
       - inspectResponsesContinuationProbeForHttp
       - inspectResponsesTerminalStateFromSseChunkForHttp
