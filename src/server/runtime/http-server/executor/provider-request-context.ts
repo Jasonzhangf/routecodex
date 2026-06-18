@@ -1,7 +1,7 @@
 import type { ProviderHandle, ProviderProtocol } from '../types.js';
 import { enhanceProviderRequestId } from '../../../utils/request-id-manager.js';
 import { buildProviderLabel, extractProviderModel } from './provider-response-utils.js';
-import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import { readRuntimeProviderObservationProjection } from '../metadata-center/request-truth-readers.js';
 
 type ProviderTargetLike = {
   providerKey: string;
@@ -32,21 +32,16 @@ export function resolveProviderRequestContext(options: {
     mergedMetadata
   } = options;
   const providerProtocol = handle.providerProtocol || (target.outboundProfile as ProviderProtocol);
-  const providerObservation = mergedMetadata ? MetadataCenter.read(mergedMetadata)?.readProviderObservation() : undefined;
-  const targetMetadata =
-    providerObservation?.target && typeof providerObservation.target === 'object'
-      ? (providerObservation.target as Record<string, unknown>)
-      : undefined;
+  const providerObservation = readRuntimeProviderObservationProjection(mergedMetadata);
+  const targetMetadata = providerObservation.target;
   const metadataModel =
-    typeof providerObservation?.modelId === 'string' && providerObservation.modelId.trim()
-      ? providerObservation.modelId.trim()
-      : typeof providerObservation?.clientModelId === 'string' && providerObservation.clientModelId.trim()
-        ? providerObservation.clientModelId.trim()
-        : typeof targetMetadata?.modelId === 'string' && targetMetadata.modelId.trim()
-          ? targetMetadata.modelId.trim()
-          : typeof targetMetadata?.clientModelId === 'string' && targetMetadata.clientModelId.trim()
-            ? targetMetadata.clientModelId.trim()
-        : undefined;
+    providerObservation.modelId
+    ?? providerObservation.clientModelId
+    ?? (typeof targetMetadata?.modelId === 'string' && targetMetadata.modelId.trim()
+      ? targetMetadata.modelId.trim()
+      : typeof targetMetadata?.clientModelId === 'string' && targetMetadata.clientModelId.trim()
+        ? targetMetadata.clientModelId.trim()
+        : undefined);
   const payloadRecord =
     providerPayload && typeof providerPayload === 'object'
       ? (providerPayload as Record<string, unknown>)

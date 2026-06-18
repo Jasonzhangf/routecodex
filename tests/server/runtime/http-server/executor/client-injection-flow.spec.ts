@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { getSessionClientRegistry } from '../../../../../src/server/runtime/http-server/session-client-registry.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
   resolveStopMessageClientInjectReadiness,
   runClientInjectionFlowBeforeReenter
@@ -63,6 +64,40 @@ describe('client-injection-flow strict tmux isolation', () => {
       details: expect.objectContaining({
         reason: 'tmux_session_required'
       })
+    });
+  });
+
+  it('does not derive request session scope from flat metadata session fields without metadata center truth', () => {
+    const readiness = resolveStopMessageClientInjectReadiness({
+      sessionId: 'flat-session-only',
+      conversationId: 'flat-conversation-only'
+    });
+
+    expect(readiness).toEqual({
+      ready: false,
+      reason: 'tmux_session_required'
+    });
+  });
+
+  it('derives request session scope from metadata center truth when tmux is absent', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'sessionId',
+      'truth-session-only',
+      {
+        module: 'tests/server/runtime/http-server/executor/client-injection-flow.spec.ts',
+        symbol: 'derives request session scope from metadata center truth when tmux is absent',
+        stage: 'test'
+      }
+    );
+
+    const readiness = resolveStopMessageClientInjectReadiness(metadata);
+
+    expect(readiness).toEqual({
+      ready: false,
+      reason: 'tmux_session_required',
+      sessionScope: 'session:truth-session-only'
     });
   });
 });

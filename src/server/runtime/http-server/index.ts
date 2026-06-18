@@ -8,6 +8,8 @@
  * - 保持API兼容性
  */
 
+// feature_id: server.http_runtime_entry
+
 import express, { type Application, type Request } from 'express';
 import type { Server } from 'http';
 
@@ -66,7 +68,12 @@ import {
 } from './router-direct-failure-snapshot.js';
 import {
   requireDirectPassthroughPayloadObject,
+  evaluateDirectRouteDecision,
 } from './direct-passthrough-payload.js';
+import {
+  annotateAsHostPayloadContractError,
+  buildDirectPayloadContractError,
+} from '../../../providers/core/runtime/responses-direct-contract-error.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
@@ -84,6 +91,8 @@ import {
   finalizeResponsesConversationRequestRetention,
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
+import { MetadataCenter } from './metadata-center/metadata-center.js';
+import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
 import {
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
@@ -160,12 +169,11 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
 }
 
 function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
-  return readTrimmedString(metadata.sessionId)
-    ?? readTrimmedString(metadata.session_id)
-    ?? readTrimmedString(metadata.clientTmuxSessionId)
-    ?? readTrimmedString(metadata.client_tmux_session_id)
-    ?? readTrimmedString(metadata.tmuxSessionId)
-    ?? readTrimmedString(metadata.tmux_session_id);
+  return readRuntimeRequestTruthIdentifiers(metadata).sessionId;
+}
+
+function readConversationIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
+  return readRuntimeRequestTruthIdentifiers(metadata).conversationId;
 }
 
 import {
@@ -187,7 +195,7 @@ import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/p
 import { runHubPipeline } from './executor-pipeline.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
-import { deriveFinishReason, deriveFinishReasonWithVisibleSuccessFallback } from '../../utils/finish-reason.js';
+import { deriveFinishReason } from '../../utils/finish-reason.js';
 import { mapProviderProtocol } from './provider-utils.js';
 import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 import { emitRequestExecutorProviderRetryTelemetry } from './executor/request-executor-retry-telemetry.js';
@@ -1360,13 +1368,6 @@ export class RouteCodexHttpServer {
     retryState: RouterDirectRetryState = createRouterDirectRetryState(input),
     directAttempt = 1,
   ): Promise<RouterDirectOutcome> {
-    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
-    const routerEngine = routingPipeline?.getVirtualRouter?.();
-    if (!routerEngine || typeof routerEngine.route !== 'function') {
-      this.logStage('router-direct.skipped', input.requestId, { reason: 'virtual-router-not-ready' });
-      return { used: false, reason: 'virtual-router-not-ready' };
-    }
-
     const allowedProviders =
       portConfig.routingPolicyGroup
         ? extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup)
@@ -1414,6 +1415,49 @@ export class RouteCodexHttpServer {
       path: input.entryEndpoint,
       headers: input.headers as Record<string, string | string[] | undefined>,
     });
+    const applyPatchMode =
+      this.userConfig
+      && typeof this.userConfig === 'object'
+      && 'servertool' in this.userConfig
+      && (this.userConfig as Record<string, unknown>).servertool
+      && typeof (this.userConfig as Record<string, unknown>).servertool === 'object'
+      && (this.userConfig as { servertool?: { apply_patch?: { mode?: unknown } } }).servertool?.apply_patch
+      && typeof (this.userConfig as { servertool?: { apply_patch?: { mode?: unknown } } }).servertool?.apply_patch?.mode === 'string'
+        ? (this.userConfig as { servertool?: { apply_patch?: { mode?: string } } }).servertool?.apply_patch?.mode
+        : undefined;
+    const directRouteDecision = evaluateDirectRouteDecision({
+      payload: rawDirectPayload,
+      metadata: metadataForHub,
+      inboundProtocol,
+      applyPatchMode,
+    });
+    if (directRouteDecision.requiresHubRelay) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: directRouteDecision.reason ?? 'direct_payload_requires_hub_relay',
+        inboundProtocol,
+      });
+      return {
+        used: false,
+        reason: directRouteDecision.reason ?? 'direct_payload_requires_hub_relay',
+      };
+    }
+    if (!directRouteDecision.providerWireValid) {
+      throw annotateAsHostPayloadContractError(
+        buildDirectPayloadContractError(
+          directRouteDecision.reason ?? 'invalid direct payload',
+          {
+            reason: directRouteDecision.reason ?? 'invalid_direct_payload',
+            inboundProtocol,
+          },
+        ),
+      );
+    }
+    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
+    const routerEngine = routingPipeline?.getVirtualRouter?.();
+    if (!routerEngine || typeof routerEngine.route !== 'function') {
+      this.logStage('router-direct.skipped', input.requestId, { reason: 'virtual-router-not-ready' });
+      return { used: false, reason: 'virtual-router-not-ready' };
+    }
 
     let routeResult: {
       target?: Record<string, unknown>;
@@ -1895,7 +1939,7 @@ export class RouteCodexHttpServer {
         : requestModel;
     const finishReason =
       normalized.body && typeof normalized.body === 'object'
-        ? deriveFinishReasonWithVisibleSuccessFallback(normalized.body as Record<string, unknown>)
+        ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
@@ -1907,7 +1951,7 @@ export class RouteCodexHttpServer {
         || !responseBody
         || typeof responseBody !== 'object'
         || Array.isArray(responseBody)
-        || '__sse_responses' in (responseBody as Record<string, unknown>)
+        || normalized.sseStream !== undefined
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
       } else if (finishReason === 'tool_calls') {
@@ -1916,7 +1960,7 @@ export class RouteCodexHttpServer {
           response: responseBody as Record<string, unknown>,
           providerKey: auditContext.providerKey,
           sessionId: readSessionIdForUsageLog(inputMetadata),
-          conversationId: typeof inputMetadata.conversationId === 'string' ? inputMetadata.conversationId : undefined,
+          conversationId: readConversationIdForUsageLog(inputMetadata),
           routingPolicyGroup:
             directResult.pipelineMetadata
             && typeof directResult.pipelineMetadata.routecodexRoutingPolicyGroup === 'string'
@@ -1933,10 +1977,11 @@ export class RouteCodexHttpServer {
     }
     const baseResult: PipelineExecutionResult = {
       ...normalized,
+      continuationOwner: 'direct',
       metadata:
         input.metadata && typeof input.metadata === 'object'
-          ? { ...(input.metadata as Record<string, unknown>), __routecodexDirectPassthrough: true }
-          : { ...(normalized.metadata ?? {}), __routecodexDirectPassthrough: true },
+          ? { ...(input.metadata as Record<string, unknown>) }
+          : { ...(normalized.metadata ?? {}) },
       usageLogInfo: {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
@@ -1956,7 +2001,7 @@ export class RouteCodexHttpServer {
         rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
         sessionId: readSessionIdForUsageLog(inputMetadata),
         session_id: inputMetadata.session_id,
-        conversationId: inputMetadata.conversationId,
+        conversationId: readConversationIdForUsageLog(inputMetadata),
         conversation_id: inputMetadata.conversation_id,
         projectPath:
           inputMetadata.clientWorkdir
@@ -1998,7 +2043,7 @@ export class RouteCodexHttpServer {
     const providerModel = this.extractProviderModel(payload) ?? requestModel;
     const finishReason =
       normalized.body && typeof normalized.body === 'object'
-        ? deriveFinishReasonWithVisibleSuccessFallback(normalized.body as Record<string, unknown>)
+        ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
@@ -2010,7 +2055,7 @@ export class RouteCodexHttpServer {
         || !responseBody
         || typeof responseBody !== 'object'
         || Array.isArray(responseBody)
-        || '__sse_responses' in (responseBody as Record<string, unknown>)
+        || normalized.sseStream !== undefined
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
       } else if (finishReason === 'tool_calls') {
@@ -2019,7 +2064,7 @@ export class RouteCodexHttpServer {
           response: responseBody as Record<string, unknown>,
           providerKey: providerBinding,
           sessionId: readSessionIdForUsageLog(inputMetadata),
-          conversationId: typeof inputMetadata.conversationId === 'string' ? inputMetadata.conversationId : undefined,
+          conversationId: readConversationIdForUsageLog(inputMetadata),
           allowScopeContinuation: true,
         });
         await finalizeResponsesConversationRequestRetention(input.requestId, {
@@ -2031,10 +2076,11 @@ export class RouteCodexHttpServer {
     }
     return {
       ...normalized,
+      continuationOwner: 'direct',
       metadata:
         input.metadata && typeof input.metadata === 'object'
-          ? { ...(input.metadata as Record<string, unknown>), __routecodexDirectPassthrough: true }
-          : { ...(normalized.metadata ?? {}), __routecodexDirectPassthrough: true },
+          ? { ...(input.metadata as Record<string, unknown>) }
+          : { ...(normalized.metadata ?? {}) },
       usageLogInfo: {
         ...(normalized.usageLogInfo ?? {}),
         providerKey: providerBinding,
@@ -2054,7 +2100,7 @@ export class RouteCodexHttpServer {
         rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
         sessionId: readSessionIdForUsageLog(inputMetadata),
         session_id: inputMetadata.session_id,
-        conversationId: inputMetadata.conversationId,
+        conversationId: readConversationIdForUsageLog(inputMetadata),
         conversation_id: inputMetadata.conversation_id,
         projectPath:
           inputMetadata.clientWorkdir

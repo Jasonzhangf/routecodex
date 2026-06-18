@@ -79,6 +79,28 @@ type StoplessGoalProjection = {
   createdAt: number;
 };
 
+export function buildBridgeProviderResponseSeed(
+  response: PipelineExecutionResult,
+  body: unknown
+): Record<string, unknown> | undefined {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    return body as Record<string, unknown>;
+  }
+  if (response.sseStream === undefined) {
+    return undefined;
+  }
+  const seed: Record<string, unknown> = {
+    sseStream: response.sseStream
+  };
+  if (typeof response.status === 'number') {
+    seed.status = response.status;
+  }
+  if (response.headers && typeof response.headers === 'object' && !Array.isArray(response.headers)) {
+    seed.headers = response.headers;
+  }
+  return seed;
+}
+
 const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 5;
 const GOAL_VALIDATION_FAILURE_STOP_THRESHOLD = 5;
 const GOAL_NO_PROGRESS_STOP_THRESHOLD = 5;
@@ -579,9 +601,11 @@ export async function convertProviderResponseIfNeeded(
   if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
     return options.response;
   }
-  if (!body || typeof body !== 'object') {
+  const bridgeProviderResponseSeed = buildBridgeProviderResponseSeed(options.response, body);
+  if (!bridgeProviderResponseSeed) {
     return options.response;
   }
+  body = bridgeProviderResponseSeed;
   let clientInjectWaitMs = 0;
   const attachTimingBreakdown = (result: PipelineExecutionResult): PipelineExecutionResult => {
     if (!(clientInjectWaitMs > 0)) {
@@ -827,8 +851,8 @@ export async function convertProviderResponseIfNeeded(
     });
     const bridgeStartMs = Date.now();
     const bridgeProviderResponse =
-      extractBridgeProviderResponsePayload(body as Record<string, unknown>)
-      ?? (body as Record<string, unknown>);
+      extractBridgeProviderResponsePayload(bridgeProviderResponseSeed)
+      ?? bridgeProviderResponseSeed;
     const effectiveRequestSemantics = (() => {
       const existing = asFlatRecord(options.requestSemantics);
       const existingTools = asFlatRecord(existing?.tools);

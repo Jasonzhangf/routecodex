@@ -14,6 +14,7 @@ Feature scope: `vr.* / virtual_router.*`
 | feature_id | summary | owner kind | owner module | required gates |
 | --- | --- | --- | --- | --- |
 | `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity` |
+| `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability` |
 | `virtual_router.primary_exhausted_to_default_pool` | primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:function-map-compile-gate`<br/>`npm run build:min` |
 | `vr.route_availability_floor` | route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-ci`<br/>`npm run verify:llmswitch-rustification-audit` |
 | `vr.provider_forwarder_runtime` | ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-forwarder-runtime`<br/>`npm run verify:function-map-compile-gate` |
@@ -58,6 +59,46 @@ Required gates:
 
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
+
+## vr.route_retry_pin_surface
+
+Summary: Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs`
+Owner scope: Virtual Router file-scoped route surface for retry-provider-pin parsing and forced-target selection input
+
+Canonical types:
+- `InstructionTarget`
+- `SelectionResult`
+
+Canonical builders:
+- `parse_retry_provider_key_target`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs`
+- `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
+- `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+- `tests/servertool/virtual-router-servertool-routing.spec.ts`
+- `docs`
+
+Forbidden paths:
+- `src/server/runtime/http-server/executor`
+- `src/providers/core/runtime`
+- `src/client`
+
+Required tests:
+- `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
+- `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
+- `tests/servertool/virtual-router-servertool-routing.spec.ts`
+
+Required gates:
+- `npm run verify:vr-no-ts-runtime`
+- `npm run verify:architecture-custom-payload-carrier-owner-queryability`
+
+Notes:
+- This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership.
 
 ## virtual_router.primary_exhausted_to_default_pool
 

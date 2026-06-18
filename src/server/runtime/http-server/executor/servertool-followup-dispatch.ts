@@ -1,15 +1,18 @@
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../handlers/types.js';
+// feature_id: server.servertool_followup_dispatch_surface
 import { asRecord } from '../provider-utils.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { runClientInjectionFlowBeforeReenter } from './client-injection-flow.js';
 import { buildServerToolNestedRequestMetadata } from './servertool-followup-metadata.js';
 import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+import { readResponsesResponseIdFromHttp } from '../../../../modules/llmswitch/bridge/responses-request-bridge.js';
 import {
   awaitNestedExecutionWithFailFast,
   getNestedFollowupAbortSignal,
   throwIfNestedFollowupAborted
 } from './servertool-followup-fail-fast.js';
 import { preserveLiveClientAbortCarriers } from './request-executor-client-abort-block.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import {
   recordErrorActionBackoff,
   waitErrorActionBackoffWithGate
@@ -89,6 +92,7 @@ async function captureNestedResponsesRequestContext(input: PipelineExecutionInpu
     throw new Error('[servertool] responses followup context capture helper unavailable');
   }
   const metadata = asRecord(input.metadata) ?? {};
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
   const context = {
     requestId: input.requestId,
     isResponsesPayload: true,
@@ -101,28 +105,17 @@ async function captureNestedResponsesRequestContext(input: PipelineExecutionInpu
     requestId: input.requestId,
     payload: body,
     context,
-    sessionId: typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined,
-    conversationId: typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined,
+    sessionId: requestTruth.sessionId,
+    conversationId: requestTruth.conversationId,
     entryKind: 'responses',
     routeHint: typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined
   });
 }
 
-function readResponsesResponseId(body: Record<string, unknown> | undefined): string | undefined {
-  if (!body) return undefined;
-  const nested = body.response && typeof body.response === 'object' && !Array.isArray(body.response)
-    ? body.response as Record<string, unknown>
-    : undefined;
-  for (const value of [body.id, body.response_id, nested?.id]) {
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
 async function rebindNestedResponsesContextToResponseId(input: PipelineExecutionInput, body: Record<string, unknown> | undefined): Promise<void> {
   const entryEndpoint = typeof input.entryEndpoint === 'string' ? input.entryEndpoint.toLowerCase() : '';
   if (!entryEndpoint.includes('/v1/responses')) return;
-  const responseId = readResponsesResponseId(body);
+  const responseId = readResponsesResponseIdFromHttp(body);
   if (!responseId || responseId === input.requestId) return;
   const mod = await getResponsesConversationModule();
   if (typeof mod.rebindResponsesConversationRequestId !== 'function') {
@@ -250,11 +243,6 @@ function readManagedStoplessGoalStatusFromSemantics(
         : undefined;
   const normalized = typeof statusCandidate === 'string' ? statusCandidate.trim().toLowerCase() : '';
   return normalized || undefined;
-}
-
-function isManagedStoplessGoalRequestSemantics(requestSemantics: Record<string, unknown> | undefined): boolean {
-  const status = readManagedStoplessGoalStatusFromSemantics(requestSemantics);
-  return status === 'active' || status === 'paused' || status === 'stopped' || status === 'completed';
 }
 
 function readBooleanFlag(value: unknown): boolean {
@@ -642,7 +630,7 @@ export async function executeServerToolReenterPipeline(args: {
   runClientInjectBeforeNested?: boolean;
 }): Promise<{
   body?: Record<string, unknown>;
-  __sse_responses?: unknown;
+  sseStream?: unknown;
   format?: string;
 }> {
   const {

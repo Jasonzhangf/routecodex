@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
+import { normalizeReqInboundShellLikeToolCallsWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.js';
 
 type NativeGovernanceInput = Parameters<typeof applyReqProcessToolGovernanceWithNative>[0];
@@ -148,5 +149,72 @@ describe('req_process servertool bundle contract', () => {
     expect(toolNames).not.toContain('review');
     expect(toolNames).not.toContain('web_search');
     expect(toolNames).not.toContain('clock');
+  });
+
+  it('RED: stopless submit_tool_outputs normalization must preserve current tool result count and schema feedback in model-visible request text', () => {
+    const payload: Record<string, unknown> = {
+      model: 'gpt-5.5',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行原任务' }]
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_servertool_cli_stop_1',
+          name: 'exec_command',
+          arguments: JSON.stringify({
+            cmd: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+          })
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_servertool_cli_stop_1',
+          output: JSON.stringify({
+            ok: true,
+            toolName: 'stop_message_auto',
+            flowId: 'stop_message_flow',
+            repeatCount: 2,
+            maxRepeats: 3,
+            continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+            schemaFeedback: {
+              reasonCode: 'stop_schema_missing',
+              missingFields: ['stopreason', 'reason']
+            },
+            schemaGuidance: {
+              requiredFields: ['stopreason', 'reason', 'next_step'],
+              stopreasonValues: {
+                finished: 0,
+                blocked: 1,
+                continueNeeded: 2
+              },
+              triggerHint: 'no_schema'
+            }
+          })
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: {
+                cmd: { type: 'string' }
+              }
+            }
+          }
+        }
+      ]
+    };
+
+    normalizeReqInboundShellLikeToolCallsWithNative(payload);
+    const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('repeatCount=2/3');
+    expect(serialized).toContain('reasonCode=stop_schema_missing');
+    expect(serialized).toContain('missingFields=stopreason, reason');
+    expect(serialized).toContain('继续做下一步');
   });
 });

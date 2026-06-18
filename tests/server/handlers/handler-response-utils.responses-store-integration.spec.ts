@@ -507,7 +507,7 @@ describe("sendPipelineResponse responses store integration", () => {
       {
         status: 200,
         body: {
-          __sse_responses: Readable.from(delayedTerminalStream()),
+          sseStream: Readable.from(delayedTerminalStream()),
           __routecodex_finish_reason: "tool_calls",
         },
         usageLogInfo: {
@@ -589,8 +589,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.output_item.done\n",
             `data: ${JSON.stringify({
               type: "response.output_item.done",
@@ -707,8 +706,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.created\n",
             `data: ${JSON.stringify({
               type: "response.created",
@@ -830,7 +828,7 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(resumed.payload.previous_response_id).toBe(responseId);
   });
 
-  it("RED: native SSE (__sse_responses) tool_calls must record responses continuation context", async () => {
+  it("RED: native SSE (sseStream) tool_calls must record responses continuation context", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
@@ -844,8 +842,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.required_action\n",
             `data: ${JSON.stringify({
               type: "response.required_action",
@@ -964,8 +961,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.required_action\n",
             `data: ${JSON.stringify({
               type: "response.required_action",
@@ -1099,7 +1095,7 @@ describe("sendPipelineResponse responses store integration", () => {
     expect(resumed.payload.previous_response_id).toBe(responseId);
   });
 
-  it("RED: native SSE (__sse_responses) tool_calls with trailing tail must not leave continuation context half-closed", async () => {
+  it("RED: native SSE (sseStream) tool_calls with trailing tail must not leave continuation context half-closed", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
@@ -1114,8 +1110,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.required_action\n",
             `data: ${JSON.stringify({
               type: "response.required_action",
@@ -1261,8 +1256,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.required_action\n",
             `data: ${JSON.stringify({
               type: "response.required_action",
@@ -1458,8 +1452,7 @@ describe("sendPipelineResponse responses store integration", () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             "event: response.required_action\n",
             `data: ${JSON.stringify({
               type: "response.required_action",

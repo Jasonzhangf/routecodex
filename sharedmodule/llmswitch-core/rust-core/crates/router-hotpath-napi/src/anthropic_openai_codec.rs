@@ -577,6 +577,9 @@ fn collect_declared_tool_names(tools: Option<&Value>) -> Vec<String> {
 }
 
 fn is_declared_tool_name(name: &str, declared_tool_names: &[String]) -> bool {
+    if declared_tool_names.is_empty() {
+        return true;
+    }
     declared_tool_names.iter().any(|entry| entry == name)
 }
 
@@ -1252,6 +1255,66 @@ mod tests {
         assert_eq!(
             content[1]["image_url"]["url"].as_str(),
             Some("data:image/png;base64,AAA")
+        );
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_preserves_tool_history_without_declared_tools() {
+        let raw = build_anthropic_from_openai_chat_json(
+            json!({
+                "model": "key1.MiniMax-M2.7",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "当你准备结束当前轮时，必须输出 stop schema JSON。"
+                    },
+                    {
+                        "role": "user",
+                        "content": "继续执行 stopless 在线验证"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_stopless_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop\"}"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_stopless_1",
+                        "name": "exec_command",
+                        "content": "{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}"
+                    }
+                ],
+                "stream": false
+            })
+            .to_string(),
+            None,
+        )
+        .expect("anthropic request");
+
+        let payload: Value = serde_json::from_str(&raw).expect("anthropic payload");
+        let messages = payload["messages"].as_array().expect("anthropic messages");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], json!("user"));
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(messages[1]["content"][0]["id"], json!("call_stopless_1"));
+        assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
+        assert_eq!(messages[2]["role"], json!("user"));
+        assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+        assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_stopless_1"));
+        assert_eq!(
+            payload["system"][0]["text"],
+            json!("当你准备结束当前轮时，必须输出 stop schema JSON。")
         );
     }
 

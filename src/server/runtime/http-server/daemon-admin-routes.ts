@@ -1,5 +1,6 @@
 import type { Application, Request, Response, NextFunction } from 'express';
 // feature_id: daemon_admin.command_handlers
+// feature_id: daemon_admin.auth_gate_shell
 import { registerDaemonAuthRoutes } from './daemon-admin/auth-handler.js';
 import { registerStatusRoutes } from './daemon-admin/status-handler.js';
 import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js';

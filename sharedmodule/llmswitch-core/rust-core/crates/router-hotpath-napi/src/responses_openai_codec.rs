@@ -55,6 +55,30 @@ fn append_local_images(messages: Vec<Value>) -> NapiResult<Vec<Value>> {
         .unwrap_or_default())
 }
 
+fn input_contains_tool_continuation_signals(input: &[Value]) -> bool {
+    input.iter().any(|entry| {
+        let Some(entry_obj) = entry.as_object() else {
+            return false;
+        };
+        matches!(
+            entry_obj
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("message")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "function_call"
+                | "tool_call"
+                | "custom_tool_call"
+                | "function_call_output"
+                | "custom_tool_call_output"
+                | "tool_result"
+                | "tool_message"
+        )
+    })
+}
+
 fn build_request_from_responses_payload(
     payload_row: &Map<String, Value>,
     context: &Value,
@@ -76,8 +100,21 @@ fn build_request_from_responses_payload(
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
         .cloned();
-    let messages = if let Some(messages) = chat_messages {
-        messages
+    let prefer_chat_messages_shortcut = !input_contains_tool_continuation_signals(input.as_slice());
+    let messages = if prefer_chat_messages_shortcut {
+        if let Some(messages) = chat_messages {
+            messages
+        } else {
+            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+                input,
+                tools: tools.clone(),
+                tool_result_fallback_text: Some(String::new()),
+                normalize_function_name: Some("responses".to_string()),
+                allow_pending_terminal_tool_call: Some(true),
+                allow_orphan_tool_result: Some(false),
+            })?
+            .messages
+        }
     } else {
         convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
             input,
@@ -410,6 +447,85 @@ mod tests {
         assert_eq!(messages[2]["role"], json!("user"));
         assert_eq!(messages[2]["content"][0]["type"], json!("text"));
         assert_eq!(messages[2]["content"][0]["text"], json!("继续"));
+    }
+
+    #[test]
+    fn request_codec_does_not_drop_live_stopless_tool_continuation_when_chat_messages_shortcut_exists() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-5.5",
+                "previous_response_id": "resp_prev_stopless_1",
+                "stream": false,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "第一轮 stopless 指令" }
+                        ]
+                    },
+                    {
+                        "type": "reasoning",
+                        "id": "reasoning_prev_1",
+                        "summary": [
+                            { "type": "summary_text", "text": "**Thinking** 第一轮推理" }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_stopless_1",
+                        "call_id": "call_stopless_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_stopless_1",
+                        "call_id": "call_stopless_1",
+                        "output": "{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续往下做；如果能收尾就直接说做完。" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_live_stopless_1" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let messages = value["request"]["messages"]
+            .as_array()
+            .expect("request messages");
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], json!("user"));
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert_eq!(messages[1]["tool_calls"][0]["id"], json!("call_stopless_1"));
+        assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], json!("exec_command"));
+        assert_eq!(messages[2]["role"], json!("tool"));
+        assert_eq!(messages[2]["tool_call_id"], json!("call_stopless_1"));
+        assert_eq!(
+            messages[2]["content"],
+            json!("{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}")
+        );
+        assert_eq!(messages[3]["role"], json!("user"));
+        assert_eq!(
+            messages[3]["content"],
+            json!("继续往下做；如果能收尾就直接说做完。")
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::hub_pipeline_blocks::metadata::{
     resolve_router_metadata_runtime_flags, resolve_stop_message_router_metadata,
 };
+// feature_id: hub.route_metadata_surface
 use crate::hub_pipeline_blocks::responses_resume::{
     read_continuation_from_semantics_node, read_responses_resume_from_semantics_node,
     synthesize_continuation_from_responses_resume,

@@ -19,7 +19,7 @@ type ReenterPipeline = (options: {
   requestId: string;
   body: JsonObject;
   metadata?: JsonObject;
-}) => Promise<{ body?: JsonObject; __sse_responses?: NodeJS.ReadableStream; format?: string }>;
+}) => Promise<{ body?: JsonObject; sseStream?: NodeJS.ReadableStream; format?: string }>;
 
 type ClientInjectDispatch = (options: {
   entryEndpoint: string;

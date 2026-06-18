@@ -19,8 +19,10 @@ Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle
 
 ```mermaid
 flowchart LR
+  StartShutdownHandler["StartShutdownHandler"]
+  DaemonRestartLoop["DaemonRestartLoop"]
+  DaemonSupervisorLoop["DaemonSupervisorLoop"]
   RuntimeInstanceRecord["RuntimeInstanceRecord"]
-  ServerLifecycleState["ServerLifecycleState"]
   TokenDaemonPidRecord["TokenDaemonPidRecord"]
   TokenDaemonBootstrap["TokenDaemonBootstrap"]
   StopIntentRecord["StopIntentRecord"]
@@ -33,7 +35,12 @@ flowchart LR
   ServerStartCommand -->|rtl-04| StopIntentRecord
   TokenDaemonBootstrap -->|rtl-05| TokenDaemonPidRecord
   TokenDaemonBootstrap -->|rtl-06| TokenDaemonPidRecord
-  ServerLifecycleState -->|rtl-07| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
+  DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
+  DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
+  ServerStartCommand -->|rtl-10| RuntimeInstanceRecord
+  StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
+  ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -43,8 +50,10 @@ flowchart LR
   class StopIntentRecord anchored;
   class TokenDaemonBootstrap anchored;
   class TokenDaemonPidRecord anchored;
-  class ServerLifecycleState pending;
-  class RuntimeInstanceRecord pending;
+  class RuntimeInstanceRecord anchored;
+  class DaemonSupervisorLoop anchored;
+  class DaemonRestartLoop anchored;
+  class StartShutdownHandler anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -55,4 +64,9 @@ flowchart LR
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-07 | `ServerLifecycleState -> RuntimeInstanceRecord` | binding pending | `binding pending` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
+| rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |

@@ -544,7 +544,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     const processIncoming = jest.fn(async (payload: Record<string, unknown>) => ({
       status: 200,
       data: {
-        __sse_responses: Readable.from([
+        sseStream: Readable.from([
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'responses handler 非 SSE accept 流式整链响应' })}\n\n`,
           'event: response.completed\n',

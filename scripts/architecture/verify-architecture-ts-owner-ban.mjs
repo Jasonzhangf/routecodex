@@ -32,6 +32,23 @@ const TS_OWNER_WHITELIST = new Set([
   'error.pipeline_contract', // provider/runtime error chain contract is TS-owned boundary glue
   'error.execution_decision_consumer', // executor decision consumer is TS-owned policy glue
   'error.client_projection', // client error projection is TS-owned projection shell
+  'hub.metadata_center_mainline', // transitional request-scoped center currently lives in TS host/runtime bridge; migration target remains Rust
+  'hub.metadata_center_request_capture', // transitional request-scoped metadata capture shell in TS host/runtime bridge
+  'hub.metadata_center_attempt_merge', // transitional request-scoped metadata merge shell in TS host/runtime bridge
+  'hub.metadata_center_servertool_context', // transitional request-scoped servertool context projection shell
+  'runtime.lifecycle.pid_cache', // runtime lifecycle cache is TS host process glue; pid cache is not semantic truth
+  'runtime.lifecycle.stop_intent', // runtime lifecycle stop signal is TS host process glue
+  'runtime.lifecycle.instance_registry', // runtime lifecycle instance declaration is TS host process glue
+  'runtime.tmux_client_binding', // tmux/client attachment registry is TS host integration, not request/session truth
+  'server.port_config_provider_failure_exemption', // server config validation contract is TS config glue with provider paths forbidden
+  'snapshot.provider_error_buffer', // provider snapshot error buffer is TS diagnostics glue, not payload/runtime truth
+  'provider.debug_example_hooks_surface', // debug example hooks are TS-only diagnostics surface
+  'daemon_admin.auth_gate_shell', // daemon-admin local/auth gate shell
+  'server.http_runtime_lifecycle', // HTTP lifecycle shell around the index owner
+  'server.provider_response_conversion_host', // TS host converter shell over Rust/provider response semantics
+  'server.response_inspection_helpers', // TS pure inspection helpers pending native downshift
+  'server.servertool_followup_dispatch_surface', // TS followup execution glue over Rust/servertool truth
+  'server.servertool_followup_metadata_surface', // TS nested followup metadata projection shell
 ]);
 
 function parseOwners(text) {

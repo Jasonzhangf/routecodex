@@ -2670,7 +2670,7 @@ describe('responses conversation store plain continuation restore', () => {
     ]);
   });
 
-  it('RED: third submit_tool_outputs resume must preserve cumulative exec_command history instead of collapsing to first user-only input', () => {
+  it('RED: third submit_tool_outputs resume must collapse auto stopless tool history to latest guidance only', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-third-round'),
       sessionId: 'sess-third-round',
@@ -2701,7 +2701,7 @@ describe('responses conversation store plain continuation restore', () => {
             id: 'fc_third_round_1',
             call_id: 'call_third_round_1',
             name: 'exec_command',
-            arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":1}\\""}',
+            arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
             status: 'in_progress'
           }
         ],
@@ -2713,7 +2713,7 @@ describe('responses conversation store plain continuation restore', () => {
                 id: 'call_third_round_1',
                 type: 'function',
                 name: 'exec_command',
-                arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":1}\\""}'
+                arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}'
               }
             ]
           }
@@ -2724,7 +2724,10 @@ describe('responses conversation store plain continuation restore', () => {
     const resumed1 = resumeResponsesConversation(
       'resp-third-round-1',
       {
-        tool_outputs: [{ tool_call_id: 'call_third_round_1', output: '{"repeatCount":1}' }],
+        tool_outputs: [{
+          tool_call_id: 'call_third_round_1',
+          output: '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续往下做；先把手头能确认的结果拿回来。","repeatCount":2,"maxRepeats":3,"schemaGuidance":{"requiredFields":["stopreason","reason","next_step"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}'
+        }],
         stream: false
       },
       { requestId: track('req-resp-store-third-round-submit-1') }
@@ -2754,7 +2757,7 @@ describe('responses conversation store plain continuation restore', () => {
             id: 'fc_third_round_2',
             call_id: 'call_third_round_2',
             name: 'exec_command',
-            arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":2}\\""}',
+            arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
             status: 'in_progress'
           }
         ],
@@ -2766,7 +2769,7 @@ describe('responses conversation store plain continuation restore', () => {
                 id: 'call_third_round_2',
                 type: 'function',
                 name: 'exec_command',
-                arguments: '{"cmd":"routecodex servertool run stop_message_auto --input-json \\"{\\\\\\"repeatCount\\\\\\":2}\\""}'
+                arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}'
               }
             ]
           }
@@ -2777,7 +2780,10 @@ describe('responses conversation store plain continuation restore', () => {
     const resumed2 = resumeResponsesConversation(
       'resp-third-round-2',
       {
-        tool_outputs: [{ tool_call_id: 'call_third_round_2', output: '{"repeatCount":2}' }],
+        tool_outputs: [{
+          tool_call_id: 'call_third_round_2',
+          output: '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。","repeatCount":3,"maxRepeats":3,"schemaGuidance":{"requiredFields":["stopreason","reason","next_step"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}'
+        }],
         stream: false
       },
       { requestId: track('req-resp-store-third-round-submit-2') }
@@ -2797,33 +2803,30 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(Array.isArray(resumed1.payload.input)).toBe(true);
     expect(Array.isArray(resumed2.payload.input)).toBe(true);
+    const resumed1Guidance = (resumed1.payload.input as Array<any>)[1]?.content?.[0]?.text ?? '';
+    const resumed2Guidance = (resumed2.payload.input as Array<any>)[1]?.content?.[0]?.text ?? '';
+    expect(String(resumed1Guidance)).toContain('上一轮执行结果：repeatCount=2/3');
+    expect(String(resumed2Guidance)).toContain('上一轮执行结果：repeatCount=3/3');
     expect(resumed2.payload.input).toEqual([
       {
         type: 'message',
         role: 'user',
         content: [{ type: 'input_text', text: '这是第三轮 stopless 恢复测试' }]
       },
-      expect.objectContaining({
-        type: 'function_call',
-        call_id: 'call_third_round_1',
-        name: 'exec_command'
-      }),
-      expect.objectContaining({
-        type: 'function_call_output',
-        call_id: 'call_third_round_1',
-        output: '{"repeatCount":1}'
-      }),
-      expect.objectContaining({
-        type: 'function_call',
-        call_id: 'call_third_round_2',
-        name: 'exec_command'
-      }),
-      expect.objectContaining({
-        type: 'function_call_output',
-        call_id: 'call_third_round_2',
-        output: '{"repeatCount":2}'
-      })
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          expect.objectContaining({
+            type: 'input_text',
+            text: expect.stringContaining('继续')
+          })
+        ]
+      }
     ]);
+    expect(JSON.stringify(resumed2.payload.input)).not.toContain('call_third_round_1');
+    expect(JSON.stringify(resumed2.payload.input)).not.toContain('call_third_round_2');
+    expect(JSON.stringify(resumed2.payload.input)).not.toContain('"type":"function_call_output"');
   });
 
   it('RED: reopened apply_patch after exec_command stays tool-ordered after submit_tool_outputs resume', () => {

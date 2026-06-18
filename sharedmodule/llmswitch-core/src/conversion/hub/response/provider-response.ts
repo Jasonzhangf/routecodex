@@ -273,7 +273,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     payload: hubRespOutbound04ClientSemantic
   });
   return {
-    __sse_responses: stream as Readable,
+    sseStream: stream as Readable,
     body: hubRespOutbound04ClientSemantic,
     format: streamEffect.codec
   };
@@ -317,7 +317,7 @@ interface ProviderResponseConversionOptions {
 
 interface ProviderResponseConversionResult {
   body?: JsonObject;
-  __sse_responses?: Readable;
+  sseStream?: Readable;
   format?: string;
 }
 
@@ -337,14 +337,14 @@ function extractProviderResponseSseStream(payload: unknown): Readable | undefine
     return undefined;
   }
   const record = payload as Record<string, unknown>;
-  const direct = record.__sse_responses ?? record.__sse_stream;
+  const direct = record.sseStream;
   if (direct && typeof (direct as { pipe?: unknown }).pipe === 'function') {
     return direct as Readable;
   }
   const data = record.data;
   if (data && typeof data === 'object' && !Array.isArray(data)) {
     const nested = data as Record<string, unknown>;
-    const nestedStream = nested.__sse_responses ?? nested.__sse_stream;
+    const nestedStream = nested.sseStream;
     if (nestedStream && typeof (nestedStream as { pipe?: unknown }).pipe === 'function') {
       return nestedStream as Readable;
     }

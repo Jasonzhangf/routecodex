@@ -86,30 +86,62 @@ function listFiles(relPath) {
   return out;
 }
 
+const fileListCache = new Map();
+const fileTextCache = new Map();
+
+function listFilesCached(relPath) {
+  if (fileListCache.has(relPath)) {
+    return fileListCache.get(relPath);
+  }
+  const files = listFiles(relPath);
+  fileListCache.set(relPath, files);
+  return files;
+}
+
+function readTextCached(file) {
+  if (fileTextCache.has(file)) {
+    return fileTextCache.get(file);
+  }
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      text = null;
+    } else {
+      throw error;
+    }
+  }
+  fileTextCache.set(file, text);
+  return text;
+}
+
 const owners = parseOwners(mapText);
 const failures = [];
 
 for (const owner of owners) {
   const allowset = new Set(owner.forbiddenMentionsAllowlist);
-  for (const builder of owner.canonicalBuilders) {
-    if (allowset.has(builder)) continue;
-    for (const relPath of owner.forbiddenPaths) {
-      for (const file of listFiles(relPath)) {
-        let text;
-        try {
-          text = fs.readFileSync(file, 'utf8');
-        } catch (error) {
-          if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-            continue;
-          }
-          throw error;
+  const builders = owner.canonicalBuilders.filter((builder) => !allowset.has(builder));
+  if (builders.length === 0 || owner.forbiddenPaths.length === 0) {
+    continue;
+  }
+  for (const relPath of owner.forbiddenPaths) {
+    const files = listFilesCached(relPath);
+    if (files.length === 0) {
+      continue;
+    }
+    for (const file of files) {
+      const text = readTextCached(file);
+      if (typeof text !== 'string') {
+        continue;
+      }
+      for (const builder of builders) {
+        if (!text.includes(builder)) {
+          continue;
         }
-        if (text.includes(builder)) {
-          failures.push(
-            `${owner.featureId}: canonical builder "${builder}" found in forbidden path ${path.relative(root, file)}`
-          );
-          break;
-        }
+        failures.push(
+          `${owner.featureId}: canonical builder "${builder}" found in forbidden path ${path.relative(root, file)}`
+        );
       }
     }
   }

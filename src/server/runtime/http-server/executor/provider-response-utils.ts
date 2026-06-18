@@ -1,5 +1,6 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import { resolveProviderResponseRequestSemanticsNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import { readRuntimeProviderObservationProjection } from '../metadata-center/request-truth-readers.js';
 
 export function extractResponseStatus(response: unknown): number | undefined {
   if (!response || typeof response !== 'object') {
@@ -106,23 +107,15 @@ export function extractClientModelId(
   metadata: Record<string, unknown>,
   originalRequest?: Record<string, unknown>
 ): string | undefined {
-  const metadataCenter = MetadataCenter.read(metadata);
-  const centerObservation = metadataCenter?.readProviderObservation();
-  const centerModelId =
-    typeof centerObservation?.clientModelId === 'string' && centerObservation.clientModelId.trim()
-      ? centerObservation.clientModelId.trim()
-      : typeof centerObservation?.modelId === 'string' && centerObservation.modelId.trim()
-        ? centerObservation.modelId.trim()
-        : undefined;
+  const centerObservation = readRuntimeProviderObservationProjection(metadata);
+  const centerModelId = centerObservation.clientModelId ?? centerObservation.modelId;
   if (centerModelId) {
     return centerModelId;
   }
   const candidates = [
     metadata.clientModelId,
     metadata.originalModelId,
-    centerObservation?.target && typeof centerObservation.target === 'object'
-      ? (centerObservation.target as Record<string, unknown>).clientModelId
-      : undefined,
+    centerObservation.target?.clientModelId,
     originalRequest && typeof originalRequest === 'object'
       ? (originalRequest as Record<string, unknown>).model
       : undefined,

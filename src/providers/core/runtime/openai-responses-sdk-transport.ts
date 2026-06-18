@@ -213,7 +213,7 @@ export class OpenAiResponsesSdkTransport {
     if (requestInfo.wantsSse) {
       const sseStream = await prepareResponsesSseStream(response);
       return {
-        __sse_responses: sseStream,
+        sseStream,
         ...(responseHeaders ? { headers: responseHeaders } : {})
       };
     }

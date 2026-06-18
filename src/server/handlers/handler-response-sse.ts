@@ -8,19 +8,18 @@ import {
   createClientSseSnapshotRecorder,
   logResponseNonBlockingError,
   maybeAttachClientSseSnapshotStream,
+  releaseMetadataCenterForHttpResponse,
   shouldCaptureClientResponseSnapshotStage,
   toNodeReadable,
   type ClientSseSnapshotRecorder,
   type DispatchOptions,
   type ResponsesRequestContext,
-  type SsePayloadShape,
 } from './handler-response-common.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { extractUsageFromResult } from '../runtime/http-server/executor/usage-aggregator.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
-import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
-import { STREAM_CONTRACT_PROBE_BODY_KEY } from '../runtime/http-server/executor/servertool-response-normalizer.js';
+import { deriveFinishReason } from '../utils/finish-reason.js';
 import {
   colorizeRequestLog,
 } from '../utils/request-log-color.js';
@@ -483,7 +482,13 @@ function createDirectPassthroughSseGuardStream(stream: Readable, requestId: stri
   return stream.pipe(transform);
 }
 
-function sendSseBridgeError(res: Response, requestLabel: string, status = 502): void {
+function sendSseBridgeError(
+  res: Response,
+  requestLabel: string,
+  status = 502,
+  metadata?: Record<string, unknown>,
+  releaseReason = 'sse_bridge_error_closeout'
+): void {
   const payload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, status);
   if (!res.headersSent) {
     res.status(200);
@@ -501,6 +506,7 @@ function sendSseBridgeError(res: Response, requestLabel: string, status = 502): 
   } catch (error) {
     logResponseNonBlockingError(`sendSseBridgeError:end:${requestLabel}`, error);
   }
+  releaseMetadataCenterForHttpResponse(metadata, releaseReason);
 }
 
 function extractStructuredSseErrorPayload(
@@ -515,7 +521,13 @@ function extractStructuredSseErrorPayload(
   });
 }
 
-function sendStructuredSseError(res: Response, requestLabel: string, payload: Record<string, unknown>): void {
+function sendStructuredSseError(
+  res: Response,
+  requestLabel: string,
+  payload: Record<string, unknown>,
+  metadata?: Record<string, unknown>,
+  releaseReason = 'sse_structured_error_closeout'
+): void {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -530,6 +542,7 @@ function sendStructuredSseError(res: Response, requestLabel: string, payload: Re
   } catch (error) {
     logResponseNonBlockingError(`sendStructuredSseError:end:${requestLabel}`, error);
   }
+  releaseMetadataCenterForHttpResponse(metadata, releaseReason);
 }
 
 async function normalizeResponsesSseFrameForClient(
@@ -689,13 +702,20 @@ async function streamResponsesJsonAsSse(
       })
       : null;
     if (!stream) {
-      sendSseBridgeError(args.res, args.requestLabel, 502);
+      sendSseBridgeError(
+        args.res,
+        args.requestLabel,
+        502,
+        args.result.metadata as Record<string, unknown> | undefined,
+        'json_to_sse_bridge_missing_stream_closeout'
+      );
       return true;
     }
     stream.on('end', () => {
       if (!args.res.writableEnded && !args.res.destroyed) {
         args.res.end();
       }
+      releaseMetadataCenterForHttpResponse(args.result.metadata, 'json_to_sse_closeout');
       args.logResponseCompleted({
         status: args.status,
         mode: 'sse',
@@ -705,14 +725,26 @@ async function streamResponsesJsonAsSse(
     stream.on('error', (error: Error) => {
       logResponseNonBlockingError(`response.sse.json_bridge.stream:${args.requestLabel}`, error);
       if (!args.res.writableEnded && !args.res.destroyed) {
-        sendSseBridgeError(args.res, args.requestLabel, 502);
+        sendSseBridgeError(
+          args.res,
+          args.requestLabel,
+          502,
+          args.result.metadata as Record<string, unknown> | undefined,
+          'json_to_sse_stream_error_closeout'
+        );
       }
     });
     stream.pipe(args.res, { end: false });
   } catch (error) {
     logResponseNonBlockingError(`response.sse.json_bridge:${args.requestLabel}`, error);
     if (!args.res.writableEnded && !args.res.destroyed) {
-      sendSseBridgeError(args.res, args.requestLabel, 502);
+      sendSseBridgeError(
+        args.res,
+        args.requestLabel,
+        502,
+        args.result.metadata as Record<string, unknown> | undefined,
+        'json_to_sse_bridge_error_closeout'
+      );
     }
   }
   return true;
@@ -772,10 +804,22 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       });
     }
     if (structuredErrorPayload) {
-      sendStructuredSseError(res, requestLabel, structuredErrorPayload);
+      sendStructuredSseError(
+        res,
+        requestLabel,
+        structuredErrorPayload,
+        result.metadata as Record<string, unknown> | undefined,
+        'force_sse_structured_error_closeout'
+      );
       return true;
     }
-    sendSseBridgeError(res, requestLabel, 502);
+    sendSseBridgeError(
+      res,
+      requestLabel,
+      502,
+      result.metadata as Record<string, unknown> | undefined,
+      'force_sse_missing_stream_closeout'
+    );
     return true;
   }
 
@@ -783,14 +827,14 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     return false;
   }
 
-  const sseBody = body as SsePayloadShape & Record<string, unknown>;
-  const streamSource = sseBody.__sse_responses;
+  const streamSource = result.sseStream;
   const stream = toNodeReadable(streamSource);
   const resultMetadata =
     result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
       ? result.metadata as Record<string, unknown>
       : undefined;
-  const isDirectPassthrough = resultMetadata?.__routecodexDirectPassthrough === true;
+  const continuationOwner = result.continuationOwner ?? 'relay';
+  const isDirectPassthrough = continuationOwner === 'direct';
   const responseProjectionMetadata = {
     ...(result.metadata ?? {}),
     requestId: requestLabel
@@ -819,7 +863,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         logResponseNonBlockingError(`writeServerSnapshot:sse_missing_stream:${requestLabel}`, error);
       });
     }
-    sendSseBridgeError(res, requestLabel, 502);
+    sendSseBridgeError(
+      res,
+      requestLabel,
+      502,
+      resultMetadata,
+      'missing_stream_closeout'
+    );
     return true;
   }
   const restoredStream = isDirectPassthrough
@@ -862,10 +912,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       trigger: 'close',
       streamEnded: false,
       sawTerminalEvent: false,
-      finishReason:
-        typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
-          ? String(sseBody[STREAM_LOG_FINISH_REASON_KEY])
-          : undefined,
+      finishReason: undefined,
       closeBeforeStreamEnd: true,
       detectedBeforeStreamStart: true
     };
@@ -921,6 +968,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (error) {
       logResponseNonBlockingError(`response.sse.client_close.prestart.destroy:${requestLabel}`, error);
     }
+    releaseMetadataCenterForHttpResponse(resultMetadata, 'sse_prestart_client_close');
     return true;
   }
 
@@ -966,10 +1014,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let streamEnded = false;
   let clientSemanticFrameWritten = false;
   const finishTracker: SseFinishReasonTracker = {
-    finishReason:
-      typeof sseBody[STREAM_LOG_FINISH_REASON_KEY] === 'string'
-        ? String(sseBody[STREAM_LOG_FINISH_REASON_KEY])
-        : undefined,
+    finishReason: undefined,
     seenTerminalEvent: false,
   };
   let totalTimer: NodeJS.Timeout | null = null;
@@ -982,9 +1027,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     requiresResponsesTerminalEvent: false
   };
   const contractProbe: StreamContractProbeEnvelope = {
-    probe: sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] && typeof sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] === 'object' && !Array.isArray(sseBody[STREAM_CONTRACT_PROBE_BODY_KEY])
-      ? sseBody[STREAM_CONTRACT_PROBE_BODY_KEY] as Record<string, unknown>
-      : undefined,
+    probe: undefined,
     emitted: false
   };
   terminalWatch.requiresResponsesTerminalEvent = shouldRequireResponsesTerminalEventForHttp({
@@ -1021,7 +1064,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     logResponsesContinuationTrace('sse.persist.start', requestLabel, {
       responseId: undefined,
       finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined,
-      continuationOwner: isDirectPassthrough ? 'direct' : 'relay',
+      continuationOwner,
       providerKey: result.usageLogInfo?.providerKey,
       hasRequestContext: Boolean(effectiveResponsesRequestContext)
     });
@@ -1034,6 +1077,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           ? result.metadata as Record<string, unknown>
           : undefined,
       requestContext: effectiveResponsesRequestContext,
+      continuationOwner,
       body: sanitizedProbeBody,
       onTrace: (stage, details) => logResponsesContinuationTrace(`sse.persist.${stage}`, requestLabel, details),
       onNonBlockingError: logResponseNonBlockingError,
@@ -1288,6 +1332,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
       probe: contractProbe.probe ?? undefined
     };
+    releaseMetadataCenterForHttpResponse(resultMetadata, `sse_${trigger}_closeout`);
     if (closeBeforeStreamEnd) {
       logSseClientCloseDiagnosis(requestLabel, {
         ...details,

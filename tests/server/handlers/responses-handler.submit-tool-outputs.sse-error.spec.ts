@@ -8,6 +8,7 @@ const mockResumeResponsesConversation = jest.fn();
 const mockCaptureResponsesRequestContextForRequest = jest.fn();
 const mockClearResponsesConversationByRequestId = jest.fn(async () => undefined);
 const mockFinalizeResponsesConversationRequestRetention = jest.fn(async () => undefined);
+const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 
@@ -15,6 +16,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId: mockClearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention: mockFinalizeResponsesConversationRequestRetention,
+  lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
   resumeResponsesConversation: mockResumeResponsesConversation,
@@ -22,6 +24,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
   })),
@@ -37,6 +43,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
 }));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', () => ({
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
   })),
@@ -62,13 +72,6 @@ jest.unstable_mockModule('../../../src/utils/errorsamples.js', () => ({
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__routecodex_finish_reason',
   deriveFinishReason: jest.fn((body: Record<string, unknown> | undefined) => {
-    const output = Array.isArray(body?.output) ? body.output : [];
-    if (output.some((item) => item && typeof item === 'object' && (item as Record<string, unknown>).type === 'function_call')) {
-      return 'tool_calls';
-    }
-    return body?.status === 'completed' ? 'stop' : undefined;
-  }),
-  deriveFinishReasonWithVisibleSuccessFallback: jest.fn((body: Record<string, unknown> | undefined) => {
     const output = Array.isArray(body?.output) ? body.output : [];
     if (output.some((item) => item && typeof item === 'object' && (item as Record<string, unknown>).type === 'function_call')) {
       return 'tool_calls';

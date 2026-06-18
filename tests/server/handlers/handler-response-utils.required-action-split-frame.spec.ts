@@ -61,7 +61,7 @@ const mockBridgeModule = async () => ({
   deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
-    body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>)
+    body && typeof body === 'object' && 'sseStream' in (body as Record<string, unknown>)
   )),
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
@@ -301,7 +301,7 @@ const mockBridgeModule = async () => ({
     forceSSE: boolean;
     metadata?: Record<string, unknown>;
   }) => {
-    if (!args.body || typeof args.body !== 'object' || !('__sse_responses' in (args.body as Record<string, unknown>))) {
+    if (!args.body || typeof args.body !== 'object' || !('sseStream' in (args.body as Record<string, unknown>))) {
       return false;
     }
     if (args.forceSSE) {
@@ -521,7 +521,7 @@ describe('handler-response-utils required_action split frame regression', () => 
       {
         status: 200,
         body: {
-          __sse_responses: Readable.from(splitRequiredActionStream()),
+          sseStream: Readable.from(splitRequiredActionStream()),
           __routecodex_stream_finish_reason: 'tool_calls',
           __routecodex_stream_contract_probe_body: {
             id: responseId,

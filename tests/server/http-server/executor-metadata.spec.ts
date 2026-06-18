@@ -464,6 +464,67 @@ describe('executor metadata session daemon extraction', () => {
     });
   });
 
+  it('merges runtime control from pipeline metadata center without reviving flat retry pin fields', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-runtime-control-merge-1',
+      headers: {
+        session_id: 'sess-center-runtime-control-merge-1',
+        conversation_id: 'conv-center-runtime-control-merge-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    const pipelineMetadata: Record<string, unknown> = {};
+    const pipelineCenter = MetadataCenter.attach(pipelineMetadata);
+    pipelineCenter.writeRuntimeControl(
+      'retryProviderKey',
+      'provider.key.model',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'merges runtime control from pipeline metadata center without reviving flat retry pin fields',
+        stage: 'test'
+      }
+    );
+    pipelineCenter.writeRuntimeControl(
+      'preselectedRoute',
+      {
+        routeName: 'tools',
+        providerKey: 'provider.key.model'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'merges runtime control from pipeline metadata center without reviving flat retry pin fields',
+        stage: 'test'
+      }
+    );
+
+    const { mergedMetadata } = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-center-runtime-control-merge-1',
+      metadataForAttempt: metadata,
+      pipelineResult: {
+        metadata: pipelineMetadata
+      } as any,
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-center-runtime-control-merge-1'
+    });
+
+    expect(mergedMetadata.__routecodexRetryProviderKey).toBeUndefined();
+    expect(mergedMetadata.__routecodexPreselectedRoute).toBeUndefined();
+    expect(MetadataCenter.read(mergedMetadata)?.readRuntimeControl()).toMatchObject({
+      retryProviderKey: 'provider.key.model',
+      preselectedRoute: {
+        routeName: 'tools',
+        providerKey: 'provider.key.model'
+      }
+    });
+  });
+
   it('preserves request truth metadata center across attempt decoration clones', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses',

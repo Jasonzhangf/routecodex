@@ -4,9 +4,9 @@ import {
   applyHeaders,
   assertClientResponseHasNoInternalCarriers,
   logResponseNonBlockingError,
+  releaseMetadataCenterForHttpResponse,
   shouldCaptureClientResponseSnapshotStage,
   type DispatchOptions,
-  type SsePayloadShape,
 } from './handler-response-common.js';
 import { sendSsePipelineResponse } from './handler-response-sse.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
@@ -36,9 +36,7 @@ import {
 
 export {
   assertClientResponseHasNoInternalCarriers,
-  hasResponsesSsePayloadForHttp as hasSsePayload,
 };
-export type { SsePayloadShape };
 
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
@@ -62,7 +60,7 @@ export async function sendPipelineResponse(
     body,
     forceSSE,
     metadata: resultMetadata,
-  });
+  }) || result.sseStream !== undefined;
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
@@ -158,8 +156,8 @@ export async function sendPipelineResponse(
     stream: expectsStream,
     forced: forceSSE,
     entryEndpoint,
-    hasSsePayload: hasResponsesSsePayloadForHttp(body),
-    directPassthrough: resultMetadata?.__routecodexDirectPassthrough === true,
+    hasSsePayload: result.sseStream !== undefined,
+    continuationOwner: result.continuationOwner,
   });
 
   // G6: sendSsePipelineResponse now returns boolean | Error.
@@ -211,6 +209,7 @@ export async function sendPipelineResponse(
       });
     }
     res.status(status).end();
+    releaseMetadataCenterForHttpResponse(resultMetadata, 'json_empty_closeout');
     logPipelineStage('response.json.completed', requestLabel, { status });
     logResponseCompleted({ status, mode: 'json', empty: true });
     return;
@@ -289,6 +288,7 @@ export async function sendPipelineResponse(
   }
   assertClientResponseHasNoInternalCarriers(sanitized, requestLabel);
   res.status(status).json(sanitized);
+  releaseMetadataCenterForHttpResponse(resultMetadata, 'json_closeout');
   logPipelineStage('response.json.completed', requestLabel, { status });
   logResponseCompleted({
     status,

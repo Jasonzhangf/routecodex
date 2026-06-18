@@ -24,6 +24,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
   })),
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
   planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
     mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
     payload: {
@@ -36,6 +40,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
 }));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', () => ({
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
   })),
@@ -61,13 +69,6 @@ jest.unstable_mockModule('../../../src/utils/errorsamples.js', () => ({
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__routecodex_finish_reason',
   deriveFinishReason: jest.fn((body: Record<string, unknown> | undefined) => {
-    const output = Array.isArray(body?.output) ? body.output : [];
-    if (output.some((item) => item && typeof item === 'object' && (item as Record<string, unknown>).type === 'function_call')) {
-      return 'tool_calls';
-    }
-    return body?.status === 'completed' ? 'stop' : undefined;
-  }),
-  deriveFinishReasonWithVisibleSuccessFallback: jest.fn((body: Record<string, unknown> | undefined) => {
     const output = Array.isArray(body?.output) ? body.output : [];
     if (output.some((item) => item && typeof item === 'object' && (item as Record<string, unknown>).type === 'function_call')) {
       return 'tool_calls';
@@ -243,7 +244,7 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     });
   });
 
-  it('keeps relay submit_tool_outputs entryEndpoint for responses providers so upstream can use native submit path', async () => {
+  it('rewrites relay submit_tool_outputs back to /v1/responses mainline after local materialization', async () => {
     const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 
     mockLookupResponsesContinuationByResponseId.mockResolvedValue({
@@ -261,8 +262,20 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
             role: 'user',
             content: [{ type: 'input_text', text: '继续执行 submit_tool_outputs 同协议直连' }],
           },
+          {
+            type: 'function_call',
+            id: 'fc_submit_same_protocol_1',
+            call_id: 'call_submit_same_protocol_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_submit_same_protocol_1',
+            call_id: 'call_submit_same_protocol_1',
+            output: 'ok',
+          },
         ],
-        tool_outputs: [{ call_id: 'call_submit_same_protocol_1', output: 'ok' }],
       },
       meta: {
         restoredFromResponseId: 'resp_submit_same_protocol_1',
@@ -333,17 +346,35 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     );
     expect(executePipeline).toHaveBeenCalledTimes(1);
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
-    expect(pipelineInput.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
+    expect(pipelineInput.entryEndpoint).toBe('/v1/responses');
     expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
     expect(pipelineInput.metadata?.responsesResume?.routeHint).toBe('thinking');
     expect(pipelineInput.body?.previous_response_id).toBe('resp_submit_same_protocol_1');
+    expect(pipelineInput.body?.tool_outputs).toBeUndefined();
+    expect(pipelineInput.body?.input).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'function_call', call_id: 'call_submit_same_protocol_1' }),
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_submit_same_protocol_1',
+          output: 'ok',
+        }),
+      ]),
+    );
     expect(mockCaptureResponsesRequestContextForRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: expect.any(String),
         entryKind: 'responses',
         payload: expect.objectContaining({
           previous_response_id: 'resp_submit_same_protocol_1',
-          tool_outputs: [{ call_id: 'call_submit_same_protocol_1', output: 'ok' }],
+          input: expect.arrayContaining([
+            expect.objectContaining({ type: 'function_call', call_id: 'call_submit_same_protocol_1' }),
+            expect.objectContaining({
+              type: 'function_call_output',
+              call_id: 'call_submit_same_protocol_1',
+              output: 'ok',
+            }),
+          ]),
         }),
         context: expect.objectContaining({
           input: expect.any(Array),

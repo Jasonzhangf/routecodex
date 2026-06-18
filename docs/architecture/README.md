@@ -77,6 +77,14 @@
   - metadata center 的 machine-readable lifecycle/slot/provenance manifest
   - 给 gate/generator/agent 消费，与 wiki 页共用同一组 node ID 和 family/slot 边界
 
+- `mainline-binding-budget.yml`
+  - 记录各条 mainline 当前允许保留的 `partial` / `binding pending` 债务预算
+  - 用于把“已知未完全绑定”锁成显式预算，禁止无审计增长
+
+- `topology-sync-manifest.yml`
+  - 记录 topology 文档当前允许保留但尚未被 call-map/manifest/wiki 消费的节点 debt
+  - 用于把 topology review debt 从“信息输出”升级成显式预算锁
+
 - `wiki/stopless-session-mainline-source.md`
   - stopless 的 runtime metadata / current-turn `tool_outputs` 主线 review 面
   - 用于审计 stopless 真源是否仍只来自当前请求闭环，而不是 file persistence / tmux / `ROUTECODEX_SESSION_DIR`
@@ -137,6 +145,12 @@
 - `scripts/architecture/verify-function-map-required-tests.mjs`
   - 检查 `required_tests` 文件真实存在，`required_gates` 对应的 `npm run` 脚本真实存在
 
+- `scripts/architecture/verify-architecture-mainline-binding-pending-gate.mjs`
+  - 按 `mainline-binding-budget.yml` 校验各 chain 的 `anchored / partial / binding pending` 不得回退或增长
+
+- `scripts/architecture/verify-architecture-topology-doc-sync.mjs`
+  - 按 `topology-sync-manifest.yml` 校验 topology 文档未消费节点 debt 不得静默增长或遗留过期 allowlist
+
 - `docs/architecture/fallback-denylist.json`
   - 定义核心架构路径的 fallback/degrade denylist 与显式 allowlist
 
@@ -176,6 +190,9 @@
 - `scripts/architecture/verify-architecture-forbidden-path-growth.mjs`
   - 检查 `canonical_types + canonical_builders` 不得在 `forbidden_paths` 生长，防止错误层重新长出第二份实现
 
+- `scripts/architecture/verify-architecture-metadata-center-manifest-code-sync.mjs`
+  - 检查 `metadata-center-manifest.yml` 声明的 family/slot/provenance 是否真实绑定到 `MetadataCenter` 类型、state、writer、reader 和 release 路径
+
 - `scripts/architecture/verify-architecture-adjacent-builder-naming.mjs`
   - 检查架构 owner builder/parser/projector 是否显式编码相邻 source/target；除入口 payload、metadata carrier、error chain 特例外，禁止泛化命名与旧 `req_process/resp_process` 退化
 
@@ -209,3 +226,5 @@
 7. `mainline-call-map.yml` 变更后，必须同步运行 `npm run render:architecture-mainline-mermaid` 并让 `wiki/mainline-call-graph.md` 保持同步。
 8. 自动生成 wiki 页变更后，必须同步运行 `node scripts/architecture/render-architecture-wiki-pages.mjs` 并通过 `node scripts/architecture/verify-architecture-wiki-sync.mjs`。
 9. 需要正式 HTML review 面时，必须生成到 `docs/architecture/wiki/html/*.html` 并通过 `npm run verify:architecture-wiki-html-sync`；浏览器验证也必须针对 repo 内 HTML 文档，而不是 `/tmp` 临时文件。
+10. `partial` / `binding pending` 只能作为显式 debt 保留：必须同步更新 `docs/architecture/mainline-binding-budget.yml` 并通过 `npm run verify:architecture-mainline-binding-pending-gate`。
+11. topology 文档允许保留的未消费节点必须同步登记到 `docs/architecture/topology-sync-manifest.yml`；未登记增长或已收口未删旧 debt 都会被 `npm run verify:architecture-topology-doc-sync` 拦截。

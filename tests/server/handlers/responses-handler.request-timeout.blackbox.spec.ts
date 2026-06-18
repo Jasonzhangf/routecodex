@@ -106,14 +106,12 @@ describe('responses-handler request timeout blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              __sse_responses: Readable.from([
+            sseStream: Readable.from([
                 'event: response.completed\n',
                 'data: {"type":"response.completed","response":{"id":"resp_fast","object":"response","status":"completed","output":[]}}\n\n',
                 'event: response.done\n',
                 'data: {"type":"response.done","response":{"id":"resp_fast","object":"response","status":"completed","output":[]}}\n\n',
               ]),
-            },
             metadata: {},
           };
         },

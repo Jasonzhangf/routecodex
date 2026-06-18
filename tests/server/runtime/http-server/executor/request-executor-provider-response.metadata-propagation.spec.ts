@@ -9,7 +9,7 @@ describe('buildProviderExecutionSuccessResult metadata propagation', () => {
     const result = buildProviderExecutionSuccessResult({
       converted: {
         status: 200,
-        body: { __sse_responses: { pipe: () => undefined } }
+        body: { sseStream: { pipe: () => undefined } }
       } as any,
       providerKey: 'test.key1',
       providerModel: 'gpt-5.4',

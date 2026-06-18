@@ -119,10 +119,10 @@
      - `seedReasoningStopStateFromCapturedRequest(...)`
    - 这会导致 session / conversation / stopless 进入骨架不是单点真源。
 
-2. **response wrapper 双实现**
-   - 两边都各自手拼 `__sse_responses` wrapper
-   - 各自挂 `finish_reason`
-   - 之前都**没有**把 `reasoning.stop finalized` 状态变成统一 wrapper 元数据
+2. **response wrapper 双实现（已废弃）**
+   - 历史上两边各自手拼 SSE wrapper 并挂内部 finish/finalized 字段。
+   - 最新 contract 已禁止把内部控制字段混入请求/响应 payload。
+   - SSE stream 与控制状态必须走 typed runtime side-channel / MetadataCenter，不能恢复 wrapper payload 字段。
 
 3. **stopless 对 streamed wrapper 漏校验**
    - `RequestExecutor.detectStoplessTerminationWithoutFinalization(...)`
@@ -142,20 +142,17 @@
    - 说明该区域长期热修，但没有完成真正骨架化。
 
 ### 本轮已先落的第一刀
-1. 新增 host 壳层共享 helper：
-   - `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`
-   - `src/server/runtime/http-server/executor/servertool-response-normalizer.ts`
+1. 历史第一刀曾新增 host 壳层共享 helper：
+   - `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`（现已删除并内联回 `servertool-adapter-context.ts`）
+   - response wrapper helper 后续已废弃并删除，不能再作为当前 contract。
 
 2. 已把 request 侧共享逻辑先抽单点：
    - session / conversation backfill
    - stopless seed
 
-3. 已把 SSE wrapper 共享逻辑先抽单点：
-   - `buildServerToolSseWrapperBody(...)`
-   - 统一挂：
-     - `__sse_responses`
-     - `__routecodex_finish_reason`
-     - `__routecodex_reasoning_stop_finalized`
+3. SSE wrapper 共享逻辑已被后续规则取代：
+   - 禁止恢复内部 payload wrapper 字段。
+   - finish reason / stopless finalized / stream probe 只能来自协议语义或 runtime side-channel。
 
 4. stopless streamed wrapper 漏检已修：
    - 若 wrapper `finish_reason=stop`

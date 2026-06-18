@@ -44,6 +44,13 @@ describe('server.response_projection internal carrier guard (Phase Server-C)', (
     )).not.toThrow();
   });
 
+  it('fails fast when non-Responses JSON body carries top-level metadata even if values look client-safe', () => {
+    expect(() => assertClientResponseHasNoInternalCarriers(
+      { id: 'chatcmpl_1', object: 'chat.completion', metadata: { user_tag: 'safe' } },
+      'req-1'
+    )).toThrow('metadata');
+  });
+
   it('fails fast when metadata carries internal routing controls', () => {
     expect(() => assertClientResponseHasNoInternalCarriers(
       { id: 'resp_1', object: 'response', metadata: { routeHint: 'tools' } },

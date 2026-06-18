@@ -224,7 +224,9 @@ Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stoples
 ```mermaid
 flowchart LR
   VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
-  StoplessReq08NextTurnMaterialized["StoplessReq08NextTurnMaterialized"]
+  StoplessReq09SchemaContractInjected["StoplessReq09SchemaContractInjected"]
+  StoplessReq08GuidanceRewritten["StoplessReq08GuidanceRewritten"]
+  StoplessReq07ContinuationRestored["StoplessReq07ContinuationRestored"]
   StoplessCli06ClientExecuted["StoplessCli06ClientExecuted"]
   StoplessCli04ProjectionPlanned["StoplessCli04ProjectionPlanned"]
   StoplessState03RuntimeSnapshotResolved["StoplessState03RuntimeSnapshotResolved"]
@@ -234,8 +236,10 @@ flowchart LR
   StoplessResp02SchemaGateEvaluated -->|stl-02| StoplessState03RuntimeSnapshotResolved
   StoplessState03RuntimeSnapshotResolved -->|stl-03| StoplessCli04ProjectionPlanned
   StoplessCli04ProjectionPlanned -->|stl-04| StoplessCli06ClientExecuted
-  StoplessCli06ClientExecuted -->|stl-05| StoplessReq08NextTurnMaterialized
-  StoplessReq08NextTurnMaterialized -->|stl-06| VrRoute04SelectedTarget
+  StoplessCli06ClientExecuted -->|stl-05| StoplessReq07ContinuationRestored
+  StoplessReq07ContinuationRestored -->|stl-06| StoplessReq08GuidanceRewritten
+  StoplessReq08GuidanceRewritten -->|stl-07| StoplessReq09SchemaContractInjected
+  StoplessReq09SchemaContractInjected -->|stl-08| VrRoute04SelectedTarget
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -244,22 +248,26 @@ flowchart LR
   class StoplessState03RuntimeSnapshotResolved anchored;
   class StoplessCli04ProjectionPlanned anchored;
   class StoplessCli06ClientExecuted anchored;
-  class StoplessReq08NextTurnMaterialized anchored;
+  class StoplessReq07ContinuationRestored anchored;
+  class StoplessReq08GuidanceRewritten anchored;
+  class StoplessReq09SchemaContractInjected anchored;
   class VrRoute04SelectedTarget anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| stl-01 | `StoplessResp01StopDetected -> StoplessResp02SchemaGateEvaluated` | anchored | `runServerToolOrchestration -> runStopMessageAutoHandlerWithNative` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
-| stl-02 | `StoplessResp02SchemaGateEvaluated -> StoplessState03RuntimeSnapshotResolved` | anchored | `resolveRuntimeStopMessageStateFromAdapterContext -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
-| stl-03 | `StoplessState03RuntimeSnapshotResolved -> StoplessCli04ProjectionPlanned` | anchored | `buildServertoolCliProjectionForAutoFlow -> plan_client_exec_cli_projection_output` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
-| stl-04 | `StoplessCli04ProjectionPlanned -> StoplessCli06ClientExecuted` | anchored | `createServertoolCommand -> build_servertool_cli_binary_run_command_from_client_exec_result` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
-| stl-05 | `StoplessCli06ClientExecuted -> StoplessReq08NextTurnMaterialized` | anchored | `has_stop_message_auto_cli_result_in_request_json -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
-| stl-06 | `StoplessReq08NextTurnMaterialized -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto runtime-metadata-only CLI continuation planning |
+| stl-01 | `StoplessResp01StopDetected -> StoplessResp02SchemaGateEvaluated` | anchored | `runServerToolOrchestration -> runStopMessageAutoHandlerWithNative` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-02 | `StoplessResp02SchemaGateEvaluated -> StoplessState03RuntimeSnapshotResolved` | anchored | `resolveRuntimeStopMessageStateFromAdapterContext -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-03 | `StoplessState03RuntimeSnapshotResolved -> StoplessCli04ProjectionPlanned` | anchored | `buildServertoolCliProjectionForAutoFlow -> plan_client_exec_cli_projection_output` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-04 | `StoplessCli04ProjectionPlanned -> StoplessCli06ClientExecuted` | anchored | `createServertoolCommand -> build_servertool_cli_binary_run_command_from_client_exec_result` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-05 | `StoplessCli06ClientExecuted -> StoplessReq07ContinuationRestored` | anchored | `has_stop_message_auto_cli_result_in_request_json -> resolve_runtime_stop_message_state_from_adapter_context` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-06 | `StoplessReq07ContinuationRestored -> StoplessReq08GuidanceRewritten` | anchored | `buildChatRequestFromResponses -> convertBridgeInputToChatMessages` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-07 | `StoplessReq08GuidanceRewritten -> StoplessReq09SchemaContractInjected` | anchored | `apply_req_process_tool_governance -> inject_stopless_system_instruction` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
+| stl-08 | `StoplessReq09SchemaContractInjected -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning |
 
 ## metadata.center.mainline
 
-future request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.
+request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.
 
 Entry contract: `MetaReq01InboundSeeded` via `docs/architecture/wiki/metadata-center-mainline-source.md`
 
@@ -275,7 +283,8 @@ flowchart LR
   MetaReq01InboundSeeded["MetaReq01InboundSeeded"]
   MetaReq01InboundSeeded -->|mtc-01| MetaReq02TruthMaterialized
   MetaReq02TruthMaterialized -->|mtc-02| MetaReq03ContinuationAttached
-  MetaReq03ContinuationAttached -->|mtc-03| MetaReq04RuntimeControlBound
+  MetaReq02TruthMaterialized -->|mtc-02-result| MetaReq03ContinuationAttached
+  MetaReq03ContinuationAttached -.->|mtc-03| MetaReq04RuntimeControlBound
   MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
   MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
   MetaResp06ResponseObserved -->|mtc-06| MetaResp07ServertoolContextProjected
@@ -283,25 +292,26 @@ flowchart LR
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class MetaReq01InboundSeeded pending;
-  class MetaReq02TruthMaterialized pending;
-  class MetaReq03ContinuationAttached pending;
-  class MetaReq04RuntimeControlBound pending;
-  class MetaReq05ProviderObservationProjected pending;
-  class MetaResp06ResponseObserved pending;
-  class MetaResp07ServertoolContextProjected pending;
-  class MetaResp08CloseoutReleased pending;
+  class MetaReq01InboundSeeded anchored;
+  class MetaReq02TruthMaterialized anchored;
+  class MetaReq03ContinuationAttached partial;
+  class MetaReq04RuntimeControlBound partial;
+  class MetaReq05ProviderObservationProjected anchored;
+  class MetaResp06ResponseObserved anchored;
+  class MetaResp07ServertoolContextProjected anchored;
+  class MetaResp08CloseoutReleased anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| mtc-01 | `MetaReq01InboundSeeded -> MetaReq02TruthMaterialized` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-02 | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07ServertoolContextProjected` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
-| mtc-07 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | binding pending | `binding pending` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout |
+| mtc-01 | `MetaReq01InboundSeeded -> MetaReq02TruthMaterialized` | anchored | `buildRequestMetadata -> writeRequestTruth` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-02 | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | anchored | `buildResponsesPipelineMetadataForHttp -> writeContinuationContext` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-02-result | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | anchored | `attachResponsesRequestContextToResultForHttp -> writeContinuationContext` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | partial | `finalizeRequestExecutorAttemptMetadata -> finalizeRequestExecutorAttemptMetadata` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | anchored | `resolveRequestExecutorPipelineAttempt -> resolveRequestExecutorPipelineAttempt` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `resolveResponsesConversationPersistInputsForHttp -> readRuntimeRequestTruthIdentifiers` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07ServertoolContextProjected` | anchored | `buildServerToolAdapterContext -> readRuntimeServerToolProjection` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
+| mtc-07 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>request-scoped metadata center registry and response closeout release remain on one request-local owner |
 
 ## Shared Multi-Reference Functions
 

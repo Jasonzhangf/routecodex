@@ -8,8 +8,18 @@
 import { requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type RoutingInstructionState = Record<string, unknown>;
+type StoplessGoalStateModule = {
+  syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
+  persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
+  readStoplessGoalState?: (adapterContext: unknown) => unknown;
+};
+
+function requireStoplessGoalStateModule(): StoplessGoalStateModule {
+  return requireCoreDist<StoplessGoalStateModule>('servertool/handlers/stopless-goal-state');
+}
 
 function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
@@ -65,10 +75,9 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
 
 export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unknown {
   try {
-    const mod = requireCoreDist<{ syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
-    const fn = mod.syncStoplessGoalStateFromRequest;
+    const fn = requireStoplessGoalStateModule().syncStoplessGoalStateFromRequest;
     if (typeof fn !== 'function') {
-      throw new Error('syncStoplessGoalStateFromRequest native unavailable');
+      throw new Error('syncStoplessGoalStateFromRequest unavailable');
     }
     return fn(adapterContext);
   } catch (error) {
@@ -78,10 +87,9 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unkno
 
 export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
   try {
-    const mod = requireCoreDist<{ persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
-    const fn = mod.persistStoplessGoalStateSnapshot;
+    const fn = requireStoplessGoalStateModule().persistStoplessGoalStateSnapshot;
     if (typeof fn !== 'function') {
-      throw new Error('persistStoplessGoalStateSnapshot native unavailable');
+      throw new Error('persistStoplessGoalStateSnapshot unavailable');
     }
     return fn(adapterContext, state);
   } catch (error) {
@@ -91,10 +99,9 @@ export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state:
 
 export function readStoplessGoalState(adapterContext: unknown): unknown {
   try {
-    const mod = requireCoreDist<{ readStoplessGoalState?: (adapterContext: unknown) => unknown }>('servertool/handlers/stopless-goal-state');
-    const fn = mod.readStoplessGoalState;
+    const fn = requireStoplessGoalStateModule().readStoplessGoalState;
     if (typeof fn !== 'function') {
-      throw new Error('readStoplessGoalState native unavailable');
+      throw new Error('readStoplessGoalState unavailable');
     }
     return fn(adapterContext);
   } catch (error) {
@@ -143,9 +150,7 @@ export function extractContinuationContextSessionIdentifiersFromMetadata(
   meta: Record<string, unknown> | undefined
 ): SessionIdentifiers {
   try {
-    const responsesRequestContext = meta && typeof meta === 'object'
-      ? (meta.responsesRequestContext as Record<string, unknown> | undefined)
-      : undefined;
+    const responsesRequestContext = MetadataCenter.read(meta)?.readContinuationContext().responsesRequestContext;
     if (!responsesRequestContext || typeof responsesRequestContext !== 'object') {
       return {};
     }

@@ -214,6 +214,25 @@ export function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
   return STOPLESS_DIRECTIVE_PATTERN.test(extractLatestUserTextForStoplessScan(source));
 }
 
+export function shouldAllowDirectResponsesPrebuiltSsePassthrough(args: {
+  entryEndpoint?: string;
+  providerProtocol?: string;
+  hasSseStream: boolean;
+  continuationOwner?: 'direct' | 'relay';
+}): boolean {
+  if (!args.hasSseStream) {
+    return false;
+  }
+  const entry = String(args.entryEndpoint || '').toLowerCase();
+  if (!entry.includes('/v1/responses')) {
+    return false;
+  }
+  if (args.providerProtocol !== 'openai-responses') {
+    return false;
+  }
+  return args.continuationOwner === 'direct';
+}
+
 // ---------------------------------------------------------------------------
 // Tool name / argument helpers
 // ---------------------------------------------------------------------------

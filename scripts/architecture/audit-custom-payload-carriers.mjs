@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import YAML from 'yaml';
 
 const repoRoot = process.cwd();
 
@@ -54,6 +55,20 @@ const patternGroups = [
   },
 ];
 
+const manifestPath = path.join(repoRoot, 'docs/architecture/custom-payload-carrier-runtime-manifest.yml');
+const manifest = fs.existsSync(manifestPath)
+  ? YAML.parse(fs.readFileSync(manifestPath, 'utf8'))
+  : null;
+const manifestGroups = new Map(
+  Array.isArray(manifest?.carrier_runtime_surfaces)
+    ? manifest.carrier_runtime_surfaces.map((group) => [String(group.carrier_id), group])
+    : []
+);
+const categoryResolutionTracks =
+  manifest?.category_resolution_tracks && typeof manifest.category_resolution_tracks === 'object'
+    ? manifest.category_resolution_tracks
+    : {};
+
 function bucketFor(relPath) {
   if (relPath.startsWith('src/') || relPath.startsWith('sharedmodule/llmswitch-core/src/') || relPath.startsWith('sharedmodule/llmswitch-core/rust-core/')) {
     return 'runtime';
@@ -101,6 +116,9 @@ function initGroupState(group) {
       other: 0,
     },
     files: new Map(),
+    runtimeCategoryCounts: new Map(),
+    runtimeSemanticFamilyCounts: new Map(),
+    runtimeResolutionCounts: new Map(),
   };
 }
 
@@ -167,6 +185,41 @@ for (const group of patternGroups) {
   console.log(
     `files runtime=${uniqueFiles.runtime} test=${uniqueFiles.test} script=${uniqueFiles.script} doc=${uniqueFiles.doc} other=${uniqueFiles.other}`
   );
+
+  if (manifestGroups.has(group.id)) {
+    const manifestGroup = manifestGroups.get(group.id);
+    const manifestEntries = Array.isArray(manifestGroup?.files) ? manifestGroup.files : [];
+    const runtimeEntries = manifestEntries.filter((entry) => {
+      const rel = String(entry.path || '');
+      return uniqueFiles.runtime > 0 && state.files.has(rel) && bucketFor(rel) === 'runtime';
+    });
+    for (const entry of runtimeEntries) {
+      const category = String(entry.category || '');
+      if (category) {
+        state.runtimeCategoryCounts.set(category, (state.runtimeCategoryCounts.get(category) ?? 0) + 1);
+      }
+      const semanticFamily = String(entry.semantic_family || '');
+      if (semanticFamily) {
+        state.runtimeSemanticFamilyCounts.set(
+          semanticFamily,
+          (state.runtimeSemanticFamilyCounts.get(semanticFamily) ?? 0) + 1
+        );
+      }
+      const resolution = String(categoryResolutionTracks[category] || '');
+      if (resolution) {
+        state.runtimeResolutionCounts.set(resolution, (state.runtimeResolutionCounts.get(resolution) ?? 0) + 1);
+      }
+    }
+    for (const category of [...state.runtimeCategoryCounts.keys()].sort()) {
+      console.log(`runtime-category ${category}=${state.runtimeCategoryCounts.get(category)}`);
+    }
+    for (const semanticFamily of [...state.runtimeSemanticFamilyCounts.keys()].sort()) {
+      console.log(`runtime-semantic-family ${semanticFamily}=${state.runtimeSemanticFamilyCounts.get(semanticFamily)}`);
+    }
+    for (const resolution of [...state.runtimeResolutionCounts.keys()].sort()) {
+      console.log(`runtime-resolution ${resolution}=${state.runtimeResolutionCounts.get(resolution)}`);
+    }
+  }
 
   for (const [rel, samples] of files.slice(0, 20)) {
     const summary = samples

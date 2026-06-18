@@ -65,7 +65,7 @@ function isSseWrapper(value: unknown): boolean {
   if (!record) {
     return false;
   }
-  if (record.__sse_responses || record.__sse_stream) {
+  if (record.sseStream) {
     return true;
   }
   if (record.mode === 'sse') {

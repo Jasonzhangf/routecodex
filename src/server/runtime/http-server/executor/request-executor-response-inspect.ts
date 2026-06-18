@@ -6,6 +6,7 @@
  * validate payload structure, etc.
  */
 
+// feature_id: server.response_inspection_helpers
 import { readString } from './request-executor-error-shared.js';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,16 +148,6 @@ export function containsEmptyAssistantSanitizedPlaceholder(value: unknown): bool
     .some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
 }
 
-export function readServerToolFollowupSource(requestSemantics?: Record<string, unknown>): string {
-  const routecodex =
-    requestSemantics?.__routecodex && typeof requestSemantics.__routecodex === 'object' && !Array.isArray(requestSemantics.__routecodex)
-      ? (requestSemantics.__routecodex as Record<string, unknown>)
-      : undefined;
-  const raw = routecodex?.serverToolFollowupSource;
-  return typeof raw === 'string' && raw.trim().length ? raw.trim() : '';
-}
-
-
 export type PayloadContractSignal = {
   reason: string;
   marker: string;
@@ -199,15 +190,6 @@ export function unwrapProviderRequestPayloadBody(payload: unknown): Record<strin
   }
   return root;
 }
-
-function containsReasoningStopFinalizedMarker(_value: unknown): boolean {
-  return false;
-}
-
-export function bodyContainsReasoningStopFinalizedMarker(_body: unknown): boolean {
-  return false;
-}
-
 
 export function hasAnthropicToolUseSuccess(body: Record<string, unknown>): boolean {
   const data = isRecord(body.data) ? body.data : body;

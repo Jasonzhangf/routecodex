@@ -39,7 +39,7 @@ describe('HttpRequestExecutor provider HTTP retry boundary', () => {
       prepareSseRequestBody: () => {},
       getEntryEndpointFromPayload: () => '/v1/chat/completions',
       getClientRequestIdFromContext: () => 'req_client_retry',
-      wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ __sse_responses: stream }),
+      wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ sseStream: stream }),
       normalizeHttpError: async (error: unknown) => error
     } as any;
 

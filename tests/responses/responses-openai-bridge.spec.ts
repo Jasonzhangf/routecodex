@@ -236,6 +236,39 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
 });
 
 describe('buildChatRequestFromResponses (responses bridge)', () => {
+  it('injects stopless schema contract from responses instructions into chat system message', () => {
+    const stoplessInstruction = [
+      '当你准备结束当前轮时，必须同时给出两部分：',
+      '1. 简洁 summary，说明这轮完成了什么或为什么现在必须停。',
+      '2. 回复末尾附一段 JSON，字段必须按真实情况填写。',
+      'stopreason 取值：0=finished，1=blocked，2=continue_needed。'
+    ].join('\n');
+    const payload = {
+      model: 'gpt-test',
+      instructions: stoplessInstruction,
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行' }]
+        }
+      ]
+    };
+
+    const ctx = captureResponsesContext(payload as any, { route: { requestId: 'req_stopless_instruction_bridge' } } as any);
+    const result = buildChatRequestFromResponses(payload as any, ctx);
+    const messages = result.request.messages;
+
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages[0]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('stopreason 取值：0=finished，1=blocked，2=continue_needed')
+    });
+    expect(messages[1]).toMatchObject({
+      role: 'user'
+    });
+  });
+
   it('fails fast when previous_response_id history contains a dangling tool call before ordinary user content', () => {
     const payload = {
       model: 'gpt-test',

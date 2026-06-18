@@ -573,7 +573,7 @@ export class HttpRequestExecutor {
         return response;
       }
       const responseRecord = response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
-      const sseStream = responseRecord?.__sse_responses;
+      const sseStream = responseRecord?.sseStream;
       if (sseStream && typeof (sseStream as NodeJS.ReadableStream).pipe === 'function') {
         const upstreamStream = sseStream as NodeJS.ReadableStream;
         const businessCheckedStream = await detectProviderBusinessErrorBeforeStreaming({

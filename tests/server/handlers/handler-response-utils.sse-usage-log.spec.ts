@@ -48,8 +48,7 @@ describe('sendPipelineResponse SSE usage logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             'event: message_start\n',
             'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
             'event: message_delta\n',
@@ -95,8 +94,7 @@ describe('sendPipelineResponse SSE usage logging', () => {
         res as any,
         {
           status: 200,
-          body: {
-            __sse_responses: Readable.from([
+          sseStream: Readable.from([
               'event: message_start\n',
               'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
               'event: message_delta\n',

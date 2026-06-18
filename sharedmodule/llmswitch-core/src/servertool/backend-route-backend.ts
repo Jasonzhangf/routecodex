@@ -7,14 +7,14 @@ export async function reenterServerToolBackend(args: {
     requestId: string;
     body: JsonObject;
     metadata?: JsonObject;
-  }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
+  }) => Promise<{ body?: JsonObject; sseStream?: unknown; format?: string }>;
   entryEndpoint: string;
   requestId: string;
   body: JsonObject;
   providerProtocol: string;
   routeHint?: string;
   metadata?: JsonObject;
-}): Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }> {
+}): Promise<{ body?: JsonObject; sseStream?: unknown; format?: string }> {
   const routeHint =
     typeof args.routeHint === 'string' && args.routeHint.trim().length ? args.routeHint.trim() : undefined;
   const merged: JsonObject = {

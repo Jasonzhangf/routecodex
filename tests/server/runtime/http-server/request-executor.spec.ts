@@ -1227,25 +1227,6 @@ describe('HubRequestExecutor failover', () => {
       ]
     })).resolves.toBeNull();
 
-    expect(__requestExecutorTestables.bodyContainsReasoningStopFinalizedMarker({
-      status: 'completed',
-      metadata: {
-        hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
-      },
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: '普通文本，没有结束标记'
-            }
-          ]
-        }
-      ]
-    })).toBe(false);
-
     const longReason = 'x'.repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);

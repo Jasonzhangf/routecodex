@@ -1404,6 +1404,39 @@ fn build_bridge_history_rejects_synthetic_routecodex_control_text() {
 }
 
 #[test]
+fn build_bridge_history_drops_stopless_cli_transcript_user_history() {
+    let output = build_bridge_history(BuildBridgeHistoryInput {
+        messages: vec![
+            json!({
+              "role":"user",
+              "content":"真正的问题"
+            }),
+            json!({
+              "role":"user",
+              "content":"Chunk ID: 89d244\nWall time: 0.1646 seconds\nProcess exited with code 0\nOriginal token count: 172\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"has_evidence\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
+            }),
+            json!({
+              "role":"user",
+              "content":"当前这一轮真正的新请求"
+            }),
+        ],
+        tools: None,
+        allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
+    })
+    .unwrap();
+
+    let serialized = serde_json::to_string(&output.input).unwrap();
+    assert!(!serialized.contains("stop_message_auto"));
+    assert!(!serialized.contains("Chunk ID: 89d244"));
+    assert_eq!(
+        output.latest_user_instruction.as_deref(),
+        Some("当前这一轮真正的新请求")
+    );
+    assert_eq!(output.input.len(), 2);
+}
+
+#[test]
 fn convert_bridge_input_rejects_synthetic_routecodex_control_text() {
     let input = BridgeInputToChatInput {
         input: vec![json!({
@@ -1419,6 +1452,40 @@ fn convert_bridge_input_rejects_synthetic_routecodex_control_text() {
     };
     let error = convert_bridge_input_to_chat_messages(input).unwrap_err();
     assert!(error.contains("synthetic_local_control_text"));
+}
+
+#[test]
+fn convert_bridge_input_drops_stopless_cli_transcript_user_message() {
+    let output = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+        input: vec![
+            json!({
+              "type":"message",
+              "role":"user",
+              "content":[{ "type":"input_text", "text":"保留的真实消息" }]
+            }),
+            json!({
+              "type":"message",
+              "role":"user",
+              "content":[{ "type":"input_text", "text":"Chunk ID: 61a259\nWall time: 0.1539 seconds\nProcess exited with code 0\nOriginal token count: 499\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\"}" }]
+            }),
+            json!({
+              "type":"message",
+              "role":"user",
+              "content":[{ "type":"input_text", "text":"后续真实消息" }]
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: None,
+        allow_orphan_tool_result: None,
+    })
+    .unwrap();
+
+    let serialized = serde_json::to_string(&output.messages).unwrap();
+    assert!(!serialized.contains("stop_message_auto"));
+    assert!(!serialized.contains("Chunk ID: 61a259"));
+    assert_eq!(output.messages.len(), 2);
 }
 
 #[test]

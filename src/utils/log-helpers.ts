@@ -35,8 +35,6 @@ function stripInternalErrorCarriers(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(record)) {
     if (
-      key === '__sse_responses' ||
-      key === '__sse_stream' ||
       key === 'sseStream'
     ) {
       continue;

@@ -1,0 +1,41 @@
+lifecycle_id: stopless.session.mainline
+summary: "Stopless runtime-metadata continuation: stop response is evaluated, projected as client exec_command, executed by CLI, then restored from current request tool_output/runtime metadata into the next model turn."
+owner_feature_id: hub.servertool_stopless_cli_continuation
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+entrypoint:
+  node_id: StoplessResp01StopDetected
+  wiki_page: docs/architecture/wiki/stopless-session-mainline-source.md
+  call_map_chain_id: stopless.session.mainline
+node_ids:
+  - StoplessCli04ProjectionPlanned
+  - StoplessCli06ClientExecuted
+  - StoplessReq07ContinuationRestored
+  - StoplessReq08GuidanceRewritten
+  - StoplessReq09SchemaContractInjected
+  - StoplessResp01StopDetected
+  - StoplessResp02SchemaGateEvaluated
+  - StoplessState03RuntimeSnapshotResolved
+  - VrRoute04SelectedTarget
+step_ids:
+  - stl-01
+  - stl-02
+  - stl-03
+  - stl-04
+  - stl-05
+  - stl-06
+  - stl-07
+  - stl-08
+edge_status_counts:
+  anchored: 8
+  partial: 0
+  binding_pending: 0
+  total: 8
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: stopless.session.mainline
+  min_function_feature: hub.servertool_stopless_cli_continuation
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

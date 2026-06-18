@@ -34,8 +34,7 @@ describe('responses-handler accept header vs client stream contract', () => {
         'x-upstream-mode': 'sse',
         'x-provider-stream-requested': '1'
       },
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
           'event: response.completed\n',
@@ -81,8 +80,7 @@ describe('responses-handler accept header vs client stream contract', () => {
         'x-upstream-mode': 'sse',
         'x-provider-stream-requested': '1'
       },
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'OK' })}\n\n`,
           'event: response.completed\n',

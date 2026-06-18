@@ -401,8 +401,8 @@ describe('ResponsesProvider direct passthrough', () => {
       }
     });
 
-    const result = await provider.sendRequestInternal(inbound) as { __sse_responses: NodeJS.ReadableStream };
-    const passthrough = result.__sse_responses;
+    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
+    const passthrough = result.sseStream;
     passthrough.resume();
     const [error] = (await once(passthrough, 'error')) as [Error & { code?: string }];
     expect(error.message).toContain('UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT');
@@ -487,8 +487,8 @@ describe('ResponsesProvider direct passthrough', () => {
       }
     });
 
-    const result = await provider.sendRequestInternal(inbound) as { __sse_responses: NodeJS.ReadableStream };
-    const passthrough = result.__sse_responses;
+    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
+    const passthrough = result.sseStream;
     let text = '';
     for await (const chunk of passthrough as AsyncIterable<Buffer | string>) {
       text += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
@@ -689,7 +689,7 @@ describe('ResponsesProvider direct passthrough', () => {
 
     const result = await provider.sendRequestInternal(inbound);
     const chunks: Buffer[] = [];
-    for await (const chunk of result.__sse_responses) {
+    for await (const chunk of result.sseStream) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const text = Buffer.concat(chunks).toString('utf8');

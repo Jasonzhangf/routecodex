@@ -1,7 +1,17 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 
-import { STREAM_LOG_FINISH_REASON_KEY } from '../../../../../src/server/utils/finish-reason.js';
+async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
+    if (typeof chunk === 'string') {
+      chunks.push(Buffer.from(chunk));
+      continue;
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -28,6 +38,21 @@ const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
   return undefined;
 };
 
+const mockResolveRelayResponsesClientSseStreamForHttp = async (args: {
+  body?: Record<string, unknown>;
+  sseStream?: unknown;
+  requestId?: string;
+}) => {
+  if (!args.body) {
+    return args.sseStream;
+  }
+  const response = args.body;
+  return Readable.from([
+    `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+    `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+  ]);
+};
+
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
@@ -36,9 +61,28 @@ const mockBridgeModule = () => ({
   syncStoplessGoalStateFromRequest: () => null,
   readStoplessGoalState: () => null,
   persistStoplessGoalStateSnapshot: () => undefined,
+  createResponsesJsonToSseConverter: async () => ({
+    convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
+      const response = payload && typeof payload === 'object'
+        ? payload
+        : { id: 'resp_from_test_converter', object: 'response', status: 'completed', output: [], output_text: '' };
+      const requestId = typeof options.requestId === 'string' ? options.requestId : 'req_test';
+      const terminalType = response.status === 'requires_action' ? 'response.required_action' : 'response.completed';
+      const terminalPayload =
+        response.status === 'requires_action'
+          ? { type: 'response.required_action', response, required_action: response.required_action }
+          : { type: 'response.completed', response };
+      return Readable.from([
+        `event: response.created\ndata: ${JSON.stringify({ type: 'response.created', response: { id: response.id ?? requestId, object: 'response', status: 'in_progress' } })}\n\n`,
+        `event: ${terminalType}\ndata: ${JSON.stringify(terminalPayload)}\n\n`,
+        `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+      ]);
+    }
+  }),
   deriveFinishReasonNative: mockDeriveFinishReasonNative,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],
+  resolveRelayResponsesClientSseStreamForHttp: mockResolveRelayResponsesClientSseStreamForHttp,
   requireCoreDist: () => ({
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
     buildResponsesPayloadFromChatWithNative: () => ({
@@ -63,9 +107,55 @@ const mockBridgeModule = () => ({
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.js', mockBridgeModule);
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
+  requireCoreDist: () => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
+    buildResponsesPayloadFromChatWithNative: () => ({
+      id: 'resp_from_native_chat_builder',
+      object: 'response',
+      status: 'completed',
+      output: [],
+      output_text: ''
+    })
+  }),
+  importCoreDist: async (subpath: string) => {
+    if (subpath === 'conversion/hub/response/provider-response') {
+      return { convertProviderResponse: mockConvertProviderResponse };
+    }
+    return {};
+  },
+  resolveImplForSubpath: () => 'ts',
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.ts', () => ({
+  requireCoreDist: () => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
+    buildResponsesPayloadFromChatWithNative: () => ({
+      id: 'resp_from_native_chat_builder',
+      object: 'response',
+      status: 'completed',
+      output: [],
+      output_text: ''
+    })
+  }),
+  importCoreDist: async (subpath: string) => {
+    if (subpath === 'conversion/hub/response/provider-response') {
+      return { convertProviderResponse: mockConvertProviderResponse };
+    }
+    return {};
+  },
+  resolveImplForSubpath: () => 'ts',
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+  convertProviderResponse: mockConvertProviderResponse
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.ts', () => ({
+  convertProviderResponse: mockConvertProviderResponse
+}));
 
 describe('provider-response-converter prebuilt SSE passthrough gate', () => {
-  it('bridges openai responses prebuilt SSE stop through default stopless even without goal state', async () => {
+  it('does not bridge openai responses prebuilt SSE through stopless in the converter', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -75,38 +165,6 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
       'event: response.completed\n'
       + 'data: {"type":"response.completed","response":{"id":"resp_prebuilt_stop_1","status":"completed","output_text":"阶段完成"}}\n\n'
     );
-    const convertedSse = new PassThrough();
-    convertedSse.end(
-      'event: response.output_item.done\n'
-      + 'data: {"type":"response.output_item.done","item":{"type":"function_call","name":"exec_command","call_id":"call_stopless_cli_1","arguments":"{}"}}\n\n'
-    );
-
-    mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: convertedSse,
-      body: {
-        id: 'resp_stopless_cli_projection_1',
-        object: 'response',
-        status: 'requires_action',
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: {
-            tool_calls: [
-              {
-                id: 'call_stopless_cli_1',
-                type: 'function',
-                function: {
-                  name: 'exec_command',
-                  arguments: JSON.stringify({
-                    cmd: 'routecodex servertool run stop_message_auto --input-json \'{"flowId":"stop_message_flow"}\''
-                  })
-                }
-              }
-            ]
-          }
-        }
-      }
-    });
-
     const { convertProviderResponseIfNeeded } = await import(
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
@@ -125,10 +183,11 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
         },
         response: {
           body: {
-            __sse_responses: prebuiltSse,
             status: 'completed',
             output_text: '阶段完成'
-          }
+          },
+          sseStream: prebuiltSse,
+          continuationOwner: 'direct',
         } as any,
         pipelineMetadata: {
           routecodexPortStopMessageEnabled: true,
@@ -144,15 +203,78 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
       }
     );
 
-    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
-    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(bridgeArgs.providerProtocol).toBe('openai-responses');
-    expect(bridgeArgs.clientInjectDispatch).toBeDefined();
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
 
-    const wrappedBody = converted.body as Record<string, unknown>;
-    expect(wrappedBody.__sse_responses).toBe(convertedSse);
-    expect(wrappedBody[STREAM_LOG_FINISH_REASON_KEY]).toBe('tool_calls');
-    expect(wrappedBody.__sse_responses).not.toBe(prebuiltSse);
+    expect(converted.sseStream).toBe(prebuiltSse);
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+  });
+
+  it('RED: relay /v1/responses prebuilt SSE must re-enter bridge instead of passthrough', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const relaySse = new PassThrough();
+    relaySse.end(
+      'event: response.completed\n'
+      + 'data: {"type":"response.completed","response":{"id":"resp_relay_prebuilt_1","status":"completed","output_text":"relay body"}}\n\n'
+    );
+
+    mockConvertProviderResponse.mockResolvedValue({
+      sseStream: relaySse,
+      body: {
+        id: 'resp_relay_bridge_1',
+        object: 'response',
+        status: 'completed',
+        output: [],
+        output_text: 'relay body'
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'openai',
+        requestId: 'req_relay_prebuilt_sse_must_bridge',
+        wantsStream: true,
+        response: {
+          body: {
+            id: 'resp_relay_upstream_1',
+            object: 'response',
+            status: 'completed',
+            output: [],
+            output_text: 'relay upstream'
+          },
+          sseStream: relaySse,
+          continuationOwner: 'relay',
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    expect(converted.sseStream).toBeDefined();
+    expect(converted.sseStream).not.toBe(relaySse);
+    const sseBody = await readStreamBody(converted.sseStream as NodeJS.ReadableStream);
+    expect(sseBody).toContain('event: response.completed');
+    expect(sseBody).toContain('event: response.done');
+    expect((converted as any).body).toMatchObject({
+      id: 'resp_relay_bridge_1',
+      object: 'response',
+      status: 'completed'
+    });
   });
 
   it('RED: does not passthrough anthropic raw SSE directly on /v1/responses', async () => {
@@ -169,7 +291,7 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     );
 
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: anthropicRawSse,
+      sseStream: anthropicRawSse,
       body: {
         id: 'resp_from_anthropic_stream_1',
         object: 'response',
@@ -198,7 +320,8 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
         requestId: 'req_anthropic_raw_sse_must_wrap_for_responses',
         wantsStream: true,
         response: {
-          body: { __sse_responses: anthropicRawSse }
+          body: {},
+          sseStream: anthropicRawSse,
         } as any,
         pipelineMetadata: {}
       },
@@ -211,12 +334,80 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
       }
     );
 
-    const wrappedBody = converted.body as Record<string, unknown>;
     expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
-    expect(wrappedBody.__sse_responses).toBeDefined();
-    expect(wrappedBody[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
-    expect(wrappedBody.output_text).toBeUndefined();
-    expect(wrappedBody.status).toBeUndefined();
+    expect(converted.sseStream).toBeDefined();
+    expect(converted.sseStream).not.toBe(anthropicRawSse);
+    const sseBody = await readStreamBody(converted.sseStream as NodeJS.ReadableStream);
+    expect(sseBody).toContain('event: response.completed');
+    expect(sseBody).toContain('event: response.done');
+    expect(sseBody).not.toContain('event: message_stop');
+    expect(sseBody).not.toContain('event: message_start');
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+  });
+
+  it('RED: stream-only relay /v1/responses must still enter bridge conversion', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const anthropicRawSse = new PassThrough();
+    anthropicRawSse.end(
+      'event: message_start\n'
+      + 'data: {"type":"message_start","message":{"id":"msg_stream_only_1","type":"message"}}\n\n'
+      + 'event: message_stop\n'
+      + 'data: {"type":"message_stop"}\n\n'
+    );
+
+    mockConvertProviderResponse.mockResolvedValue({
+      sseStream: anthropicRawSse,
+      body: {
+        id: 'resp_stream_only_bridge_1',
+        object: 'response',
+        status: 'completed',
+        output: [],
+        output_text: 'stream-only relay body'
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_stream_only_relay_must_bridge',
+        wantsStream: true,
+        response: {
+          sseStream: anthropicRawSse,
+          headers: {
+            'content-type': 'text/event-stream; charset=utf-8'
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    expect(converted.sseStream).toBeDefined();
+    expect(converted.sseStream).not.toBe(anthropicRawSse);
+    const sseBody = await readStreamBody(converted.sseStream as NodeJS.ReadableStream);
+    expect(sseBody).toContain('event: response.completed');
+    expect(sseBody).toContain('event: response.done');
+    expect(sseBody).not.toContain('event: message_stop');
+    expect((converted as any).body).toMatchObject({
+      id: 'resp_stream_only_bridge_1',
+      object: 'response',
+      status: 'completed'
+    });
   });
 
 });

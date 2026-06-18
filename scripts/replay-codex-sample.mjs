@@ -14,6 +14,20 @@ const HEADER_DENYLIST = new Set([
   'accept',
   'content-type'
 ]);
+const CLIENT_REPLAY_METADATA_ALLOWLIST = new Set([
+  'clientRequestId',
+  'userAgent',
+  'clientOriginator',
+  'requestSource',
+  'experimentFlag',
+  'appVersion',
+  'sessionId',
+  'session_id',
+  'conversationId',
+  'conversation_id',
+  'client_tmux_session_id',
+  'rcc_session_client_tmux_session_id',
+]);
 
 function usage() {
   console.log(`Usage:
@@ -135,6 +149,30 @@ function extractBody(doc) {
   if (typeof doc?.data?.data === 'object') return doc.data.data;
   if (typeof doc?.body?.data === 'object') return doc.body.data;
   return undefined;
+}
+
+export function stripReplayOnlyClientHeadersFromBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return body;
+  }
+  const cloned = JSON.parse(JSON.stringify(body));
+  const metadata = cloned?.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return cloned;
+  }
+  for (const key of Object.keys(metadata)) {
+    if (key === 'clientHeaders') {
+      delete metadata.clientHeaders;
+      continue;
+    }
+    if (!CLIENT_REPLAY_METADATA_ALLOWLIST.has(key)) {
+      delete metadata[key];
+    }
+  }
+  if (Object.keys(metadata).length === 0) {
+    delete cloned.metadata;
+  }
+  return cloned;
 }
 
 function isProviderRequestShape(body) {
@@ -259,9 +297,8 @@ function detectStream(doc, requestBody) {
   return false;
 }
 
-function extractSampleHeaders(doc) {
-  const raw = doc?.headers;
-  if (!raw || typeof raw !== 'object') {
+function normalizeReplayHeaderRecord(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {};
   }
   const headers = {};
@@ -281,6 +318,21 @@ function extractSampleHeaders(doc) {
     seen.add(lowered);
   }
   return headers;
+}
+
+export function extractSampleHeaders(doc) {
+  const topLevel = normalizeReplayHeaderRecord(doc?.headers);
+  if (Object.keys(topLevel).length > 0) {
+    return topLevel;
+  }
+
+  const requestBody = extractBody(doc);
+  const metadataHeaders = normalizeReplayHeaderRecord(requestBody?.metadata?.clientHeaders);
+  if (Object.keys(metadataHeaders).length > 0) {
+    return metadataHeaders;
+  }
+
+  return {};
 }
 
 function redactAuthorization(value) {
@@ -338,6 +390,7 @@ export async function main() {
   let requestBody = isProviderRequestShape(rawRequestBody)
     ? buildReplayInputFromProviderRequest(rawRequestBody, endpoint)
     : rawRequestBody;
+  requestBody = stripReplayOnlyClientHeadersFromBody(requestBody);
   const submitReplayShape = detectSubmitToolOutputsReplayShape(rawRequestBody, endpoint);
   if (submitReplayShape) {
     endpoint = submitReplayShape.endpoint;

@@ -34,6 +34,15 @@ pub(crate) fn build_governed_filter_payload(request: &Value) -> Value {
         .and_then(|obj| obj.get("semantics"))
         .cloned()
         .unwrap_or(Value::Null);
+    let input = request_obj
+        .and_then(|obj| obj.get("input"))
+        .filter(|v| v.is_array())
+        .cloned();
+    let instructions = request_obj
+        .and_then(|obj| obj.get("instructions"))
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let metadata = request_obj
         .and_then(|obj| obj.get("metadata"))
         .and_then(|v| v.as_object())
@@ -71,6 +80,12 @@ pub(crate) fn build_governed_filter_payload(request: &Value) -> Value {
     let mut out = Map::new();
     out.insert("model".to_string(), model);
     out.insert("messages".to_string(), messages);
+    if let Some(input) = input {
+        out.insert("input".to_string(), input);
+    }
+    if let Some(instructions) = instructions {
+        out.insert("instructions".to_string(), Value::String(instructions));
+    }
     if !semantics.is_null() {
         out.insert("semantics".to_string(), semantics);
     }

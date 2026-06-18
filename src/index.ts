@@ -760,6 +760,7 @@ class RouteCodexApp {
   private httpServer: RouteCodexHttpServer | null = null;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
+  private _bindPort: number | null = null;
   private configPath: string = path.join(safeProcessCwd(), 'config', 'config.json');
   private readonly baseDir: string;
 
@@ -847,6 +848,7 @@ class RouteCodexApp {
         if (!Number.isFinite(bindPort)) {
           bindPort = port;
         }
+        this._bindPort = bindPort;
       } catch {
         bindHost = '0.0.0.0';
         bindPort = port;
@@ -967,23 +969,23 @@ class RouteCodexApp {
             origin: 'start',
             routeCodexHomeDir: resolveRccPath()
           });
-         } catch (error) {
-           logNonBlockingError('write_server_pid_file', error);
-         }
-         try {
-           writeRuntimeInstance({
-             port: bindPort,
-             host: LOCAL_HOSTS.IPV4,
-             command: String(process.argv[1] || 'routecodex').trim(),
-             configPath: '',
-             ownerScope: 'index.start',
-             status: 'declared',
-             routeCodexHomeDir: resolveRccPath(),
-           });
-         } catch (error) {
-           logNonBlockingError('write_runtime_instance', error);
-         }
-       })();
+        } catch (error) {
+          logNonBlockingError('write_server_pid_file', error);
+        }
+        try {
+          writeRuntimeInstance({
+            port: bindPort,
+            host: bindHost,
+            command: String(process.argv[1] || 'routecodex').trim(),
+            configPath: this.configPath,
+            ownerScope: 'index.start',
+            status: 'declared',
+            routeCodexHomeDir: resolveRccPath(),
+          });
+        } catch (error) {
+          logNonBlockingError('write_runtime_instance', error);
+        }
+      })();
 
       this._isRunning = true;
 
@@ -1049,6 +1051,17 @@ class RouteCodexApp {
 
         if (this.httpServer) {
           await this.httpServer.stop();
+        }
+        try {
+          if (this._bindPort && Number.isFinite(this._bindPort)) {
+            updateRuntimeInstanceStatus({
+              port: this._bindPort,
+              status: 'stop',
+              routeCodexHomeDir: resolveRccPath(),
+            });
+          }
+        } catch (error) {
+          logNonBlockingError('update_runtime_instance.stop', error);
         }
         this._isRunning = false;
         console.log('✅ RouteCodex server stopped successfully');

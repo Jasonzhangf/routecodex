@@ -13,11 +13,27 @@ function parseOwners(text) {
     const trimmed = rawLine.trim();
     if (trimmed.startsWith('- feature_id:')) {
       if (current) owners.push(current);
-      current = { featureId: trimmed.split(':').slice(1).join(':').trim(), allowedPaths: [], canonicalBuilders: [] };
+      current = {
+        featureId: trimmed.split(':').slice(1).join(':').trim(),
+        ownerScope: '',
+        ownerModule: '',
+        allowedPaths: [],
+        canonicalBuilders: []
+      };
       section = null;
       continue;
     }
     if (!current) continue;
+    if (trimmed.startsWith('owner_scope:')) {
+      current.ownerScope = trimmed.slice('owner_scope:'.length).trim();
+      section = null;
+      continue;
+    }
+    if (trimmed.startsWith('owner_module:')) {
+      current.ownerModule = trimmed.slice('owner_module:'.length).trim();
+      section = null;
+      continue;
+    }
     if (trimmed === 'allowed_paths:') {
       section = 'allowedPaths';
       continue;
@@ -72,8 +88,16 @@ for (const owner of parseOwners(mapText)) {
       }
     }
   }
+  const isFileScopedOwner =
+    owner.ownerScope.toLowerCase().includes('file-scoped')
+    || owner.ownerModule.toLowerCase().includes('file-scoped');
+  const minBuilderHitFiles = isFileScopedOwner ? 1 : 2;
   if (anchorFiles < 1) failures.push(`${owner.featureId}: needs at least 1 source anchor file`);
-  if (builderHitFiles.size < 2) failures.push(`${owner.featureId}: needs canonical builder hits in at least 2 files, got ${builderHitFiles.size}`);
+  if (builderHitFiles.size < minBuilderHitFiles) {
+    failures.push(
+      `${owner.featureId}: needs canonical builder hits in at least ${minBuilderHitFiles} files, got ${builderHitFiles.size}`
+    );
+  }
 }
 
 if (failures.length) {

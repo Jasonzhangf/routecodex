@@ -1,0 +1,33 @@
+lifecycle_id: error.mainline
+summary: Provider/runtime/direct failures enter unified ErrorErr chain and only then project to client-visible error.
+owner_feature_id: error.pipeline_contract
+owner_module: src/providers/core/utils/provider-error-reporter.ts
+entrypoint:
+  node_id: ErrorErr01SourceRaised
+  wiki_page: docs/design/pipeline-type-topology-and-module-boundaries.md
+  call_map_chain_id: error.mainline
+node_ids:
+  - ErrorErr01SourceRaised
+  - ErrorErr02HostCaptured
+  - ErrorErr03RuntimeClassified
+  - ErrorErr05ExecutionDecision
+  - ErrorErr06ClientProjected
+step_ids:
+  - err-01
+  - err-02
+  - err-03
+  - err-04
+edge_status_counts:
+  anchored: 3
+  partial: 1
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: error.mainline
+  min_function_feature: error.pipeline_contract
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

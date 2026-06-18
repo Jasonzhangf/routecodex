@@ -184,13 +184,8 @@ fn is_tool_result_followup_turn_value(request_semantics: Option<&Value>) -> bool
 }
 
 fn stream_contract_probe_body(body: &Value) -> Option<&Value> {
-    let row = body.as_object()?;
-    if !row.contains_key("__sse_responses") {
-        return Some(body);
-    }
-    row.get("__routecodex_stream_contract_probe_body")
-        .or_else(|| row.get("streamContractProbeBody"))
-        .filter(|value| value.is_object())
+    body.as_object()?;
+    Some(body)
 }
 
 fn value_has_visible_assistant_text(value: Option<&Value>) -> bool {
@@ -338,8 +333,6 @@ fn payload_contract_signal(reason: String, marker: &str) -> Value {
     Value::Object(row)
 }
 
-const STREAM_LOG_FINISH_REASON_KEY: &str = "__routecodex_finish_reason";
-
 fn resolve_finish_reason_record(body: &Value) -> Option<&Map<String, Value>> {
     let root = body.as_object()?;
     for key in ["data", "response", "payload"] {
@@ -350,10 +343,6 @@ fn resolve_finish_reason_record(body: &Value) -> Option<&Map<String, Value>> {
             || nested.get("output").and_then(Value::as_array).is_some()
             || nested.get("stop_reason").and_then(Value::as_str).is_some()
             || nested.get("status").and_then(Value::as_str).is_some()
-            || nested
-                .get(STREAM_LOG_FINISH_REASON_KEY)
-                .and_then(Value::as_str)
-                .is_some()
         {
             return Some(nested);
         }
@@ -517,9 +506,6 @@ fn is_empty_client_response_payload_value(payload: &Value) -> bool {
     let Some(record) = payload.as_object() else {
         return true;
     };
-    if record.contains_key("__sse_responses") || record.contains_key("__sse_stream") {
-        return false;
-    }
     if record.contains_key("error") || has_servertool_followup_tool_bearing_payload(record) {
         return false;
     }
@@ -696,9 +682,6 @@ fn derive_finish_reason_value(body: &Value) -> Option<String> {
     }
     if response_status == "requires_action" {
         return Some("tool_calls".to_string());
-    }
-    if let Some(wrapped_finish_reason) = read_string(record.get(STREAM_LOG_FINISH_REASON_KEY)) {
-        return Some(wrapped_finish_reason);
     }
     if has_chat_choice_assistant_content(first_choice) {
         return Some("stop".to_string());

@@ -1,3 +1,4 @@
+// feature_id: server.servertool_followup_metadata_surface
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
   'conversationid',

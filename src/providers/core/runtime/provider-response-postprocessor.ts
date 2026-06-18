@@ -29,14 +29,14 @@ export function buildPostprocessedProviderResponse(args: {
   const processedRecord = ProviderPayloadUtils.asResponseRecord(processedResponse);
 
   const sseStream =
-    processedRecord.__sse_responses ||
-    processedRecord.data?.__sse_responses;
+    processedRecord.sseStream ||
+    processedRecord.data?.sseStream;
   if (sseStream) {
     const headersFromRecord = typeof processedRecord.headers === 'object' && processedRecord.headers !== null
       ? (processedRecord.headers as Record<string, string>)
       : undefined;
     const restoredHeaders = restoreClientSessionHeaders(args.context, headersFromRecord);
-    const result: UnknownObject = { __sse_responses: sseStream };
+    const result: UnknownObject = { sseStream };
     if (restoredHeaders && Object.keys(restoredHeaders).length > 0) {
       result.headers = restoredHeaders;
     }

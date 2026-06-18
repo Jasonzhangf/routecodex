@@ -44,7 +44,7 @@ export interface ServerToolOrchestrationOptions {
     metadata?: JsonObject;
   }) => Promise<{
     body?: JsonObject;
-    __sse_responses?: unknown;
+    sseStream?: unknown;
     format?: string;
   }>;
   clientInjectDispatch?: (options: {
@@ -170,6 +170,7 @@ function extractStoplessLoopState(execution: ServerToolEngineResult['execution']
   repeatCount: number;
   maxRepeats: number;
   triggerHint?: string;
+  schemaFeedback?: JsonObject;
 } {
   const context = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
     ? execution.context as Record<string, unknown>
@@ -186,10 +187,15 @@ function extractStoplessLoopState(execution: ServerToolEngineResult['execution']
     row.triggerHint,
     context.stopSchemaTriggerHint
   ].find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+  const schemaFeedbackCandidate = [
+    row.schemaFeedback,
+    context.stopSchemaFeedback
+  ].find((value) => value && typeof value === 'object' && !Array.isArray(value)) as JsonObject | undefined;
   return {
     repeatCount,
     maxRepeats,
-    ...(typeof triggerHint === 'string' && triggerHint.trim() ? { triggerHint: triggerHint.trim() } : {})
+    ...(typeof triggerHint === 'string' && triggerHint.trim() ? { triggerHint: triggerHint.trim() } : {}),
+    ...(schemaFeedbackCandidate ? { schemaFeedback: schemaFeedbackCandidate } : {})
   };
 }
 
@@ -496,7 +502,8 @@ export async function runServerToolOrchestration(
         flowId,
         repeatCount: loopState.repeatCount,
         maxRepeats: loopState.maxRepeats,
-        ...(loopState.triggerHint ? { triggerHint: loopState.triggerHint } : {})
+        ...(loopState.triggerHint ? { triggerHint: loopState.triggerHint } : {}),
+        ...(loopState.schemaFeedback ? { schemaFeedback: loopState.schemaFeedback } : {})
       }
     });
     logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {

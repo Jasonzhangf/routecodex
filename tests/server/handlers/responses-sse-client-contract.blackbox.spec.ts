@@ -206,7 +206,7 @@ describe('Responses SSE client contract blackbox', () => {
           status: 200,
           metadata: { outboundStream: true, stream: true },
           body: {
-            __sse_responses: upstream,
+            sseStream: upstream,
             __routecodex_finish_reason: 'tool_calls',
             __routecodex_stream_contract_probe_body: {
               id: 'resp_tool_call_contract',
@@ -276,7 +276,7 @@ describe('Responses SSE client contract blackbox', () => {
           status: 200,
           metadata: { outboundStream: true, stream: true },
           body: {
-            __sse_responses: upstream,
+            sseStream: upstream,
             __routecodex_stream_contract_probe_body: {
               id: 'resp_text_contract',
               object: 'response',
@@ -339,10 +339,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_nonstandard_event_contract',
         {
@@ -380,10 +379,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_custom_tool_input_delta_contract',
         {
@@ -429,10 +427,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_keepalive_transport_contract',
         {
@@ -478,10 +475,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_no_synthetic_terminal_dup',
         {
@@ -584,10 +580,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_image_partial_contract',
         {
@@ -645,10 +640,9 @@ describe('Responses SSE client contract blackbox', () => {
         res as any,
         {
           status: 200,
-          metadata: { outboundStream: true, stream: true, __routecodexDirectPassthrough: true },
-          body: {
-            __sse_responses: upstream
-          },
+          metadata: { outboundStream: true, stream: true },
+          continuationOwner: 'direct',
+          sseStream: upstream,
         } as any,
         'req_direct_sdk_events_contract',
         {
@@ -696,9 +690,7 @@ describe('Responses SSE client contract blackbox', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
         } as any,
         'req_incomplete_contract',
         {

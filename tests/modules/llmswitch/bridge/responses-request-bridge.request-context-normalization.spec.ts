@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
+const mockPlanResponsesHandlerEntry = jest.fn();
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -18,7 +19,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
-  planResponsesHandlerEntry: jest.fn(),
+  planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
 }));
 
 jest.unstable_mockModule('../../../../src/server/utils/finish-reason.js', () => ({
@@ -29,13 +30,22 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
   writeErrorsampleJson: jest.fn(),
 }));
 
-const { buildResponsesRequestContextForHttp } = await import(
+const {
+  buildResponsesRequestContextForHttp,
+  prepareResponsesHandlerRuntimeForHttp
+} = await import(
   '../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts'
 );
 
 describe('responses-request-bridge relay request-context normalization', () => {
   beforeEach(() => {
     mockCaptureReqInboundResponsesContextSnapshot.mockReset();
+    mockPlanResponsesHandlerEntry.mockReset();
+    mockPlanResponsesHandlerEntry.mockResolvedValue({
+      payload: undefined,
+      mode: 'none',
+      responseId: undefined
+    });
   });
 
   it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
@@ -191,5 +201,57 @@ describe('responses-request-bridge relay request-context normalization', () => {
     ).rejects.toThrow(
       'orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_JyD0R31sWoSfsvEtKsqHJkRh'
     );
+  });
+
+  it('materializes request context session truth from factual Codex client headers', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [],
+      toolsRaw: []
+    });
+
+    const prepared = await prepareResponsesHandlerRuntimeForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        input: []
+      },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_codex_header_session_1',
+      requestMetadata: {
+        clientHeaders: {
+          'user-agent': 'codex-tui/0.128.0',
+          originator: 'codex-tui',
+          session_id: 'sess_codex_header_1',
+          conversation_id: 'conv_codex_header_1'
+        }
+      },
+      acceptsSse: true
+    });
+
+    expect(prepared.kind).toBe('ok');
+    if (prepared.kind !== 'ok') {
+      throw new Error(`expected ok, got ${prepared.kind}`);
+    }
+    expect(prepared.requestContext.sessionId).toBe('sess_codex_header_1');
+    expect(prepared.requestContext.conversationId).toBe('conv_codex_header_1');
+  });
+
+  it('strips request body metadata before persisting relay request context payload', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [],
+      toolsRaw: []
+    });
+
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        metadata: { userAgent: 'persisted-context-must-not-leak' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      },
+      requestId: 'req_relay_context_strip_metadata_1',
+      metadata: { session_id: 'sess_strip_1', conversation_id: 'conv_strip_1' },
+    });
+
+    expect(context.payload.metadata).toBeUndefined();
+    expect(JSON.stringify(context.payload)).not.toContain('persisted-context-must-not-leak');
   });
 });

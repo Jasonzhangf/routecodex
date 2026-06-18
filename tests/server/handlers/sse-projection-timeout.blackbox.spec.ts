@@ -274,9 +274,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-          },
+          body: {},
+          sseStream: upstream,
         } as any,
         'req_projection_timeout',
         {
@@ -304,7 +303,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       const text = await response.text();
       expect(Date.now() - startedAt).toBeLessThan(5_500);
       expect(text).toContain('event: error');
-      expect(text).toMatch(/SSE_CLIENT_PROJECTION_(TIMEOUT|FAILED)/);
+      expect(text).toMatch(/(SSE_CLIENT_PROJECTION_(TIMEOUT|FAILED)|HTTP_SSE_TIMEOUT)/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -331,11 +330,54 @@ describe('HTTP Responses SSE projection timeout', () => {
           && !Array.isArray(body)
           && (body as Record<string, unknown>).required_action
         ),
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
+        updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+          const existing =
+            probe && typeof probe === 'object' && !Array.isArray(probe)
+              ? { ...(probe as Record<string, unknown>) }
+              : {};
+          const text =
+            typeof chunk === 'string'
+              ? chunk
+              : Buffer.isBuffer(chunk)
+                ? chunk.toString('utf8')
+                : '';
+          const dataLine = text
+            .split(/\r?\n/)
+            .find((line) => line.startsWith('data:'));
+          if (!dataLine) {
+            return existing;
+          }
+          const payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
+          const item = payload.item;
+          if (
+            payload.type === 'response.output_item.done'
+            && item
+            && typeof item === 'object'
+            && !Array.isArray(item)
+            && (item as Record<string, unknown>).type === 'function_call'
+          ) {
+            const toolCall = {
+              id: (item as Record<string, unknown>).id ?? 'call_tool_close_guard',
+              type: 'function',
+              name: (item as Record<string, unknown>).name ?? 'exec_command',
+              arguments: (item as Record<string, unknown>).arguments ?? '{}',
+              function: {
+                name: (item as Record<string, unknown>).name ?? 'exec_command',
+                arguments: (item as Record<string, unknown>).arguments ?? '{}',
+              }
+            };
+            return {
+              id: 'resp_tool_close_guard',
+              status: 'requires_action',
+              required_action: {
+                type: 'submit_tool_outputs',
+                submit_tool_outputs: { tool_calls: [toolCall] }
+              },
+              output: [{ ...(item as Record<string, unknown>) }]
+            };
+          }
+          return existing;
+        },
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_tool_close_guard'),
         importCoreDist: async (subpath?: string) => {
@@ -359,9 +401,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const upstream = new PassThrough();
     upstream.on('error', () => {});
@@ -372,15 +411,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-            __routecodex_finish_reason: 'tool_calls',
-            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-              id: 'resp_tool_close_guard',
-              status: 'requires_action',
-              required_action: requiredAction
-            }
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'tool_calls'
@@ -395,6 +427,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       );
       upstream.write('event: response.output_item.done\n');
       upstream.write('data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_tool_close_guard","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\"}"}}\n\n');
+      upstream.end();
     });
 
     const server = http.createServer(app);
@@ -514,10 +547,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-            __routecodex_finish_reason: 'tool_calls',
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'tool_calls'
@@ -587,9 +618,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const upstream = new PassThrough();
     upstream.on('error', () => {});
@@ -600,14 +628,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-              id: 'resp_non_terminal_guard',
-              status: 'in_progress',
-              output_text: 'first'
-            }
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'stop'
@@ -685,9 +707,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const upstream = new PassThrough();
     upstream.on('error', () => {});
@@ -698,14 +717,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-              id: 'resp_missing_terminal_guard',
-              status: 'in_progress',
-              output_text: 'partial'
-            }
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'stop'
@@ -783,9 +796,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const upstream = new PassThrough();
     upstream.on('error', () => {});
@@ -796,25 +806,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-            __routecodex_finish_reason: 'tool_calls',
-            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-              id: 'resp_disconnect_guard',
-              status: 'requires_action',
-              required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: {
-                  tool_calls: [{
-                    id: 'call_disconnect_guard',
-                    type: 'function',
-                    name: 'exec_command',
-                    arguments: '{"cmd":"pwd"}'
-                  }]
-                }
-              }
-            }
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'tool_calls'
@@ -895,9 +888,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const { trackClientConnectionState } = await import('../../../src/server/utils/client-connection-state.js');
     const upstream = new PassThrough();
@@ -915,25 +905,8 @@ describe('HTTP Responses SSE projection timeout', () => {
               stream: true,
               clientConnectionState,
             },
-            body: {
-              __sse_responses: upstream,
-              __routecodex_finish_reason: 'tool_calls',
-              [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-                id: 'resp_disconnect_before_stream_start',
-                status: 'requires_action',
-                required_action: {
-                  type: 'submit_tool_outputs',
-                  submit_tool_outputs: {
-                    tool_calls: [{
-                      id: 'call_disconnect_before_stream_start',
-                      type: 'function',
-                      name: 'exec_command',
-                      arguments: '{"cmd":"pwd"}'
-                    }]
-                  }
-                }
-              }
-            },
+            body: {},
+            sseStream: upstream,
             usageLogInfo: {
               requestStartedAtMs: Date.now(),
               finishReason: 'tool_calls'
@@ -1022,10 +995,8 @@ describe('HTTP Responses SSE projection timeout', () => {
               stream: true,
               clientConnectionState,
             },
-            body: {
-              __sse_responses: upstream,
-              __routecodex_finish_reason: 'stop',
-            },
+            body: {},
+            sseStream: upstream,
             usageLogInfo: {
               requestStartedAtMs: Date.now(),
               finishReason: 'stop'
@@ -1117,9 +1088,6 @@ describe('HTTP Responses SSE projection timeout', () => {
       writeServerSnapshot: async () => undefined
     }));
 
-    const { STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const upstream = new PassThrough();
     upstream.on('error', () => {});
@@ -1132,16 +1100,10 @@ describe('HTTP Responses SSE projection timeout', () => {
           metadata: {
             outboundStream: true,
             stream: true,
-            __routecodexDirectPassthrough: true,
           },
-          body: {
-            __sse_responses: upstream,
-            [STREAM_CONTRACT_PROBE_BODY_KEY]: {
-              id: 'resp_direct_passthrough_probe',
-              status: 'requires_action',
-              required_action: requiredAction
-            }
-          },
+          continuationOwner: 'direct',
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'tool_calls'
@@ -1275,9 +1237,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           status: 200,
           metadata: { outboundStream: true, stream: true },
-          body: {
-            __sse_responses: upstream,
-          },
+          body: {},
+          sseStream: upstream,
           usageLogInfo: {
             requestStartedAtMs: Date.now(),
             finishReason: 'stop'

@@ -147,8 +147,7 @@ describe('sendPipelineResponse chat usage normalization', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             'data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
             'data: [DONE]\n\n'
           ]),

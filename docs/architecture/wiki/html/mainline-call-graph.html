@@ -329,7 +329,9 @@
         <p>Entry contract: <code>StoplessResp01StopDetected</code> via <code>docs/architecture/wiki/stopless-session-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
-          StoplessReq08NextTurnMaterialized[&quot;StoplessReq08NextTurnMaterialized&quot;]
+          StoplessReq09SchemaContractInjected[&quot;StoplessReq09SchemaContractInjected&quot;]
+          StoplessReq08GuidanceRewritten[&quot;StoplessReq08GuidanceRewritten&quot;]
+          StoplessReq07ContinuationRestored[&quot;StoplessReq07ContinuationRestored&quot;]
           StoplessCli06ClientExecuted[&quot;StoplessCli06ClientExecuted&quot;]
           StoplessCli04ProjectionPlanned[&quot;StoplessCli04ProjectionPlanned&quot;]
           StoplessState03RuntimeSnapshotResolved[&quot;StoplessState03RuntimeSnapshotResolved&quot;]
@@ -339,8 +341,10 @@
           StoplessResp02SchemaGateEvaluated --&gt;|stl-02| StoplessState03RuntimeSnapshotResolved
           StoplessState03RuntimeSnapshotResolved --&gt;|stl-03| StoplessCli04ProjectionPlanned
           StoplessCli04ProjectionPlanned --&gt;|stl-04| StoplessCli06ClientExecuted
-          StoplessCli06ClientExecuted --&gt;|stl-05| StoplessReq08NextTurnMaterialized
-          StoplessReq08NextTurnMaterialized --&gt;|stl-06| VrRoute04SelectedTarget
+          StoplessCli06ClientExecuted --&gt;|stl-05| StoplessReq07ContinuationRestored
+          StoplessReq07ContinuationRestored --&gt;|stl-06| StoplessReq08GuidanceRewritten
+          StoplessReq08GuidanceRewritten --&gt;|stl-07| StoplessReq09SchemaContractInjected
+          StoplessReq09SchemaContractInjected --&gt;|stl-08| VrRoute04SelectedTarget
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -349,22 +353,26 @@
           class StoplessState03RuntimeSnapshotResolved anchored;
           class StoplessCli04ProjectionPlanned anchored;
           class StoplessCli06ClientExecuted anchored;
-          class StoplessReq08NextTurnMaterialized anchored;
+          class StoplessReq07ContinuationRestored anchored;
+          class StoplessReq08GuidanceRewritten anchored;
+          class StoplessReq09SchemaContractInjected anchored;
           class VrRoute04SelectedTarget anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>stl-01</td><td><code>StoplessResp01StopDetected -&gt; StoplessResp02SchemaGateEvaluated</code></td><td>anchored</td><td><code>runServerToolOrchestration -&gt; runStopMessageAutoHandlerWithNative</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
-        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>resolveRuntimeStopMessageStateFromAdapterContext -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
-        <tr><td>stl-03</td><td><code>StoplessState03RuntimeSnapshotResolved -&gt; StoplessCli04ProjectionPlanned</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow -&gt; plan_client_exec_cli_projection_output</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
-        <tr><td>stl-04</td><td><code>StoplessCli04ProjectionPlanned -&gt; StoplessCli06ClientExecuted</code></td><td>anchored</td><td><code>createServertoolCommand -&gt; build_servertool_cli_binary_run_command_from_client_exec_result</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
-        <tr><td>stl-05</td><td><code>StoplessCli06ClientExecuted -&gt; StoplessReq08NextTurnMaterialized</code></td><td>anchored</td><td><code>has_stop_message_auto_cli_result_in_request_json -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
-        <tr><td>stl-06</td><td><code>StoplessReq08NextTurnMaterialized -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>classify -&gt; classify</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto runtime-metadata-only CLI continuation planning</td></tr>
+        <tr><td>stl-01</td><td><code>StoplessResp01StopDetected -&gt; StoplessResp02SchemaGateEvaluated</code></td><td>anchored</td><td><code>runServerToolOrchestration -&gt; runStopMessageAutoHandlerWithNative</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>resolveRuntimeStopMessageStateFromAdapterContext -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-03</td><td><code>StoplessState03RuntimeSnapshotResolved -&gt; StoplessCli04ProjectionPlanned</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow -&gt; plan_client_exec_cli_projection_output</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-04</td><td><code>StoplessCli04ProjectionPlanned -&gt; StoplessCli06ClientExecuted</code></td><td>anchored</td><td><code>createServertoolCommand -&gt; build_servertool_cli_binary_run_command_from_client_exec_result</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-05</td><td><code>StoplessCli06ClientExecuted -&gt; StoplessReq07ContinuationRestored</code></td><td>anchored</td><td><code>has_stop_message_auto_cli_result_in_request_json -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-06</td><td><code>StoplessReq07ContinuationRestored -&gt; StoplessReq08GuidanceRewritten</code></td><td>anchored</td><td><code>buildChatRequestFromResponses -&gt; convertBridgeInputToChatMessages</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-07</td><td><code>StoplessReq08GuidanceRewritten -&gt; StoplessReq09SchemaContractInjected</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; inject_stopless_system_instruction</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-08</td><td><code>StoplessReq09SchemaContractInjected -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>classify -&gt; classify</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
         </tbody>
         </table>
         <h2>metadata.center.mainline</h2>
-        <p>future request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.</p>
+        <p>request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.</p>
         <p>Entry contract: <code>MetaReq01InboundSeeded</code> via <code>docs/architecture/wiki/metadata-center-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&quot;]
@@ -377,7 +385,8 @@
           MetaReq01InboundSeeded[&quot;MetaReq01InboundSeeded&quot;]
           MetaReq01InboundSeeded --&gt;|mtc-01| MetaReq02TruthMaterialized
           MetaReq02TruthMaterialized --&gt;|mtc-02| MetaReq03ContinuationAttached
-          MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
+          MetaReq02TruthMaterialized --&gt;|mtc-02-result| MetaReq03ContinuationAttached
+          MetaReq03ContinuationAttached -.-&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
           MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07ServertoolContextProjected
@@ -385,25 +394,26 @@
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-          class MetaReq01InboundSeeded pending;
-          class MetaReq02TruthMaterialized pending;
-          class MetaReq03ContinuationAttached pending;
-          class MetaReq04RuntimeControlBound pending;
-          class MetaReq05ProviderObservationProjected pending;
-          class MetaResp06ResponseObserved pending;
-          class MetaResp07ServertoolContextProjected pending;
-          class MetaResp08CloseoutReleased pending;</pre>
+          class MetaReq01InboundSeeded anchored;
+          class MetaReq02TruthMaterialized anchored;
+          class MetaReq03ContinuationAttached partial;
+          class MetaReq04RuntimeControlBound partial;
+          class MetaReq05ProviderObservationProjected anchored;
+          class MetaResp06ResponseObserved anchored;
+          class MetaResp07ServertoolContextProjected anchored;
+          class MetaResp08CloseoutReleased anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>mtc-01</td><td><code>MetaReq01InboundSeeded -&gt; MetaReq02TruthMaterialized</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-02</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07ServertoolContextProjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
-        <tr><td>mtc-07</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center: request truth, continuation context, runtime control, provider observation, client attachment scope, and provenance-driven closeout</td></tr>
+        <tr><td>mtc-01</td><td><code>MetaReq01InboundSeeded -&gt; MetaReq02TruthMaterialized</code></td><td>anchored</td><td><code>buildRequestMetadata -&gt; writeRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-02</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>buildResponsesPipelineMetadataForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-02-result</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>attachResponsesRequestContextToResultForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>partial</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>resolveResponsesConversationPersistInputsForHttp -&gt; readRuntimeRequestTruthIdentifiers</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>buildServerToolAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-07</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
         </tbody>
         </table>
         <h2>Shared Multi-Reference Functions</h2>

@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/index.js', () => ({
   buildResponsesTerminalSseFramesFromProbeNative: jest.fn(),
@@ -18,6 +18,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   createResponsesJsonToSseConverter: jest.fn(),
   createResponsesSseToJsonConverter: jest.fn(),
   finalizeResponsesConversationRequestRetention: jest.fn(),
+  lookupResponsesContinuationByResponseId: jest.fn(),
   materializeLatestResponsesContinuationByScope: jest.fn(),
   preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({})),
   recordResponsesResponseForRequest: jest.fn(),
@@ -30,20 +31,39 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   writeSnapshotViaHooks: jest.fn(),
 }));
 
-const { resolveResponsesRequestContextForHttp } = await import(
-  '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
-);
+let resolveResponsesRequestContextForHttp: any;
+let MetadataCenter: any;
+
+beforeAll(async () => {
+  ({ resolveResponsesRequestContextForHttp } = await import(
+    '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
+  ));
+  ({ MetadataCenter } = await import(
+    '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
+  ));
+});
 
 describe('responses-response-bridge request-context resolution', () => {
-  it('RED: prefers result metadata responsesRequestContext over server fallback context', () => {
+  it('prefers MetadataCenter continuation_context responsesRequestContext over server fallback context', () => {
+    const metadata: Record<string, unknown> = {};
+    const requestContext = {
+      payload: { model: 'gpt-5.5', store: true },
+      context: { input: [{ type: 'message' }] },
+      sessionId: 'sess_meta',
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeContinuationContext(
+      'responsesRequestContext',
+      requestContext,
+      {
+        module: 'tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts',
+        symbol: 'prefers MetadataCenter continuation_context responsesRequestContext over server fallback context',
+        stage: 'test',
+      }
+    );
+
     const resolved = resolveResponsesRequestContextForHttp({
-      metadata: {
-        responsesRequestContext: {
-          payload: { model: 'gpt-5.5', store: true },
-          context: { input: [{ type: 'message' }] },
-          sessionId: 'sess_meta',
-        },
-      },
+      metadata,
       fallback: {
         payload: { model: 'fallback-model' },
         context: { input: [] },
@@ -55,6 +75,30 @@ describe('responses-response-bridge request-context resolution', () => {
       expect.objectContaining({
         sessionId: 'sess_meta',
         payload: expect.objectContaining({ model: 'gpt-5.5' }),
+      }),
+    );
+  });
+
+  it('does not read top-level metadata.responsesRequestContext without MetadataCenter binding', () => {
+    const resolved = resolveResponsesRequestContextForHttp({
+      metadata: {
+        responsesRequestContext: {
+          payload: { model: 'top-level-only' },
+          context: { input: [] },
+          sessionId: 'sess_top_level_only',
+        },
+      },
+      fallback: {
+        payload: { model: 'fallback-model' },
+        context: { input: [] },
+        sessionId: 'sess_fallback',
+      },
+    });
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        sessionId: 'sess_fallback',
+        payload: expect.objectContaining({ model: 'fallback-model' }),
       }),
     );
   });

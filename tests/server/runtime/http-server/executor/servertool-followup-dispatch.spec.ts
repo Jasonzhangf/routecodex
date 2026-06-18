@@ -15,6 +15,19 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../../../../src/modules/llmswitch/bridge/module-loader.js',
   () => ({
+    parsePrefixList: jest.fn((raw: string | undefined) =>
+      String(raw || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    ),
+    matchesPrefix: jest.fn((subpath: string, prefixes: string[]) =>
+      prefixes.some((prefix) => subpath === prefix || subpath.startsWith(`${prefix}/`))
+    ),
+    isEngineEnabled: jest.fn(() => false),
+    getEnginePrefixes: jest.fn(() => []),
+    resolveImplForSubpath: jest.fn(() => 'ts'),
+    resolveCoreModulePath: jest.fn((subpath: string) => subpath),
     importCoreDist: jest.fn(async (subpath: string) => {
       if (subpath === 'conversion/shared/responses-conversation-store') {
         return {
@@ -62,6 +75,14 @@ jest.unstable_mockModule(
         };
       }
       throw new Error(`unexpected importCoreDist ${subpath}`);
+    }),
+    requireCoreDist: jest.fn((subpath: string) => {
+      if (subpath === 'native/router-hotpath/native-hub-pipeline-semantic-mappers') {
+        return {
+          normalizeServertoolFollowupPayloadShapeWithNative: (_entryEndpoint: string, payload: Record<string, unknown>) => payload
+        };
+      }
+      throw new Error(`unexpected requireCoreDist ${subpath}`);
     })
   })
 );
@@ -87,7 +108,92 @@ jest.unstable_mockModule(
       optionalPrimaryOrder: [],
       mandatoryOrder: []
     })),
-    planServertoolFollowupRuntimeWithNative: jest.fn(() => null)
+    planServertoolFollowupRuntimeWithNative: jest.fn(() => null),
+    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
+      document: mockGetDefaultServertoolSkeletonDocumentWithNative(),
+      toolSpecs: {
+        clock: {
+          name: 'clock',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'clock' },
+          execution: { mode: 'guarded', stripAfterExecute: true }
+        },
+        exec_command: {
+          name: 'exec_command',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'exec_command' },
+          execution: { mode: 'guarded', stripAfterExecute: true }
+        },
+        apply_patch: {
+          name: 'apply_patch',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'apply_patch' },
+          execution: { mode: 'reenter', stripAfterExecute: true }
+        }
+      },
+      toolSpecList: [
+        {
+          name: 'clock',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'clock' },
+          execution: { mode: 'guarded', stripAfterExecute: true }
+        },
+        {
+          name: 'exec_command',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'exec_command' },
+          execution: { mode: 'guarded', stripAfterExecute: true }
+        },
+        {
+          name: 'apply_patch',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'apply_patch' },
+          execution: { mode: 'reenter', stripAfterExecute: true }
+        }
+      ],
+      autoHookQueueConfig: { optionalPrimaryOrder: [], mandatoryOrder: [] },
+      pendingInjectionConfig: { messageKinds: [] },
+      followupConfig: {
+        genericInjectionOps: [],
+        nativeSupportedOps: [],
+        flowPolicy: {
+          profilesByFlowId: { stop_message_flow: { seedLoopPayload: true } },
+          noFollowupFlowIds: [],
+          autoLimitFlowIds: [],
+          flowOnlyLoopLimitFlowIds: [],
+          clientInjectOnlyFlowIds: [],
+          seedLoopPayloadFlowIds: ['stop_message_flow'],
+          clientInjectSourceByFlowId: {},
+          transparentReplayRequestSuffixByFlowId: {},
+          ignoreRequiresActionFollowupFlowIds: [],
+          contextDecorationModeByFlowId: {}
+        }
+      },
+      stateConfig: { scopePriority: [], pendingInjection: { enabled: true, strictContract: true } },
+      requestPrepareEnabled: true,
+      internalDispatchEnabled: true,
+      finalizeStripEnabled: true
+    })),
+    resolveServertoolToolSpecWithNative: jest.fn(({ name }: { name: string }) => {
+      if (name === 'apply_patch') {
+        return {
+          name: 'apply_patch',
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: 'apply_patch' },
+          execution: { mode: 'reenter', stripAfterExecute: true }
+        };
+      }
+      if (name === 'exec_command' || name === 'clock') {
+        return {
+          name,
+          enabled: true,
+          trigger: { type: 'tool_call', canonicalName: name },
+          execution: { mode: 'guarded', stripAfterExecute: true }
+        };
+      }
+      return null;
+    }),
+    normalizeServertoolRegistrationSpecWithNative: jest.fn((spec: unknown) => spec)
   })
 );
 

@@ -1,5 +1,4 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
-import { STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
 import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
 
 type NativeChatProcessNodeResultSemanticsModule = {
@@ -255,9 +254,4 @@ export async function persistPayloadContractProviderSnapshots(args: {
     },
     forceLocalDiskWriteWhenDisabled: true
   });
-}
-
-
-export function bodyContainsReasoningStopFinalizedMarker(_body: unknown): boolean {
-  return false;
 }

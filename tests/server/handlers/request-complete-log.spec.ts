@@ -1,6 +1,5 @@
 import { jest } from '@jest/globals';
 import { logRequestComplete } from '../../../src/server/handlers/handler-utils.js';
-import { STREAM_LOG_FINISH_REASON_KEY } from '../../../src/server/utils/finish-reason.js';
 
 describe('logRequestComplete', () => {
   const originalMode = process.env.ROUTECODEX_HTTP_LOG_VERBOSE;
@@ -30,7 +29,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=\x1b[97m200\x1b[0m'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=200'));
   });
 
   it('maps anthropic stop_reason into finish_reason', () => {
@@ -39,7 +38,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=\x1b[97m200\x1b[0m'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('status=200'));
   });
 
   it('derives tool_calls for responses required_action payloads', () => {
@@ -68,12 +67,11 @@ describe('logRequestComplete', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
   });
 
-  it('reads finish_reason from streamed responses wrapper metadata', () => {
+  it('does not read finish_reason from streamed wrapper custom metadata', () => {
     logRequestComplete('/v1/responses', 'req-resp-stream', 200, {
-      __sse_responses: { pipe: () => undefined },
-      [STREAM_LOG_FINISH_REASON_KEY]: 'tool_calls'
+      sseStream: { pipe: () => undefined }
     });
 
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
   });
 });

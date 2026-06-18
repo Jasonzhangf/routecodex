@@ -243,13 +243,20 @@ export function mergeMetadataPreservingDefined(
   base: Record<string, unknown>,
   overlay?: Record<string, unknown> | null
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...base };
+  const merged: Record<string, unknown> = Object.create(Object.getPrototypeOf(base) ?? Object.prototype);
+  for (const key of Reflect.ownKeys(base)) {
+    const descriptor = Object.getOwnPropertyDescriptor(base, key);
+    if (descriptor) {
+      Object.defineProperty(merged, key, descriptor);
+    }
+  }
   if (!overlay || typeof overlay !== 'object') {
     return merged;
   }
-  for (const [key, value] of Object.entries(overlay)) {
+  for (const key of Reflect.ownKeys(overlay)) {
+    const value = Reflect.get(overlay, key);
     if (value !== undefined) {
-      merged[key] = value;
+      Reflect.set(merged, key, value);
     }
   }
   return merged;

@@ -351,6 +351,14 @@ export function buildChatRequestFromResponses(
       const nonSystemMessages = messages.filter((msg: any) => String(msg?.role).toLowerCase() !== 'system');
       messages = [...preservedSystems, ...nonSystemMessages];
     }
+  } else if (typeof context.systemInstruction === 'string' && context.systemInstruction.trim().length) {
+    const hasSystemInstruction = messages.some((message: any) => String(message?.role).toLowerCase() === 'system');
+    if (!hasSystemInstruction) {
+      messages = [
+        { role: 'system', content: context.systemInstruction.trim() },
+        ...messages
+      ];
+    }
   }
   messages = appendLocalImageBlockOnLatestUserInputWithNative({ messages }).messages;
   if (!messages.length) {

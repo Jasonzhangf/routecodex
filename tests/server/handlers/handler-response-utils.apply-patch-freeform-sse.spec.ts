@@ -215,7 +215,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
     expect(text).not.toContain('"type":"function_call","name":"apply_patch"');
   });
 
-  it('normalizes live __sse_responses function_call frames before writing to client', async () => {
+  it('normalizes live sseStream function_call frames before writing to client', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const patch = '*** Begin Patch\n*** Add File: tmp/routecodex-online-apply-patch-smoke.txt\n+hello\n*** End Patch';
     const upstream = new PassThrough();
@@ -228,7 +228,8 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
       {
         status: 200,
         headers: {},
-        body: { __sse_responses: upstream },
+        body: {},
+        sseStream: upstream,
       } as any,
       'req_apply_patch_live_sse',
       {
@@ -275,7 +276,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
 
     await sendPipelineResponse(
       res as any,
-      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      { status: 200, headers: {}, body: {}, sseStream: upstream } as any,
       'req_apply_patch_nested_sse',
       {
         entryEndpoint: '/v1/responses',
@@ -344,7 +345,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
 
     await sendPipelineResponse(
       res as any,
-      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      { status: 200, headers: {}, body: {}, sseStream: upstream } as any,
       'req_apply_patch_delta_sse',
       {
         entryEndpoint: '/v1/responses',
@@ -398,12 +399,13 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
       {
         status: 200,
         headers: {},
-        body: { __sse_responses: upstream },
+        sseStream: upstream,
+        body: {},
         metadata: {
           outboundStream: true,
           stream: true,
-          __routecodexDirectPassthrough: true,
         },
+        continuationOwner: 'direct',
       } as any,
       'req_apply_patch_direct_delta_sse',
       {
@@ -458,7 +460,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
 
     await sendPipelineResponse(
       res as any,
-      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      { status: 200, headers: {}, body: {}, sseStream: upstream } as any,
       'req_apply_patch_terminal_order_sse',
       {
         entryEndpoint: '/v1/responses',
@@ -524,7 +526,7 @@ describe('handler response utils apply_patch freeform SSE projection', () => {
 
     await sendPipelineResponse(
       res as any,
-      { status: 200, headers: {}, body: { __sse_responses: upstream } } as any,
+      { status: 200, headers: {}, body: {}, sseStream: upstream } as any,
       'req_function_call_terminal_order_sse',
       {
         entryEndpoint: '/v1/responses',

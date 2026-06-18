@@ -50,7 +50,7 @@ describe('HTTP SSE stream timeout', () => {
           status: 200,
           headers: {},
           body: {
-            __sse_responses: stalled
+            sseStream: stalled
           }
         } as any,
         'req_test',

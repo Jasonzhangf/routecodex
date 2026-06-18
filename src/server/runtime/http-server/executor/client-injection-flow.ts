@@ -2,6 +2,7 @@ import {
   getSessionClientRegistry,
   injectSessionClientPromptWithResult
 } from '../session-client-registry.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { sanitizeFollowupText } from '../../../../modules/llmswitch/bridge.js';
 import { evaluateTmuxScopeCleanup } from '../tmux-scope-cleanup-policy.js';
@@ -109,15 +110,12 @@ function resolveInjectConversationSessionId(metadata: Record<string, unknown>): 
   if (tmuxSessionId) {
     return `tmux:${tmuxSessionId}`;
   }
-  const sessionId =
-    normalizeInjectToken(metadata.sessionId) ||
-    normalizeInjectToken(metadata.session_id);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const sessionId = normalizeInjectToken(requestTruth.sessionId);
   if (sessionId) {
     return `session:${sessionId}`;
   }
-  const conversationId =
-    normalizeInjectToken(metadata.conversationId) ||
-    normalizeInjectToken(metadata.conversation_id);
+  const conversationId = normalizeInjectToken(requestTruth.conversationId);
   if (conversationId) {
     return `conversation:${conversationId}`;
   }

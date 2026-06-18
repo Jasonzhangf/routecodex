@@ -11,7 +11,7 @@
 - 当前请求存在唯一 `MetadataCenter` 实例，按 request 作用域隔离，不做全局 singleton。
 - `sessionId` / `conversationId` / `requestId` / `pipelineId` 只从 `request_truth` 读取；`responsesRequestContext.*` 不得再 materialize 为 request truth。
 - stopless/servertool 不再从多来源回填 session truth，而是只读 center 投影。
-- `mergePipelineMetadata`、`finalizeRequestExecutorAttemptMetadata`、`servertool-adapter-context`、`servertool-request-normalizer` 中已确认错误的 flat merge/backfill 逻辑被物理删除或降为薄壳投影。
+- `buildHandlerPipelineMetadata`、`finalizeRequestExecutorAttemptMetadata`、`servertool-adapter-context` 中已确认错误的 flat merge/backfill 逻辑被物理删除或降为薄壳投影；原 `servertool-request-normalizer` 单函数文件已内联删除。
 - metadata center 保留 provenance：至少能回答值是谁写的、在哪个 stage 写的、是否允许覆盖。
 - red test 先红后绿；实现后必须跑 build 和现网/真实样本 replay，不得只靠单测宣称完成。
 
@@ -23,10 +23,9 @@
 - 第一阶段实现 `request_truth` 与 `continuation_context`。
 - 第二阶段迁移 stopless/servertool/read-side。
 - 替换以下已确认漂移点：
-  - `src/server/handlers/handler-utils.ts::mergePipelineMetadata`
+  - `src/server/handlers/handler-utils.ts::buildHandlerPipelineMetadata`
   - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts::finalizeRequestExecutorAttemptMetadata`
   - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
-  - `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`
   - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
   - `src/server/runtime/http-server/executor-metadata.ts`
 - mainline source / function-map / verification-map / wiki 跟实现同步收口。
@@ -34,7 +33,8 @@
 ### Out of Scope
 
 - 本轮不重做 provider outbound metadata boundary 方案本身；只要求新 center 不破坏现有隔离边界。
-- 本轮不实现完整 `runtime_control` / `provider_observation` / `client_attachment_scope` / `debug_snapshot` 全量迁移，只定义 contract 和占位 API。
+- 本轮不实现完整 `runtime_control` / `client_attachment_scope` / `debug_snapshot` / 全量 response-observation 迁移。
+- `provider_observation` 已从 contract-only 升级到第一阶段真实落地：当前至少覆盖 `target/providerKey/assignedModelId/modelId/clientModelId/compatibilityProfile` 的 center-backed 写入与关键读路径；剩余 response-side observation 仍待后续收口。
 - 本轮不顺手改 unrelated session binding、tmux 注入、provider health、quota、retry。
 
 ## 设计原则
@@ -139,12 +139,12 @@
 
 目标：
 
-- `mergePipelineMetadata` 不再是 request truth 真源
+- handler entry metadata builder 不再是 request truth 真源
 
 做法：
 
 - 把 request truth materialize 前移到 metadata center owner
-- `mergePipelineMetadata` 若仍保留，只能变为 thin projection/compat shell，随后删除
+- handler entry metadata builder 若仍保留，只能变为 thin projection/compat shell，随后删除
 
 #### B. executor attempt merge 替换
 
@@ -155,13 +155,14 @@
 做法：
 
 - 改成读取 center，再只追加 runtime-result projection
+- provider target / compatibility 观察值改写入 `provider_observation` family，不得复活 flat `metadata.target` / `metadata.compatibilityProfile`
 - 第一阶段若 runtime_control 尚未迁完，只允许返回显式 projection，不允许重写 request truth
 
 #### C. servertool/stopless read path 替换
 
 目标：
 
-- `buildServerToolAdapterContext` 与 `servertool-request-normalizer` 不再从 top-level metadata / nested metadata / `__rt` / captured request 多源猜 session
+- `buildServerToolAdapterContext` 不再从 top-level metadata / nested metadata / `__rt` / captured request 多源猜 session
 
 做法：
 
@@ -194,8 +195,10 @@
 - `src/server/runtime/http-server/executor-metadata.ts`
 - `src/server/handlers/handler-utils.ts`
 - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+- `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
 - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
-- `src/server/runtime/http-server/executor/servertool-request-normalizer.ts`
+- `src/server/runtime/http-server/executor/provider-request-context.ts`
+- `src/server/runtime/http-server/executor/provider-response-utils.ts`
 - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
 - `docs/architecture/function-map.yml`
 - `docs/architecture/verification-map.yml`

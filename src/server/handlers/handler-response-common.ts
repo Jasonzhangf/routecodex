@@ -3,6 +3,9 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { shouldCaptureSnapshotStage } from '../../utils/snapshot-stage-policy.js';
+import { releaseMetadataCenterForHttpResponse } from '../runtime/http-server/metadata-center/metadata-center.js';
+
+export { releaseMetadataCenterForHttpResponse };
 
 /**
  * Phase Server-C: assertClientResponseHasNoInternalCarriers.
@@ -40,7 +43,6 @@ const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
   'routecodexPortStopMessageEnabled',
   'clientAbortSignal',
   'clientConnectionState',
-  '__routecodexDirectPassthrough',
 ]);
 
 export type ResponsesRequestContext = {
@@ -57,10 +59,6 @@ export interface DispatchOptions {
   entryEndpoint?: string;
   sseTotalTimeoutMs?: number;
   responsesRequestContext?: ResponsesRequestContext;
-}
-
-export interface SsePayloadShape {
-  __sse_responses?: unknown;
 }
 
 export type ClientSseSnapshotRecorder = {
@@ -85,6 +83,18 @@ function isInternalMetadataCarrier(value: unknown): boolean {
   return false;
 }
 
+function isClientVisibleProtocolMetadataContainer(record: Record<string, unknown>): boolean {
+  const object = typeof record.object === 'string' ? record.object.trim() : '';
+  if (object === 'response') {
+    return true;
+  }
+  const type = typeof record.type === 'string' ? record.type.trim() : '';
+  if (type.startsWith('response.')) {
+    return true;
+  }
+  return false;
+}
+
 function findForbiddenFieldInResponsePayload(
   payload: unknown,
   seen: WeakSet<object> = new WeakSet(),
@@ -104,6 +114,9 @@ function findForbiddenFieldInResponsePayload(
   const record = payload as Record<string, unknown>;
   for (const [key, value] of Object.entries(record)) {
     if (key === 'metadata') {
+      if (!isClientVisibleProtocolMetadataContainer(record)) {
+        return key;
+      }
       if (isInternalMetadataCarrier(value)) {
         return key;
       }

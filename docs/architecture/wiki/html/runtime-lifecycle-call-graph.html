@@ -139,8 +139,10 @@
         <p>Managed server and token-daemon lifecycle: <code>ROUTECODEX_SESSION_DIR</code> is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and <code>tmuxSessionId</code> / request <code>sessionId</code> / <code>conversationId</code> stay separate namespaces rather than directory-derived identity.</p>
         <p>Entry contract: <code>ServerPidCacheRecord</code> via <code>docs/design/server-runtime-lifecycle-ssot.md</code></p>
         <pre class="mermaid">flowchart LR
+          StartShutdownHandler[&quot;StartShutdownHandler&quot;]
+          DaemonRestartLoop[&quot;DaemonRestartLoop&quot;]
+          DaemonSupervisorLoop[&quot;DaemonSupervisorLoop&quot;]
           RuntimeInstanceRecord[&quot;RuntimeInstanceRecord&quot;]
-          ServerLifecycleState[&quot;ServerLifecycleState&quot;]
           TokenDaemonPidRecord[&quot;TokenDaemonPidRecord&quot;]
           TokenDaemonBootstrap[&quot;TokenDaemonBootstrap&quot;]
           StopIntentRecord[&quot;StopIntentRecord&quot;]
@@ -153,7 +155,12 @@
           ServerStartCommand --&gt;|rtl-04| StopIntentRecord
           TokenDaemonBootstrap --&gt;|rtl-05| TokenDaemonPidRecord
           TokenDaemonBootstrap --&gt;|rtl-06| TokenDaemonPidRecord
-          ServerLifecycleState --&gt;|rtl-07| RuntimeInstanceRecord
+          ServerStartCommand --&gt;|rtl-07| RuntimeInstanceRecord
+          DaemonSupervisorLoop --&gt;|rtl-08| RuntimeInstanceRecord
+          DaemonRestartLoop --&gt;|rtl-09| RuntimeInstanceRecord
+          ServerStartCommand --&gt;|rtl-10| RuntimeInstanceRecord
+          StartShutdownHandler --&gt;|rtl-11| RuntimeInstanceRecord
+          ServerStopCommand --&gt;|rtl-12| RuntimeInstanceRecord
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -163,8 +170,10 @@
           class StopIntentRecord anchored;
           class TokenDaemonBootstrap anchored;
           class TokenDaemonPidRecord anchored;
-          class ServerLifecycleState pending;
-          class RuntimeInstanceRecord pending;</pre>
+          class RuntimeInstanceRecord anchored;
+          class DaemonSupervisorLoop anchored;
+          class DaemonRestartLoop anchored;
+          class StartShutdownHandler anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -175,7 +184,12 @@
         <tr><td>rtl-04</td><td><code>ServerStartCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>consumeDaemonStopIntent -&gt; consumeServerStopIntent</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
         <tr><td>rtl-05</td><td><code>TokenDaemonBootstrap -&gt; TokenDaemonPidRecord</code></td><td>anchored</td><td><code>resolveTokenDaemonPidPath -&gt; resolveTokenDaemonPidPath</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
         <tr><td>rtl-06</td><td><code>TokenDaemonBootstrap -&gt; TokenDaemonPidRecord</code></td><td>anchored</td><td><code>resolveTokenDaemonPidPath -&gt; resolveTokenDaemonPidPath</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
-        <tr><td>rtl-07</td><td><code>ServerLifecycleState -&gt; RuntimeInstanceRecord</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-07</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-08</td><td><code>DaemonSupervisorLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-09</td><td><code>DaemonRestartLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-10</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-11</td><td><code>StartShutdownHandler -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-12</td><td><code>ServerStopCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         </tbody>
         </table>
       </article>

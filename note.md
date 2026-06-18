@@ -1,3 +1,622 @@
+## 2026-06-18 stopless schema-missing guidance branch fix
+
+- Jason 最新明确要求：`schema missing` 时的引导不能只是“补字段”，必须显式分支：
+  - 第一轮短提示：继续执行；如果任务已经完成，再补齐 schema。
+  - 第二轮再展开：如果任务已经完成，补齐 schema；如果任务还没完成，继续执行。
+- 这次只改 stopless model-visible guidance owner，不碰 SSE/协议层：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+- 具体收口：
+  - `triggerHint=no_schema` 改成按轮次分支：首轮短，二轮展开。
+  - `reasonCode=stop_schema_missing` 的 feedback 也按轮次分支：首轮短，二轮展开。
+- 新增 focused tests：
+  - `stop_hook_guidance_text_for_first_missing_schema_round_stays_short`
+  - `stop_hook_guidance_text_for_second_missing_schema_round_must_expand_branching`
+  - `stopless_resume_guidance_for_first_missing_schema_round_stays_short`
+  - `stopless_resume_guidance_for_second_missing_schema_round_must_expand_branching`
+- 验证：
+  - `cargo test -p router-hotpath-napi stop_hook_guidance_text_for_first_missing_schema_round_stays_short --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi stop_hook_guidance_text_for_second_missing_schema_round_must_expand_branching --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi stopless_resume_guidance_for_first_missing_schema_round_stays_short --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi stopless_resume_guidance_for_second_missing_schema_round_must_expand_branching --lib -- --nocapture` PASS
+- 备注：
+  - 这是文案/引导闭环的一部分，还没有做 5555 live probe 复核，所以不能宣称 stopless 整体语义闭环完成。
+
+## 2026-06-18 stopless fresh-request history contamination fix
+
+- Jason 最新这条“还在循环”不是 continuation restore 那条旧问题，而是 fresh `/v1/responses` 请求历史里直接混入了旧 stopless CLI transcript，导致 provider request 在进入上游前就已经带着 `Chunk ID ... Output: {"toolName":"stop_message_auto"...}` 污染文本。
+- 真实证据：
+  - 旧污染样本：`/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781756088758_a1cdfc62/provider-request.json`
+  - 污染位置：约 `L3939+` 出现多条 `role=user` 的 stopless transcript 文本
+- 这次唯一 owner 修点落在 Rust bridge history/input 归一化，而不是 SSE/协议层：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/utils.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs`
+- 新行为：
+  - 对 `role=user` 的历史消息，如果内容能被归一化识别为 stopless CLI transcript/result（即 `toolName == stop_message_auto`），直接在 bridge owner 层丢弃，不再当普通历史传给模型。
+  - 这样既不会污染 provider request，也不会污染 `latest_user_instruction`。
+- 新红测：
+  - `build_bridge_history_drops_stopless_cli_transcript_user_history`
+  - `convert_bridge_input_drops_stopless_cli_transcript_user_message`
+- 离线验证：
+  - `cargo test -p router-hotpath-napi build_bridge_history_drops_stopless_cli_transcript_user_history --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi convert_bridge_input_drops_stopless_cli_transcript_user_message --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi hub_bridge_actions --lib -- --nocapture` PASS
+- packaged native 已刷新：
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+- 真实样本片段离线回放（dist/native）：
+  - 用旧污染样本中 `继续执行 + 3 条 stopless transcript` 回放 `convertBridgeInputToChatMessages`
+  - 输出只剩 `继续执行`，`pollutedOut=0`
+- 安装态 / 运行态验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `routecodex --version` => `0.90.3121`
+  - `routecodex restart --port 5555` PASS
+  - `curl -s http://127.0.0.1:5555/health` => version `0.90.3121`
+  - 本地真实重放请求（同样本污染片段）后，新样本：
+    - `/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781757433137_9a4026a1/provider-request.json`
+    - provider request 只剩一条 `input_text = "继续执行"`
+    - `rg -n "Chunk ID:|stop_message_auto"` 对该文件 `0 matches`
+
+## 2026-06-18 stopless continuation/restore collapse fix: only latest guidance survives
+
+- Jason 当前这条 stopless 闭环问题，根因不是工具列表消失，而是 continuation/restore/materialize 把旧 stopless `function_call + function_call_output` 当普通历史重新带回后续 provider request，导致旧 guidance 污染后续轮次，VR 看到的也不是“当期轮”。
+- 已锁唯一 owner：
+  - TS store 只是保存/交给 native：`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+  - 真正 collapse owner：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+- 这次修正把 collapse 真源从“猜 exec_command 文本是否像 stop hook”改成“看已完成 tool output 的真实语义”：
+  - 先识别 `function_call_output.output.toolName == stop_message_auto`
+  - 再按 `call_id` 折叠对应 stopless pair 为一条 user guidance
+  - 最后只保留最新一条 stopless guidance，旧 guidance 全删
+- 直接证据：
+  - `resumeResponsesConversationPayloadWithNative(...)` 在修前会吐回两轮 `function_call/function_call_output`
+  - 修后同一 native 直调只剩：
+    - 原始 user message
+    - 最新 stopless guidance message
+- 新增/更新验证：
+  - Rust red->green: `cargo test -p router-hotpath-napi resume_collapses_stopless_history_to_latest_guidance_only --lib -- --nocapture` PASS
+  - Rust suite: `cargo test -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture` PASS
+  - normalization guard: `cargo test -p router-hotpath-napi hub_req_inbound_tool_call_normalization --lib -- --nocapture` PASS
+  - JS blackbox: `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/sharedmodule/responses-continuation-store.spec.ts --runInBand` PASS
+- 运行时注意：
+  - Jest/Node 默认先吃 `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`
+  - 仅跑 `cargo test` 不会刷新 packaged native；必须跑 `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` 或更高层 build/install 流程
+
+## 2026-06-18 stopless structured feedback + req_chatprocess transparent rewrite
+
+- Jason latest correction locked three requirements together:
+  - CLI feedback must stay concise structured data, not long natural-language followup text.
+  - req_chatprocess must rewrite the paired stopless tool execution result into model-transparent natural language plus missing/error feedback.
+  - virtual router must still route the stopless continuation turn to `thinking`, and this must be reflected in mainline source + wiki.
+- Verified owner chain:
+  - response-side precise schema gate truth originates in `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` (`schemaGate.reason_code`, `schemaGate.missing_fields`);
+  - stopless CLI projection owner remains `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`;
+  - model-visible rewrite owner remains `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`;
+  - VR thinking route lock remains `tests/servertool/stopless-vr-route-hint.spec.ts`.
+- Implemented direction:
+  - stop-message handler now emits structured `stopSchemaFeedback { reasonCode, missingFields }` into stopless execution context;
+  - CLI projection preserves only concise stopless input (`flowId/repeatCount/maxRepeats/triggerHint` + optional `schemaFeedback`);
+  - CLI stdout now preserves `schemaFeedback`;
+  - req_chatprocess now rewrites stopless paired tool result using:
+    - `continuationPrompt`
+    - natural-language rendering of `schemaFeedback`
+    - natural-language rendering of `schemaGuidance.decisionRules/invalidExamples`
+- Focused evidence:
+  - `cargo test -p servertool-core cli_contract --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi hub_req_inbound_tool_call_normalization --lib -- --nocapture` PASS
+  - `cargo build -p servertool-cli --bin routecodex-servertool` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/cli/servertool-command.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stopless-vr-route-hint.spec.ts --runInBand` PASS
+- Doc truth updated:
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/verification-map.yml`
+  - `docs/architecture/wiki/stopless-session-mainline-source.md`
+  - `docs/architecture/wiki/servertool-ownership-map.md`
+
+## 2026-06-18 stopless mainline closure gap: req-side schema contract missing on `/v1/responses`
+
+- 最新真实样本再次证明“无限续接 / 不触发”不是单纯模型理解问题，而是 req 侧 stopless schema contract 没有落到 `/v1/responses` 主线的真实 wire：
+  - 样本：`/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781757806242_67c06c6a/provider-request.json`
+  - 证据：
+    - provider request 顶层 `system` 只有默认 `You are Claude Code...`
+    - `rg -n 'stopreason|continue_needed|stop_message_auto|reasoning_stop'` 对该 provider-request 为 0 命中
+    - 同文件却仍有正常 tool 列表，说明不是 provider request 整体异常，而是 stopless contract 没被注入到真实主线
+- 当前唯一 owner 根因方向已锁：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+    - 现在 `prepend_stopless_system_instruction()` 只会写 `request.messages`
+  - 但 `/v1/responses` 主线真实会先经过 `input/instructions`，后续 `buildChatRequestFromResponses()` 才转成 chat messages
+  - `buildChatRequestFromResponses()` 已支持从 `payload.instructions -> captured.systemInstruction -> system message`，所以真正缺的是 req_process 对 responses 形态写 `instructions`
+- 下一刀收口：
+  - req_process stopless contract 注入改成同时覆盖：
+    - chat/messages 形态：`messages[0].role=system`
+    - responses/input 形态：`instructions`
+- 红测至少两层：
+  - Rust：`apply_req_process_tool_governance` 对 `/v1/responses + input` 必须写入 `instructions`
+  - TS：`buildChatRequestFromResponses` 收到该 `instructions` 后，chat request `messages[0]` 必须是包含 `stopreason` 的 system message
+
+## 2026-06-18 stopless live followup snapshot gap on `/v1/responses` continuation
+
+- 5555 在线复核 `0.90.3129` 先锁到一个新的真实 owner：
+  - 首轮 stopless 激活正常，CLI payload 已带 `schemaFeedback`
+  - 但 submit_tool_outputs 第二轮 provider-request 起初仍缺 `上一轮执行结果：repeatCount/reasonCode/missingFields`
+  - 这不是 `hub_req_inbound_tool_call_normalization.rs` owner，而是 `/v1/responses` continuation collapse owner：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+- 修正：
+  - 给 `shared_responses_conversation_utils.rs::build_stop_hook_guidance_text_from_output(...)` 补上与 req inbound normalization 同步的 stopless snapshot 文本：
+    - `上一轮执行结果：repeatCount=2/3；reasonCode=...；missingFields=...。`
+- 本地验证：
+  - `cargo test -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/sharedmodule/responses-continuation-store.spec.ts --runInBand` PASS
+- 在线证据：
+  - 最新样本 ` /Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781767097095_e92d4345/provider-request.json`
+  - 已出现：
+    - `上一轮执行结果：repeatCount=2/3；reasonCode=stop_schema_continue_next_step；missingFields=...`
+- 仍需说明的缺口：
+  - 当前 `scripts/tests/stopless-5555-live-probe.mjs` 自身把第二轮模型行为限定成“看到 repeatCount=1 就直接输出 stop schema JSON”，所以它不适合作为“三次 no_schema 在线自然停”的 live 证据；这条仍只有本地黑盒 gate，尚未做真实在线三轮复核。
+
+## 2026-06-18 relay `/v1/responses` tools->minimax raw SSE leak root cause and fix
+
+- 真实失败样本：
+  - log requestId=`openai-responses-minimax.key1-MiniMax-M2.7-20260618T101045841-364433-4887`
+  - sample dirs:
+    - `/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781748645841_a22d38d0`
+    - `/Volumes/extension/.rcc/codex-samples/openai-responses/port-unknown/openai-responses-minimax.key1-MiniMax-M2.7-20260618T101045841-364433-4887`
+- 样本证据已锁死：
+  - `provider-response_1.json` 只有 Anthropic raw SSE：末尾 `event: message_stop`
+  - `client-response_server.json` 也把 raw `message_stop` 直接吐给 client，随后补 `event: error code=upstream_stream_incomplete`
+  - 说明这条 relay `/v1/responses` tools 路径在响应投影前没有先完成 raw Anthropic SSE -> standard Responses 语义转换
+- 唯一 owner 根因：
+  - `src/server/runtime/http-server/executor/provider-response-utils.ts::normalizeProviderResponseBody`
+    - 对“只有 `sseStream`，没有 body”的 provider response 会返回 `body=undefined`
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts`
+    - 原先在 `/v1/responses` 转换前有早退：`if (!body || typeof body !== 'object') return options.response;`
+    - 结果 stream-only relay response 整段跳过 bridge conversion，raw SSE 直接漏到 client
+- 已修：
+  - `provider-response-converter.ts` 新增 `buildBridgeProviderResponseSeed(...)`
+  - 对 stream-only provider response，不再因 `body` 缺失早退；改为用 `sseStream + status/headers/metadata` 组装 bridge seed，再进入 bridge conversion
+- 已验证：
+  - `npx jest tests/server/runtime/http-server/executor/provider-response-converter.bridge-seed.spec.ts --runInBand` PASS
+  - `npx jest tests/server/runtime/http-server/executor/provider-response-relay-sse.spec.ts --runInBand` PASS
+  - `npm run build:min` PASS
+- 备注：
+  - 旧 `provider-response-converter.prebuilt-sse-passthrough.spec.ts` 这组 test 自带 ESM/core-loader mock 脆弱面，当前仍会在进入断言前卡在 `conversion/hub/response/provider-response` 动态装载，不把它当成本次修复真假判断依据
+
+## 2026-06-18 payload-carrier baseline rerun after P0 role-map doc sync
+
+- 复跑原因：`docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 新增 `P0 TS/host role map` 后，需要确认 audit 只是 docs 命中变化，没有把 runtime / owner-queryability 基线打偏。
+- 复跑结果：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+  - `__routecodex*`: `runtime=72, test=81, script=16, doc=58`，runtime unique files=`25`
+  - `__sse_*`: `runtime=0, test=20, script=15, doc=7`，runtime unique files=`0`
+  - `response.metadata`: `runtime=11, test=13, script=5, doc=44`，runtime unique files=`4`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+    - `__routecodex*`: `unique-owner=16`、`ambiguous-owner=9`、`missing-owner=0`、`missing-verification=0`
+    - `response.metadata`: `unique-owner=2`、`ambiguous-owner=2`、`missing-owner=0`、`missing-verification=0`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+  - `git diff --check` PASS
+- 结论：
+  - 本次变化只在 docs 面：`__routecodex* doc 41 -> 58`
+  - runtime files、runtime category / semantic family / resolution track、owner-queryability 全部保持不变
+  - `P0 TS/host role map` 可以继续作为 writer-first 清理顺序的真事实，不会把审计面写假
+
+## 2026-06-18 P0 writer-first migration checklist anchored to source + verification map
+
+- 已把 P0 五项从“role map”继续收成可执行 checklist，位置：`docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`
+- 当前真实顺序：
+  - request-route lane：`request-executor-attempt-state.ts -> index.ts -> hub-pipeline-execute-request-stage.ts`
+  - response-followup lane：`servertool-followup-dispatch.ts -> provider-response-converter.ts`
+- 真实角色与源码锚点已再次核实：
+  - `request-executor-attempt-state.ts` `L48-L55` = narrow writer
+  - `index.ts` `L1310-L1319`, `L1402-L1410` = entry writer + relay bridge
+  - `hub-pipeline-execute-request-stage.ts` `L20-L25` = bridge copier
+  - `servertool-followup-dispatch.ts` `L223-L245`, `L279-L331` = materializer / mutating reader
+  - `provider-response-converter.ts` `L1031-L1034` = pure reader
+- verification-map 也已对齐到这五个 owner：
+  - `hub.metadata_center_attempt_merge`
+  - `server.http_runtime_entry`
+  - `hub.request_stage_pipeline_bridge`
+  - `server.servertool_followup_dispatch_surface`
+  - `server.provider_response_conversion_host`
+- 结论：
+  - 后续如果要继续清 `__routecodex*` runtime residue，必须按这两条 lane 的固定顺序推进
+  - 不能跳过 writer/materializer 直接收 bridge/reader；那样只会把旧字段读取面换地方，不会真的退出 payload truth
+
+## 2026-06-18 request-route control source-to-sink verdict
+
+- 已补 source-to-sink 审计：
+  - `__routecodexRetryProviderKey` 当前最窄 TS writers = `request-executor-attempt-state.ts` + `index.ts`
+  - `__routecodexPreselectedRoute` 当前关键链 = `index.ts` writer -> `executor-metadata.ts` / `servertool-followup-metadata.ts` guards -> `hub-pipeline-execute-request-stage.ts` bridge -> Rust `hub_pipeline_lib/engine.rs` read
+- 新增更强约束：
+  - `metadata-center-manifest.yml` 已声明 `runtime_control` family 与 `MetaReq04RuntimeControlBound`
+  - `metadata-center-types.ts` 也已有 `runtime_control`
+  - 但 `metadata-center.ts` 当前 `state/read/write/markReleased` 还没有 `runtime_control` 实现
+- 因此当前“最安全的下一刀”修正为：
+  - 首选前置 slice = `hub.metadata_center_mainline / mtc-03 runtime_control plumbing`
+  - 次选才是 `hub.metadata_center_attempt_merge / request-executor-attempt-state.ts`
+  - 不首选 `index.ts`，因为它同时碰 direct relay、port dispatch、`PreselectedRoute` 与 `RetryProviderKey`
+  - 不首选 `hub-pipeline-execute-request-stage.ts`，因为它依赖 Rust request-stage route input 同批切换
+- 这意味着后续若要真正开始字段迁移实现，最稳的顺序仍然是：
+  - 先补 `runtime_control` carrier
+  - 再单收 attempt writer
+  - 再收 entry writer
+  - 最后才碰 TS bridge / Rust request-route band
+
+## 2026-06-18 mtc-03 review-surface correction
+
+- 已更新 `docs/architecture/wiki/metadata-center-mainline-source.md`：
+  - `mtc-03` 的缺口不只是 `MetadataCenter` API 未实现
+  - runtime-control family 现在还是“manifest/type 先行、state/read/write/release 落后”
+  - request-route pin 这一小段语义也还没成为 first-class center slot
+- 结论：
+  - “最窄 writer 看起来最安全”这件事仍成立，但它已经不是最前置 slice
+  - 真正的前置 slice 仍是 `hub.metadata_center_mainline / mtc-03 runtime_control plumbing`
+
+## 2026-06-18 current worktree review-surface refresh after internal-field cleanup progress
+
+- 重新按 goal 要求读了 `/Users/fanzhang/.codex/attachments/8c20d54c-9dab-43f9-a735-57abc20fb98a/pasted-text-1.txt`，并基于当前 worktree 重新跑 review-surface / payload-carrier 审计。
+- 当前 runtime 基线：
+  - `npm run audit:custom-payload-carriers` PASS
+  - `__routecodex*`: `runtime=72, test=81, script=16, doc=41`，runtime unique files=`25`
+  - `__sse_*`: `runtime=0, test=20, script=15, doc=7`，runtime unique files=`0`
+  - `response.metadata`: `runtime=11, test=13, script=5, doc=44`，runtime unique files=`4`
+- 当前 owner/queryability：
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS
+  - `__routecodex*`: `unique-owner=16`、`ambiguous-owner=9`、`missing-owner=0`、`missing-verification=0`
+  - `response.metadata`: `unique-owner=2`、`ambiguous-owner=2`、`missing-owner=0`、`missing-verification=0`
+- 已把 `payload_side_channel=10` 落成具体候选表：
+  - 文档：`docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`
+  - 排序原则：先 `unique-owner` TS/host (`request-executor-attempt-state.ts` / `servertool-followup-dispatch.ts` / `provider-response-converter.ts` / `index.ts` / `hub-pipeline-execute-request-stage.ts`)，再 `ambiguous-owner` Rust broad-owner 带
+  - 每项都已写明 owner、当前 token hits、semantic family、处置结论、风险、验证路径
+- 当前 review-surface / longtail 复核：
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-ci-longtail` PASS
+  - `npm run verify:architecture-wiki-browser-smoke` PASS
+  - `npm run verify:architecture-mainline-mermaid-sync` PASS
+  - `npm run verify:architecture-forbidden-path-growth` PASS
+  - `npm run verify:architecture-adjacent-builder-naming` PASS
+- 继续确认：
+  - 这轮 review-surface 没有发现新的红 gate
+  - 当前最明显的变化是 `__routecodex*` runtime unique files 已稳定在 `25`
+  - 之后已改用更稳定的命令执行方式补齐完整回执：
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci; printf '__RC__=%s' $?`
+      - 完整输出已拿到，最终 `__RC__=0`
+    - `node -e 'spawnSync(\"npm\", [\"run\", \"build:min\"], ...); write /tmp/rtk-buildmin.exit'`
+      - `/tmp/rtk-buildmin.exit = 0`
+      - `/tmp/rtk-buildmin.log` 末尾显示 `vite build`、`copy-compat-assets`、`copy-modules-config`、`fix:cli-permission` 已执行完
+- 本轮只更新审计面与证明，不接手 Jason 正在做的内部字段运行时删除实现线
+
+## 2026-06-18 build/install/live evidence refresh on current worktree
+
+- 为了把“PTy/session 空转”从证据链里剔掉，这轮改用两种更稳定的方式取完整回执：
+  - `verify:architecture-ci` 直接打印最终退出码
+  - `build:min` / `install:global` 用 `node:child_process.spawnSync(...)` 包装，并把完整日志落到 `/tmp`
+- 当前完整证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci; printf '__RC__=%s' $?`
+    - 最终 `__RC__=0`
+  - `node -e 'spawnSync(\"npm\", [\"run\", \"build:min\"], ...); write /tmp/rtk-buildmin.exit'`
+    - `/tmp/rtk-buildmin.exit = 0`
+    - `/tmp/rtk-buildmin.log` 尾部已确认执行完：
+      - `vite build`
+      - `copy-compat-assets`
+      - `copy-modules-config`
+      - `fix:cli-permission`
+  - `node -e 'spawnSync(\"npm\", [\"run\", \"install:global\"], env.ROUTECODEX_INSTALL_INPLACE_BUILD=1 ...)'`
+    - `/tmp/rtk-installglobal.log` 已明确输出：
+      - `✅ 构建完成`
+      - `🌍 执行全局安装...`
+      - `changed 220 packages in 17s`
+      - `✅ 全局安装成功`
+      - `📦 刷新 RCC install/current runtime snapshot...`
+    - 该脚本尾部仍可能卡在 snapshot refresh 后的 shell/PTY 回执，不把“无 exit 文件”当作失败；成功结论以下面真实证据为准：
+      - `routecodex --version` => `0.90.3110`
+      - `routecodex restart --port 5555` => `✔ RouteCodex server restarted: localhost:5555`
+      - `curl -s http://127.0.0.1:5555/health` => `{\"status\":\"ok\",\"ready\":true,\"pipelineReady\":true,\"server\":\"routecodex\",\"version\":\"0.90.3110\"}`
+      - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/tests/stopless-5555-live-probe.mjs` PASS
+        - `health.version = 0.90.3110`
+        - first turn `responseStatus=requires_action`
+        - resume chain `responseStatus=completed`
+        - `finalStatus=completed`
+- 结论：
+  - 当前 worktree 上，`CI gate -> build:min -> install:global -> restart -> /health -> live stopless replay` 这条证据链已经再次闭环
+  - 这轮仍不意味着 Jason 的内部字段删除实现已经全部完成；它只说明 review-surface / build/install/runtime 验证链没有被当前清理进度打断
+
+## 2026-06-18 followup dispatch duplicate-helper closeout and residual red classification
+
+- 已把 `servertool-followup-dispatch.ts` 的本地 `readResponsesResponseId(...)` 去重到 `responses-request-bridge.ts::readResponsesResponseIdFromHttp(...)`。
+- 这次去重后的单测验证结果：
+  - `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` PASS
+- 为了让 Jest mock 跟上当前导出面，补了两处测试出口：
+  - `module-loader.js` mock 增加 `resolveImplForSubpath` / `parsePrefixList` / `matchesPrefix` / `isEngineEnabled` / `getEnginePrefixes` / `resolveCoreModulePath`
+  - `native-chat-process-servertool-orchestration-semantics.js` mock 增加 `planServertoolSkeletonDerivedConfigWithNative` / `resolveServertoolToolSpecWithNative`
+- 三件套复跑结果：
+  - `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` PASS
+  - `tests/server/runtime/http-server/executor/servertool-followup-model-pin-regression.spec.ts` 仍红
+  - `tests/server/handlers/responses-handler.stop-followup-metadata.blackbox.spec.ts` 仍红
+- 这两个剩余红点和本次去重无直接因果：
+  - blackbox 红点是 `forbidden client metadata field: __rt`，属于当前你在清的内部字段入口校验线
+  - model-pin 红点是 `servertool-followup-metadata.ts` 仍按设计剥离 `providerKey/targetProviderKey/assignedModelId`
+- 当前处理原则不变：我只审计 / 收口 / 证明，不接手你正在做的内部字段物理删除实现线
+
+## 2026-06-18 followup dispatch duplicate helper dedup
+
+- 继续收 `servertool-followup-dispatch.ts` 时确认：
+  - 本地 `readResponsesResponseId(...)`
+  - 与 `src/modules/llmswitch/bridge/responses-request-bridge.ts::readResponsesResponseIdFromHttp(...)`
+  - 逻辑同形，且 bridge 侧已经是现存 canonical builder
+- 额外核查：
+  - `responses-request-bridge.ts` 不 import `servertool-followup-dispatch.ts`
+  - 不会形成循环依赖
+- 已改：
+  - `servertool-followup-dispatch.ts` 改为直接 import `readResponsesResponseIdFromHttp(...)`
+  - 删除本地重复 helper `readResponsesResponseId(...)`
+- 这次改动属于 shared logic first / duplicate wrapper removal，不改 runtime 语义，不改 payload carrier 基线
+
+## 2026-06-18 dead-helper trim in followup/converter band
+
+- 继续沿 `response_followup_semantics` 带做瘦身时，补做本地 helper 零 caller 扫描：
+  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts::isManagedStoplessGoalRequestSemantics`
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts::resolveGoalPersistenceScopeKey`
+- `rg` 证据：
+  - 这两个 helper 在 `src/tests/docs/sharedmodule` 范围内都只有定义命中，没有 runtime/test caller
+- 结论：
+  - 两者都属于纯 dead helper，可物理删除，不影响 payload carrier 基线与运行时语义
+- 已删：
+  - `isManagedStoplessGoalRequestSemantics(...)`
+  - `resolveGoalPersistenceScopeKey(...)`
+- 这轮是纯代码清理，不改 function-map / manifest 基线；验证口径走 focused build/gate
+
+## 2026-06-18 response followup semantics slimming: zero-runtime-consumer helper removal
+
+- 继续做 payload-carrier 审计时发现：
+  - `src/server/runtime/http-server/executor/request-executor-response-inspect.ts::readServerToolFollowupSource`
+  - 全仓命中只有：
+    - 定义本身
+    - `docs/architecture/function-map.yml` symbol table
+    - `tests/server/runtime/http-server/executor/request-executor-response-inspect.spec.ts`
+  - `rg -n "readServerToolFollowupSource" src tests docs scripts sharedmodule` 没有任何 runtime caller
+- 结论：
+  - 这是一个零 runtime consumer 的 dead helper，且它是该文件里唯一 `requestSemantics.__routecodex` 读取点
+  - 物理删除该 helper 不改变功能行为，但可以真实收缩 `response_followup_semantics` runtime residue
+- 已改：
+  - 删除 `readServerToolFollowupSource(...)`
+  - 删除对应白盒测试
+  - `docs/architecture/function-map.yml` 去掉该 canonical builder，并把 owner_scope 改回真实剩余职责
+  - `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 删除 `request-executor-response-inspect.ts` 这项 runtime residue
+  - 相关审计文档基线同步预期：
+    - `__routecodex*` runtime files `26 -> 25`
+    - `payload_side_channel 11 -> 10`
+    - `response_followup_semantics 4 -> 3`
+- 这次改动属于 dead helper 瘦身，不接管 Jason 正在做的字段迁移实现线
+
+## 2026-06-18 custom payload carrier truth-refinement: request-route guard split
+
+- 继续做 Jason 并行字段清理之外的 review-surface 审计，不碰 runtime 实现线。
+- 重新核 `src/server/runtime/http-server/executor-metadata.ts` 与 `src/server/runtime/http-server/executor/servertool-followup-metadata.ts` 的 `__routecodex*` residue 语义：
+  - `executor-metadata.ts`
+    - 代码证据：`decorateMetadataForAttempt(...)` 只在 retry/excluded-provider 路径 `delete clone.__routecodexPreselectedRoute`
+    - 白盒证据：`tests/server/http-server/executor-metadata.spec.ts` 用例 `drops stale preselected route on retry attempts with provider exclusions`
+    - 结论：当前 `__routecodex*` residue 是 strip/guard，不是写入 side-channel owner
+  - `servertool-followup-metadata.ts`
+    - 代码证据：`stripProviderSelectionMetadataFields(...)` 会删 `__routecodexPreselectedRoute` / `providerKey` / `targetProviderKey` / `target`
+    - 白盒证据：`tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts` 用例 `does not inherit provider selection metadata for followup reentry`
+    - 结论：当前 `__routecodex*` residue 是 followup reentry guard，不是 payload-side-channel writer
+- 因此把 `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 中这两个文件从 `payload_side_channel` truthy 改为 `guard_surface`；`semantic_family` 仍保留 `request_route_control`
+- 预期分桶变化：
+  - `__routecodex*`: `payload_side_channel 13 -> 11`
+  - `__routecodex*`: `guard_surface 3 -> 5`
+- 这次改动只修 review surface truth，不改 runtime 语义；后续 Jason 做字段物理删除时，这两处应作为 guard/strip 面审计，不应再被算进真实 side-channel writer 清单
+
+## 2026-06-18 architecture review-surface rerun + canonical-builder spread closeout
+
+- resume 后按项目/全局约束重读了 `~/.codex/USER.md`、`note.md`、`docs/agent-routing/00-entry-routing.md`、`docs/agent-routing/10-runtime-ssot-routing.md`、goal 文档与 `user-correction-alignment` / `coding-principals` / `rcc-dev-skills`。
+- 基线复跑：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `git diff --check` PASS
+- `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` 首次复跑时命中真实漂移：
+  - `verify:architecture-forbidden-path-growth` 报 `vr.route_selection: "VrRoute04SelectedTarget" found in forbidden path src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
+  - 根因不是 VR 主线语义泄漏，而是 `request-executor-pipeline-attempt.ts` 里的 `MetadataCenter` provider-observation writer 把 canonical node id `VrRoute04SelectedTarget` 当成了本地 `stage` 标签。
+- 修复：
+  - `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
+    - `PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER.stage`
+    - 从 `VrRoute04SelectedTarget` 改成局部 observation 标签 `request_executor_pipeline_target_observation`
+  - 这次改动不碰 payload、不改 runtime route semantics，只收回 forbidden-path growth。
+- 修后复验：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-forbidden-path-growth` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `git diff --check` PASS
+- 继续复核 owner/queryability 收口方向：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:function-map-canonical-builder-spread` PASS
+  - 当前 `features_with_multi_file_canonical_builders=14`
+  - 高信号结构性 broad-owner：
+    - `vr.route_selection`
+    - `virtual_router.primary_exhausted_to_default_pool`
+    - `vr.provider_forwarder_runtime`
+    - `hub.metadata_boundary`
+    - `hub.response_post_servertool_client_projection`
+- 结论：
+  - 当前剩余 Rust broad-owner ambiguity 不是“再缩 `owner_module`”就能真收口的问题。
+  - 对 `vr.route_selection` / `virtual_router.primary_exhausted_to_default_pool` 这类 feature，canonical builders 客观分布在多个文件；直接把 `owner_module` 改窄会破坏 `verify:function-map-canonical-builder-definitions` / `verify:function-map-compile-gate` 的真实性。
+  - 下一步如果还要继续降低 `audit:custom-payload-carrier-owner-queryability` 的 `ambiguous-owner`，只能做 truthy sub-feature split，不能做伪 file owner 收窄。
+- 继续复核 Jason 的 payload/SSE 清理后静态锁面：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-no-custom-payload-carriers` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+  - 当前事实：
+    - `__sse_*` runtime residues 仍为 `0`
+    - `__routecodex*` runtime files 仍为 `26`
+    - owner-queryability 现为 `unique-owner=17 / ambiguous-owner=9 / missing-owner=0 / missing-verification=4`
+- 本轮继续补的不是实现清理，而是 verification/queryability 锁：
+  - `docs/architecture/verification-map.yml`
+    - `error.provider_failure_policy` 新增 unit 路径：
+      - `src/providers/core/runtime/http-request-executor.ts`
+      - `src/providers/core/runtime/provider-request-header-orchestrator.ts`
+      - `src/providers/core/runtime/transport/oauth-header-preflight.ts`
+    - `server.responses_handler_family` 新增：
+      - unit `src/server/handlers/handler-utils.ts`
+      - contract `tests/server/handlers/handler-utils.metadata-contract.spec.ts`
+      - integration `tests/server/handlers/handler-utils.metadata.spec.ts`
+  - 结果：
+    - `audit:custom-payload-carrier-owner-queryability` 收口为 `unique-owner=17 / ambiguous-owner=9 / missing-owner=0 / missing-verification=0`
+    - 首次复跑 `verify:architecture-ci` 暴露 manifest 基线滞后：上述 4 个文件在 `custom-payload-carrier-runtime-manifest.yml` 仍写成 `verification_state: missing`
+    - 已同步 manifest 为 `present`
+- 修后复验：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 metadata center phase-1 provider observation closeout slice
+
+- 继续收 MetadataCenter phase-1 的旧 flat provider projection 面，这轮把 `provider_observation` family 真正落到 request-scoped `MetadataCenter`：
+  - `src/server/runtime/http-server/metadata-center/metadata-center-types.ts`
+    - 新增 `MetadataCenterProviderObservation`
+  - `src/server/runtime/http-server/metadata-center/metadata-center.ts`
+    - 新增 `writeProviderObservation(...)` / `readProviderObservation()`
+    - `markReleased(...)` 现在也覆盖 `providerObservation`
+  - `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
+    - 删除 flat `mergedMetadata.target` / `mergedMetadata.compatibilityProfile` 写入
+    - 改为只写 center `provider_observation.{target,providerKey,assignedModelId,modelId,clientModelId,compatibilityProfile}`
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+    - merge request/pipeline metadata center 时，把 `providerObservation` family 一并 merge 进最终 center
+  - 读路径迁移：
+    - `servertool-adapter-context.ts`
+    - `provider-request-context.ts`
+    - `provider-response-utils.ts`
+    - provider model / compatibility / original client model 现在优先读 center-backed `provider_observation`
+- 新/改测试：
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+  - `tests/server/runtime/http-server/executor/provider-request-context.spec.ts`
+  - `tests/server/runtime/http-server/executor/provider-response-utils.spec.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/server/http-server/executor-metadata.spec.ts`
+- docs/wiki 同步：
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+  - `docs/architecture/wiki/metadata-center-audit.md`
+  - `docs/architecture/wiki/html/metadata-center-mainline-source.html`
+- 验证：
+  - focused:
+    - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/executor/provider-request-context.spec.ts tests/server/runtime/http-server/executor/provider-response-utils.spec.ts tests/server/http-server/executor-metadata.spec.ts --runInBand` PASS
+    - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts -t "writes provider observation into MetadataCenter instead of reviving flat target metadata" --runInBand` PASS
+  - regression stack:
+    - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/index.request-truth-contract.spec.ts tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts tests/server/runtime/http-server/executor/client-injection-flow.spec.ts tests/server/runtime/http-server/executor/provider-request-context.spec.ts tests/server/runtime/http-server/executor/provider-response-utils.spec.ts --runInBand` PASS
+  - docs/gates:
+    - `npm run verify:architecture-wiki-sync` PASS
+    - `npm run render:architecture-wiki-html` PASS
+    - `npm run verify:architecture-wiki-html-sync` PASS
+    - `npm run verify:function-map-compile-gate` PASS
+  - build/install/live:
+    - `npm run build:min` PASS
+    - `ROUTECODEX_INSTALL_INPLACE_BUILD=1 npm run install:global` 实际生效；安装过程仍有 silent hang 现象
+    - `/health` after restart => `ready=true pipelineReady=true version=0.90.3102`
+    - `node scripts/tests/stopless-5555-live-probe.mjs` PASS
+      - first turn `requires_action`
+      - `hasExecCommand=true`
+      - resume after hook output => `completed`
+      - `finalStatus=completed`
+- 额外事实：
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts` 里现有用例 `does not infer fallback routePool from pool when explicit routePool is missing` 单独运行仍红，表现与本轮 provider observation 改动无关；这条属于该文件已有 routePool 语义噪音，不是 metadata center provider observation 回归。
+
+## 2026-06-18 handler entry generic metadata-merge closeout slice
+
+- 继续收 MetadataCenter phase-1 里明确点名的旧 merge surface，这轮把 `src/server/handlers/handler-utils.ts::mergePipelineMetadata` 物理删掉，改成显式 handler entry builder：`buildHandlerPipelineMetadata(...)`。
+- 改动面：
+  - `src/server/handlers/handler-utils.ts`
+    - 删除 `mergePipelineMetadata`
+    - 保留 denylist/allowlist sanitize 语义，但入口改成显式 handler builder 名称，不再保留“泛型 merge 真源”语义
+  - `src/server/handlers/chat-handler.ts`
+  - `src/server/handlers/messages-handler.ts`
+  - `src/server/handlers/responses-handler.ts`
+    - 三个入口都改用 `buildHandlerPipelineMetadata(...)`
+  - `tests/server/handlers/handler-utils.metadata-contract.spec.ts`
+  - `tests/server/handlers/handler-utils.metadata.spec.ts`
+    - 同步锁定新 builder
+- review surface 同步：
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+  - `docs/architecture/wiki/metadata-center-audit.md`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/goals/metadata-center-implementation-plan.md`
+  - HTML 重渲染后 `metadata-center-mainline-source.html` 已不再残留 `mergePipelineMetadata`
+- 验证：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-utils.metadata-contract.spec.ts tests/server/handlers/handler-utils.metadata.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/index.request-truth-contract.spec.ts tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts tests/server/runtime/http-server/executor/client-injection-flow.spec.ts --runInBand` PASS
+  - `npm run verify:architecture-wiki-sync` PASS
+  - `npm run render:architecture-wiki-html` PASS
+  - `npm run verify:architecture-wiki-html-sync` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run build:min` PASS
+  - `routecodex --version` => `0.90.3101`
+  - `routecodex restart --port 5555` PASS
+  - `curl -s http://127.0.0.1:5555/health` => `ready=true pipelineReady=true version=0.90.3101`
+  - `node scripts/tests/stopless-5555-live-probe.mjs` PASS
+    - first turn `requires_action`
+    - `hasExecCommand=true`
+    - resumed `submit_tool_outputs` => `completed`
+    - final `finalStatus=completed`
+
+## 2026-06-18 metadata center phase-1 executor followup closeout
+
+- 继续收 `request_truth + continuation_context` phase-1，补上 executor 带里两个真实残留 consumer：
+  - `src/server/runtime/http-server/executor/request-executor-request-state.ts`
+  - `src/server/runtime/http-server/executor/goal-state-persistence.ts`
+- 已改：
+  - `initializeRequestExecutorRequestState(...)` 的 `registerRequestLogContext(...)` 不再读 flat `initialMetadata.sessionId/conversationId`，只读 `readRuntimeRequestTruthIdentifiers(initialMetadata)`。
+  - `persistGoalStateFromMergedMetadata(...)` 不再读 flat `metadata.sessionId/conversationId`，改从 `MetadataCenter.request_truth` 取 session/conversation。
+- 新增白盒锁：
+  - `tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts`
+  - `tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts`
+- 正向锁：
+  - 有 `MetadataCenter.request_truth` 时，即使 flat 字段缺失或冲突，request log context / stopless goal persistence 仍取 center truth。
+- 反向锁：
+  - 只有 flat `sessionId/conversationId`、没有 center truth 时，不得伪造 request truth；
+  - `goal-state-persistence` 在无 explicit inject scope 且无 center truth 时不得持久化。
+- 定向审计结论：
+  - `responses-request-bridge.ts` 当前 `readResponsesSessionIdFromHttp/readResponsesConversationIdFromHttp` 仍属于入口 scope seed / continuation 恢复定位，不是 request truth materialization，本轮不改。
+  - `state-integrations.extractSessionIdentifiersFromMetadata(...)` 当前只被 `executor-metadata.ts` 用于入口 requestTruth source seed，不是旧双真源读路径，本轮不改。
+- 已验证：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/http-server/executor-metadata.spec.ts tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/index.request-truth-contract.spec.ts tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts tests/server/runtime/http-server/executor/client-injection-flow.spec.ts tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts --runInBand` PASS
+
+## 2026-06-18 owner-queryability split closeout for http-server executor band
+
+- 本轮不碰 Jason 正在做的 `__routecodex_*` / SSE custom 字段实现清理，只做 review surface / owner map / source anchor / verification 收口。
+- 结构调整：
+  - 把 `hub.metadata_center_mainline` 从目录级 owner 缩到真实 registry/release owner：`metadata-center.ts`
+  - 新增 file-scoped owner：
+    - `hub.metadata_center_request_capture` -> `executor-metadata.ts`
+    - `hub.metadata_center_attempt_merge` -> `request-executor-attempt-state.ts`
+    - `hub.metadata_center_servertool_context` -> `servertool-adapter-context.ts`
+    - `daemon_admin.auth_gate_shell` -> `daemon-admin-routes.ts`
+    - `server.provider_response_conversion_host` -> `provider-response-converter.ts`
+    - `server.response_inspection_helpers` -> `request-executor-response-inspect.ts`
+    - `server.servertool_followup_dispatch_surface` -> `servertool-followup-dispatch.ts`
+    - `server.servertool_followup_metadata_surface` -> `servertool-followup-metadata.ts`
+    - `server.http_runtime_lifecycle` -> `http-server-lifecycle.ts`
+  - `server.http_runtime_entry` 收窄为 `index.ts` 真壳层，不再吃整个 `src/server/runtime/http-server/`
+- 新增定向测试：
+  - `tests/server/runtime/http-server/executor/request-executor-response-inspect.spec.ts`
+  - `tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts`
+- 已验证：
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/request-executor-response-inspect.spec.ts tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/http-server/executor-metadata.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts --runInBand` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts --runInBand` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-owner-queryability` PASS
+  - `npm run verify:architecture-review-surface-light` PASS
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS
+- 新审计结果：
+  - `__routecodex*` runtime 从 `unique-owner=9 / ambiguous-owner=17 / missing-owner=0 / missing-verification=8`
+  - 提升到 `unique-owner=17 / ambiguous-owner=9 / missing-owner=0 / missing-verification=4`
+  - 当前剩余 9 个 ambiguous owner 全部在 Rust crate broad owner 区，不再是 `src/server/runtime/http-server/executor/**` 这条 TS 热带
+- 发现的非本轮回归基线噪音：
+  - `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` 现有一条红点：缺 `normalizeServertoolRegistrationSpecWithNative` export
+  - `tests/server/handlers/responses-handler.stop-followup-metadata.blackbox.spec.ts` 当前受更严格 metadata 边界影响，现状 502 / `forbidden client metadata field: __rt`
+  - 这两处未由本轮 map/anchor 变更引入，本轮未接手修实现
+
 ## 2026-06-18 architecture/build gate rerun + doc drift closeout
 
 ## 2026-06-18 bridge surface re-audit on current worktree
@@ -19,6 +638,10 @@
 ## 2026-06-18 internal-field cleanup audit prep
 
 - 目标：在 Jason 并行清 `__routecodex_*` / SSE custom 字段时，先把“当前 gate 覆盖面”和“剩余内部 carrier 分布”审计清楚，不抢改实现。
+- 新增 repo 级审计入口：
+  - `scripts/architecture/audit-custom-payload-carriers.mjs`
+  - `npm run audit:custom-payload-carriers`
+  - 作用：跨 `src/tests/scripts/docs/sharedmodule` 统计 `__routecodex*` / `__sse_*` / `response.metadata` 的 bucket 分布，给后续清理前后做基线对比
 - 当前 `verify-no-custom-payload-carriers.mjs` 事实：
   - 只扫描 `src`、`sharedmodule/llmswitch-core/src`、`rust-core/router-hotpath-napi/src`
   - 只禁 6 个精确 token：
@@ -49,11 +672,53 @@
     - 对合法 `response.metadata`，若内部含 `__routecodex*` / `__rt*` / internal metadata keys，也会 fail-fast
     - 普通 provider `response.metadata` 仍允许透传，这是当前标准协议语义，不是自定义 carrier
 - 结论：
-  - 当前“payload 自定义字段”热区 gate 是绿的，但它只锁住了已知高风险 token，不是“所有 `__routecodex*` 前缀一律防复活”的完整 gate
-  - 当前 repo 里仍有大量 `tests` / `docs` / `fixtures` 历史样本使用旧字段，后续如果 Jason 要求彻底收口，这些面也需要分开判定：保留为历史样本、还是同步清理
-  - 等 Jason 的实现清理合入后，下一轮审计应重点看两件事：
-    1. runtime 侧是否还把请求/响应 payload 语义建立在 `__routecodex*` 字段上
-    2. static gate 是否要从“精确 token denylist”升级到“prefix-aware + side-channel-aware”防复活
+- 当前“payload 自定义字段”热区 gate 是绿的，但它只锁住了已知高风险 token，不是“所有 `__routecodex*` 前缀一律防复活”的完整 gate
+- 新发现的 owner-queryability 缺口：
+  - `requestSemantics.__routecodex` 目前分布在 `request-executor-response-inspect.ts`、`servertool-followup-dispatch.ts`、`provider-response-converter.ts`
+  - provider-runtime local markers 目前分布在 `http-request-executor.ts`、`provider-request-header-orchestrator.ts`、`oauth-header-preflight.ts`、`snapshot-writer-buffer.ts`
+  - 这两组在现有 `function-map.yml` / `verification-map.yml` 里都还做不到 1-2 次查询内稳定反查唯一 owner；后续 Jason 清理前，必须先补 owner/queryability，不能继续只靠 grep 改字段
+- 新增结构化 owner-queryability 审计：
+  - `scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs`
+  - `npm run audit:custom-payload-carrier-owner-queryability`
+  - 当前结果：
+    - `__routecodex*` runtime `26` 个文件里，`unique-owner=9`、`ambiguous-owner=17`、`missing-owner=0`、`missing-verification=8`
+    - `response.metadata` runtime `4` 个文件里，`unique-owner=2`、`ambiguous-owner=2`、`missing-owner=0`、`missing-verification=0`
+  - 当前最值得先补 map 的缺口：
+  - 本轮已补上的 owner 缺口：
+    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` -> `hub.request_stage_pipeline_bridge`
+    - `src/providers/core/utils/snapshot-writer-buffer.ts` -> `snapshot.provider_error_buffer`
+    - `src/providers/core/hooks/debug-example-hooks.ts` -> `provider.debug_example_hooks_surface`
+  - 当前最明显的 owner 歧义带：
+    - `src/server/runtime/http-server/executor/**` 仍普遍落在 `hub.metadata_center_mainline` 与 `server.http_runtime_entry` 双 owner 之间
+- 当前 repo 里仍有大量 `tests` / `docs` / `fixtures` 历史样本使用旧字段，后续如果 Jason 要求彻底收口，这些面也需要分开判定：保留为历史样本、还是同步清理
+- `npm run audit:custom-payload-carriers` 当前基线：
+  - `__routecodex*`
+    - hits: `runtime=76, test=81, script=12, doc=17`
+    - unique files: `runtime=26, test=32, script=5, doc=3`
+    - runtime 主热区：`__routecodexPreselectedRoute`、`__routecodexRetryProviderKey`、`__routecodexRequestInfo`、`__routecodexAuthPreflightFatal`
+  - `__sse_*`
+    - hits: `runtime=0, test=20, script=13, doc=6`
+    - unique files: `runtime=0, test=8, script=6, doc=4`
+    - 当前已无 runtime 残留，主要还在测试 fixture / install verify / mock extract / 历史文档
+  - `response.metadata`
+    - hits: `runtime=11, test=13, script=3, doc=32`
+    - unique files: `runtime=4, test=3, script=3, doc=4`
+    - runtime 面主要是 `responses-response-bridge.ts` allowlist/guard、Rust contract、provider debug hooks
+- 新增 runtime spread 锁：
+  - `scripts/architecture/verify-custom-payload-carrier-containment.mjs`
+  - `package.json` 新增 `verify:architecture-custom-payload-carrier-containment`
+  - `verify:architecture-ci-longtail` 已强制接线
+  - 当前 allowlist 真相：
+    - `__routecodex*`: runtime allowlisted files = `26`
+    - `__sse_*`: runtime allowlisted files = `0`
+    - `response.metadata`: runtime allowlisted files = `4`
+- 当前已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-function-map-build-wiring.mjs` PASS
+- 等 Jason 的实现清理合入后，下一轮审计应重点看两件事：
+  1. runtime 侧是否还把请求/响应 payload 语义建立在 `__routecodex*` 字段上
+  2. static gate 是否要从“精确 token denylist”升级到“prefix-aware + side-channel-aware”防复活
 
 ## 2026-06-18 install/build tiering gate closeout
 
@@ -111,6 +776,100 @@
   - metadata-center wiki 改成“当前已部分实现、仍在迁移”，不再沿用 future 叙事；
   - 改完需要重渲染 wiki HTML，并复跑 wiki sync/html sync/manifest sync。
 
+## 2026-06-18 stopless submit_tool_outputs second-hop real root cause locked
+
+- 用 repo 本地 native `executeHubPipelineWithNative(...)` 直接重放 exact stopless resumed payload（`previous_response_id + user + reasoning + function_call + function_call_output`，target=`anthropic:claude-code`）后，复现了和 live 5555 一致的错误：provider request 只剩 user 文本，没有 `assistant tool_use + user tool_result`。
+- 这把 owner 从“server 调用面/全局安装漂移”收敛到了 Rust mainline 内部；随后再逐段复核：
+  - `coerceStandardizedRequestFromPayloadJson` 正常，产出 `user + assistant(tool_call) + tool`。
+  - `applyReqProcessToolGovernanceJson` 正常，仍保留 tool pair，只额外 prepend stopless system instruction。
+  - 直接调用 `buildAnthropicFromOpenaiChatJson(...)` 对上述 governed chat payload 转 anthropic 时，tool pair 被错误丢失，只剩 `system/user`。
+- 最终根因：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`
+  - `is_declared_tool_name(...)` 只有在 request 顶层 `tools` 声明里出现过的工具名才允许保留 assistant `tool_calls` / tool result。
+  - stopless resumed relay submit_tool_outputs 正常不会再带 client `tools` 声明，因此 `exec_command` 被误判成 undeclared，`tool_use/tool_result` 全被过滤。
+- 已修：
+  - `is_declared_tool_name(...)` 改为：当 request 顶层没有任何 declared tools 时，不做这层名字过滤，保留既有 tool history。
+  - 新增定向 Rust 锁：
+    - `anthropic_openai_codec.rs::build_anthropic_from_openai_chat_preserves_tool_history_without_declared_tools`
+    - `hub_pipeline_tests.rs::test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_declared_tools`
+  - 同步刷新已有 anthropic continuation 测试断言，改成锁语义存在性，不再依赖 claude-code compat 下的具体 message index。
+- 当前源码验证：
+  - `cargo test build_anthropic_from_openai_chat_preserves_tool_history_without_declared_tools --package router-hotpath-napi` PASS
+  - `cargo test test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_declared_tools --package router-hotpath-napi` PASS
+  - `cargo test test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic_provider --package router-hotpath-napi` PASS
+  - `cargo test request_codec_does_not_drop_live_stopless_tool_continuation_when_chat_messages_shortcut_exists --package router-hotpath-napi` PASS
+- 下一步必须做：
+  - rebuild native
+  - global install
+  - restart 5555
+  - replay `scripts/tests/stopless-5555-live-probe.mjs`
+  - 重新核对 live `provider-request.json` 是否已出现 `tool_use/tool_result`，再判断 submit_tool_outputs 是否真正闭环
+
+## 2026-06-18 stopless live probe finalStatus misreport closed
+
+- 在 `second-hop` 主线修复已经 live 生效后，`/tmp/stopless-5555-live-probe.json` 仍把 `finalStatus` 留成 `requires_action`，但 `resumeChain[0].rawBody.raw` 实际已包含 `response.completed` / `response.done` 和最终 assistant 文本。
+- 真根因不在 stopless runtime，而在 probe 自己：
+  - `scripts/tests/stopless-5555-live-probe.mjs::summarizeAttempt(...)` 只会读 JSON body，不会解析 `submit_tool_outputs` 返回的原始 SSE 字符串，所以恢复轮拿不到最终 `status=completed`。
+  - 同文件还存在测试边界错误：被 import 时会直接执行 `main()`，导致脚本测试带 live 副作用。
+- 已修：
+  - 新增 `parseSseResponseEnvelope()` / `materializeProbeResponseBody()`，把 raw SSE 里的最后一个 `response` envelope materialize 回 probe summary；
+  - `summarizeAttempt()` 统一基于 materialized body 取 `responseId/status/outputText`；
+  - 增加 direct-execution guard，只有脚本直接执行时才会跑 `main()`。
+- 新锁：
+  - `tests/scripts/stopless-5555-live-probe.spec.ts`
+  - 覆盖两件事：
+    1. raw SSE completion 必须能 materialize 成 `status=completed`
+    2. `summarizeAttempt()` 不能再把完成态 SSE 误报成 `requires_action`
+- 当前验证：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/scripts/stopless-5555-live-probe.spec.ts` PASS
+  - `node scripts/tests/stopless-5555-live-probe.mjs` 线上复放 PASS，输出：
+    - 首轮：`responseStatus=requires_action`
+    - 恢复轮：`responseStatus=completed`
+    - 最终：`finalStatus=completed`
+
+## 2026-06-18 metadata center phase-1 request-truth read-path tightening
+
+- 继续按 `docs/goals/metadata-center-implementation-plan.md` 收 request truth / continuation_context 第一阶段，当前锁定并已收口的旧双真源读路径：
+  1. `src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+     - 之前还会从 flat `metadata.sessionId/session_id/conversationId/conversation_id` 回退读取；
+     - 已改成只读 `MetadataCenter.request_truth`。
+  2. `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+     - request log / responses persistence 辅助上下文不再把 flat metadata 当 request truth；
+     - 现在只认 `usageLogInfo` 或 `MetadataCenter.request_truth`。
+  3. `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+     - nested responses request context capture 不再直读 `metadata.sessionId/conversationId`；
+     - 现在改走 centralized `readRuntimeRequestTruthIdentifiers(...)`。
+  4. `src/server/runtime/http-server/executor/client-injection-flow.ts`
+     - inject scope 推导不再从 flat request session 字段偷读；
+     - 现在 tmux 之外只认 `MetadataCenter.request_truth`。
+  5. `src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts`
+     - session/conversation storm backoff scope 不再从 flat request session 字段偷读；
+     - 现在只认 `MetadataCenter.request_truth`，没有 truth 时退到 workdir/daemon/clientType scope。
+- 新增/更新测试锁：
+  - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts`
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts`
+  - `tests/server/runtime/http-server/executor/client-injection-flow.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts`
+  - 另外复核通过：
+    - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+    - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts`
+    - `tests/server/runtime/http-server/executor-metadata.binding.spec.ts`
+    - `tests/servertool/servertool-cli-projection.spec.ts`
+- 当前验证结果：
+  - request truth 定向链 PASS：
+    - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+    - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor/client-injection-flow.spec.ts tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts`
+    - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor-metadata.binding.spec.ts`
+    - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/index.request-truth-contract.spec.ts tests/servertool/servertool-cli-projection.spec.ts`
+  - live 5555 replay 继续为绿：
+    - `node scripts/tests/stopless-5555-live-probe.mjs`
+    - 新样本：`sessionId=stopless-live-1781726889159`
+    - 结果仍是：首轮 `requires_action`、恢复轮 `completed`、最终 `finalStatus=completed`
+- 当前未完成：
+  - `build:min -> install:global -> restart 5555 -> live replay` 还没跑完；
+  - `build:min` 前置 `review-surface/wiki/html/manifest` gate 已单独收绿，但长链构建当时被拆开执行；
+  - `verify:function-map-compile-gate` 单独执行仍在等待明确输出，需下一步继续把完整 build/install 链跑完。
+
 ## 2026-06-17 hub pipeline architecture review evidence
 
 ## 2026-06-18 metadata center mtc-07 closeout verified
@@ -155,6 +914,23 @@
 - 剩余非本轮 blocker：
   - 完整 `build:min` / `verify:architecture-ci` 通过 shell 工具长链采样存在 session 输出异常；当前已拿到其前置 review-surface / function-map / longtail leaf 证据，但本轮只把它记为“工具取证不稳定”，不把它宣称成未验证的失败或成功
   - Jason 最新规则下，`assertClientResponseHasNoInternalCarriers()` 对顶层 `metadata` 仍需后续补成一律 fail-fast 审计点
+
+## 2026-06-18 install-global isolated build blocker on stopless-goal-state import
+
+- 在把最新 stopless mainline 修正推到全局 CLI 时，`PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run install:global` 并没有卡在业务逻辑，而是卡在隔离构建目录的 Jest：
+  - `tests/server/http-server/routes.invalid-json.spec.ts` 报 `Could not locate module ../../../../sharedmodule/llmswitch-core/dist/servertool/handlers/stopless-goal-state.js`
+- 根因：
+  - `scripts/install-global.sh` 的 isolated build copy 明确排除了 `sharedmodule/llmswitch-core/dist`
+  - 但 `src/modules/llmswitch/bridge/state-integrations.ts` 还在静态 import `../../../../sharedmodule/llmswitch-core/dist/servertool/handlers/stopless-goal-state.js`
+  - 导致 repo 直跑可用、isolated build 必炸，模块解析真源不一致
+- 收口：
+  - `state-integrations.ts` 已改成通过 `requireCoreDist('servertool/handlers/stopless-goal-state')` 读取 stopless owner exports，不再静态绑仓库内 dist 路径
+  - 这样隔离构建 / Jest / 全局安装都走同一个 llmswitch bridge loader
+- 复核：
+  - `tests/server/http-server/routes.invalid-json.spec.ts` 已转绿
+  - `tests/sharedmodule/state-integrations-stopless-goal.red.spec.ts` 当前仍有与本次修复无关的既有红点：
+    - `READ: returns empty owner result when no goal state is persisted` 读到了预存 state
+    - `COOLDOWN` 断言仍假设 Rust `health.rs` 不含 `persisted_503_reprobe_available`
 
 ## 2026-06-18 response metadata guard protocol-shape closeout
 
@@ -4020,3 +4796,658 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
   - 没有新的 zero-consumer export 浮出来；
   - `responses-sse-bridge.ts` 仍是高引用 re-export facade，不适合直接删；
   - `responses-response-bridge.ts` 当前最小 src consumer 也仍有 2，继续只能按“更小粒度 helper / native-downshift”推进，不能按大文件直接拆删。
+
+## 2026-06-18 metadata-center request-truth closeout slice
+
+- 本轮目标是把 http-server executor 带上的 request truth 平铺回写残留先砍掉，避免 `sessionId/conversationId` 又从 merge/backfill 漏回 metadata 顶层。
+- 已确认并收口的残留点：
+  - `src/server/runtime/http-server/executor-metadata.ts`
+    - `buildRequestMetadata(...)` 不再把 request truth 回写到 `metadata.sessionId/conversationId`
+    - continuation context 判定改为只看 `MetadataCenter.readRequestTruth()`，不再看顶层平铺字段
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+    - `finalizeRequestExecutorAttemptMetadata(...)` 不再把 request truth merge 回顶层
+    - 合并后显式删除 `sessionId/session_id/conversationId/conversation_id`
+    - request log context 改成只读 `readRuntimeRequestTruthIdentifiers(...)`
+  - `src/server/runtime/http-server/request-executor.ts`
+    - providerContext request log 绑定改为只读 `MetadataCenter.request_truth`
+  - `src/server/runtime/http-server/executor/request-executor-provider-response.ts`
+    - usageLogInfo 的 `sessionId/conversationId` 改为只读 `MetadataCenter.request_truth`
+- focused tests：
+  - `tests/server/http-server/executor-metadata.spec.ts` PASS
+  - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS
+  - `tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts` PASS
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts` PASS
+  - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts` PASS
+  - `tests/server/runtime/http-server/executor/client-injection-flow.spec.ts` PASS
+- build/install/restart/live：
+  - `npm run build:min` PASS
+  - global `routecodex --version` => `0.90.3098`
+  - `routecodex restart --port 5555` PASS
+  - `curl http://127.0.0.1:5555/health` => `ready=true pipelineReady=true version=0.90.3098`
+  - `node scripts/tests/stopless-5555-live-probe.mjs` PASS
+    - first turn `requires_action`
+    - `hasExecCommand=true`
+    - resumed `submit_tool_outputs` => `completed`
+    - final `finalStatus=completed`
+- 当前确认：
+  - 在线 stopless 不再出现“该激活时不激活”这一轮回归
+  - 也没有回到无限 continuation loop
+  - `request truth` 在当前 http-server executor band 已切到 `MetadataCenter` 单真源读取
+- 仍待后续继续审的面：
+  - repo 其余 runtime/provider 路径上仍有大量 `sessionId/conversationId` 平铺字段语义，不等于都已迁完
+  - 这轮只收 `http-server` / stopless 相关主线，不宣称全项目 metadata 中心迁移完成
+
+## 2026-06-18 review-surface / slimming audit final evidence refresh
+
+- 本轮不再扩改实现，只补当前 worktree 的最终机器证据，确认 review surface 与瘦身审计文档已经对齐。
+- 当前重新验收：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `git diff --check` PASS
+- 关键含义：
+  - `build:min` 已再次证明本地 build 前置链会拦 `no-custom-payload-carriers / mainline-call-map / node-id-consistency / wiki-sync / wiki-html-sync / manifest-sync` 漂移；
+  - `verify:architecture-ci` 已再次证明完整架构 gate、review surface、longtail、build wiring、custom payload carrier containment 在当前 worktree 同时为绿；
+  - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 当前已经包含候选表、owner、consumer count、处置结论、风险、验证路径，不需要再另起一份重复审计文档。
+- 本轮未接手的边界仍保持不变：
+  - Jason 正在做的 `__routecodex_*` / SSE custom payload 字段删除实现未被我接管；
+  - 当前 `verify-no-custom-payload-carriers` 仍是已知高风险 token denylist，不是最终的 generic prefix 防复活 gate；
+  - 等该实现线合入后，再做一轮 post-cleanup 审计与静态 gate 升级。
+
+## 2026-06-18 client-visible internal-carrier static lock
+
+- 目标：不接手 Jason 的字段删除实现，只把 client-visible response/SSE projection 层“谁允许认识内部字段前缀”机器锁住，避免后续在 handler/bridge 侧再长出新的自定义 payload 语义。
+- 新增：
+  - `scripts/architecture/verify-client-response-internal-carrier-surface.mjs`
+  - `package.json` script: `verify:client-response-internal-carrier-surface`
+- gate 语义：
+  - 扫描 response-layer 五个文件：
+    - `src/server/handlers/handler-response-common.ts`
+    - `src/server/handlers/handler-response-sse.ts`
+    - `src/server/handlers/handler-response-utils.ts`
+    - `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+    - `src/modules/llmswitch/bridge/responses-sse-bridge.ts`
+  - 只允许：
+    - `handler-response-common.ts` 持有 `assertClientResponseHasNoInternalCarriers`
+    - `responses-response-bridge.ts` 持有 `assertDirectPassthroughResponsesSseMetadataIsolationForHttp`
+  - `__routecodex*` / `__rt` 只能出现在上述两个 guard owner；
+  - `response.metadata` 事件语义只能出现在 `responses-response-bridge.ts`；
+  - `__sse_*` 在 client-visible response/SSE layer 必须保持 0。
+- wiring：
+  - 已接入 `verify:architecture-ci`
+  - 已写入 `function-map.yml` / `verification-map.yml` 的 `hub.metadata_boundary` 与 responses bridge surfaces
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:client-response-internal-carrier-surface` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `git diff --check` PASS
+- 边界说明：
+  - 这不是“runtime 全局 `__routecodex*` prefix ban 已完成”；
+  - 它只锁 client-visible response/SSE 层，防止新的 handler/bridge payload 漂移；
+- provider/runtime 内部 marker 去前缀与 side-channel 收口仍要等 Jason 当前实现线合入后再做 containment/queryability 审计。
+
+## 2026-06-18 custom-payload owner/queryability hard gate closeout
+
+- 继续保持“我不接手 Jason 的 `__routecodex_*` / SSE 自定义字段运行时删除实现，只补静态 gate 防复活”边界。
+- 新增：
+  - `scripts/architecture/custom-payload-carrier-owner-queryability-lib.mjs`
+  - `scripts/architecture/verify-custom-payload-carrier-owner-queryability.mjs`
+- `audit-custom-payload-carrier-owner-queryability.mjs` 现已改为复用 shared collector；不再手写第二份扫描/owner/verification 逻辑。
+- `package.json`
+  - 新增 `verify:architecture-custom-payload-carrier-owner-queryability`
+  - `verify:architecture-ci-longtail` 现在强制顺序包含：
+    - `verify:architecture-custom-payload-carrier-containment`
+    - `verify:architecture-custom-payload-carrier-owner-queryability`
+    - `verify:architecture-custom-payload-carrier-runtime-manifest`
+- `scripts/architecture/verify-function-map-build-wiring.mjs` 已反向锁死：后续若 longtail 去掉 owner/queryability gate，会直接失败。
+- `docs/architecture/function-map.yml` / `docs/architecture/verification-map.yml`
+  - `hub.metadata_boundary` 已把 `verify:architecture-custom-payload-carrier-owner-queryability` 纳入 required gate / smoke。
+- gate 语义：
+  - `routecodex_prefix` / `response_metadata`
+    - 只要出现 `missing-owner > 0` 或 `missing-verification > 0`，直接 fail
+  - `sse_prefix`
+    - runtime files 必须保持 `0`
+  - `ambiguous-owner` 目前仍允许，因为这 9 个 remaining 文件都是已确认的 Rust broad-owner 结构性基线，不能靠伪收窄 `owner_module` 做假绿。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-owner-queryability` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-build-wiring` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `git diff --check` PASS
+- 当前被硬锁的基线：
+  - `__routecodex*`: `files=26 / unique-owner=17 / ambiguous-owner=9 / missing-owner=0 / missing-verification=0`
+  - `__sse_*`: `files=0`
+  - `response.metadata`: `files=4 / unique-owner=2 / ambiguous-owner=2 / missing-owner=0 / missing-verification=0`
+- 结论：
+  - 现在“missing-verification 已补齐”不再只是 audit 报表事实，而是 longtail/build wiring 会真拦的 CI 事实。
+  - 下一阶段如要继续收窄，只能做 truthy Rust sub-feature split，不能伪造更窄 `owner_module`。
+
+## 2026-06-18 metadata center mtc-05/06 anchored reader closeout
+
+- 目标：继续收 `metadata.center.mainline` 的 review surface 真相，不改 runtime 语义，只把 `mtc-05/06` 从“partial 但 caller/callee 已可见”推进到“真实 helper anchored”。
+- 新增/修改：
+  - `src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+    - 新增 `readRuntimeProviderObservationProjection(...)`
+    - 新增 `readRuntimeServerToolProjection(...)`
+  - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+    - 删除本地散落的 provider observation / assigned model / compatibility profile 读取逻辑
+    - 统一改走 `readRuntimeServerToolProjection(...)`
+  - `src/server/runtime/http-server/executor/provider-request-context.ts`
+    - 改走 `readRuntimeProviderObservationProjection(...)`
+  - `src/server/runtime/http-server/executor/provider-response-utils.ts`
+    - `extractClientModelId(...)` 改走 `readRuntimeProviderObservationProjection(...)`
+  - `docs/architecture/mainline-call-map.yml`
+    - `mtc-05` 改为 `resolveResponsesConversationPersistInputsForHttp -> readRuntimeRequestTruthIdentifiers`
+    - `mtc-06` 改为 `buildServerToolAdapterContext -> readRuntimeServerToolProjection`
+    - 二者状态从 `partial` 收到 `anchored`
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+    - 同步 `mtc-05/06` 的 helper 级真实读边
+    - “What is not done yet” 改为只保留 `mtc-03` partial 与 `response_observation` 仍未成为 first-class family 的事实
+- 关键判断：
+  - 这次不是把 `response_observation` 伪装成“已实现 family migration”；
+  - 只是把当前 repo 里已经存在的 MetadataCenter 读边收成单点 helper，再把 mainline call map 绑定到真实 helper。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts tests/server/runtime/http-server/executor/provider-request-context.spec.ts tests/server/runtime/http-server/executor/provider-response-utils.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-mainline-call-map` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run render:architecture-wiki-pages` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run render:architecture-wiki-html` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-wiki-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-wiki-html-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-mainline-node-id-consistency` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface-light` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `git diff --check` PASS
+- 当前 metadata-center mainline 状态更新：
+  - `mtc-01/02/02-result/04/05/06/07 = anchored`
+  - `mtc-03 = partial`
+  - 当前剩余缺口不再是“找不到真实 caller/callee”，而是：
+    - `runtime_control` merge/write 仍未 first-class family 化
+    - `response_observation` 仍未 first-class family 化
+
+## 2026-06-18 runtime carrier classification manifest
+
+- 目标：把 remaining runtime `__routecodex*` / `response.metadata` 热区从“allowlist 还剩多少文件”推进到“每个文件属于哪一类问题”，避免 Jason 后续清理时把 payload side-channel、local marker、guard surface 混成一锅。
+- 新增：
+  - `docs/architecture/custom-payload-carrier-runtime-manifest.yml`
+  - `scripts/architecture/verify-custom-payload-carrier-runtime-manifest.mjs`
+- wiring：
+  - `package.json` 新增 `verify:architecture-custom-payload-carrier-runtime-manifest`
+  - `verify:architecture-ci-longtail` 已强制接线
+  - `verify-function-map-build-wiring.mjs` 已反向锁定：longtail 若移除此 gate 会直接失败
+  - `function-map.yml` / `verification-map.yml` 的 `hub.metadata_boundary` 已记录此 gate
+- 当前机器分桶结果：
+  - `__routecodex*` runtime files=`26`
+    - `payload_side_channel=13`
+    - `local_runtime_marker=6`
+    - `guard_surface=3`
+    - `contract_or_test_surface=4`
+  - `response.metadata` runtime files=`4`
+    - `guard_surface=1`
+    - `local_runtime_marker=1`
+    - `contract_or_test_surface=2`
+- 这次分桶的用途：
+  - `payload_side_channel`：后续必须迁到 `MetadataCenter / runtime side-channel`
+  - `local_runtime_marker`：后续应走 typed local field / local struct rename，不该按 payload 问题处理
+  - `guard_surface`：当前必须保留，用来 fail-fast 拦 client-visible 泄漏
+  - `contract_or_test_surface`：只用于锁边界，不是 runtime 业务 owner
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+
+## 2026-06-18 mtc-03 runtime_control contract truth tightened
+
+- 继续按 active goal 只做 review-surface / sequencing / audit，不接手 Jason 正在推进的 `__routecodex_*` / SSE custom 字段运行时删除实现线。
+- 重新核对 `metadata-center` 相关真相：
+  - `src/server/runtime/http-server/metadata-center/metadata-center-types.ts`
+    - 已声明 `MetadataCenterFamily = 'runtime_control'`
+  - `src/server/runtime/http-server/metadata-center/metadata-center.ts`
+    - 真实 state 仍只有 `requestTruth` / `continuationContext` / `providerObservation`
+    - 仍缺 `runtimeControl` state + `writeRuntimeControl(...)` + `readRuntimeControl()` + `markReleased(...)` 覆盖
+  - `src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+    - 仍无 runtime-control projection reader
+- 重新钉实 `mtc-03` first-batch contract，不再只写“generic runtime_control”：
+  - request-route control：
+    - `routeHint`
+    - `routeName`
+    - `routeId`
+    - `providerProtocol`
+    - `retryProviderKey`
+    - `preselectedRoute`
+  - followup / stopless control：
+    - `serverToolFollowup`
+    - `serverToolFollowupSource`
+    - `stoplessGoalStatus`
+  - stop-message control：
+    - `stopMessageEnabled`
+    - `stopMessageExcludeDirect`
+- 代码证据来源：
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+  - `src/server/runtime/http-server/index.ts`
+  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- 新的 review-surface 结论：
+  - `metadata-center-manifest.yml` 里的 `runtime_control.stopMessage` 目前仍偏泛化
+  - 但 runtime 真正消费面已经是 `stopMessageEnabled` / `stopMessageExcludeDirect`
+  - 所以下一执行 slice 不能直接从 `request-executor-attempt-state.ts` 开始
+  - 必须先做 `hub.metadata_center_mainline / mtc-03 runtime_control plumbing`
+    - `metadata-center-types.ts`
+    - `metadata-center.ts`
+    - `request-truth-readers.ts` runtime-control projection
+  - 然后才轮到 `hub.metadata_center_attempt_merge / request-executor-attempt-state.ts`
+
+## 2026-06-18 mtc-03 runtime_control plumbing landed
+
+- 已完成最小代码骨架，不接手 Jason 正在做的 payload 字段物理删除线：
+  - `src/server/runtime/http-server/metadata-center/metadata-center-types.ts`
+    - 新增 `MetadataCenterRuntimeControl`
+    - `MetadataCenterState` 新增 `runtimeControl`
+  - `src/server/runtime/http-server/metadata-center/metadata-center.ts`
+    - 新增 `writeRuntimeControl(...)`
+    - 新增 `readRuntimeControl()`
+    - `markReleased(...)` 覆盖 `runtimeControl`
+  - `src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+    - 新增 `readRuntimeControlProjection(...)`
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+    - pipeline metadata center merge 现已带上 `runtimeControl`
+- focused 白盒已补：
+  - `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts`
+    - 新增 runtime-control projection 读取验证
+  - `tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts`
+    - 新增 runtime-control closeout 释放验证
+  - `tests/server/http-server/executor-metadata.spec.ts`
+    - 新增 pipeline metadata center -> merged metadata 的 runtime-control merge 验证
+- 当前真实状态修正：
+  - 之前“`metadata-center.ts` 仍缺 runtimeControl state/read/write/release”这条已不再成立
+  - `mtc-03` 仍是 `partial`，但现在缺的不是 carrier plumbing，而是生产 writer/materializer/read path 仍在 flat metadata / `requestSemantics.__routecodex` 上
+  - 因此下一执行 slice 现在前移为：
+    1. `hub.metadata_center_attempt_merge / request-executor-attempt-state.ts`
+    2. `server.http_runtime_entry / index.ts`
+    3. request-stage bridge / followup materializer / Rust broad-owner 带
+- 本轮验证：
+  - focused tests:
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts --runInBand` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts --runInBand` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/http-server/executor-metadata.spec.ts --runInBand` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - review-surface / build gates:
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-mainline-call-map` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-manifest-sync` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-wiki-sync` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run render:architecture-wiki-html` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-wiki-html-sync` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-wiki-browser-smoke` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+    - `git diff --check` PASS
+  - payload-carrier audit baseline after this slice:
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+      - `__routecodex*`: `runtime=72, test=83, script=16, doc=58`, runtime unique files=`25`
+      - `__sse_*`: `runtime=0, test=20, script=15, doc=7`, runtime unique files=`0`
+      - `response.metadata`: `runtime=11, test=13, script=5, doc=44`, runtime unique files=`4`
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+      - `__routecodex*`: `unique-owner=16`、`ambiguous-owner=9`、`missing-owner=0`、`missing-verification=0`
+      - `response.metadata`: `unique-owner=2`、`ambiguous-owner=2`、`missing-owner=0`、`missing-verification=0`
+
+## 2026-06-18 runtime_control map truth absorbed without widening canonical-builder gate
+
+- 继续把这轮落地的 `request-truth-readers.ts` / runtime-control plumbing 吸进 review surface：
+  - `docs/architecture/function-map.yml`
+    - `hub.metadata_center_mainline.allowed_paths` 新增 `src/server/runtime/http-server/metadata-center/request-truth-readers.ts`
+    - `hub.metadata_center_mainline.required_tests` 新增 `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts`
+    - notes 补明：first-batch `runtime_control` carrier 与 host-side projection reader 已落地，但 writer migration 仍 pending
+  - `docs/architecture/verification-map.yml`
+    - `hub.metadata_center_mainline.unit` 新增 `request-truth-readers.ts`
+    - `hub.metadata_center_mainline.contract` 新增 `request-truth-readers.spec.ts`
+- 中途踩到一个真实 gate 边界：
+  - 尝试把 `writeRuntimeControl` / `readRuntimeControl` 升成 `canonical_builders` 时，`verify-function-map-canonical-builder-definitions.mjs` 现有单行匹配模型认不出多行泛型方法签名
+  - 若直接放宽 verifier，会把一批当前仓库既有 multi-hit canonical builder 全部炸出来，超出本轮目标
+  - 因此本轮收口策略是：
+    - 不扩大 canonical-builder verifier 语义面
+    - 只把新活文件/测试吸进 `allowed_paths + required_tests + verification-map`
+    - 保持 compile gate 仍对当前 worktree 绿
+- 本轮新增验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 install/global live verification closeout for metadata-center reader slice
+
+- 重新续跑 `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_INPLACE_BUILD=1 ROUTECODEX_BUILD_RESTART_ONLY=1 ./scripts/install-global.sh`。
+- 事实：
+  - 构建与全局安装成功，CLI 版本升级到 `0.90.3105`。
+  - 安装脚本在 `📦 刷新 RCC install/current runtime snapshot...` 之后仍会尾部空转，不可把“脚本未退出”误判成“安装失败”。
+  - 受管 5555/5520 运行体当时仍停留在 `0.90.3102`，需要显式 `routecodex restart --port 5555` / `routecodex restart --port 5520` 刷新到新构建。
+  - restart 期间 health probe 会先报 non-blocking `network_error` / `starting`，随后成功完成；这不是失败结论。
+- live 证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH routecodex --version` => `0.90.3105`
+  - `curl -s http://127.0.0.1:5555/health` => `ready=true pipelineReady=true version=0.90.3105`
+  - `curl -s http://127.0.0.1:5520/health` => `ready=true pipelineReady=true version=0.90.3105`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/tests/stopless-5555-live-probe.mjs` PASS
+    - first turn `requires_action`
+    - `hasExecCommand=true`
+    - `submit_tool_outputs` resumed to `completed`
+    - `finalStatus=completed`
+- 收口动作：
+  - 安装会话 `94247` 已在拿到 build/install/restart/live 证据后用 Ctrl-C 结束，避免留下挂起 session。
+- 文档收口：
+  - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 已修正 metadata-center 候选表中的 stale truth：从“`mtc-04/05/06 = partial`”改为“`mtc-03 = partial`，`mtc-04/05/06/07 = anchored`”。
+  - `docs/architecture/wiki/metadata-center-mainline-source.md` 已同步只保留 `mtc-03` 为 remaining partial。
+  - 复验：`npm run render:architecture-wiki-pages` PASS，`npm run render:architecture-wiki-html` PASS，`npm run verify:architecture-review-surface-light` PASS，`npm run verify:architecture-ci` PASS，`git diff --check` PASS。
+
+## 2026-06-18 payload carrier slimming audit truth refresh
+
+- 重新按当前 worktree 跑：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail`
+- 当前事实：
+  - `__routecodex*`: `runtime=76, test=83, script=16, doc=29`，runtime unique files=`26`
+  - `__sse_*`: `runtime=0, test=20, script=15, doc=7`，runtime unique files=`0`
+  - `response.metadata`: `runtime=11, test=13, script=5, doc=40`，runtime unique files=`4`
+  - owner-queryability 现状：
+    - `__routecodex*` => `unique-owner=17 / ambiguous-owner=9 / missing-owner=0 / missing-verification=0`
+    - `response.metadata` => `unique-owner=2 / ambiguous-owner=2 / missing-owner=0 / missing-verification=0`
+- 结论修正：
+  - `requestSemantics.__routecodex` 三个 TS 热区不再是 `binding pending`，而是：
+    - `server.response_inspection_helpers`
+    - `server.servertool_followup_dispatch_surface`
+    - `server.provider_response_conversion_host`
+  - provider-runtime local markers 也不再是 owner 未定，而是已经锚到：
+    - `error.provider_failure_policy`
+    - `error.pipeline_contract`
+    - `snapshot.provider_error_buffer`
+  - 当前 remaining ambiguity 基本只剩 Rust broad-owner 带；下一步如果还要压 `ambiguous-owner`，只能做 truthy Rust sub-feature split，不能再伪造更窄 `owner_module`。
+- 新增机器锁：
+  - `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 现在除了 category / owner_queryability / verification_state，还机器编码了 `category_resolution_tracks`
+  - `verify-custom-payload-carrier-runtime-manifest.mjs` 现会校验：
+    - 每个 category 都有合法 resolution track
+    - 并输出 resolution 计数
+  - 当前 verifier 输出：
+    - `routecodex_prefix`: `contract_boundary_only=4 / guard_lock=3 / local_marker_rename=6 / side_channel_migration=13`
+    - `response_metadata`: `contract_boundary_only=2 / guard_lock=1 / local_marker_rename=1`
+
+## 2026-06-18 response.metadata guard truth refresh
+
+- focused 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/red-tests/server_sse_guard_e2e.test.ts tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts --runInBand` PASS
+- 当前真相：
+  - `assertClientResponseHasNoInternalCarriers()` 已经对非 `response` / `response.*` 协议形状的顶层 `metadata` 做 fail-fast
+  - direct same-protocol `event: response.metadata` 仍允许普通 provider metadata 透传
+  - 同事件若携带 `__routecodex*` / `__rt*` / internal control keys，仍 fail-fast
+- 因此上一轮文档里“顶层 metadata 仍非一律 fail-fast”的描述已过时；当前剩余问题不是 guard 缺失，而是 runtime residues 是否真正退出 payload truth。
+
+## 2026-06-18 payload carrier audit/containment drift source removed
+
+- 改动：
+  - `scripts/architecture/verify-custom-payload-carrier-containment.mjs` 不再手写第二份 runtime allowlist，改为直接从 `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 读取 `routecodex_prefix` / `response_metadata` 文件集。
+  - `scripts/architecture/audit-custom-payload-carriers.mjs` 现在直接输出：
+    - `runtime-category`
+    - `runtime-resolution`
+- 结果：
+  - `audit:custom-payload-carriers` 现在会明确显示：
+    - `routecodex_prefix` => `contract_or_test_surface=4 / guard_surface=3 / local_runtime_marker=6 / payload_side_channel=13`
+    - `response_metadata` => `contract_or_test_surface=2 / guard_surface=1 / local_runtime_marker=1`
+  - 继续细分后，当前 `semantic_family` 结果也已机器可读：
+    - `routecodex_prefix.request_route_control=9`
+    - `routecodex_prefix.response_followup_semantics=4`
+    - `routecodex_prefix.provider_runtime_local_marker=5`
+    - `response_metadata.response_metadata_contract=2`
+    - `response_metadata.response_metadata_protocol_guard=1`
+- 后续清理不再需要人工同步“manifest 一份、containment allowlist 一份”两套 runtime 真相。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 runtime carrier owner-queryability baseline lock
+
+- 继续在 `custom-payload-carrier-runtime-manifest.yml` 上加了两列：
+  - `owner_queryability`
+  - `verification_state`
+- 目的：
+  - 不只知道某个 runtime 命中属于 `payload_side_channel` / `local_runtime_marker` / `guard_surface`；
+  - 还要锁住它当前是不是 `unique-owner`，以及 verification coverage 现在是否存在，防止已经收窄清楚的 TS/host 热区重新滑回 broad owner 模糊带。
+- 当前机器基线：
+  - `__routecodex*`
+    - `unique-owner=17`
+    - `ambiguous-owner=9`
+    - `missing-verification=4`
+  - `response.metadata`
+    - `unique-owner=2`
+    - `ambiguous-owner=2`
+    - `missing-verification=0`
+- 结构性结论：
+  - 现在 remaining ambiguity 已基本集中在 Rust crate broad-owner 区；
+  - 这说明下一阶段高价值工作是把这些 Rust broad owner 再拆窄，而不是继续在 TS/handler 层补新的 token denylist。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+
+## 2026-06-18 request-route writer residue static contract lock
+
+- 本轮不接手 Jason 正在做的 payload/internal-field 删除实现，只补 review-surface truth 和静态 gate。
+- 新增 / 接线：
+  - `tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts`
+  - `tests/server/runtime/http-server/index.request-truth-contract.spec.ts` 增补 request-route residue 断言
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`
+- 锁住的真相：
+  - `request-executor-attempt-state.ts`
+    - flat `__routecodexRetryProviderKey` residue 仍只存在 `prepareRequestExecutorAttemptState`
+    - `finalizeRequestExecutorAttemptMetadata` 已真实 merge `pipelineMetadataCenter.snapshot().runtimeControl`
+    - merged metadata 侧没有重新 backfill flat `__routecodexRetryProviderKey` / `__routecodexPreselectedRoute`
+  - `index.ts`
+    - `__routecodexPreselectedRoute` 只剩 router-direct relay edge 那 1 处 flat write
+    - `__routecodexRetryProviderKey` 只剩 `metadataForHub` request-route control 那 1 组 write/delete
+- 这层锁的目的：
+  - 在 Jason 后续迁走 flat writer 前，先把“剩余 residue 的精确位置”变成可回归证据
+  - 防止 review-surface 漂成“carrier 已有，所以 writer 已经迁完”的假结论
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/index.request-truth-contract.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+  - `git diff --check` PASS
+
+## 2026-06-18 response-followup residue static contract lock
+
+- 本轮继续只做 review-surface / gate 收口，不接手 Jason 正在做的内部字段物理删除实现。
+- 新增 / 接线：
+  - `tests/server/runtime/http-server/executor/servertool-followup-dispatch.contract.spec.ts`
+  - `tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`
+- 锁住的真相：
+  - `servertool-followup-dispatch.ts`
+    - 当前 `requestSemantics.__routecodex` residue 仍全部局限在 followup materializer helper 带
+    - 运行时 residue 只用于：
+      - `isServerToolFollowup(...)`
+      - `readManagedStoplessGoalStatusFromSemantics(...)`
+      - `materializeFollowupRequestSemantics(...)`
+    - `stripResponsesOnlyRequestSettings(...)` 之后不再继续出现 `__routecodex`
+    - `materializeFollowupRequestSemantics(...)` 仍通过 cloned `nextSemantics.__routecodex` 重建 `serverToolFollowup / serverToolFollowupSource / stoplessGoalStatus`
+  - `provider-response-converter.ts`
+    - 当前只剩 1 处 `options.requestSemantics?.__routecodex` pure read
+    - 它只用来判定 `isServerToolFollowupRequest`
+    - 文件里没有新的 `__routecodex = ...` 写入，也没有 metadata 侧 `__routecodex` 读
+- 这层锁的目的：
+  - 在后续真正迁到 `MetadataCenter / runtime side-channel` 前，先把 response-followup lane 的剩余旧字段位置固定成机器证据
+  - 防止 review-surface 漂成“followup residue 已经退出 TS owner”这种假结论
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/servertool-followup-dispatch.contract.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+    - 稳定回执：`/tmp/routecodex-architecture-ci.exit = 0`
+    - 完整日志：`/tmp/routecodex-architecture-ci.log`
+## 2026-06-18 responses SSE passthrough boundary audit
+
+- 新线上报错不是 handler 单点误判，而是普通 Hub `/v1/responses` 误命中了 prebuilt SSE passthrough：
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts` 之前只要 `entry=/v1/responses && providerProtocol=openai-responses && sseStream` 就直接 return response。
+  - 这违反了“只有 direct/provider-direct/router-direct 才允许 same-protocol passthrough”的项目硬边界。
+- 证据链：
+  - `handler-response-sse.ts` 真实用 `result.continuationOwner === 'direct'` 判 direct passthrough；
+  - `responses-response-bridge.ts::normalizeResponsesSseFrameForClientForHttp()` 只规范化 `response.*` 事件，`message_stop` 会原样放过；
+  - 因此普通 relay 路径若把 anthropic/非标准 SSE 放到 `/v1/responses` 出口，最终就会走到 `upstream_stream_incomplete`。
+- 修正方向：
+  - `provider-response-converter` prebuilt SSE passthrough gate 必须与出口 owner 对齐，只允许 `continuationOwner=direct` 命中；
+  - relay `/v1/responses` 即使 upstream/protocol 标成 `openai-responses`，也必须重新走 bridge conversion / standard projection。
+- 额外发现：
+  - `build:min` 被现有架构 gate 卡住，原因不是本次代码，而是 `docs/architecture/function-map.yml` 里 `describe_hub_pipeline_contracts` 被 `hub.pipeline_contract_surface` 与 `hub.metadata_boundary` 双重声明。
+  - 该 builder 应只归 `hub.pipeline_contract_surface`；`hub.metadata_boundary` 保留 `describe_pipeline_contract` 即可。
+  - `verify-architecture-feature-anchor-coverage.mjs` 还把所有 feature 一刀切要求“canonical builder 至少命中 2 个文件”，这和 `vr.route_retry_pin_surface` 这种显式 `file-scoped owner` 冲突。
+  - 已按 owner truth 收口 gate：`file-scoped owner` 允许 1 个 builder file，其他 owner 仍要求至少 2 个。
+
+## 2026-06-18 relay responses SSE reprojection
+
+- 新增 host helper：`provider-response-relay-sse.ts`，规则是 relay `/v1/responses` 只认标准化 response body，重建 `response.*` SSE；只有 `continuationOwner=direct` 才允许 stream passthrough。
+- 触发原因：线上 `/v1/responses` 仍出现 `lastRawFrame=message_stop` / `lastProjectedFrame=message_stop`，说明 raw provider SSE 还能漏到 client SSE。
+- 当前定向红绿证据：`npx jest tests/server/runtime/http-server/executor/provider-response-relay-sse.spec.ts --runInBand` PASS。
+
+## 2026-06-18 function-map compile-gate truth closeout after Rust file-scoped owner split
+
+- 这轮红点不是 runtime 行为回归，而是 review-surface truth 漂移：新增 Rust file-scoped feature 后，`function-map / verification-map / source feature anchor / canonical builder uniqueness / builder-hit spread` 没有同步收口。
+- 实际收口动作：
+  - `hub.route_metadata_input_surface` 更名为更真实的 `hub.route_metadata_surface`，避免伪装成 compile gate 无法证明的单文件 singleton。
+  - `hub.pipeline_contract_surface` 去掉与 `hub.metadata_boundary` 重复声明的 `describe_hub_pipeline_contracts`，保留 `describe_meta_carrier_contracts` / `validate_pipeline_node_contract_boundary`。
+  - `vr.route_retry_pin_surface` 不再把过于泛化的 `route` 当 canonical builder；改为以 `route.rs + router_metadata_input.rs` 两个真实语义面构成 retry-pin 双文件 surface。
+  - `router_metadata_input.rs` source anchor 与 `verification-map.yml` feature id 已同步到 `hub.route_metadata_surface`。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+    - 稳定回执：`/tmp/routecodex-compile7.exit = 0`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-feature-id-anchors` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-owner-queryability` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+    - 稳定回执：`/tmp/routecodex-longtail.exit = 0`
+  - `git diff --check` PASS
+- 结论：
+  - 当前 compile gate 已恢复为绿，剩余工作仍是 Jason 正在推进的内部字段物理删除实现线；我这边只把 review-surface / owner truth / gate queryability 收回到可信状态。
+
+## 2026-06-18 architecture debt budgets for drift lock
+
+- 本轮继续不接 Jason 正在做的 `__routecodex_*` / SSE 非标字段运行时删除实现，只补不会冲突的架构锁。
+- 新确认的两个“会漂移但之前只报不拦”的口子：
+  - `verify:architecture-mainline-binding-pending-gate` 之前只统计，不拦 request.mainline / metadata.center / error.mainline 的 debt 增长
+  - `verify:architecture-topology-doc-sync` 之前只打印 topology 未消费节点列表，不拦新 debt 或旧 debt 清掉后 manifest 未更新
+- 已加显式预算真源：
+  - `docs/architecture/mainline-binding-budget.yml`
+  - `docs/architecture/topology-sync-manifest.yml`
+- 新规则：
+  - mainline 的 `partial` / `binding pending` 只能在 budget 内存在；超预算、anchored 回退、total edges 漂移都会 fail
+  - topology 文档未消费节点必须显式登记；新增长、旧 debt 已收口却不删 manifest，都会 fail
+- package wiring 也已收紧：
+  - `verify:architecture-review-surface-light` 现在直接跑 `verify:architecture-mainline-binding-pending-gate`
+  - `verify:architecture-review-surface-light` 现在直接跑 `verify:architecture-topology-doc-sync`
+- 当前仍未处理的硬红点：
+  - `verify:architecture-ci-longtail` 因 `src/server/runtime/http-server/executor/provider-response-converter.ts:101-102` 的 `response.metadata` runtime spread 失败
+  - 这是 Jason 正在清 internal payload/runtime residue 的同一风险面，这轮不碰实现，只保留为审计事实
+- 验证结果：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-mainline-binding-pending-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-topology-doc-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-build-wiring` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface-light` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` FAIL only at `verify-custom-payload-carrier-containment` with `provider-response-converter.ts:101-102 response.metadata`
+
+## 2026-06-18 response.metadata bridge-seed cleanup and review-surface evidence refresh
+
+- 本轮继续收口 review-surface / slimming audit，不接手 Jason 正在推进的 `__routecodex_*` 物理删除主线。
+- 已确认并记录：
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts::buildBridgeProviderResponseSeed(...)` 的 stream-only seed 现在只包含 `sseStream/status/headers`，不再 spread `response.metadata`。
+  - `provider-response-converter.ts` 当前仍有 `options.requestSemantics?.__routecodex` pure reader residue，属于 `response_followup_semantics` 后续迁移项，不能标成 fully clean。
+- 最新审计：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS
+    - `__routecodex*`: `runtime=72, test=103, script=16, doc=58`，runtime unique files=`25`
+    - `__sse_*`: `runtime=0, test=20, script=15, doc=7`，runtime unique files=`0`
+    - `response.metadata`: `runtime=11, test=14, script=5, doc=46`，runtime unique files=`4`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carrier-owner-queryability` PASS
+    - `__routecodex*`: `unique-owner=20 / ambiguous-owner=5 / missing-owner=0 / missing-verification=0`
+    - `response.metadata`: `unique-owner=4 / ambiguous-owner=0 / missing-owner=0 / missing-verification=0`
+- 文档同步：
+  - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md` 已把 runtime carrier baseline、owner-queryability、P0 role map、mtc-03 后续执行顺序更新到当前事实。
+  - `docs/goals/hub-pipeline-architecture-review-surface-cleanup-plan.md` 已补入 latest audit evidence 与 converter bridge-seed cleanup 事实。
+- 已有绿证据来自上一轮同一 worktree：
+  - focused converter stack 5 suites / 18 tests PASS
+  - `verify:architecture-custom-payload-carrier-containment` PASS
+  - `verify:architecture-ci-longtail` PASS
+  - `verify:function-map-compile-gate` PASS
+  - `verify:architecture-review-surface-light` PASS
+  - `build:min` PASS
+  - `verify:architecture-ci` standalone PASS
+- 待补最终回执：
+  - 已补齐：
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+    - `git diff --check` PASS
+  - 剩余风险：
+    - 未做本轮 live/runtime smoke；本轮只改 review docs/note，runtime 行为变更证据沿用上一轮 focused converter stack 与 architecture/build gates。
+    - `provider-response-converter.ts` 只清掉 `response.metadata` bridge seed spread，仍保留 `requestSemantics.__routecodex` pure reader residue，后续要等 `servertool-followup-dispatch.ts` 迁到 `MetadataCenter / runtime side-channel` 后再收。
+
+
+## 2026-06-18 install script build:min lock hardened
+
+- 继续对 active goal 做完成标准审计时发现一个真实缺口：
+  - 文档与长期 gate 结论都声称 install 链已被 architecture tiering 锁住；
+  - 但 `scripts/architecture/verify-build-script-tiering.mjs` 之前只检查 package.json 里的 `build/build:min/CI` wiring，没有读取 `scripts/install-global.sh` / `scripts/install-release.sh` 本体。
+- 修正：
+  - `verify-build-script-tiering.mjs` 现在直接读取 install shell 真源，硬性要求两份脚本都继续包含 `npm run build:min`。
+  - 新增 focused regression：`tests/scripts/install-build-tiering.spec.ts`，把 install-global/install-release 都必须经 `build:min` 变成白盒回归证据。
+- 已验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/architecture/verify-build-script-tiering.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/scripts/install-build-tiering.spec.ts --runInBand` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+  - `git diff --check` PASS
+- 结论：
+  - 现在“build/install 与 CI 都不能绕过 review-surface/function-map/build:min 链”这条完成标准，不再只靠文档和人工观察 install shell，而是有静态 gate + focused test 双锁。
+
+## 2026-06-18 metadata-center manifest/code sync gate
+
+- 继续做 hub pipeline 架构收口，不接 Jason 正在推进的 `__routecodex_*` / SSE 非标字段物理删除实现。
+- 新发现的架构漂移缺口：
+  - `docs/architecture/metadata-center-manifest.yml` 已声明 6 个 family：`request_truth`、`continuation_context`、`runtime_control`、`provider_observation`、`client_attachment_scope`、`debug_snapshot`
+  - TS `MetadataCenter` 只实现了前 4 个 family，`client_attachment_scope` / `debug_snapshot` 仍停在 manifest/wiki 声明层
+  - 之前 `verify:architecture-manifest-sync` 只能证明 manifest/function-map/mainline/wiki 对齐，不能证明 manifest family/slot 已绑定真实代码
+- 修正：
+  - `src/server/runtime/http-server/metadata-center/metadata-center-types.ts` 补齐 `MetadataCenterClientAttachmentScope`、`MetadataCenterDebugSnapshot` 与 state bucket
+  - `src/server/runtime/http-server/metadata-center/metadata-center.ts` 补齐 `write/readClientAttachmentScope`、`write/readDebugSnapshot`，并让 `markReleased` 覆盖这两个 family
+  - 新增 `scripts/architecture/verify-architecture-metadata-center-manifest-code-sync.mjs`
+  - `package.json` 的 `verify:architecture-review-surface-light` 已接入新 gate
+  - `scripts/architecture/verify-function-map-build-wiring.mjs` 已反查该 gate，防止后续从 review-surface-light 移除
+  - `docs/architecture/function-map.yml` / `verification-map.yml` / `README.md` 已同步登记
+- 新负向测试：
+  - `client_attachment_scope.tmuxSessionId` 不得合成 request truth
+  - `debug_snapshot.traceMarkers` 不得合成 request truth，且 closeout release 必须覆盖 debug snapshot slot
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-metadata-center-manifest-code-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` PASS，8/8
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-build-wiring` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-manifest-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface-light` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 剩余风险：
+  - 这轮只锁 manifest/code 同步和 family registry，不迁移 `runtime_control` writer，也不删除 `__routecodex_*` payload residue。
+  - 未做 live probe；本轮改动主要是 architecture gate + TS registry family，未触发安装/重启。

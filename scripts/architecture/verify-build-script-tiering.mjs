@@ -3,64 +3,51 @@ import path from 'node:path';
 
 const root = process.cwd();
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const scripts = pkg.scripts || {};
-
-const failures = [];
-
-function assertIncludes(haystack, needle, failure) {
-  if (!haystack.includes(needle)) {
-    failures.push(failure);
-  }
-}
-
-const buildDev = scripts['build:dev'] || '';
-const buildDevFull = scripts['build:dev:full'] || '';
-const installGlobal = scripts['install:global'] || '';
-const installRelease = scripts['install:release'] || '';
-
-assertIncludes(
-  buildDev,
-  'npm run build',
-  'build:dev must invoke npm run build as the canonical build entry',
-);
-assertIncludes(
-  buildDevFull,
-  'npm run build',
-  'build:dev:full must invoke npm run build as the canonical build entry',
-);
-assertIncludes(
-  installGlobal,
-  './scripts/install-global.sh',
-  'install:global must route through ./scripts/install-global.sh',
-);
-assertIncludes(
-  installRelease,
-  './scripts/install-release.sh',
-  'install:release must route through ./scripts/install-release.sh',
-);
-
+const scripts = pkg.scripts ?? {};
 const installGlobalScript = fs.readFileSync(path.join(root, 'scripts/install-global.sh'), 'utf8');
 const installReleaseScript = fs.readFileSync(path.join(root, 'scripts/install-release.sh'), 'utf8');
+const failures = [];
 
-assertIncludes(
-  installGlobalScript,
-  'npm run build:min',
-  'scripts/install-global.sh must build through npm run build:min',
-);
-assertIncludes(
-  installReleaseScript,
-  'npm run build:min',
-  'scripts/install-release.sh must build through npm run build:min',
-);
+function has(scriptName, token) {
+  return String(scripts[scriptName] ?? '').includes(token);
+}
+
+if (!has('build:min', 'npm run verify:architecture-review-surface-light')) {
+  failures.push('build:min must run verify:architecture-review-surface-light');
+}
+if (!has('build:min', 'npm run verify:function-map-compile-gate')) {
+  failures.push('build:min must run verify:function-map-compile-gate');
+}
+if (!has('build', 'npm run verify:architecture-review-surface-light')) {
+  failures.push('build must run verify:architecture-review-surface-light');
+}
+if (!has('build', 'npm run verify:function-map-compile-gate')) {
+  failures.push('build must run verify:function-map-compile-gate');
+}
+if (!has('verify:architecture-review-surface-light', 'verify:architecture-mainline-node-id-consistency')) {
+  failures.push('review surface light must include mainline node-id consistency gate');
+}
+if (!has('verify:architecture-review-surface-light', 'verify:architecture-manifest-sync')) {
+  failures.push('review surface light must include mainline manifest sync gate');
+}
+if (!has('verify:architecture-ci', 'verify:architecture-topology-doc-sync')) {
+  failures.push('architecture-ci should include topology doc sync gate');
+}
+if (!has('verify:architecture-ci', 'verify:function-map-required-tests-bidir')) {
+  failures.push('architecture-ci should include required-tests bidir gate');
+}
+if (!installGlobalScript.includes('npm run build:min')) {
+  failures.push('scripts/install-global.sh must run npm run build:min');
+}
+if (!installReleaseScript.includes('npm run build:min')) {
+  failures.push('scripts/install-release.sh must run npm run build:min');
+}
 
 if (failures.length > 0) {
   console.error('[verify:build-script-tiering] failed');
-  for (const failure of failures) {
-    console.error(`- ${failure}`);
-  }
+  for (const f of failures) console.error(`- ${f}`);
   process.exit(1);
 }
 
 console.log('[verify:build-script-tiering] ok');
-console.log('- build:dev and build:dev:full route through npm run build');
-console.log('- install scripts route through build:min');
+console.log('- build tiering and CI wiring are consistent with architecture gates');

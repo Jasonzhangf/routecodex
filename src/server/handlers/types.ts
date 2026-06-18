@@ -15,6 +15,8 @@ export interface PipelineExecutionResult {
   status?: number;
   headers?: Record<string, string>;
   body?: unknown;
+  sseStream?: unknown;
+  continuationOwner?: 'direct' | 'relay';
   metadata?: Record<string, unknown>;
   timingBreakdown?: {
     hubResponseExcludedMs?: number;

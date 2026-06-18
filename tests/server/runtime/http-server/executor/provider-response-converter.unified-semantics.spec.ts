@@ -113,7 +113,8 @@ const mockBridgeModule = () => ({
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   deriveFinishReasonNative: jest.fn(() => undefined),
   updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => [])
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async (args: { sseStream?: unknown }) => args.sseStream)
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
@@ -636,7 +637,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     mockCreateSnapshotRecorder.mockClear();
 
     mockConvertProviderResponse.mockImplementationOnce(async ({ providerProtocol, entryEndpoint }) => ({
-      __sse_responses:
+      sseStream:
         providerProtocol === 'openai-responses' && entryEndpoint === '/v1/responses'
           ? ({ pipe: () => undefined } as any)
           : undefined,
@@ -693,7 +694,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
     const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(bridgeArgs?.providerProtocol).toBe('openai-responses');
-    expect((result as any).body?.__sse_responses).toBeDefined();
+    expect((result as any).sseStream).toBeDefined();
   });
 
   it('does not start stopless reenter followup after client disconnect', async () => {
@@ -789,7 +790,7 @@ describe('provider-response-converter unified semantics handoff', () => {
         },
         executeNested: async () => ({ body: { ok: true } } as any),
       },
-    )).rejects.toThrow('__sse_responses');
+    )).rejects.toThrow('sseStream');
     expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
   });
 });

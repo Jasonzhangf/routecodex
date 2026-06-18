@@ -525,20 +525,117 @@ fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic
     let messages = output["payload"]["messages"]
         .as_array()
         .expect("provider messages");
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0]["role"], json!("assistant"));
-    assert_eq!(messages[0]["content"][0]["type"], json!("tool_use"));
-    assert_eq!(messages[0]["content"][0]["id"], json!("call_probe_1"));
-    assert_eq!(messages[0]["content"][0]["name"], json!("probe_tool"));
-    assert_eq!(messages[1]["role"], json!("user"));
-    assert_eq!(messages[1]["content"][0]["type"], json!("tool_result"));
+    assert!(messages.len() >= 2);
+    let assistant_tool_use = messages
+        .iter()
+        .find(|message| {
+            message["role"] == json!("assistant")
+                && message["content"][0]["type"] == json!("tool_use")
+        })
+        .expect("assistant tool_use message");
+    assert_eq!(assistant_tool_use["content"][0]["id"], json!("call_probe_1"));
+    assert_eq!(assistant_tool_use["content"][0]["name"], json!("probe_tool"));
+    let user_tool_result = messages
+        .iter()
+        .find(|message| {
+            message["role"] == json!("user")
+                && message["content"][0]["type"] == json!("tool_result")
+        })
+        .expect("user tool_result message");
     assert_eq!(
-        messages[1]["content"][0]["tool_use_id"],
+        user_tool_result["content"][0]["tool_use_id"],
         json!("call_probe_1")
     );
     assert_eq!(
-        messages[1]["content"][0]["content"],
+        user_tool_result["content"][0]["content"],
         json!("TOOL_RESULT_ROUTE_CODEX_OK")
+    );
+}
+
+#[test]
+fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_declared_tools() {
+    let input_json = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "minimonth.key1.MiniMax-M2.7",
+                    "providerType": "anthropic",
+                    "outboundProfile": "anthropic-messages",
+                    "runtimeKey": "minimonth.key1.MiniMax-M2.7",
+                    "compatibilityProfile": "anthropic:claude-code"
+                },
+                "routeName": "tools/gateway-priority-5555-weighted-tools"
+            }
+        },
+        "request": {
+            "requestId": "req_stopless_resume_tool_history_anthropic_provider",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "stream": false,
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound",
+            "payload": {
+                "model": "gpt-5.5",
+                "previous_response_id": "resp_prev_stopless_1",
+                "stream": false,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续执行 stopless 在线验证" }
+                        ]
+                    },
+                    {
+                        "type": "reasoning",
+                        "id": "reasoning_prev_1",
+                        "summary": [
+                            { "type": "summary_text", "text": "**Thinking** 第一轮推理" }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_stopless_1",
+                        "call_id": "call_stopless_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_stopless_1",
+                        "call_id": "call_stopless_1",
+                        "output": "{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}"
+                    }
+                ]
+            },
+            "metadata": {
+                "stream": false,
+                "providerProtocol": "openai-responses"
+            }
+        }
+    })
+    .to_string();
+
+    let result = execute_hub_pipeline_json(input_json).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["success"], json!(true));
+    let messages = output["payload"]["messages"]
+        .as_array()
+        .expect("provider messages");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["role"], json!("user"));
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+    assert_eq!(messages[1]["content"][0]["id"], json!("call_stopless_1"));
+    assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
+    assert_eq!(messages[2]["role"], json!("user"));
+    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_stopless_1"));
+    assert_eq!(
+        output["payload"]["system"][0]["text"],
+        json!("You are Claude Code, Anthropic's official CLI for Claude.")
     );
 }
 

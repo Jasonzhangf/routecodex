@@ -116,6 +116,18 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
           'merged from pipeline result metadata center'
         );
       }
+      const runtimeControlSnapshot = pipelineMetadataCenter.snapshot().runtimeControl;
+      for (const [key, slot] of Object.entries(runtimeControlSnapshot)) {
+        if (!slot) {
+          continue;
+        }
+        mergedCenter?.writeRuntimeControl(
+          key as keyof ReturnType<typeof pipelineMetadataCenter.readRuntimeControl>,
+          slot.value as Record<string, unknown> | boolean | string | undefined,
+          slot.writtenBy,
+          'merged from pipeline result metadata center'
+        );
+      }
       const providerObservationSnapshot = pipelineMetadataCenter.snapshot().providerObservation;
       for (const [key, slot] of Object.entries(providerObservationSnapshot)) {
         if (!slot) {

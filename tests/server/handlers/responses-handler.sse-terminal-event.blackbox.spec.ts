@@ -97,8 +97,7 @@ describe('responses-handler SSE terminal contract', () => {
       status: 200,
       headers: {},
       metadata: { outboundStream: true, stream: true },
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_item.added\n',
           `data: ${JSON.stringify({
             type: 'response.output_item.added',
@@ -174,8 +173,7 @@ describe('responses-handler SSE terminal contract', () => {
       status: 200,
       headers: {},
       metadata: { outboundStream: true, stream: true },
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_item.added\n',
           `data: ${JSON.stringify({
             type: 'response.output_item.added',
@@ -251,7 +249,7 @@ describe('responses-handler SSE terminal contract', () => {
           output: [{ id: 'fc_1', type: 'function_call', status: 'completed', name: 'shell', call_id: 'call_1', arguments: '{}' }],
           required_action: { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [{ id: 'call_1', type: 'function_call', function: { name: 'shell', arguments: '{}' } }] } }
         },
-        __sse_responses: Readable.from([
+        sseStream: Readable.from([
           'event: response.required_action\n',
           `data: ${JSON.stringify({
             type: 'response.required_action',
@@ -316,8 +314,7 @@ describe('responses-handler SSE terminal contract', () => {
       status: 200,
       headers: {},
       metadata: { outboundStream: true, stream: true },
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'first' })}\n\n`,
           'event: response.output_text.delta\n',

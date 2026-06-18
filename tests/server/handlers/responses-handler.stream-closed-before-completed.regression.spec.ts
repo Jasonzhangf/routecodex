@@ -249,9 +249,7 @@ describe('responses-handler stream closed before completed regression', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
           metadata: {
             outboundStream: true,
             stream: true
@@ -310,9 +308,7 @@ describe('responses-handler stream closed before completed regression', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
           metadata: {
             outboundStream: true,
             stream: true
@@ -370,9 +366,7 @@ describe('responses-handler stream closed before completed regression', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
           metadata: {
             outboundStream: true,
             stream: true
@@ -444,9 +438,7 @@ describe('responses-handler stream closed before completed regression', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
           metadata: {
             outboundStream: true,
             stream: true
@@ -535,14 +527,12 @@ describe('responses-handler stream closed before completed regression', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: upstream
-          },
+          sseStream: upstream,
           metadata: {
             outboundStream: true,
             stream: true,
-            __routecodexDirectPassthrough: true
-          }
+          },
+          continuationOwner: 'direct',
         } as any,
         'req_stream_closed_tool_continuation',
         { entryEndpoint: '/v1/responses' }

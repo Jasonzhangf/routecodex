@@ -12,7 +12,7 @@ type PipelineAttemptTarget = HubPipelineResult['target'];
 const PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER = {
   module: 'src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts',
   symbol: 'resolveRequestExecutorPipelineAttempt',
-  stage: 'VrRoute04SelectedTarget',
+  stage: 'request_executor_pipeline_target_observation',
 } as const;
 
 function normalizeExplicitRoutePool(value: unknown): string[] {

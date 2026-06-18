@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 function extractCommandInput(command: string): Record<string, unknown> {
-  const match = command.match(/--input-json '([^']+)'(?=\s--session-id|\s--request-id|$)/);
+  const match = command.match(/--input-json '([^']+)'(?=\s--|$)/);
   return match ? JSON.parse(match[1]) as Record<string, unknown> : {};
 }
 
@@ -59,8 +59,8 @@ describe('servertool CLI projection blackbox', () => {
     const command = JSON.parse(toolCall.function.arguments).cmd;
     expect(toolCall.function.name).toBe('exec_command');
     expect(command).toContain("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
-    expect(command).toContain("--session-id 'sess-blackbox'");
-    expect(command).toContain("--request-id 'req_servertool_blackbox'");
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));
@@ -116,11 +116,11 @@ describe('servertool CLI projection blackbox', () => {
     expect(input.flowId).toBe('stop_message_flow');
     expect(input.continuationPrompt).toBeUndefined();
     expect(input.schemaGuidance).toBeUndefined();
-    expect(command).not.toMatch(/Stop schema|stop schema|stopreason/);
     expect(command).not.toContain('continuationPrompt');
     expect(command).not.toContain('继续执行');
+    expect(command).toContain('schemaFeedback');
+    expect(command).toContain('stopreason');
     for (const forbidden of [
-      'schema',
       'stopless',
       'servertool',
       '第一轮',
@@ -216,6 +216,110 @@ describe('servertool CLI projection blackbox', () => {
     expect(command).toContain('routecodex hook run reasoning_stop');
     expect(command).not.toContain('stop_message_auto');
     expect(extractCommandInput(command).repeatCount).toBe(2);
+  });
+
+  it('blackbox locks exact schemaFeedback into final stopless exec_command payload', async () => {
+    isolateSessionDir('schema-feedback-lock');
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_stop_schema_feedback_lock',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '阶段完成，但缺 schema。'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      },
+      adapterContext: {
+        sessionId: 'sess-stop-cli-schema-feedback-lock',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: '继续执行' }]
+        },
+        __rt: {
+          stopMessageState: {
+            stopMessageText: '继续执行原任务',
+            stopMessageMaxRepeats: 3,
+            stopMessageUsed: 1,
+            stopMessageStageMode: 'on'
+          }
+        }
+      } as any,
+      requestId: 'req_stop_cli_schema_feedback_lock',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('schema feedback blackbox must not reenter server-side followup');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    const input = extractCommandInput(command);
+    expect(input.triggerHint).toBe('no_schema');
+    expect(input.schemaFeedback).toMatchObject({
+      reasonCode: 'stop_schema_missing'
+    });
+    expect((input.schemaFeedback as any).missingFields).toEqual(
+      expect.arrayContaining(['stopreason', 'reason'])
+    );
+  });
+
+  it('blackbox stops projecting new exec_command after third consecutive no_schema', async () => {
+    isolateSessionDir('third-no-schema-terminal');
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_stop_third_no_schema_terminal',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '还是没补 schema。'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      },
+      adapterContext: {
+        sessionId: 'sess-stop-cli-third-no-schema-terminal',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: '继续执行' }]
+        },
+        __rt: {
+          stopMessageState: {
+            stopMessageText: '继续执行原任务',
+            stopMessageMaxRepeats: 3,
+            stopMessageUsed: 2,
+            stopMessageStageMode: 'on'
+          }
+        }
+      } as any,
+      requestId: 'req_stop_cli_third_no_schema_terminal',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('third no_schema terminal must not reenter');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const payload = result.chat as any;
+    expect(JSON.stringify(payload)).not.toContain('routecodex hook run reasoning_stop');
+    expect(payload.required_action).toBeUndefined();
+    expect(payload.choices?.[0]?.message?.tool_calls).toBeUndefined();
   });
 
   it('returns terminal allow-stop result without re-projecting exec_command', async () => {

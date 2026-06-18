@@ -561,7 +561,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     );
 
     return {
-      __sse_responses: streamForHost,
+      sseStream: streamForHost,
       status: 200,
       statusText: 'OK',
       headers: {

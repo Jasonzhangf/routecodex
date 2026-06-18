@@ -18,6 +18,7 @@ async function requestSse(
   body: Record<string, unknown>,
   options?: {
     metadata?: Record<string, unknown>;
+    continuationOwner?: 'direct' | 'relay';
     chunks?: string[];
   }
 ): Promise<{ status: number; text: string }> {
@@ -30,14 +31,15 @@ async function requestSse(
         status: 200,
         headers: {},
         body: {
-          mode: 'sse',
-          __sse_responses: stream
+          mode: 'sse'
         },
+        sseStream: stream,
         metadata: {
           outboundStream: true,
           clientModelId: 'client-visible-model',
           ...(options?.metadata ?? {})
-        }
+        },
+        continuationOwner: options?.continuationOwner,
       } as any,
       'req_sse_metadata_guard',
       { entryEndpoint: '/v1/responses' }
@@ -86,8 +88,16 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
 
   it('keeps ordinary provider metadata on direct passthrough SSE', async () => {
     const response = await requestSse(
-      { id: 'evt-direct-provider-metadata', metadata: { provider_event_id: 'evt-provider-1' } },
-      { metadata: { __routecodexDirectPassthrough: true } }
+      {},
+      {
+        continuationOwner: 'direct',
+        chunks: [
+          `event: response.metadata\ndata: ${JSON.stringify({
+            type: 'response.metadata',
+            metadata: { provider_event_id: 'evt-provider-1' }
+          })}\n\n`
+        ]
+      }
     );
 
     expect(response.status).toBe(200);
@@ -99,10 +109,10 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
     const response = await requestSse(
       {},
       {
-        metadata: { __routecodexDirectPassthrough: true },
+        continuationOwner: 'direct',
         chunks: [
-          `event: message\r\ndata: ${JSON.stringify({
-            id: 'evt-direct-crlf-provider-metadata',
+          `event: response.metadata\r\ndata: ${JSON.stringify({
+            type: 'response.metadata',
             metadata: { provider_event_id: 'evt-provider-crlf' }
           })}\r\n\r\n`
         ]
@@ -116,14 +126,14 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
   });
 
   it('fails direct passthrough split SSE frame before leaking internal metadata controls', async () => {
-    const frame = `event: message\ndata: ${JSON.stringify({
-      id: 'evt-direct-internal-metadata',
+    const frame = `event: response.metadata\ndata: ${JSON.stringify({
+      type: 'response.metadata',
       metadata: { routeHint: 'tools' }
     })}\n\n`;
     const response = await requestSse(
       {},
       {
-        metadata: { __routecodexDirectPassthrough: true },
+        continuationOwner: 'direct',
         chunks: [frame.slice(0, 18), frame.slice(18)]
       }
     );

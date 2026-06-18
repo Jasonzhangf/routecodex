@@ -1,8 +1,11 @@
 import type {
+  MetadataCenterClientAttachmentScope,
   MetadataCenterContinuationContext,
+  MetadataCenterDebugSnapshot,
   MetadataCenterFamily,
   MetadataCenterProviderObservation,
   MetadataCenterRequestTruth,
+  MetadataCenterRuntimeControl,
   MetadataCenterSlot,
   MetadataCenterState,
   MetadataCenterStatus,
@@ -94,7 +97,10 @@ export class MetadataCenter {
     this.state = {
       requestTruth: {},
       continuationContext: {},
-      providerObservation: {}
+      runtimeControl: {},
+      providerObservation: {},
+      clientAttachmentScope: {},
+      debugSnapshot: {}
     };
   }
 
@@ -189,6 +195,45 @@ export class MetadataCenter {
     };
   }
 
+  writeRuntimeControl<K extends keyof MetadataCenterRuntimeControl>(
+    key: K,
+    value: MetadataCenterRuntimeControl[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.runtimeControl[key] as MetadataCenterSlot<MetadataCenterRuntimeControl[K]> | undefined;
+    this.state.runtimeControl[key] = buildSlot({
+      value,
+      family: 'runtime_control',
+      writtenBy,
+      writePolicy: 'replaceable',
+      previous,
+      reason
+    });
+  }
+
+  readRuntimeControl(): MetadataCenterRuntimeControl {
+    return {
+      routeHint: this.state.runtimeControl.routeHint?.value as string | undefined,
+      routeName: this.state.runtimeControl.routeName?.value as string | undefined,
+      routeId: this.state.runtimeControl.routeId?.value as string | undefined,
+      providerProtocol: this.state.runtimeControl.providerProtocol?.value as string | undefined,
+      providerFamily: this.state.runtimeControl.providerFamily?.value as string | undefined,
+      retryProviderKey: this.state.runtimeControl.retryProviderKey?.value as string | undefined,
+      preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
+      serverToolFollowup: this.state.runtimeControl.serverToolFollowup?.value as boolean | undefined,
+      serverToolFollowupSource: this.state.runtimeControl.serverToolFollowupSource?.value as string | undefined,
+      stoplessGoalStatus: this.state.runtimeControl.stoplessGoalStatus?.value as string | undefined,
+      stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
+      stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
+      streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,
+      clientAbort: this.state.runtimeControl.clientAbort?.value as boolean | undefined
+    };
+  }
+
   writeProviderObservation<K extends keyof MetadataCenterProviderObservation>(
     key: K,
     value: MetadataCenterProviderObservation[K],
@@ -222,6 +267,63 @@ export class MetadataCenter {
     };
   }
 
+  writeClientAttachmentScope<K extends keyof MetadataCenterClientAttachmentScope>(
+    key: K,
+    value: MetadataCenterClientAttachmentScope[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.clientAttachmentScope[key] as MetadataCenterSlot<MetadataCenterClientAttachmentScope[K]> | undefined;
+    this.state.clientAttachmentScope[key] = buildSlot({
+      value,
+      family: 'client_attachment_scope',
+      writtenBy,
+      writePolicy: 'replaceable',
+      previous,
+      reason
+    });
+  }
+
+  readClientAttachmentScope(): MetadataCenterClientAttachmentScope {
+    return {
+      daemonId: this.state.clientAttachmentScope.daemonId?.value as string | undefined,
+      tmuxSessionId: this.state.clientAttachmentScope.tmuxSessionId?.value as string | undefined,
+      tmuxTarget: this.state.clientAttachmentScope.tmuxTarget?.value as string | undefined,
+      workdir: this.state.clientAttachmentScope.workdir?.value as string | undefined
+    };
+  }
+
+  writeDebugSnapshot<K extends keyof MetadataCenterDebugSnapshot>(
+    key: K,
+    value: MetadataCenterDebugSnapshot[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.debugSnapshot[key] as MetadataCenterSlot<MetadataCenterDebugSnapshot[K]> | undefined;
+    this.state.debugSnapshot[key] = buildSlot({
+      value,
+      family: 'debug_snapshot',
+      writtenBy,
+      writePolicy: 'append_only',
+      previous,
+      reason
+    });
+  }
+
+  readDebugSnapshot(): MetadataCenterDebugSnapshot {
+    return {
+      snapshotId: this.state.debugSnapshot.snapshotId?.value as string | undefined,
+      bridgeHistory: this.state.debugSnapshot.bridgeHistory?.value as unknown[] | undefined,
+      traceMarkers: this.state.debugSnapshot.traceMarkers?.value as unknown[] | undefined
+    };
+  }
+
   markReleased(writtenBy: MetadataCenterWriter, reason?: string): void {
     for (const key of Object.keys(this.state.requestTruth) as Array<keyof MetadataCenterRequestTruth>) {
       const slot = this.state.requestTruth[key];
@@ -247,12 +349,48 @@ export class MetadataCenter {
         reason,
       });
     }
+    for (const key of Object.keys(this.state.runtimeControl) as Array<keyof MetadataCenterRuntimeControl>) {
+      const slot = this.state.runtimeControl[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.runtimeControl[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
     for (const key of Object.keys(this.state.providerObservation) as Array<keyof MetadataCenterProviderObservation>) {
       const slot = this.state.providerObservation[key];
       if (!slot) {
         continue;
       }
       this.state.providerObservation[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.clientAttachmentScope) as Array<keyof MetadataCenterClientAttachmentScope>) {
+      const slot = this.state.clientAttachmentScope[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.clientAttachmentScope[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.debugSnapshot) as Array<keyof MetadataCenterDebugSnapshot>) {
+      const slot = this.state.debugSnapshot[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.debugSnapshot[key] = transitionSlotStatus({
         previous: slot,
         status: 'released',
         changedBy: writtenBy,

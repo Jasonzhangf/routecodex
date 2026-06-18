@@ -4,7 +4,7 @@ import { GENERATED_WIKI_PAGES, MANUAL_WIKI_PAGES, WIKI_ROOT } from './architectu
 
 export const WIKI_HTML_ROOT = `${WIKI_ROOT}/html`;
 
-const MERMAID_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+export const MERMAID_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
 function readText(root, relPath) {
   return fs.readFileSync(path.join(root, relPath), 'utf8');

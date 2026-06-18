@@ -70,10 +70,9 @@ describe('responses SSE prestart close guard', () => {
           outboundStream: true,
           stream: true,
           clientConnectionState: { disconnected: true },
-          __routecodexDirectPassthrough: true,
         },
-        body: {
-          __sse_responses: Readable.from([
+        continuationOwner: 'direct',
+        sseStream: Readable.from([
             'event: response.completed\n',
             'data: {"type":"response.completed","response":{"id":"resp_prestart_state_only","object":"response","status":"completed"}}\n\n',
             'event: response.done\n',

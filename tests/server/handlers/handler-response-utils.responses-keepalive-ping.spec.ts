@@ -62,9 +62,7 @@ describe('responses SSE keepalive ping', () => {
       {
         status: 200,
         metadata: { outboundStream: true, stream: true },
-        body: {
-          __sse_responses: stream,
-        },
+        sseStream: stream,
       } as any,
       'req_responses_keepalive_ping',
       {

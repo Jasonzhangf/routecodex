@@ -106,24 +106,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
     warnSpy.mockRestore();
   });
 
-  it('does not attach stream contract probe for empty response.created placeholder', async () => {
-    const { buildServerToolSseWrapperBody, STREAM_CONTRACT_PROBE_BODY_KEY } = await import(
-      '../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js'
-    );
-    const body = buildServerToolSseWrapperBody({
-      sseResponses: Readable.from([]),
-      convertedBody: {
-        id: '066acd209c6b56063dc1679d535ece5c',
-        object: 'response',
-        status: 'completed',
-        output: []
-      }
-    });
-
-    expect(body).toHaveProperty('__sse_responses');
-    expect(body).not.toHaveProperty(STREAM_CONTRACT_PROBE_BODY_KEY);
-  });
-
   it('logs finish_reason after streamed responses complete', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -204,9 +186,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_finish_reason: 'tool_calls'
+        sseStream: stream,
+        usageLogInfo: {
+          finishReason: 'tool_calls',
+          requestStartedAtMs: Date.now()
         }
       } as any,
       'req-stream-finish',
@@ -263,9 +246,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        }
+        sseStream: stream
       } as any,
       'req-stream-incomplete-log-guard',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -352,9 +333,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        }
+        sseStream: stream
       } as any,
       'req-stream-client-close',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -414,9 +393,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        },
+        sseStream: stream,
         usageLogInfo: {
           providerKey: 'cc.key1.gpt-5.4-mini',
           routeName: 'router-direct:search/-',
@@ -482,9 +459,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: upstream
-        }
+        sseStream: upstream
       } as any,
       'req-stream-client-close-upstream-abort',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -557,9 +532,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: upstream
-        }
+        sseStream: upstream
       } as any,
       'req-stream-client-close-projection-pending',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -644,10 +617,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_finish_reason: 'tool_calls'
-        },
+        sseStream: stream,
         usageLogInfo: {
           providerKey: 'asxs.crsa.gpt-5.5',
           timingRequestIds: ['req-direct-required-action-close'],
@@ -766,10 +736,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_finish_reason: 'stop'
-        },
+        sseStream: stream,
         usageLogInfo: {
           stoplessMode: 'on',
           stoplessArmed: true
@@ -859,10 +826,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_finish_reason: 'stop'
-        },
+        sseStream: stream,
         usageLogInfo: {
           stoplessMode: 'on',
           stoplessArmed: true
@@ -1012,9 +976,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        }
+        sseStream: stream
       } as any,
       'req-stream-tail-after-completed',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1093,10 +1055,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_stream_finish_reason: 'tool_calls'
-        }
+        sseStream: stream
       } as any,
       'req-stream-tool-calls-tail',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1119,7 +1078,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(responseErrors).toEqual([]);
   });
 
-  it('RED: synthesizes response.completed when stream closes without terminal but contractProbe already carries completed response fact', async () => {
+  it('does not synthesize response.completed when stream closes without standard terminal event', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1175,30 +1134,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_stream_finish_reason: 'stop',
-          __routecodex_stream_contract_probe_body: {
-            id: 'resp_probe_completed_1',
-            object: 'response',
-            status: 'completed',
-            output: [
-              {
-                id: 'msg_probe_completed_1',
-                type: 'message',
-                role: 'assistant',
-                status: 'completed',
-                content: [
-                  {
-                    type: 'output_text',
-                    text: 'ok'
-                  }
-                ]
-              }
-            ],
-            output_text: 'ok'
-          }
-        }
+        sseStream: stream
       } as any,
       'req-stream-probe-completed-no-terminal',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1215,15 +1151,13 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: response.completed');
-    expect(output).toContain('"status":"completed"');
-    expect(output).toContain('"output_text":"ok"');
+    expect(output).toContain('event: error');
+    expect(output).toContain('upstream_stream_incomplete');
+    expect(output).not.toContain('event: response.completed');
     expect(output).not.toContain('data: [DONE]');
-    expect(output).not.toContain('upstream_stream_incomplete');
-    expect(output).not.toContain('event: error');
   });
 
-  it('RED: data DONE alone is not a Responses terminal event and completed probe is still emitted', async () => {
+  it('data DONE alone is not a Responses terminal event and does not synthesize completion', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1293,24 +1227,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __routecodex_stream_contract_probe_body: {
-            id: 'resp_done_only_probe_1',
-            object: 'response',
-            status: 'completed',
-            output: [
-              {
-                id: 'msg_done_only_probe_1',
-                type: 'message',
-                role: 'assistant',
-                status: 'completed',
-                content: [{ type: 'output_text', text: 'ok' }]
-              }
-            ],
-            output_text: 'ok'
-          }
-        }
+        sseStream: stream
       } as any,
       'req-stream-done-only-with-probe',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1324,11 +1241,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: response.completed');
-    expect(output).toContain('event: response.done');
+    expect(output).not.toContain('event: response.completed');
+    expect(output).not.toContain('event: response.done');
     expect(output).not.toContain('data: [DONE]');
-    expect(output).not.toContain('upstream_stream_incomplete');
-    expect(output).not.toContain('event: error');
   });
 
   it('does not append DONE when upstream emits response.completed and response.done without DONE sentinel', async () => {
@@ -1366,9 +1281,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        }
+        sseStream: stream
       } as any,
       'req-stream-terminal-without-done',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1445,9 +1358,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream
-        }
+        sseStream: stream
       } as any,
       'req-stream-message-event-terminal',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1507,9 +1418,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         res as any,
         {
           status: 200,
-          body: {
-            __sse_responses: stream
-          }
+          sseStream: stream
         } as any,
         'req-stream-snapshot-no-duplicate',
         { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1625,9 +1534,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         res as any,
         {
           status: 200,
-          body: {
-            __sse_responses: stream
-          }
+          sseStream: stream
         } as any,
         'req-terminal-message-only',
         { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1698,9 +1605,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         res as any,
         {
           status: 200,
-          body: {
-            __sse_responses: stream
-          }
+          sseStream: stream
         } as any,
         'req-function-call-not-terminal',
         { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -1863,23 +1768,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       res as any,
       {
         status: 200,
-        body: {
-          __sse_responses: stream,
-          __stream_contract_probe_body: {
-            id: 'resp_tool',
-            object: 'response',
-            status: 'requires_action',
-            required_action: {
-              submit_tool_outputs: {
-                tool_calls: [{
-                  id: 'call_tool_repair',
-                  type: 'function',
-                  function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
-                }]
-              }
-            }
-          }
-        }
+        sseStream: stream
       } as any,
       'req-required-action-no-completed-repair',
       { forceSSE: true, entryEndpoint: '/v1/responses' }

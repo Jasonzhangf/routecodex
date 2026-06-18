@@ -66,7 +66,7 @@ export interface ServerSideToolEngineOptions {
     metadata?: JsonObject;
   }) => Promise<{
     body?: JsonObject;
-    __sse_responses?: unknown;
+    sseStream?: unknown;
     format?: string;
   }>;
   clientInjectDispatch?: (options: {
@@ -141,7 +141,7 @@ export type ServerToolBackendPlan =
   };
 
 export type ServerToolBackendResult =
-  | { kind: 'vision_analysis'; response: { body?: JsonObject; __sse_responses?: unknown; format?: string } }
+  | { kind: 'vision_analysis'; response: { body?: JsonObject; sseStream?: unknown; format?: string } }
   | {
     kind: 'web_search';
     chosenEngine?: { id: string; providerKey: string };

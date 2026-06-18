@@ -1,4 +1,5 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
+// feature_id: hub.metadata_center_request_capture
 import { asRecord } from './provider-utils.js';
 import {
   extractContinuationContextSessionIdentifiersFromMetadata,
@@ -608,6 +609,12 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     clientInjectReady,
     clientInjectReason
   };
+  delete metadata.responsesRequestContext;
+  if (metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)) {
+    const rt = { ...(metadata.__rt as Record<string, unknown>) };
+    delete rt.responsesRequestContext;
+    metadata.__rt = rt;
+  }
 
   if (normalizedClientHeaders) {
     metadata.clientHeaders = normalizedClientHeaders;
@@ -645,7 +652,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         stage: 'ServerReqInbound01ClientRaw'
       }
     );
-    metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId) {
     center.writeRequestTruth(
@@ -657,16 +663,15 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         stage: 'ServerReqInbound01ClientRaw'
       }
     );
-    metadata.conversationId = sessionIdentifiers.conversationId;
   }
   const continuationIdentifiers = extractContinuationContextSessionIdentifiersFromMetadata({
     ...bodyMeta,
     ...metadata
   });
+  const requestTruth = center.readRequestTruth();
   if (
     continuationIdentifiers.sessionId
-    && !metadata.responsesRequestContext
-    && !metadata.sessionId
+    && !requestTruth.sessionId
   ) {
     center.writeContinuationContext(
       'responsesRequestContext',
@@ -682,12 +687,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         stage: 'HubReqInbound02Standardized'
       }
     );
-    metadata.responsesRequestContext = {
-      sessionId: continuationIdentifiers.sessionId,
-      ...(continuationIdentifiers.conversationId
-        ? { conversationId: continuationIdentifiers.conversationId }
-        : {})
-    };
   }
 
   if (shouldTraceSessionScopeMetadata({
@@ -718,6 +717,10 @@ export function decorateMetadataForAttempt(
   excludedProviderKeys: Set<string>
 ): Record<string, unknown> {
   const clone = cloneMetadata(base);
+  const metadataCenter = MetadataCenter.read(base);
+  if (metadataCenter) {
+    MetadataCenter.bind(clone, metadataCenter);
+  }
   preserveLiveClientAbortCarriers({ source: base, target: clone });
   clone.retryAttempt = attempt;
   if (excludedProviderKeys.size > 0) {

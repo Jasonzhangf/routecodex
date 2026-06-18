@@ -20,7 +20,7 @@ use super::types::{
     ValidateToolArgumentsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, is_synthetic_routecodex_control_content,
+    coerce_bridge_role, is_stopless_cli_result_content, is_synthetic_routecodex_control_content,
     is_synthetic_routecodex_tool_call_id, MediaBlock,
 };
 
@@ -662,6 +662,10 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             .and_then(Value::as_str)
             .map(|role| coerce_bridge_role(Some(role)))
             .unwrap_or_else(|| "user".to_string());
+        let original_content = entry_obj.get("content").cloned().unwrap_or(Value::Null);
+        if role_hint == "user" && is_stopless_cli_result_content(&original_content) {
+            continue;
+        }
         if role_hint != "system" {
             non_system_message_indices.push(entry_index);
         }

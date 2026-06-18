@@ -22,8 +22,7 @@ describe('responses-handler stream compatibility without SSE accept header', () 
     const executePipeline = jest.fn(async (input: any) => ({
       status: 200,
       headers: {},
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           'event: response.output_text.delta\n',
           `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'stream-no-accept-ok' })}\n\n`,
           'event: response.completed\n',

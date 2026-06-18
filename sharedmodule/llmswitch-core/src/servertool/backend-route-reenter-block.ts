@@ -118,7 +118,7 @@ export async function runReenterFollowup(args: {
     requestId: string;
     body?: JsonObject;
     metadata?: JsonObject;
-  }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
+  }) => Promise<{ body?: JsonObject; sseStream?: unknown; format?: string }>;
   coerceFollowupPayloadStream: (payload: JsonObject, stream: boolean) => JsonObject;
   appendStopMessageLoopWarning: (payload: JsonObject, repeatCountRaw: number) => void;
   applyHubFollowupPolicyShadow: (args: {
@@ -172,7 +172,7 @@ export async function runReenterFollowup(args: {
   | { kind: 'followup_body'; followupBody?: JsonObject }
 > {
   const resolveFollowupBodyCandidate = (
-    followup: { body?: JsonObject; __sse_responses?: unknown; format?: string } | undefined
+    followup: { body?: JsonObject; sseStream?: unknown; format?: string } | undefined
   ): JsonObject | undefined => {
     if (!followup || typeof followup !== 'object') {
       return undefined;
@@ -286,7 +286,7 @@ export async function runReenterFollowup(args: {
   }
 
   let followup:
-    | { body?: JsonObject; __sse_responses?: unknown; format?: string }
+    | { body?: JsonObject; sseStream?: unknown; format?: string }
     | undefined;
   let lastError: unknown;
   const attempt = 1;
@@ -327,7 +327,7 @@ export async function runReenterFollowup(args: {
     lifecycle('attempt_result', {
       attempt,
       hasBody: Boolean(attemptBodyCandidate),
-      hasSse: Boolean(followup && (followup as Record<string, unknown>).__sse_responses)
+      hasSse: Boolean(followup && (followup as Record<string, unknown>).sseStream)
     });
     if (attemptBodyCandidate && args.isEmptyClientResponsePayload(attemptBodyCandidate)) {
       void persistEmptyFollowupSample({

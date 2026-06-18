@@ -3,7 +3,7 @@ import { applyClientConnectionStateToContext } from '../../../utils/client-conne
 import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
-import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import { readRuntimeServerToolProjection } from '../metadata-center/request-truth-readers.js';
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -18,14 +18,6 @@ function readNonEmptyString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
-}
-
-function readProviderObservation(metadataBag?: Record<string, unknown>): Record<string, unknown> | undefined {
-  const providerObservation = metadataBag ? MetadataCenter.read(metadataBag)?.readProviderObservation() : undefined;
-  if (!providerObservation) {
-    return undefined;
-  }
-  return providerObservation as unknown as Record<string, unknown>;
 }
 
 function hasRccFenceInRequestPayload(payload: unknown): boolean {
@@ -75,20 +67,6 @@ function preferEntryOriginRequestForStoplessGoalSync(
   baseContext.capturedEntryRequest = entryOriginRequest as Record<string, unknown>;
 }
 
-function resolveAssignedModelId(metadataBag?: Record<string, unknown>): string | undefined {
-  const providerObservation = readProviderObservation(metadataBag);
-  return readNonEmptyString(providerObservation?.assignedModelId)
-    ?? readNonEmptyString(providerObservation?.modelId)
-    ?? readNonEmptyString(asFlatRecord(providerObservation?.target)?.modelId)
-    ?? readNonEmptyString(metadataBag?.modelId);
-}
-
-function resolveCompatProfile(metadataBag?: Record<string, unknown>): string | undefined {
-  const providerObservation = readProviderObservation(metadataBag);
-  return readNonEmptyString(providerObservation?.compatibilityProfile)
-    ?? readNonEmptyString(asFlatRecord(providerObservation?.target)?.compatibilityProfile);
-}
-
 export function buildServerToolAdapterContext(args: {
   metadata?: Record<string, unknown>;
   entryOriginRequest?: Record<string, unknown>;
@@ -112,15 +90,14 @@ export function buildServerToolAdapterContext(args: {
   if (originRecord && (!existingCapturedChatRequest || hasRccFenceInRequestPayload(originRecord))) {
     baseContext.capturedChatRequest = originRecord;
   }
-  const metadataCenter = MetadataCenter.read(metadataBag);
-  const centerRequestTruth = metadataCenter?.readRequestTruth();
-  if (centerRequestTruth?.sessionId) {
-    baseContext.sessionId = centerRequestTruth.sessionId;
+  const serverToolProjection = readRuntimeServerToolProjection(metadataBag);
+  if (serverToolProjection.sessionId) {
+    baseContext.sessionId = serverToolProjection.sessionId;
   } else {
     delete baseContext.sessionId;
   }
-  if (centerRequestTruth?.conversationId) {
-    baseContext.conversationId = centerRequestTruth.conversationId;
+  if (serverToolProjection.conversationId) {
+    baseContext.conversationId = serverToolProjection.conversationId;
   } else {
     delete baseContext.conversationId;
   }
@@ -139,7 +116,7 @@ export function buildServerToolAdapterContext(args: {
   if (originalModelId) {
     baseContext.originalModelId = originalModelId;
   }
-  const assignedModelId = resolveAssignedModelId(metadataBag);
+  const assignedModelId = serverToolProjection.assignedModelId;
   if (assignedModelId) {
     baseContext.modelId = assignedModelId;
   }
@@ -178,7 +155,7 @@ export function buildServerToolAdapterContext(args: {
       : {})
   };
 
-  const compatProfile = resolveCompatProfile(metadataBag);
+  const compatProfile = serverToolProjection.compatibilityProfile;
   if (compatProfile) {
     baseContext.compatibilityProfile = compatProfile;
   }

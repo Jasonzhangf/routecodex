@@ -137,6 +137,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code></td></tr>
+        <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code></td></tr>
         <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run build:min</code></td></tr>
         <tr><td><code>vr.route_availability_floor</code></td><td>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code></td></tr>
         <tr><td><code>vr.provider_forwarder_runtime</code></td><td>ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run verify:vr-forwarder-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
@@ -184,6 +185,48 @@
         <p>Notes:</p>
         <ul>
           <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
+        </ul>
+        <h2>vr.route_retry_pin_surface</h2>
+        <p>Summary: Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code> Owner scope: Virtual Router file-scoped route surface for retry-provider-pin parsing and forced-target selection input</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>InstructionTarget</code></li>
+          <li><code>SelectionResult</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>parse_retry_provider_key_target</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs</code></li>
+          <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts</code></li>
+          <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/client</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
+          <li><code>tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts</code></li>
+          <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+          <li><code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership.</li>
         </ul>
         <h2>virtual_router.primary_exhausted_to_default_pool</h2>
         <p>Summary: primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</p>

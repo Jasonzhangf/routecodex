@@ -16,6 +16,19 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../../src/modules/llmswitch/bridge/module-loader.js',
   () => ({
+    parsePrefixList: jest.fn((raw: string | undefined) =>
+      String(raw || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    ),
+    matchesPrefix: jest.fn((subpath: string, prefixes: string[]) =>
+      prefixes.some((prefix) => subpath === prefix || subpath.startsWith(`${prefix}/`))
+    ),
+    isEngineEnabled: jest.fn(() => false),
+    getEnginePrefixes: jest.fn(() => []),
+    resolveImplForSubpath: jest.fn(() => 'ts'),
+    resolveCoreModulePath: jest.fn((subpath: string) => subpath),
     importCoreDist: jest.fn(async (subpath: string) => {
       if (subpath === 'conversion/shared/responses-conversation-store') {
         return {
@@ -23,7 +36,20 @@ jest.unstable_mockModule(
           rebindResponsesConversationRequestId: jest.fn()
         };
       }
+      if (subpath === 'native/router-hotpath/native-hub-pipeline-semantic-mappers') {
+        return {
+          normalizeServertoolFollowupPayloadShapeWithNative: (_entryEndpoint: string, payload: Record<string, unknown>) => payload
+        };
+      }
       throw new Error(`unexpected importCoreDist ${subpath}`);
+    }),
+    requireCoreDist: jest.fn((subpath: string) => {
+      if (subpath === 'native/router-hotpath/native-hub-pipeline-semantic-mappers') {
+        return {
+          normalizeServertoolFollowupPayloadShapeWithNative: (_entryEndpoint: string, payload: Record<string, unknown>) => payload
+        };
+      }
+      throw new Error(`unexpected requireCoreDist ${subpath}`);
     })
   })
 );

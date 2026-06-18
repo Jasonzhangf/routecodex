@@ -35,7 +35,7 @@ function createExecutor() {
     prepareSseRequestBody: () => {},
     getEntryEndpointFromPayload: () => '/v1/responses',
     getClientRequestIdFromContext: () => 'req_client_sse',
-    wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ __sse_responses: stream }),
+    wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ sseStream: stream }),
     normalizeHttpError: async (error: unknown) => error
   } as any;
 
@@ -55,12 +55,12 @@ function createExecutorWithPreparedSseResponse() {
     prepareSseRequestBody: () => {},
     getEntryEndpointFromPayload: () => '/v1/responses',
     getClientRequestIdFromContext: () => 'req_client_sse_prepared',
-    wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ __sse_responses: stream }),
+    wrapUpstreamSseResponse: async (stream: NodeJS.ReadableStream) => ({ sseStream: stream }),
     executePreparedRequest: async () => {
       const stream = new PassThrough();
       stream.end('event: done\n\ndata: [DONE]\n\n');
       return {
-        __sse_responses: stream,
+        sseStream: stream,
         headers: { 'content-type': 'text/event-stream' }
       };
     },

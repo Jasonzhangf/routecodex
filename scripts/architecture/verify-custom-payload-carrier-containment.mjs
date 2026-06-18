@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import YAML from 'yaml';
 
 const repoRoot = process.cwd();
 
@@ -25,39 +26,30 @@ const allowedExtensions = new Set([
   '.tsx',
 ]);
 
+const manifestPath = path.join(repoRoot, 'docs/architecture/custom-payload-carrier-runtime-manifest.yml');
+const manifest = YAML.parse(fs.readFileSync(manifestPath, 'utf8'));
+const manifestGroups = new Map(
+  (Array.isArray(manifest.carrier_runtime_surfaces) ? manifest.carrier_runtime_surfaces : []).map((group) => [
+    String(group.carrier_id),
+    group,
+  ])
+);
+
+function manifestAllowedFiles(carrierId) {
+  const group = manifestGroups.get(carrierId);
+  return new Set(
+    Array.isArray(group?.files)
+      ? group.files.map((entry) => String(entry.path || '')).filter(Boolean)
+      : []
+  );
+}
+
 const rules = [
   {
     id: 'routecodex_prefix',
     title: '__routecodex* runtime containment',
     regex: /__routecodex[A-Za-z0-9_]*/g,
-    allowedFiles: new Set([
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/meta_error_carriers.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs',
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
-      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-      'src/providers/core/runtime/http-request-executor.ts',
-      'src/providers/core/runtime/provider-request-header-orchestrator.ts',
-      'src/providers/core/runtime/transport/oauth-header-preflight.ts',
-      'src/providers/core/utils/provider-error-reporter.ts',
-      'src/providers/core/utils/snapshot-writer-buffer.ts',
-      'src/server/handlers/handler-response-common.ts',
-      'src/server/handlers/handler-utils.ts',
-      'src/server/runtime/http-server/daemon-admin-routes.ts',
-      'src/server/runtime/http-server/executor-metadata.ts',
-      'src/server/runtime/http-server/executor/provider-response-converter.ts',
-      'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
-      'src/server/runtime/http-server/executor/request-executor-response-inspect.ts',
-      'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
-      'src/server/runtime/http-server/executor/servertool-followup-metadata.ts',
-      'src/server/runtime/http-server/index.ts',
-    ]),
+    allowedFiles: manifestAllowedFiles('routecodex_prefix'),
   },
   {
     id: 'sse_prefix',
@@ -69,12 +61,7 @@ const rules = [
     id: 'response_metadata',
     title: 'response.metadata runtime containment',
     regex: /\bresponse\.metadata\b/g,
-    allowedFiles: new Set([
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs',
-      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-      'src/providers/core/hooks/debug-example-hooks.ts',
-    ]),
+    allowedFiles: manifestAllowedFiles('response_metadata'),
   },
 ];
 

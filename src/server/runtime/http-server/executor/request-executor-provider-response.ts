@@ -10,6 +10,7 @@ import {
 import { extractUsageFromResult, mergeUsageMetrics } from './usage-aggregator.js';
 import { extractStatusCodeFromError } from './utils.js';
 import { resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 
 export type HubStageTopEntry = {
   stage: string;
@@ -64,6 +65,7 @@ export function buildProviderExecutionSuccessResult(args: {
 }): PipelineExecutionResult {
   const metadataHubStageTop = args.readHubStageTop(args.mergedMetadata);
   const hubDecodeBreakdown = args.readHubDecodeBreakdown(metadataHubStageTop);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(args.mergedMetadata);
   const decodeStats =
     args.converted.body && typeof args.converted.body === 'object' && !Array.isArray(args.converted.body)
       ? (args.converted.body as Record<string, any>).__rccDecodeStats
@@ -116,10 +118,10 @@ export function buildProviderExecutionSuccessResult(args: {
       tmux_session_id: args.mergedMetadata.tmux_session_id,
       rccSessionClientTmuxSessionId: args.mergedMetadata.rccSessionClientTmuxSessionId,
       rcc_session_client_tmux_session_id: args.mergedMetadata.rcc_session_client_tmux_session_id,
-      sessionId: args.mergedMetadata.sessionId,
-      session_id: args.mergedMetadata.session_id,
-      conversationId: args.mergedMetadata.conversationId,
-      conversation_id: args.mergedMetadata.conversation_id,
+      sessionId: requestTruth.sessionId,
+      session_id: requestTruth.sessionId,
+      conversationId: requestTruth.conversationId,
+      conversation_id: requestTruth.conversationId,
       projectPath:
         args.readString(args.mergedMetadata.clientWorkdir)
         ?? args.readString(args.mergedMetadata.client_workdir)
@@ -455,11 +457,9 @@ export async function processSuccessfulProviderResponse(args: {
     providerKey: args.providerKey,
     attempt: args.attempt
   });
-  if (args.converted.body && typeof args.converted.body === 'object') {
+  if (!args.converted.sseStream && args.converted.body && typeof args.converted.body === 'object') {
     const body = args.converted.body as Record<string, unknown>;
-    if (!('__sse_responses' in body)) {
-      args.stats.recordToolUsage({ providerKey: args.providerKey, model: args.providerModel }, body);
-    }
+    args.stats.recordToolUsage({ providerKey: args.providerKey, model: args.providerModel }, body);
   }
   args.logStage('provider.tool_usage_record.completed', args.inputRequestId, {
     providerKey: args.providerKey,

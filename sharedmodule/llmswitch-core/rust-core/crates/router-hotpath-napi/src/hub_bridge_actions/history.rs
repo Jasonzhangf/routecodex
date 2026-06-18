@@ -29,8 +29,9 @@ use super::types::{
     ResolveResponsesRequestBridgeDecisionsInput, ResolveResponsesRequestBridgeDecisionsOutput,
 };
 use super::utils::{
-    coerce_bridge_role, flatten_content_to_string, is_synthetic_routecodex_control_content,
-    is_synthetic_routecodex_tool_call_id, normalize_function_call_output_id, MediaBlock,
+    coerce_bridge_role, flatten_content_to_string, is_stopless_cli_result_content,
+    is_synthetic_routecodex_control_content, is_synthetic_routecodex_tool_call_id,
+    normalize_function_call_output_id, MediaBlock,
 };
 
 fn require_explicit_tool_call_id(call_id: Option<String>, reason: &str) -> Result<String, String> {
@@ -1006,6 +1007,9 @@ pub(crate) fn build_bridge_history(
                 original_system_messages.push(collected_text.clone());
                 system_parts.push(collected_text);
             }
+            continue;
+        }
+        if role == "user" && is_stopless_cli_result_content(&content) {
             continue;
         }
         non_system_message_indices.push(message_index);

@@ -1,4 +1,5 @@
 // feature_id: hub.metadata_boundary
+// feature_id: hub.pipeline_contract_surface
 use serde::Serialize;
 use serde_json::{json, Value};
 

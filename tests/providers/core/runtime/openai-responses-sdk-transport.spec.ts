@@ -108,7 +108,7 @@ describe('OpenAiResponsesSdkTransport', () => {
 
       const requestBody = JSON.parse(String(calls[0].init?.body));
       expect(requestBody.stream).toBe(true);
-      expect((response as any).__sse_responses).toBeDefined();
+      expect((response as any).sseStream).toBeDefined();
     } finally {
       global.fetch = originalFetch;
     }
@@ -204,7 +204,7 @@ describe('OpenAiResponsesSdkTransport', () => {
         { requestId: 'req_stream_success' } as any
       );
       const chunks: Buffer[] = [];
-      for await (const chunk of (response as any).__sse_responses) {
+      for await (const chunk of (response as any).sseStream) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       const text = Buffer.concat(chunks).toString('utf8');

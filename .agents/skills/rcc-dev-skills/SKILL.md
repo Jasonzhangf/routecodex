@@ -25,6 +25,7 @@ description: RouteCodex 调试与架构路由入口
 | 架构总览 | `references/00-architecture-map.md` | 单一路径、分层职责、关键文件 |
 | PipeDebug 流程 | `references/10-pipedebug-flow.md` | 按阶段切段定位 |
 | 改动落点 | `references/20-change-index.md` | 功能改动先改哪 |
+| 改动流程 | `references/21-change-workflow.md` | 功能变更先看什么、怎么锁唯一修改点 |
 | 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
 | owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
 | `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
@@ -39,7 +40,7 @@ description: RouteCodex 调试与架构路由入口
 ### 1. 先判类
 - 架构 / 节点 / 责任 → `00` / `30`
 - 调试流程 → `10`
-- 改动落点 → `20`
+- 改动落点 / 修改顺序 → `20` / `21`
 - owner / gate / feature → `40` / `70`
 - 运行时配置 / provider → `50`
 - note / memory / skill 沉淀 → `60`

@@ -2,6 +2,7 @@
 
 import fs from 'node:fs/promises';
 import { execSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const baseUrl = process.env.STOPLESS_BASE_URL || 'http://127.0.0.1:5555';
 const models = String(
@@ -128,21 +129,67 @@ function extractExecCommand(responseBody) {
   };
 }
 
-function summarizeAttempt(model, attempt, response) {
-  const execCommand = extractExecCommand(response.body);
-  const outputText = typeof response.body?.output_text === 'string'
-    ? response.body.output_text
-    : extractOutputText(response.body);
+export function parseSseResponseEnvelope(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return null;
+  }
+  let latestResponse = null;
+  for (const line of raw.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data: ')) {
+      continue;
+    }
+    const payloadText = trimmed.slice(6);
+    if (!payloadText || payloadText === '{"type":"ping"}') {
+      continue;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch {
+      continue;
+    }
+    const response = payload?.response;
+    if (response && typeof response === 'object') {
+      latestResponse = response;
+    }
+  }
+  return latestResponse;
+}
+
+export function materializeProbeResponseBody(responseBody) {
+  if (!responseBody || typeof responseBody !== 'object') {
+    return responseBody;
+  }
+  if (typeof responseBody.raw !== 'string') {
+    return responseBody;
+  }
+  const parsed = parseSseResponseEnvelope(responseBody.raw);
+  if (!parsed) {
+    return responseBody;
+  }
+  return {
+    ...responseBody,
+    ...parsed
+  };
+}
+
+export function summarizeAttempt(model, attempt, response) {
+  const materializedBody = materializeProbeResponseBody(response.body);
+  const execCommand = extractExecCommand(materializedBody);
+  const outputText = typeof materializedBody?.output_text === 'string'
+    ? materializedBody.output_text
+    : extractOutputText(materializedBody);
   const execCommandText = execCommand?.command ?? null;
   return {
     model,
     attempt,
     status: response.status,
-    responseId: response.body?.id ?? null,
-    requestId: response.body?.request_id ?? response.body?.error?.request_id ?? null,
-    responseStatus: response.body?.status ?? null,
-    errorCode: response.body?.error?.code ?? null,
-    errorMessage: response.body?.error?.message ?? null,
+    responseId: materializedBody?.id ?? null,
+    requestId: materializedBody?.request_id ?? materializedBody?.error?.request_id ?? null,
+    responseStatus: materializedBody?.status ?? null,
+    errorCode: materializedBody?.error?.code ?? null,
+    errorMessage: materializedBody?.error?.message ?? null,
     hasExecCommand: Boolean(execCommandText),
     isStopMessageAutoExecCommand: isStopMessageAutoCommand(execCommandText),
     toolCallId: execCommand?.toolCallId ?? null,
@@ -177,7 +224,10 @@ function looksLikeStopSchema(text) {
 }
 
 function isStopMessageAutoCommand(command) {
-  return typeof command === 'string' && command.includes('routecodex servertool run stop_message_auto');
+  return typeof command === 'string' && (
+    command.includes('routecodex hook run reasoning_stop')
+    || command.includes('routecodex servertool run stop_message_auto')
+  );
 }
 
 async function runResumeRound(responseId, toolCallId, command) {
@@ -294,15 +344,25 @@ async function main() {
   process.exitCode = report.finalStatus === 'no_live_stopless_path' ? 2 : 3;
 }
 
-main().catch(async (error) => {
-  const failure = {
-    baseUrl,
-    models,
-    maxAttemptsPerModel,
-    finalStatus: 'probe_error',
-    error: error instanceof Error ? error.message : String(error)
-  };
-  await fs.writeFile(outputPath, JSON.stringify(failure, null, 2));
-  console.error(JSON.stringify(failure, null, 2));
-  process.exit(1);
-});
+function isDirectExecution() {
+  const entryPath = process.argv[1];
+  if (typeof entryPath !== 'string' || !entryPath) {
+    return false;
+  }
+  return pathToFileURL(entryPath).href === import.meta.url;
+}
+
+if (isDirectExecution()) {
+  main().catch(async (error) => {
+    const failure = {
+      baseUrl,
+      models,
+      maxAttemptsPerModel,
+      finalStatus: 'probe_error',
+      error: error instanceof Error ? error.message : String(error)
+    };
+    await fs.writeFile(outputPath, JSON.stringify(failure, null, 2));
+    console.error(JSON.stringify(failure, null, 2));
+    process.exit(1);
+  });
+}

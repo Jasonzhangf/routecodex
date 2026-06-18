@@ -179,7 +179,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
         executePipeline: async (input: any) => {
           const converted = await convertProviderResponse({
             providerProtocol: 'anthropic-messages',
-            providerResponse: { __sse_responses: Readable.from([sample.body.bodyText]) },
+            providerResponse: { sseStream: Readable.from([sample.body.bodyText]) },
             context: {
               requestId: input.requestId,
               entryEndpoint: '/v1/responses',
@@ -218,7 +218,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
     expect(sample?.meta?.providerKey).toBe('mimo.key1.mimo-v2.5');
     expect(sample?.body).toEqual(expect.objectContaining({ mode: 'sse' }));
     expect(sample?.body?.bodyText).toBeUndefined();
-    expect(sample?.body?.__sse_responses).toBeUndefined();
+    expect(sample?.body?.sseStream).toBeUndefined();
 
     await expect(convertProviderResponse({
       providerProtocol: 'anthropic-messages',
@@ -241,7 +241,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
 
     const converted = await convertProviderResponse({
       providerProtocol: 'anthropic-messages',
-      providerResponse: { __sse_responses: Readable.from([sample.body.bodyText]) },
+      providerResponse: { sseStream: Readable.from([sample.body.bodyText]) },
       context: {
         requestId: 'red_240111_stream_wants_stream',
         entryEndpoint: '/v1/responses',
@@ -251,7 +251,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
       wantsStream: true
     });
     expect(JSON.stringify(converted)).not.toContain('Anthropic response must contain content array');
-    expect(converted.body ?? converted.__sse_responses).toBeTruthy();
+    expect(converted.body ?? converted.sseStream).toBeTruthy();
   });
 
   it('maps Anthropic SSE raw marker text through the same materializer', async () => {
@@ -321,7 +321,7 @@ describe('responses HTTP anthropic provider response remap blackbox', () => {
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
     expect(sample?.body).toMatchObject({ mode: 'sse', captureSse: true, transport: 'prepared-request-executor' });
     expect(sample?.body?.bodyText).toBeUndefined();
-    expect(sample?.body?.__sse_responses).toBeUndefined();
+    expect(sample?.body?.sseStream).toBeUndefined();
 
     const app = express();
     app.use(express.json({ limit: '512kb' }));

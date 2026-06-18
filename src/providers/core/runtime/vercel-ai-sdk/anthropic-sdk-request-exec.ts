@@ -160,7 +160,7 @@ export async function executeAnthropicRequestWithBody(
       throw buildHttpError(502, 'missing upstream SSE body');
     }
     return {
-      __sse_responses: Readable.fromWeb(response.body as never),
+      sseStream: Readable.fromWeb(response.body as never),
       ...(responseHeaders ? { headers: responseHeaders } : {})
     };
   }

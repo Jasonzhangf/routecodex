@@ -21,6 +21,10 @@
 - `verify:architecture-review-surface-light` 已接入 `build` / `build:min`，位置在 `tsc` 前。
 - `verify:architecture-review-surface` 已接入 `verify:architecture-ci`。
 - `verify:architecture-ci-longtail` 已接入 `verify:architecture-ci`。
+- `verify:client-response-internal-carrier-surface` 已接入 `verify:architecture-ci`，静态锁定 client-visible response/SSE 层只有 `handler-response-common.ts` 与 `responses-response-bridge.ts` 允许显式识别 `__routecodex*` / `__rt` / `response.metadata`；`__sse_*` 在该层必须保持 0。
+- `verify:architecture-custom-payload-carrier-runtime-manifest` 已接入 `verify:architecture-ci-longtail`，静态锁定 `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 与当前 runtime 命中集合一致，不允许新增未分类热区或保留已失效 manifest 项。
+- `verify:architecture-custom-payload-carrier-owner-queryability` 已接入 `verify:architecture-ci-longtail`，静态锁定 `routecodex_prefix` / `response_metadata` 不得再出现 `missing-owner` 或 `missing-verification`，且 `sse_prefix` runtime files 必须保持 `0`。
+- `custom-payload-carrier-runtime-manifest.yml` 现已继续锁定每个 runtime 热区条目的 `owner_queryability` 与 `verification_state` baseline，避免已有 `unique-owner` 文件回退成 `ambiguous-owner` / `missing verification` 而不被 longtail 报警。
 - `verify:build-script-tiering` 已接入 `verify:architecture-ci-longtail`，静态锁定：
   - `build:dev` / `build:dev:full` 只能通过 `npm run build` 进入 canonical build 链；
   - `install:global` / `install:release` 只能通过各自 shell installer；
@@ -28,6 +32,7 @@
 - `verify:function-map-build-wiring` 已加锁：后续若移除 build/min 的 review surface light，或移除 architecture-ci 的 review surface / longtail，会直接失败。
 - `verify:architecture-mainline-node-id-consistency` 已接入 `verify:architecture-review-surface-light`，且 `verify:function-map-build-wiring` 已加锁：若 review surface light 移除此 gate，会直接失败。
 - `verify:function-map-build-wiring` 已继续加锁：若 `verify:architecture-ci-longtail` 移除 `verify:build-script-tiering`，会直接失败。
+- `verify:function-map-build-wiring` 已继续加锁：若 `verify:architecture-ci-longtail` 移除 `verify:architecture-custom-payload-carrier-owner-queryability`，会直接失败。
 
 已验证：
 
@@ -57,26 +62,117 @@
   - `npm run verify:architecture-mainline-mermaid-sync` PASS。
   - `git diff --check` PASS。
   - `metadata.center.mainline` 当前不再是“后半段全 pending”：
-    - `mtc-04` 已落到 `resolveRequestExecutorPipelineAttempt` 的真实 partial binding，记录当前 `target` / `compatibilityProfile` 投影仍走 flat metadata；
-    - `mtc-05` 已落到 `persistResponsesConversationLifecycleForHttp` 的真实 partial binding，记录 response closeout 当前以 `deriveFinishReason(...)` + MetadataCenter request truth 组合完成；
-    - `mtc-06` 已落到 `buildServerToolAdapterContext -> MetadataCenter.readRequestTruth()` 的真实 partial binding，锁住 servertool session/conversation 只读 center；
+    - `mtc-04` 已 anchored 到 `resolveRequestExecutorPipelineAttempt` 的真实 provider-observation 写边；
+    - `mtc-05` 已 anchored 到 `resolveResponsesConversationPersistInputsForHttp -> readRuntimeRequestTruthIdentifiers()` 的真实 request-truth read 边；
+    - `mtc-06` 已 anchored 到 `buildServerToolAdapterContext -> readRuntimeServerToolProjection()` 的真实 servertool projection read 边；
     - `mtc-07` 已落到 `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased` 的真实 anchored binding；JSON closeout、SSE finish/close、SSE bridge-error cleanup 已共用这条 closeout/release owner。
   - 当前 worktree 重新取证：
   - `npm run verify:architecture-review-surface-light` PASS。
   - `npm run verify:architecture-ci` PASS。
   - `npm run build:min` PASS。
+  - `npm run verify:client-response-internal-carrier-surface` PASS。
+  - `npm run verify:architecture-custom-payload-carrier-owner-queryability` PASS。
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS。
   - `node scripts/architecture/verify-build-script-tiering.mjs` PASS。
   - `node scripts/architecture/verify-function-map-build-wiring.mjs` PASS。
+  - `npm run audit:function-map-canonical-builder-spread` PASS，当前 `features_with_multi_file_canonical_builders=14`。
+  - `npm run verify:architecture-ci` 首次复跑暴露真实 review-surface 漂移：
+    - `vr.route_selection` 的 canonical node id `VrRoute04SelectedTarget` 被写进了 forbidden host path `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts` 的本地 `MetadataCenter` writer `stage`
+    - 已修为局部 observation 标签 `request_executor_pipeline_target_observation`
+    - 修后 `npm run verify:architecture-forbidden-path-growth` PASS，`npm run verify:architecture-ci` PASS
+  - `docs/architecture/custom-payload-carrier-runtime-manifest.yml` 当前分桶真相：
+    - `__routecodex*`: `payload_side_channel=10`、`local_runtime_marker=6`、`guard_surface=5`、`contract_or_test_surface=4`
+    - `response.metadata`: `guard_surface=1`、`local_runtime_marker=1`、`contract_or_test_surface=2`
+  - 同一 manifest 现在还机器编码了处置轨道，防止后续把不同 residue 当成同一类问题清理：
+    - `payload_side_channel -> side_channel_migration`
+    - `guard_surface -> guard_lock`
+    - `local_runtime_marker -> local_marker_rename`
+    - `contract_or_test_surface -> contract_boundary_only`
+  - `verify-custom-payload-carrier-containment.mjs` 现已不再手写第二份 runtime allowlist，而是直接消费 `custom-payload-carrier-runtime-manifest.yml`；containment / manifest 不再双维护。
+  - `audit:custom-payload-carriers` 现也直接输出 `runtime-category` / `runtime-resolution` 分布，避免把 `25` 个 runtime 文件误当成同一类问题。
+  - manifest 现已再细分 `semantic_family`，当前 machine-readable 结果：
+    - `routecodex_prefix.request_route_control = 9`
+    - `routecodex_prefix.response_followup_semantics = 3`
+    - `routecodex_prefix.request_route_control_contract = 4`
+    - `routecodex_prefix.client_response_guard = 1`
+    - `routecodex_prefix.request_entry_guard = 1`
+    - `routecodex_prefix.daemon_admin_local_marker = 1`
+    - `routecodex_prefix.response_metadata_protocol_guard = 1`
+    - `routecodex_prefix.provider_runtime_local_marker = 5`
+    - 其中 `executor-metadata.ts` 与 `servertool-followup-metadata.ts` 已确认只是 request-route-control 的 strip/guard surface，不再计入 `payload_side_channel`。
+    - `request-executor-response-inspect.ts::readServerToolFollowupSource` 也已作为零 runtime consumer helper 物理删除，不再算作 `response_followup_semantics` runtime residue。
+    - 这使后续 side-channel 清理可以按“真实 request-route control writer”与“response followup semantics”两条主线分开推进，而不是继续把 `payload_side_channel=10` 当成和 guard surface 混在一起的 residue。
+  - 同一 manifest 当前还锁定 owner/queryability baseline：
+    - `__routecodex*`: `unique-owner=20`、`ambiguous-owner=5`、`missing-verification=0`
+    - `response.metadata`: `unique-owner=4`、`ambiguous-owner=0`、`missing-verification=0`
+  - `docs/architecture/verification-map.yml` 已把以下 runtime 热区补进最小验证栈，避免 payload carrier 清理继续靠 grep：
+    - `src/providers/core/runtime/http-request-executor.ts`
+    - `src/providers/core/runtime/provider-request-header-orchestrator.ts`
+    - `src/providers/core/runtime/transport/oauth-header-preflight.ts`
+    - `src/server/handlers/handler-utils.ts`
+  - 同步后 `custom-payload-carrier-runtime-manifest.yml` 已把上述四项 `verification_state` 从 `missing` 收到 `present`
+  - 修后复验：
+    - `npm run audit:custom-payload-carrier-owner-queryability` PASS，`__routecodex*` 当前 `missing-verification=0`
+    - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+    - `npm run verify:architecture-ci-longtail` PASS
+    - `npm run verify:architecture-ci` PASS
+  - 当前 worktree（你这轮内部字段清理继续推进后）重新复核：
+    - `npm run audit:custom-payload-carriers` PASS
+    - `__routecodex*`: `runtime=72, test=103, script=16, doc=58`，runtime unique files=`25`
+    - `response.metadata`: `runtime=11, test=14, script=5, doc=46`，runtime unique files=`4`
+    - `npm run audit:custom-payload-carrier-owner-queryability` PASS，`__routecodex*` 当前 `unique-owner=20`、`ambiguous-owner=5`、`missing-owner=0`、`missing-verification=0`
+    - `response.metadata` 当前 `unique-owner=4`、`ambiguous-owner=0`、`missing-owner=0`、`missing-verification=0`
+    - `src/server/runtime/http-server/executor/provider-response-converter.ts::buildBridgeProviderResponseSeed(...)` 已移除 `response.metadata` bridge seed spread；stream-only bridge seed 仅保留 `sseStream/status/headers`。
+    - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+    - `node scripts/architecture/verify-custom-payload-carrier-containment.mjs` PASS
+    - `npm run verify:function-map-compile-gate` PASS
+    - `npm run verify:architecture-ci-longtail` PASS
+    - `npm run verify:architecture-wiki-browser-smoke` PASS
+    - `npm run verify:architecture-mainline-mermaid-sync` PASS
+    - `npm run verify:architecture-forbidden-path-growth` PASS
+    - `npm run verify:architecture-adjacent-builder-naming` PASS
 
-新增审计发现（未在本轮 gate 栈内收口）：
+新增审计发现（已由当前 worktree focused tests 证明收口）：
 
-- `tests/red-tests/server_sse_guard_e2e.test.ts` 当前显示 `assertClientResponseHasNoInternalCarriers(...)` 对顶层 `metadata` 字段仍非一律 fail-fast；现实现只在 `metadata` 内含内部控制键时才报错。
-- 这与“非协议标准字段不得混入请求/响应 payload”新规则不完全一致，应在 Jason 的内部字段清理线完成后，统一收口为 payload 层直接禁止 `metadata` 进入 client-visible body/SSE data。
+- `assertClientResponseHasNoInternalCarriers(...)` 现在已对“非 `response` / `response.*` 协议形状”的顶层 `metadata` 做 fail-fast。
+- direct same-protocol `event: response.metadata` 仍允许普通 provider metadata 透传，但一旦 metadata 内含 `__routecodex*` / `__rt*` / internal control keys` 仍必须 fail-fast。
+- 已验证：
+  - `tests/red-tests/server_sse_guard_e2e.test.ts` PASS
+  - `tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` PASS
 
 当前剩余非 blocker 缺口：
 
-- 本轮补的是“install/build 调用层级防漂移 gate”，不是一次新的 release/global install 实机 smoke；也就是说，当前已经有静态机器锁保证安装链不会绕开 `build:min`，但没有在这条 slice 里重新执行 `install:global` / `install:release` 端到端安装验证。
+- 这条 slice 后续已补跑真实 install/live：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_INPLACE_BUILD=1 ROUTECODEX_BUILD_RESTART_ONLY=1 ./scripts/install-global.sh`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH routecodex --version` => `0.90.3105`
+  - `routecodex restart --port 5555` / `routecodex restart --port 5520`
+  - `curl -s http://127.0.0.1:5555/health` / `:5520/health` => `ready=true pipelineReady=true version=0.90.3105`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/tests/stopless-5555-live-probe.mjs` PASS
+  - 仍保留的事实是：`install-global.sh` 在 snapshot refresh 后可能尾部空转，不能把“脚本未退出”直接等同于“安装失败”；真实结论要看 CLI 版本、显式 restart、health 与 live probe。
 - `verify-no-custom-payload-carriers` 当前是“已知高风险 token denylist”，不是 generic `__routecodex*` / `__sse_*` 前缀防复活 gate；它当前也不扫描 `tests` / `scripts` / `docs`。这对 review-surface 绿灯足够，但对 Jason 最新“所有非标准 payload 字段都要锁死”规则还不是最终形态。
+- 新增的 `verify:client-response-internal-carrier-surface` 只锁 client-visible response/SSE projection 层的前缀认知面，不等于 runtime 全局 `__routecodex*` 前缀清零；provider/runtime 内部 marker 去前缀仍要等 Jason 的实现线与后续 containment 审计收口。
+- 新增的 runtime manifest 也不是 prefix 清零 gate；它的作用是把 remaining runtime hits 变成可查询的语义分桶，后续才能按 `payload_side_channel -> MetadataCenter/runtime side-channel`、`local_runtime_marker -> typed local field` 分别清理，而不是继续把 26 个 runtime 文件当成同一类问题。
+- runtime manifest 现在还额外锁了 machine-readable `resolution track`；这能防止后续把 `guard_surface` 或 `local_runtime_marker` 误归为 payload 清理对象，但它仍不是 prefix 清零 gate，本身不证明 runtime 已完成字段迁移。
+- runtime manifest 现在也锁了 `semantic_family`；它能证明“剩余 side-channel 到底是哪条主线的语义”，但仍不证明这些字段已经迁离 payload truth，本身不能替代实际 runtime 清理。
+- baseline 里仍保留的 `ambiguous-owner` 主要都在 Rust crate broad-owner 区；这说明当前下一阶段更高价值的工作不是继续加新 deny token，而是把 Rust broad-owner 带拆成更窄的真实 owner，尤其是 `payload_side_channel` 那 10 个文件里仍落在 Rust broad owner 的部分。
+- `audit:function-map-canonical-builder-spread` 已证明这批 broad owner 不是简单 map 噪音：
+  - `vr.route_selection`
+  - `virtual_router.primary_exhausted_to_default_pool`
+  - `vr.provider_forwarder_runtime`
+  - `hub.metadata_boundary`
+  - `hub.response_post_servertool_client_projection`
+  - 这些 feature 的 canonical builders 客观分布在多个文件；直接收窄 `owner_module` 会破坏 compile gate 的真实性。
+  - 因此下一步 owner/queryability 收口必须走 truthy sub-feature split，而不是伪 file-owner 收窄。
+- `metadata.center.mainline / mtc-03` 当前仍有一个 review-surface truth gap：
+  - 当前 first-batch 实际槽位已可从源码证实，不应再只写成泛化描述：
+    - `routeHint`, `routeName`, `routeId`, `providerProtocol`
+    - `retryProviderKey`, `preselectedRoute`
+    - `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`
+    - `stopMessageEnabled`, `stopMessageExcludeDirect`
+  - 本轮 `metadata-center.ts` / `request-truth-readers.ts` 的 `runtimeControl` plumbing 已落地，machine-readable manifest 也已同步到 first-batch slots
+  - 所以 review-surface 的下一执行 slice 已前移为：先动 `request-executor-attempt-state.ts` 这类窄 writer，再收更宽的 entry shell / followup materializer
 
 ## 范围与边界
 
@@ -240,7 +336,7 @@ Out of scope：
 
 1. 记录当前红 gate 输出到 `note.md`。
 2. 修正 mainline call map 的 metadata center edge 绑定。
-   - 当前阶段不追求把 `mtc-04` / `mtc-05` / `mtc-06` 伪装成 fully anchored family implementation；若 repo 真实实现仍是 flat projection，就只升到 `partial`。
+   - 当前阶段不追求把“尚未成为 first-class family 的语义”伪装成已完成 family migration；只有在 caller/callee/read/write helper 都已真实存在时才升到 `anchored`。
 3. 强化 pending edge validator，补红测或 fixture 证明 stale pending symbol 会被拦。
 4. 重新生成 wiki Markdown 与 HTML，跑 sync gate。
 5. 修复 duplicate-owner longtail，跑 longtail gate。

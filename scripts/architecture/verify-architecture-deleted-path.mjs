@@ -100,6 +100,8 @@ const deletedPathDenylist = [
   'src/providers/core/utils/tool-result-text.ts',
   'src/providers/core/utils/transformation-engine.ts',
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-media.ts',
+  'src/server/runtime/http-server/executor/servertool-response-normalizer.ts',
+  'src/server/runtime/http-server/executor/servertool-request-normalizer.ts',
 ];
 const deletedContentDenylist = [
   {
@@ -112,6 +114,33 @@ const deletedContentDenylist = [
       'export interface DispatchCenter',
       'export interface DispatchNotification',
     ],
+  },
+];
+const repoWideDeletedContentDenylist = [
+  {
+    token: 'buildServerToolSseWrapperBody',
+    roots: ['src', 'sharedmodule/llmswitch-core/src', 'tests', 'scripts'],
+    reason: 'servertool SSE wrapper builder was removed; SSE stream/control state must use typed side-channel, not payload wrapper builder.',
+  },
+  {
+    token: 'servertool-response-normalizer',
+    roots: ['src', 'sharedmodule/llmswitch-core/src', 'tests', 'scripts'],
+    reason: 'deleted servertool-response-normalizer module must not be restored.',
+  },
+  {
+    token: 'deriveFinishReasonWithVisibleSuccessFallback',
+    roots: ['src', 'tests', 'scripts'],
+    reason: 'finish reason fallback alias was removed; all runtime and test consumers must use deriveFinishReason directly.',
+  },
+  {
+    token: 'bodyContainsReasoningStopFinalizedMarker',
+    roots: ['src', 'tests', 'scripts'],
+    reason: 'reasoning-stop finalized marker helper was removed; runtime and tests must not restore the dead marker inspection path.',
+  },
+  {
+    token: '__routecodex_reasoning_stop_finalized',
+    roots: ['src', 'sharedmodule/llmswitch-core/src', 'tests', 'scripts'],
+    reason: 'non-standard reasoning-stop finalized payload marker was removed; internal control must not return through payload fields.',
   },
 ];
 
@@ -149,6 +178,26 @@ function parseOwners(text) {
   return owners;
 }
 
+function walkTextFiles(dir, files = []) {
+  if (!fs.existsSync(dir)) return files;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'dist' || entry.name === 'target' || entry.name === 'node_modules') {
+      continue;
+    }
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkTextFiles(full, files);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name);
+    if (['.c', '.h', '.js', '.jsx', '.mjs', '.rs', '.ts', '.tsx'].includes(ext)) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
 const failures = [];
 for (const rel of deletedPathDenylist) {
   const abs = path.join(root, rel);
@@ -163,6 +212,26 @@ for (const entry of deletedContentDenylist) {
   for (const token of entry.tokens) {
     if (text.includes(token)) {
       failures.push(`deleted_content resurrected -> ${entry.file}: ${token}`);
+    }
+  }
+}
+for (const rule of repoWideDeletedContentDenylist) {
+  for (const relRoot of rule.roots) {
+    for (const file of walkTextFiles(path.join(root, relRoot))) {
+      const relFile = path.relative(root, file);
+      if (relFile === 'scripts/architecture/verify-architecture-deleted-path.mjs') {
+        continue;
+      }
+      if (
+        rule.token === '__routecodex_reasoning_stop_finalized'
+        && relFile === 'scripts/architecture/verify-no-custom-payload-carriers.mjs'
+      ) {
+        continue;
+      }
+      const text = fs.readFileSync(file, 'utf8');
+      if (text.includes(rule.token)) {
+        failures.push(`deleted_content resurrected -> ${relFile}: ${rule.token} (${rule.reason})`);
+      }
     }
   }
 }
@@ -198,3 +267,4 @@ console.log('[verify:architecture-deleted-path] ok');
 console.log(`- checked ${parseOwners(mapText).length} features for dead allowed_paths / required_tests / required_gates`);
 console.log(`- checked ${deletedPathDenylist.length} deleted paths stay absent`);
 console.log(`- checked ${deletedContentDenylist.length} files for deleted content residues`);
+console.log(`- checked ${repoWideDeletedContentDenylist.length} repo-wide deleted content residues`);

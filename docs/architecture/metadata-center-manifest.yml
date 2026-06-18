@@ -42,8 +42,13 @@ families:
       - routeId
       - providerProtocol
       - providerFamily
+      - retryProviderKey
+      - preselectedRoute
       - serverToolFollowup
-      - stopMessage
+      - serverToolFollowupSource
+      - stoplessGoalStatus
+      - stopMessageEnabled
+      - stopMessageExcludeDirect
       - streamIntent
       - clientAbort
   provider_observation:
@@ -51,6 +56,8 @@ families:
       - target
       - providerKey
       - assignedModelId
+      - modelId
+      - clientModelId
       - compatibilityProfile
       - responseSemantics
       - finishReason

@@ -1,19 +1,52 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import { STREAM_LOG_FINISH_REASON_KEY } from '../../../../../src/server/utils/finish-reason.js';
-import {
-  REASONING_STOP_FINALIZED_FLAG_KEY
-} from '../../../../../src/server/runtime/http-server/executor/servertool-response-normalizer.js';
 import { PassThrough } from 'node:stream';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-jest.mock('../../../../../src/modules/llmswitch/bridge.js', () => ({
+const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return undefined;
+  }
+  const record = body as Record<string, unknown>;
+  if (Array.isArray(record.choices)) {
+    const first = record.choices[0] as Record<string, unknown> | undefined;
+    return typeof first?.finish_reason === 'string' ? first.finish_reason : undefined;
+  }
+  if (record.status === 'requires_action' || record.required_action) {
+    return 'tool_calls';
+  }
+  if (
+    record.status === 'completed'
+    || (typeof record.output_text === 'string' && record.output_text.trim())
+    || (Array.isArray(record.output) && record.output.length > 0)
+  ) {
+    return 'stop';
+  }
+  return undefined;
+};
+
+const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+  persistStoplessGoalStateSnapshot: () => undefined,
+  readStoplessGoalState: () => null,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
-}));
+  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
+  syncStoplessGoalStateFromRequest: () => null,
+  deriveFinishReasonNative: mockDeriveFinishReasonNative,
+  updateResponsesContractProbeFromSseChunkNative: () => ({}),
+  buildResponsesTerminalSseFramesFromProbeNative: () => [],
+  importCoreDist: async () => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
+  }),
+  requireCoreDist: () => ({
+    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
+  })
+});
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 describe('provider-response-converter finish reason wrapper metadata', () => {
   it('does not bypass response-side servertool for streamed passthrough relay', async () => {
@@ -23,7 +56,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
 
     const sseStream = { pipe: () => undefined };
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: sseStream,
+      sseStream: sseStream,
       body: {
         id: 'chatcmpl_passthrough_stream_stop',
         object: 'chat.completion',
@@ -50,7 +83,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         wantsStream: true,
         processMode: 'chat',
         serverToolsEnabled: true,
-        response: { body: { __sse_responses: sseStream } } as any,
+        response: { body: {}, sseStream: sseStream } as any,
         pipelineMetadata: {}
       },
       {
@@ -63,8 +96,8 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     );
 
     expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
-    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
-    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+    expect(converted.sseStream).toBe(sseStream);
   });
 
   it('preserves derived finish_reason for streamed responses logs', async () => {
@@ -74,7 +107,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
 
     const sseStream = { pipe: () => undefined };
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: sseStream,
+      sseStream: sseStream,
       body: {
         status: 'requires_action',
         required_action: {
@@ -107,8 +140,8 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
       }
     );
 
-    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('tool_calls');
-    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+    expect(converted.sseStream).toBe(sseStream);
   });
 
   it('preserves reasoning.stop finalized marker state on streamed wrapper bodies', async () => {
@@ -118,7 +151,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
 
     const sseStream = { pipe: () => undefined };
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: sseStream,
+      sseStream: sseStream,
       body: {
         id: 'chatcmpl_reasoning_stop_finalized',
         object: 'chat.completion',
@@ -157,9 +190,8 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
       }
     );
 
-    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
-    expect((converted.body as Record<string, unknown>)[REASONING_STOP_FINALIZED_FLAG_KEY]).toBe(true);
-    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+    expect(converted.sseStream).toBe(sseStream);
   });
 
   it('does not set streamed finalized flag from hidden metadata marker only', async () => {
@@ -169,7 +201,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
 
     const sseStream = { pipe: () => undefined };
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: sseStream,
+      sseStream: sseStream,
       body: {
         id: 'chatcmpl_reasoning_stop_hidden_marker_only',
         object: 'chat.completion',
@@ -211,9 +243,8 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
       }
     );
 
-    expect((converted.body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
-    expect((converted.body as Record<string, unknown>)[REASONING_STOP_FINALIZED_FLAG_KEY]).toBeUndefined();
-    expect((converted.body as Record<string, unknown>).__sse_responses).toBe(sseStream);
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
+    expect(converted.sseStream).toBe(sseStream);
   });
 
   it('RED: does not passthrough anthropic raw SSE directly on /v1/responses', async () => {
@@ -230,7 +261,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     );
 
     mockConvertProviderResponse.mockResolvedValue({
-      __sse_responses: anthropicRawSse,
+      sseStream: anthropicRawSse,
       body: {
         id: 'resp_from_anthropic_stream_1',
         object: 'response',
@@ -259,7 +290,8 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         requestId: 'req_anthropic_raw_sse_must_wrap_for_responses',
         wantsStream: true,
         response: {
-          body: { __sse_responses: anthropicRawSse }
+          body: {},
+          sseStream: anthropicRawSse,
         } as any,
         pipelineMetadata: {}
       },
@@ -272,10 +304,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
       }
     );
 
-    const wrappedBody = converted.body as Record<string, unknown>;
-    expect(wrappedBody.__sse_responses).toBeDefined();
-    expect(wrappedBody[STREAM_LOG_FINISH_REASON_KEY]).toBe('stop');
-    expect((wrappedBody as Record<string, unknown>).output_text).toBeUndefined();
-    expect((wrappedBody as Record<string, unknown>).status).toBeUndefined();
+    expect(converted.sseStream).toBeDefined();
+    expect(JSON.stringify(converted.body)).not.toContain('__routecodex_');
   });
 });

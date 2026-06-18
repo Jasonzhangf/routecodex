@@ -68,6 +68,7 @@ export type PrepareResponsesHandlerRuntimeForHttpArgs = {
   entryEndpoint: string;
   responseIdFromPath?: string;
   requestId: string;
+  requestMetadata?: Record<string, unknown>;
   portScope?: ResponsesConversationPortScopeForHttp;
   forceStream?: boolean;
   acceptsSse: boolean;
@@ -125,7 +126,6 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     clientHeaders: args.clientHeaders,
     clientConnectionState: args.clientConnectionState,
     ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
-    responsesRequestContext: args.requestContext,
   };
   const center = MetadataCenter.attach(metadata);
   center.writeContinuationContext(
@@ -134,7 +134,7 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     {
       module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
       symbol: 'buildResponsesPipelineMetadataForHttp',
-      stage: 'HubReqInbound02Standardized'
+      stage: 'MetaReq03ContinuationAttached'
     }
   );
   if (args.resumeMeta) {
@@ -144,7 +144,7 @@ export function buildResponsesPipelineMetadataForHttp(args: {
       {
         module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
         symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'HubReqInbound02Standardized'
+        stage: 'MetaReq03ContinuationAttached'
       }
     );
   }
@@ -201,23 +201,47 @@ export function planResponsesHandlerStreamForHttp(args: {
 }
 
 export function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
-  const value = typeof metadata?.session_id === 'string'
-    ? metadata.session_id
-    : typeof metadata?.sessionId === 'string'
-      ? metadata.sessionId
+  const clientHeaders =
+    metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
+      ? (metadata.clientHeaders as Record<string, unknown>)
       : undefined;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed || undefined;
+  const candidates = [
+    metadata?.session_id,
+    metadata?.sessionId,
+    clientHeaders?.session_id,
+    clientHeaders?.sessionId,
+    clientHeaders?.['session-id'],
+    clientHeaders?.['x-session-id']
+  ];
+  for (const candidate of candidates) {
+    const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
 }
 
 export function readResponsesConversationIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
-  const value = typeof metadata?.conversation_id === 'string'
-    ? metadata.conversation_id
-    : typeof metadata?.conversationId === 'string'
-      ? metadata.conversationId
+  const clientHeaders =
+    metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
+      ? (metadata.clientHeaders as Record<string, unknown>)
       : undefined;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed || undefined;
+  const candidates = [
+    metadata?.conversation_id,
+    metadata?.conversationId,
+    clientHeaders?.conversation_id,
+    clientHeaders?.conversationId,
+    clientHeaders?.['conversation-id'],
+    clientHeaders?.['x-conversation-id']
+  ];
+  for (const candidate of candidates) {
+    const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
 }
 
 export function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {
@@ -401,10 +425,11 @@ export async function buildResponsesRequestContextForHttp(args: {
     requestId: args.requestId,
     toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
   });
+  const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
   const capturedInput = Array.isArray(captured.input) ? captured.input : [];
   const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
   return {
-    payload: args.payload,
+    payload: payloadForPersistence,
     context: {
       input: capturedInput,
       toolsRaw: capturedToolsRaw,
@@ -473,7 +498,11 @@ export async function prepareResponsesHandlerEntryForHttp(
       matchedPort: args.matchedPort,
       routingPolicyGroup: args.routingPolicyGroup,
     });
-    pipelineEntryEndpoint = args.entryEndpoint;
+    // Relay-owned continuation is already materialized into a normal
+    // /v1/responses payload; keep it on the mainline instead of letting
+    // downstream provider/runtime layers reinterpret it as upstream-native
+    // submit_tool_outputs.
+    pipelineEntryEndpoint = '/v1/responses';
     return {
       kind: 'ok',
       payload: (resumeResult.payload ?? {}) as AnyRecord,
@@ -527,8 +556,12 @@ export async function prepareResponsesHandlerRuntimeForHttp(
     requestTimeoutMs: args.requestTimeoutMs,
   });
   const requestBodyMetadata = readRequestBodyMetadataForHttp(args.payload);
-  const sessionId = readResponsesSessionIdFromHttp(requestBodyMetadata);
-  const conversationId = readResponsesConversationIdFromHttp(requestBodyMetadata);
+  const effectiveRequestMetadata = {
+    ...(requestBodyMetadata ?? {}),
+    ...(args.requestMetadata ?? {})
+  };
+  const sessionId = readResponsesSessionIdFromHttp(effectiveRequestMetadata);
+  const conversationId = readResponsesConversationIdFromHttp(effectiveRequestMetadata);
   try {
     const preparedEntry = await prepareResponsesHandlerEntryForHttp({
       payload: args.payload,
@@ -561,7 +594,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       requestContext: await buildResponsesRequestContextForHttp({
         payload,
         requestId: args.requestId,
-        metadata: requestBodyMetadata,
+        metadata: effectiveRequestMetadata,
         matchedPort: args.portScope?.matchedPort,
         routingPolicyGroup: args.portScope?.routingPolicyGroup,
       }),
@@ -637,14 +670,11 @@ export function attachResponsesRequestContextToResultForHttp(args: {
   }
   const nextMetadata = {
     ...(args.resultMetadata || {}),
-    responsesRequestContext:
-      (args.resultMetadata?.responsesRequestContext as Record<string, unknown> | undefined)
-      ?? args.requestContext,
   };
   const center = MetadataCenter.attach(nextMetadata);
   center.writeContinuationContext(
     'responsesRequestContext',
-    (nextMetadata.responsesRequestContext as Record<string, unknown>) ?? args.requestContext,
+    args.requestContext,
     {
       module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
       symbol: 'attachResponsesRequestContextToResultForHttp',

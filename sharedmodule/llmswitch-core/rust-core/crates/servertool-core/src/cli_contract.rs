@@ -357,6 +357,17 @@ fn build_stopless_cli_model_guidance(
     current_repeat_count: u32,
 ) -> String {
     let mut parts = Vec::<String>::new();
+    if let Some(feedback) = schema_feedback {
+        let missing = if feedback.missing_fields.is_empty() {
+            String::from("[]")
+        } else {
+            format!("[{}]", feedback.missing_fields.join(", "))
+        };
+        parts.push(format!(
+            "schemaFeedback: reasonCode={}, missingFields={}",
+            feedback.reason_code, missing
+        ));
+    }
     let prompt = continuation_prompt.trim();
     if !prompt.is_empty() {
         parts.push(prompt.to_string());
@@ -1320,6 +1331,8 @@ mod tests {
         .expect("second round stop_message_auto output");
         assert!(output.model_guidance.contains("如果任务已经完成，补齐 stop schema"));
         assert!(output.model_guidance.contains("如果任务还没完成，不要停，继续执行当前任务"));
+        assert!(output.model_guidance.contains("schemaFeedback: reasonCode=stop_schema_missing"));
+        assert!(output.model_guidance.contains("missingFields=[stopreason, reason, next_step]"));
     }
 
     #[test]

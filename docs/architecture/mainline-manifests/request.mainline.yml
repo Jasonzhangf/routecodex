@@ -1,0 +1,36 @@
+lifecycle_id: request.mainline
+summary: HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build.
+owner_feature_id: server.responses_request_handler_bridge_surface
+owner_module: src/modules/llmswitch/bridge/responses-request-bridge.ts
+entrypoint:
+  node_id: ServerReqInbound01ClientRaw
+  wiki_page: docs/design/pipeline-type-topology-and-module-boundaries.md
+  call_map_chain_id: request.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubReqOutbound05ProviderSemantic
+  - ProviderReqOutbound06WirePayload
+  - ServerReqInbound01ClientRaw
+  - VrRoute04SelectedTarget
+step_ids:
+  - req-00
+  - req-01
+  - req-02
+  - req-03
+  - req-04
+  - req-05
+edge_status_counts:
+  anchored: 3
+  partial: 1
+  binding_pending: 2
+  total: 6
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: request.mainline
+  min_function_feature: server.responses_request_handler_bridge_surface
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

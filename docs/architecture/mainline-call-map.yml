@@ -404,8 +404,8 @@ chains:
         callee_symbol: plan_client_exec_cli_projection_output
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "flowId/repeatCount/maxRepeats/triggerHint only"
-        semantic_output: "client-visible exec_command using public alias reasoning_stop; no sessionDir/sessionId/requestId flags"
+        semantic_input: "concise stopless command payload: flowId/repeatCount/maxRepeats/triggerHint plus optional schemaFeedback{reasonCode,missingFields}"
+        semantic_output: "client-visible exec_command using public alias reasoning_stop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
         status: anchored
       - step_id: stl-04
         from_node: StoplessCli04ProjectionPlanned
@@ -416,11 +416,11 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "exec_command shell string with status-only input and repeat flags"
-        semantic_output: "servertool CLI stdout JSON containing continuationPrompt/schemaGuidance/repeatCount/maxRepeats"
+        semantic_output: "servertool CLI stdout JSON containing continuationPrompt, schemaGuidance, structured schemaFeedback, repeatCount, and maxRepeats"
         status: anchored
       - step_id: stl-05
         from_node: StoplessCli06ClientExecuted
-        to_node: StoplessReq08NextTurnMaterialized
+        to_node: StoplessReq07ContinuationRestored
         caller_symbol: has_stop_message_auto_cli_result_in_request_json
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
         callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
@@ -430,19 +430,41 @@ chains:
         semantic_output: "stopless runtime snapshot restored into request turn without file persistence"
         status: anchored
       - step_id: stl-06
-        from_node: StoplessReq08NextTurnMaterialized
+        from_node: StoplessReq07ContinuationRestored
+        to_node: StoplessReq08GuidanceRewritten
+        caller_symbol: buildChatRequestFromResponses
+        caller_file: sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts
+        callee_symbol: convertBridgeInputToChatMessages
+        callee_file: sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
+        semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn"
+        status: anchored
+      - step_id: stl-07
+        from_node: StoplessReq08GuidanceRewritten
+        to_node: StoplessReq09SchemaContractInjected
+        caller_symbol: apply_req_process_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        callee_symbol: inject_stopless_system_instruction
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "next-turn request after stopless guidance rewrite"
+        semantic_output: "stopless schema contract physically rebound to request mainline (`messages` for chat, `instructions` for responses)"
+        status: anchored
+      - step_id: stl-08
+        from_node: StoplessReq09SchemaContractInjected
         to_node: VrRoute04SelectedTarget
         caller_symbol: classify
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
         callee_symbol: classify
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "stopless followup metadata/current-turn signal"
+        semantic_input: "stopless followup metadata/current-turn signal plus rebound schema contract"
         semantic_output: "thinking route; historical tools route hint must not dominate stopless turn"
         status: anchored
 
   - chain_id: metadata.center.mainline
-    summary: "future request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
+    summary: "request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
     entry_contract:
       node: MetaReq01InboundSeeded
       owner_doc: docs/architecture/wiki/metadata-center-mainline-source.md
@@ -452,25 +474,37 @@ chains:
         to_node: MetaReq02TruthMaterialized
         caller_symbol: buildRequestMetadata
         caller_file: src/server/runtime/http-server/executor-metadata.ts
-        callee_symbol: mergePipelineMetadata
-        callee_file: src/server/handlers/handler-utils.ts
+        callee_symbol: writeRequestTruth
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "client request metadata seed plus request body metadata"
         semantic_output: "request truth candidates (`requestId/sessionId/conversationId/entryEndpoint/clientRequestId`) captured into one request-scoped carrier"
-        status: binding pending
-        note: "Current implementation still uses flat metadata merge; future center must replace this with typed request_truth slots."
+        status: anchored
+        note: "Current implementation writes `request_truth.sessionId/conversationId` in `buildRequestMetadata`; `buildHandlerPipelineMetadata` is no longer the request-truth owner."
       - step_id: mtc-02
         from_node: MetaReq02TruthMaterialized
         to_node: MetaReq03ContinuationAttached
-        caller_symbol: buildResponsesRequestContextForHttp
+        caller_symbol: buildResponsesPipelineMetadataForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        callee_symbol: buildResponsesRequestContextForHttp
-        callee_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: writeContinuationContext
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "request truth plus responses continuation inputs"
-        semantic_output: "continuation context attached separately from request truth; `responsesRequestContext.*` must not redefine request `sessionId/conversationId`"
-        status: binding pending
-        note: "Current implementation still builds continuation context on flat metadata/request objects; future center must attach `continuation_context` as a separate family with no write-back into `request_truth`."
+        semantic_input: "request truth plus responses pipeline continuation inputs"
+        semantic_output: "responses request context and resume metadata attached as continuation context without redefining request truth"
+        status: anchored
+        note: "Pipeline metadata write attaches `responsesRequestContext` and optional `responsesResume` into `continuation_context`; request truth remains write-once."
+      - step_id: mtc-02-result
+        from_node: MetaReq02TruthMaterialized
+        to_node: MetaReq03ContinuationAttached
+        caller_symbol: attachResponsesRequestContextToResultForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: writeContinuationContext
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
+        owner_feature_id: hub.metadata_center_mainline
+        semantic_input: "request truth plus responses result continuation context"
+        semantic_output: "responses request context attached to pipeline result metadata as continuation context without redefining request truth"
+        status: anchored
+        note: "Result metadata write attaches `responsesRequestContext` into `continuation_context`; tests lock continuation-only cases cannot materialize request truth."
       - step_id: mtc-03
         from_node: MetaReq03ContinuationAttached
         to_node: MetaReq04RuntimeControlBound
@@ -480,9 +514,9 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request metadata carrier plus pipeline result metadata"
-        semantic_output: "runtime control (`routeHint/routeName/serverToolFollowup/stream`) attached without flattening over request truth"
-        status: binding pending
-        note: "Current implementation still merges flat objects; metadata center must split request truth and runtime control families."
+        semantic_output: "partial runtime-control contract attached without redefining request truth: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) remain only partly first-class"
+        status: partial
+        note: "Current implementation now has first-class `runtimeControl` state/read/write/release coverage plus a host-side projection reader, but production writers still use flat merge/materialization for the first-batch control slots; request truth is rebound from the center and no longer overwritten by pipeline metadata."
       - step_id: mtc-04
         from_node: MetaReq04RuntimeControlBound
         to_node: MetaReq05ProviderObservationProjected
@@ -492,45 +526,45 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "selected target plus runtime metadata for current attempt"
-        semantic_output: "provider observation (`target/providerKey/compatibilityProfile/model`) projected as separate family"
-        status: binding pending
-        note: "Current implementation still carries provider/routing observation through shared metadata/result objects; future center must project `provider_observation` without reopening request-truth writes."
+        semantic_output: "selected target is written into `provider_observation` slots (`target/providerKey/assignedModelId/modelId/clientModelId/compatibilityProfile`) without reviving flat request metadata fields"
+        status: anchored
+        note: "Current owner now writes provider observation through `MetadataCenter.writeProviderObservation(...)` inside `resolveRequestExecutorPipelineAttempt`; flat `mergedMetadata.target` / `mergedMetadata.compatibilityProfile` revival is physically removed."
       - step_id: mtc-05
         from_node: MetaReq05ProviderObservationProjected
         to_node: MetaResp06ResponseObserved
-        caller_symbol: convertProviderResponseIfNeeded
-        caller_file: src/server/runtime/http-server/executor/provider-response-converter.ts
-        callee_symbol: convertProviderResponseIfNeeded
-        callee_file: src/server/runtime/http-server/executor/provider-response-converter.ts
+        caller_symbol: resolveResponsesConversationPersistInputsForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        callee_symbol: readRuntimeRequestTruthIdentifiers
+        callee_file: src/server/runtime/http-server/metadata-center/request-truth-readers.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
-        semantic_output: "response observation (`finishReason/responseSemantics`) attached without overwriting request truth"
-        status: binding pending
-        note: "Current response conversion path still reads/writes mixed metadata and response fields together; future center must append response observation/provenance without flattening over earlier families."
+        semantic_output: "response closeout derives `finishReason` and uses MetadataCenter-backed request truth for lifecycle persistence without reopening request truth"
+        status: anchored
+        note: "The closeout helper still derives `finishReason` locally, but the request-truth read for lifecycle persistence is now a concrete edge to `readRuntimeRequestTruthIdentifiers(...)`; a first-class `response_observation` family is still not implemented."
       - step_id: mtc-06
         from_node: MetaResp06ResponseObserved
         to_node: MetaResp07ServertoolContextProjected
         caller_symbol: buildServerToolAdapterContext
         caller_file: src/server/runtime/http-server/executor/servertool-adapter-context.ts
-        callee_symbol: backfillAdapterContextSessionIdentifiersFromEntryOriginRequest
-        callee_file: src/server/runtime/http-server/executor/servertool-request-normalizer.ts
+        callee_symbol: readRuntimeServerToolProjection
+        callee_file: src/server/runtime/http-server/metadata-center/request-truth-readers.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request/continuation/runtime/provider observation families"
-        semantic_output: "read-only servertool projection; request truth must stay distinct from continuation context and client attachment scope"
-        status: binding pending
-        note: "Current adapter context still performs session backfill from multiple sources; future center should replace this with deterministic projections."
+        semantic_output: "servertool adapter context reads request truth from MetadataCenter and projects session/conversation truth without reusing continuation context as request truth"
+        status: anchored
+        note: "The servertool adapter context now projects request truth plus provider observation through `readRuntimeServerToolProjection(...)`; broader adapter enrichment still happens locally, but the MetadataCenter-backed projection edge is concrete."
       - step_id: mtc-07
         from_node: MetaResp07ServertoolContextProjected
         to_node: MetaResp08CloseoutReleased
-        caller_symbol: buildProviderExecutionSuccessResult
-        caller_file: src/server/runtime/http-server/executor/request-executor-provider-response.ts
-        callee_symbol: buildProviderExecutionSuccessResult
-        callee_file: src/server/runtime/http-server/executor/request-executor-provider-response.ts
+        caller_symbol: releaseMetadataCenterForHttpResponse
+        caller_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
+        callee_symbol: markReleased
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "response observation plus final client/servertool outcome"
-        semantic_output: "metadata center status finalized/released for the current request closeout"
-        status: binding pending
-        note: "No explicit center exists yet; this edge documents the intended closeout owner for future implementation."
+        semantic_input: "response observation plus final client/servertool outcome reaching handler closeout"
+        semantic_output: "metadata center request-truth and continuation-context slots marked released for the current request closeout"
+        status: anchored
+        note: "The closeout helper is invoked by JSON response completion, SSE finish/close cleanup, and SSE bridge-error early-close paths."
 
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture

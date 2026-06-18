@@ -1,0 +1,50 @@
+version: 1
+description: >
+  Budget lock for mainline call-map debt. Existing partial/binding-pending edges
+  are explicitly acknowledged per chain, but any growth must fail fast until the
+  chain is re-budgeted with review.
+chains:
+  - chain_id: request.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 3
+    max_partial_edges: 1
+    max_binding_pending_edges: 2
+    note: >
+      Request route-selection and req_outbound typed/runtime split are still
+      intentionally open; do not add new pending edges without rebudgeting.
+  - chain_id: response.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Fully anchored response mainline must not regress.
+  - chain_id: error.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 3
+    max_partial_edges: 1
+    max_binding_pending_edges: 0
+    note: Error mainline still has one split host/runtime classification edge.
+  - chain_id: metadata.center.mainline
+    expected_total_edges: 8
+    min_anchored_edges: 7
+    max_partial_edges: 1
+    max_binding_pending_edges: 0
+    note: Metadata center runtime-control family is partially implemented.
+  - chain_id: runtime.lifecycle.mainline
+    expected_total_edges: 12
+    min_anchored_edges: 12
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Runtime lifecycle chain is fully anchored and locked.
+  - chain_id: runtime.tmux_client_binding.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Tmux/client binding chain is fully anchored and locked.
+  - chain_id: stopless.session.mainline
+    expected_total_edges: 8
+    min_anchored_edges: 8
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: Stopless session chain is fully anchored and locked.

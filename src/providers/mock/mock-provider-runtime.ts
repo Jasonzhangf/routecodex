@@ -462,7 +462,7 @@ export class MockProviderRuntime {
       lines.push('data: [DONE]');
       return {
         status: resp.status || 200,
-        data: { __sse_responses: Readable.from(lines.join('\n')) },
+        data: { sseStream: Readable.from(lines.join('\n')) },
         headers: { 'content-type': 'text/event-stream; charset=utf-8' }
       };
     }

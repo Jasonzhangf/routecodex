@@ -1,6 +1,11 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { detectSubmitToolOutputsReplayShape, normalizeReplayEndpoint } from '../../scripts/replay-codex-sample.mjs';
+import {
+  detectSubmitToolOutputsReplayShape,
+  extractSampleHeaders,
+  normalizeReplayEndpoint,
+  stripReplayOnlyClientHeadersFromBody
+} from '../../scripts/replay-codex-sample.mjs';
 
 describe('replay codex sample endpoint normalization', () => {
   test('RED: provider-request full upstream URL must normalize to local replay path', () => {
@@ -41,5 +46,39 @@ describe('replay codex sample endpoint normalization', () => {
         tool_outputs: [{ call_id: 'call_abc', output: 'ok' }]
       }
     });
+  });
+
+  test('extracts replay headers from nested request body clientHeaders when top-level headers are absent', () => {
+    expect(
+      extractSampleHeaders({
+        body: {
+          metadata: {
+            clientHeaders: {
+              session_id: 'sess_nested_1',
+              conversation_id: 'conv_nested_1',
+              'user-agent': 'codex-tui/0.128.0'
+            }
+          }
+        }
+      })
+    ).toEqual({
+      session_id: 'sess_nested_1',
+      conversation_id: 'conv_nested_1',
+      'user-agent': 'codex-tui/0.128.0'
+    });
+  });
+
+  test('strips replay-only clientHeaders from request body metadata before dispatch', () => {
+    expect(
+      stripReplayOnlyClientHeadersFromBody({
+        metadata: {
+          clientHeaders: {
+            session_id: 'sess_nested_2'
+          },
+          rcc_passthrough_tool_choice: 'auto',
+          routeHint: 'search'
+        }
+      })
+    ).toEqual({});
   });
 });

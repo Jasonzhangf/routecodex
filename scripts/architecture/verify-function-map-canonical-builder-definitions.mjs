@@ -97,7 +97,7 @@ function findDefinitionHits(relPath, builder) {
     new RegExp(`\\bpub\\(super\\)\\s+fn\\s+${escaped}\\b`),
     new RegExp(`\\bexport\\s+const\\s+${escaped}\\s*=`),
     new RegExp(`\\bconst\\s+${escaped}\\s*=`),
-    new RegExp(`^\\s*(?:(?:public|private|protected)\\s+)?${escaped}\\s*\\([^)]*\\)\\s*[:{]`),
+    new RegExp(`^\\s*(?:(?:public|private|protected)\\s+)?${escaped}(?:<[^>]+>)?\\s*\\([^)]*\\)\\s*[:{]`),
   ];
 
   for (const file of files) {

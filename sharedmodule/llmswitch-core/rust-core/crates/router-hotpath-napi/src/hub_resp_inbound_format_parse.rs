@@ -115,9 +115,7 @@ fn has_provider_sse_marker_signal(record: &Map<String, Value>) -> bool {
         || (record
             .get("clientStream")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-            && !record.contains_key("__sse_responses")
-            && !record.contains_key("__sse_stream"))
+            .unwrap_or(false))
 }
 
 fn is_provider_response_sse_marker(payload: &Value) -> bool {

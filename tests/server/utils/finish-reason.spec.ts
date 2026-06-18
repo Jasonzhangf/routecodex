@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../src/server/utils/finish-reason.js';
+import { deriveFinishReason } from '../../../src/server/utils/finish-reason.js';
 
 describe('deriveFinishReason', () => {
   it('infers tool_calls for chat payloads with message.tool_calls but missing choice.finish_reason', () => {
@@ -37,11 +37,24 @@ describe('deriveFinishReason', () => {
     expect(reason).toBe('stop');
   });
 
-  it('keeps wrapper finish reason fallback', () => {
+  it('infers stop for responses payloads with completed assistant output but missing explicit finish reason', () => {
     const reason = deriveFinishReason({
-      [STREAM_LOG_FINISH_REASON_KEY]: 'tool_calls'
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            {
+              type: 'output_text',
+              text: 'done',
+            },
+          ],
+        },
+      ],
     });
-    expect(reason).toBe('tool_calls');
+    expect(reason).toBe('stop');
   });
-});
 
+});

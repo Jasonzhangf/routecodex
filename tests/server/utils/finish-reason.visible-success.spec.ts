@@ -1,10 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
-import { deriveFinishReasonWithVisibleSuccessFallback } from '../../../src/server/utils/finish-reason.js';
+import { deriveFinishReason } from '../../../src/server/utils/finish-reason.js';
 
-describe('deriveFinishReasonWithVisibleSuccessFallback', () => {
+describe('deriveFinishReason visible success coverage', () => {
   it('returns explicit tool_calls when required_action tool calls exist', () => {
     expect(
-      deriveFinishReasonWithVisibleSuccessFallback({
+      deriveFinishReason({
         status: 'requires_action',
         required_action: {
           submit_tool_outputs: {
@@ -17,7 +17,7 @@ describe('deriveFinishReasonWithVisibleSuccessFallback', () => {
 
   it('returns stop for chat-like visible assistant success without explicit finish_reason', () => {
     expect(
-      deriveFinishReasonWithVisibleSuccessFallback({
+      deriveFinishReason({
         id: 'chatcmpl_router_direct_finish_reason',
         object: 'chat.completion',
         choices: [
@@ -35,7 +35,7 @@ describe('deriveFinishReasonWithVisibleSuccessFallback', () => {
 
   it('returns stop for responses completed visible output without explicit finish_reason', () => {
     expect(
-      deriveFinishReasonWithVisibleSuccessFallback({
+      deriveFinishReason({
         id: 'resp_router_direct_visible_output',
         status: 'completed',
         output: [

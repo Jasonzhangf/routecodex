@@ -1,7 +1,5 @@
 import { deriveFinishReasonNative } from '../../modules/llmswitch/bridge.js';
 
-export const STREAM_LOG_FINISH_REASON_KEY = "__routecodex_finish_reason";
-
 const FINISH_REASON_DEBUG_ENABLED =
   process.env.ROUTECODEX_DEBUG_FINISH_REASON === '1' ||
   process.env.RCC_DEBUG_FINISH_REASON === '1';
@@ -21,8 +19,4 @@ export function deriveFinishReason(body: unknown): string | undefined {
   const finishReason = deriveFinishReasonNative(body);
   logFinishReasonDebug('[FINISH-REASON:DEBUG] derived:', finishReason);
   return finishReason;
-}
-
-export function deriveFinishReasonWithVisibleSuccessFallback(body: unknown): string | undefined {
-  return deriveFinishReason(body);
 }

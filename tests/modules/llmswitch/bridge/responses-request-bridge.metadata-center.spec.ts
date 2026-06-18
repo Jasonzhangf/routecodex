@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -27,13 +27,19 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
   writeErrorsampleJson: jest.fn(),
 }));
 
-const {
-  buildResponsesPipelineMetadataForHttp,
-  attachResponsesRequestContextToResultForHttp
-} = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts');
-const { MetadataCenter } = await import(
-  '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
-);
+let buildResponsesPipelineMetadataForHttp: any;
+let attachResponsesRequestContextToResultForHttp: any;
+let MetadataCenter: any;
+
+beforeAll(async () => {
+  ({
+    buildResponsesPipelineMetadataForHttp,
+    attachResponsesRequestContextToResultForHttp
+  } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts'));
+  ({ MetadataCenter } = await import(
+    '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
+  ));
+});
 
 describe('responses-request-bridge metadata center projection', () => {
   it('writes request-side responses continuation context into metadata center', () => {
@@ -68,6 +74,7 @@ describe('responses-request-bridge metadata center projection', () => {
       responsesRequestContext: requestContext,
       responsesResume: resumeMeta
     });
+    expect(metadata.responsesRequestContext).toBeUndefined();
     expect(center?.readRequestTruth().sessionId).toBeUndefined();
   });
 
@@ -85,9 +92,9 @@ describe('responses-request-bridge metadata center projection', () => {
       requestContext
     });
 
-    expect(nextMetadata?.responsesRequestContext).toBe(requestContext);
     const center = MetadataCenter.read(nextMetadata);
     expect(center?.readContinuationContext().responsesRequestContext).toBe(requestContext);
+    expect(nextMetadata?.responsesRequestContext).toBeUndefined();
     expect(center?.readRequestTruth().sessionId).toBeUndefined();
   });
 });

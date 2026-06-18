@@ -3,6 +3,7 @@
 //! response projection / error projection modules.
 //!
 //! No live behavior changes.
+// feature_id: server.rust_contract_surface
 
 use serde::Serialize;
 use serde_json::{json, Value};

@@ -486,8 +486,9 @@ describe('router-direct passthrough HTTP blackbox', () => {
       expect(response.status).toBe(200);
       expect(upstreamPostCount).toBe(1);
       expect(text).toContain('exec_command');
-      expect(text).toContain('routecodex servertool run stop_message_auto');
+      expect(text).toContain('routecodex hook run reasoning_stop');
       expect(text).toContain('stop_message_flow');
+      expect(text).toContain('requires_action');
       expect(text).not.toContain('direct-json-ok');
     } finally {
       await server?.stop().catch(() => undefined);

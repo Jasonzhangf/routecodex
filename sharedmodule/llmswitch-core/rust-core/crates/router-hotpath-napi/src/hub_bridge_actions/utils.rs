@@ -1,5 +1,7 @@
 use serde_json::{Map, Value};
 
+use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_tooling::{normalize_tool_result_text, parse_lenient_string};
 use crate::shared_tool_call_id_core::{
     clamp_prefixed_tool_call_id, extract_tool_call_id_core, normalize_prefixed_tool_call_id,
     sanitize_id_core,
@@ -151,6 +153,24 @@ pub(crate) fn flatten_content_to_string(value: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+pub(crate) fn is_stopless_cli_result_text(text: &str) -> bool {
+    let normalized = normalize_tool_result_text(text);
+    let parsed = parse_lenient_string(normalized.as_str());
+    parsed
+        .as_object()
+        .and_then(|row| {
+            read_trimmed_string(row.get("toolName"))
+                .or_else(|| read_trimmed_string(row.get("tool_name")))
+        })
+        .is_some_and(|tool_name| tool_name == "stop_message_auto")
+}
+
+pub(crate) fn is_stopless_cli_result_content(value: &Value) -> bool {
+    flatten_content_to_string(value)
+        .map(|text| is_stopless_cli_result_text(text.as_str()))
+        .unwrap_or(false)
 }
 
 fn sanitize_servertool_name_token(value: &str) -> String {

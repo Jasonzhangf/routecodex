@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { EventEmitter } from 'node:events';
 
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { handleChatCompletions } from '../../../src/server/handlers/chat-handler.js';
 import { handleImageGenerations } from '../../../src/server/handlers/images-handler.js';
 import { handleMessages } from '../../../src/server/handlers/messages-handler.js';
@@ -122,6 +123,7 @@ describe('handler metadata boundary', () => {
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-test',
+        stream: false,
         metadata: { userAgent: 'responses-sess' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
       });
@@ -152,13 +154,17 @@ describe('handler metadata boundary', () => {
       await fetchJson(baseUrl, '/v1/responses', {
         model: 'gpt-test',
         store: true,
+        stream: false,
         metadata: { userAgent: 'persisted-context-must-not-leak' },
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
       });
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.metadata.responsesRequestContext?.payload?.metadata).toBeUndefined();
-      expect(JSON.stringify(input.metadata.responsesRequestContext?.payload)).not.toContain('persisted-context-must-not-leak');
+      expect(input.metadata.responsesRequestContext).toBeUndefined();
+      const center = MetadataCenter.read(input.metadata);
+      const requestContextPayload = center?.readContinuationContext().responsesRequestContext?.payload;
+      expect(requestContextPayload?.metadata).toBeUndefined();
+      expect(JSON.stringify(requestContextPayload ?? null)).not.toContain('persisted-context-must-not-leak');
     } finally {
       await closeServer(server);
     }
@@ -193,15 +199,16 @@ describe('handler metadata boundary', () => {
     const { server, baseUrl } = await listenApp(app);
     try {
       const result = await fetchJson(baseUrl, '/v1/images/generations', {
+        model: 'gpt-image-test',
         prompt: 'draw boundary',
         metadata: { userAgent: 'image-sess' }
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.body.qwenImageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
+      expect(input.body.imageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
       expect(input.metadata.userAgent).toBe('image-sess');
-      expect(input.metadata.qwenImageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
+      expect(input.metadata.imageGeneration).toMatchObject({ enabled: true, mode: 'generate' });
     } finally {
       await closeServer(server);
     }

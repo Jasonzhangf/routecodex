@@ -53,8 +53,8 @@ flowchart LR
 | `mtc-02-result` | request truth fixed -> result continuation attached | `HubReqChatProcess03Governed` / host result bridge | `continuation_context` | `attachResponsesRequestContextToResultForHttp -> MetadataCenter.writeContinuationContext`; result metadata 现在也只把 `responsesRequestContext` 写进 center continuation family |
 | `mtc-03` | continuation attached -> runtime control bound | `HubReqChatProcess03Governed` / `VrRoute04SelectedTarget` | `runtime_control` | route hint / stream / servertool followup / stop-message controls |
 | `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -> MetadataCenter.writeProviderObservation`; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat `metadata.target` |
-| `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `responses-response-bridge.ts` currently derives `finishReason` and persists lifecycle using MetadataCenter-backed request truth |
-| `mtc-06` | response observed -> servertool context projection | `HubRespChatProcess03Governed` | read-only projection from center; no new request truth | `servertool-adapter-context.ts` now reads request truth from `MetadataCenter.readRequestTruth()` for session/conversation projection |
+| `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `resolveResponsesConversationPersistInputsForHttp -> readRuntimeRequestTruthIdentifiers`; closeout still derives `finishReason` locally, but request-truth persistence edge is now concrete |
+| `mtc-06` | response observed -> servertool context projection | `HubRespChatProcess03Governed` | read-only projection from center; no new request truth | `buildServerToolAdapterContext -> readRuntimeServerToolProjection`; session/conversation/model/compatibility projection now goes through one MetadataCenter-backed helper |
 | `mtc-07` | projected -> closeout released | `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame` | `status/provenance` closeout only | `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`; JSON closeout、SSE finish/close、SSE bridge-error 现已共用真实 handler closeout owner |
 
 ## Family Definitions
@@ -98,6 +98,22 @@ These are internal control semantics:
 - `stopMessage*`
 - `streamIntent`
 - `clientAbort`
+
+Current schema gap:
+
+- the center now implements first-class `runtimeControl` state/read/write/release plus a host-side projection reader, so the family is no longer "manifest/type only"
+- the current repo already exposes a narrower first-batch runtime-control contract that is stronger than the generic manifest wording:
+  - request-route control: `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`
+  - followup / stopless control: `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`
+  - stop-message control: `stopMessageEnabled`, `stopMessageExcludeDirect`
+- this first batch is not speculative. It is directly evidenced by current writers/readers:
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+  - `src/server/runtime/http-server/index.ts`
+  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+- the remaining gap is no longer carrier availability. The gap is that production writers/readers still mostly materialize these controls through flat metadata or request-semantics residue instead of writing/reading the new center family first
+- this is why `mtc-03` is still only `partial`: the first-class center contract now exists, but the request-route-control and followup-control writers have not yet been migrated onto it
 
 ### `provider_observation`
 
@@ -223,18 +239,27 @@ Completed:
 Still open:
 
 1. delete remaining scattered flat merge/projection surfaces
-2. promote `response_observation` and remaining adapter projections so `mtc-05` / `mtc-06` can move from `partial` toward fully anchored family ownership
-3. continue replay closeout for the remaining upstream `/v1/messages` `HTTP_400` that is no longer a session-truth bug
+2. promote `response_observation` and remaining runtime-control projections so the remaining `mtc-03` partial edge can move toward fully anchored family ownership
+3. migrate the narrow request-attempt/runtime-entry writers onto the landed runtime-control family:
+   - `routeHint`, `routeName`, `routeId`, `providerProtocol`
+   - `retryProviderKey`, `preselectedRoute`
+   - `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`
+   - `stopMessageEnabled`, `stopMessageExcludeDirect`
+4. move remaining followup/control readers to center-backed runtime-control projection
+5. continue replay closeout for the remaining upstream `/v1/messages` `HTTP_400` that is no longer a session-truth bug
 
 ## Migration Order
 
 Next migration order:
 
 1. keep `request_truth` write-once and `continuation_context` replaceable as separate center families
-2. finish provider observation and response observation family projection without reopening request-truth writes
-3. replace remaining flat merge/projection surfaces with center-backed projections
-4. add manifest and wiki sync gates so node IDs stay shared across machine and human review surfaces
-5. replay real request samples after each runtime-facing migration slice
+2. keep the landed first-class `runtime_control` carrier plumbing as the only new center-backed control surface
+3. migrate the narrow request-attempt writer onto that runtime-control carrier before touching wider entry-shell writers
+4. migrate wider entry-shell and followup/control readers onto center-backed runtime-control projection
+5. finish provider observation and response observation family projection without reopening request-truth writes
+6. replace remaining flat merge/projection surfaces with center-backed projections
+7. add manifest and wiki sync gates so node IDs stay shared across machine and human review surfaces
+8. replay real request samples after each runtime-facing migration slice
 
 ## Review Checklist
 
@@ -266,6 +291,7 @@ What is done in repo:
 
 What is not done yet:
 
-- `mtc-04` / `mtc-05` / `mtc-06` are only `partial`: the repo has real caller/callee/read-path truth now, but `provider_observation` / `response_observation` are still projected through flat metadata rather than first-class MetadataCenter families
+- `mtc-03` is still `partial`: broader runtime-control merge/write semantics have not yet become a first-class MetadataCenter family
+- `mtc-05` / `mtc-06` now have concrete MetadataCenter-backed reader edges, but response observation itself is still not a first-class MetadataCenter family
 - remaining flat merge/projection surfaces are not fully replaced
-- manifest/wiki/mainline sync gates are not fully wired
+- manifest/wiki/mainline core sync gates are wired; remaining work is semantic migration depth, not missing sync gate plumbing

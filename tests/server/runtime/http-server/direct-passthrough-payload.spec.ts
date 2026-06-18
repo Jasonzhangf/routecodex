@@ -56,6 +56,27 @@ describe('direct-passthrough-payload', () => {
     expect(decision.requiresHubRelay).toBe(false);
   });
 
+  it('requires hub relay for first-turn responses stopless when direct include is enabled', () => {
+    const body = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+    };
+
+    const decision = evaluateDirectRouteDecision({
+      payload: body,
+      metadata: {
+        stopMessageEnabled: true,
+        stopMessageExcludeDirect: false,
+      },
+      inboundProtocol: 'openai-responses',
+      applyPatchMode: 'client',
+    });
+
+    expect(decision.providerWireValid).toBe(true);
+    expect(decision.requiresHubRelay).toBe(true);
+    expect(decision.reason).toBe('servertool_followup_requires_hub_relay');
+  });
+
   it('fails fast when direct payload is not an object', () => {
     expect(() => requireDirectPassthroughPayloadObject(null)).toThrow(
       'provider-runtime-error: direct passthrough payload must be an object',

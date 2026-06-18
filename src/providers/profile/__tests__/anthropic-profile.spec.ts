@@ -115,18 +115,18 @@ describe('anthropicFamilyProfile.resolveBusinessResponseError', () => {
     expect(error).toBeUndefined();
   });
 
-  it('accepts top-level __sse_stream marker', () => {
+  it('accepts top-level typed SSE stream side-channel', () => {
     const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
-      response: { __sse_stream: true },
+      response: { sseStream: true },
       runtimeMetadata: {}
     });
 
     expect(error).toBeUndefined();
   });
 
-  it('accepts nested __sse_stream marker', () => {
+  it('accepts nested typed SSE stream side-channel', () => {
     const error = anthropicFamilyProfile.resolveBusinessResponseError?.({
-      response: { data: { __sse_stream: true } },
+      response: { data: { sseStream: true } },
       runtimeMetadata: {}
     });
 

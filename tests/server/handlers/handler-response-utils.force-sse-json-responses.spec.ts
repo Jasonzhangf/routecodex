@@ -121,7 +121,7 @@ const mockBridgeModule = async () => ({
   })),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   hasResponsesSsePayloadForHttp: jest.fn((body: unknown) => Boolean(
-    body && typeof body === 'object' && '__sse_responses' in (body as Record<string, unknown>)
+    body && typeof body === 'object' && 'sseStream' in (body as Record<string, unknown>)
   )),
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
@@ -297,7 +297,7 @@ const mockBridgeModule = async () => ({
     forceSSE: boolean;
     metadata?: Record<string, unknown>;
   }) => {
-    if (!args.body || typeof args.body !== 'object' || !('__sse_responses' in (args.body as Record<string, unknown>))) {
+    if (!args.body || typeof args.body !== 'object' || !('sseStream' in (args.body as Record<string, unknown>))) {
       return false;
     }
     if (args.forceSSE) {
@@ -541,18 +541,16 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: Readable.from([
+          sseStream: Readable.from([
               'event: response.created\n',
               'data: {"type":"response.created","response":{"id":"resp_direct_meta","metadata":{"provider":"raw"}}}\n\n',
               'event: response.completed\n',
               'data: {"type":"response.completed","response":{"id":"resp_direct_meta","metadata":{"provider":"raw"}}}\n\n',
             ]),
-          },
           metadata: {
             outboundStream: true,
-            __routecodexDirectPassthrough: true,
           },
+          continuationOwner: 'direct',
           usageLogInfo: {
             routeName: 'router-direct:thinking',
             requestStartedAtMs: Date.now(),
@@ -589,16 +587,14 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: Readable.from([
+          sseStream: Readable.from([
               'event: response.created\n',
               'data: {"type":"response.created","response":{"id":"resp_direct_meta","metadata":{"routeHint":"tools"}}}\n\n',
             ]),
-          },
           metadata: {
             outboundStream: true,
-            __routecodexDirectPassthrough: true,
           },
+          continuationOwner: 'direct',
           usageLogInfo: {
             routeName: 'router-direct:thinking',
             requestStartedAtMs: Date.now(),
@@ -649,8 +645,8 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
             ]
           },
           metadata: {
-            __routecodexDirectPassthrough: true,
           },
+          continuationOwner: 'direct',
         } as any,
         'req_direct_json_function_call',
         { entryEndpoint: '/v1/responses' }
@@ -681,8 +677,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: Readable.from([
+          sseStream: Readable.from([
               'event: response.output_item.done\n',
               'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"call_direct_sse_tool","call_id":"call_direct_sse_tool","name":"stop_message_auto","arguments":"{\\"flowId\\":\\"stop_message_flow\\"}"}}\n\n',
               'event: response.completed\n',
@@ -690,11 +685,10 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
               'event: response.done\n',
               'data: {"type":"response.done","response":{"id":"resp_direct_sse_tool","status":"completed"}}\n\n',
             ]),
-          },
           metadata: {
             outboundStream: true,
-            __routecodexDirectPassthrough: true,
           },
+          continuationOwner: 'direct',
           usageLogInfo: {
             routeName: 'router-direct:thinking',
             requestStartedAtMs: Date.now(),
@@ -731,8 +725,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            __sse_responses: Readable.from([
+          sseStream: Readable.from([
               'event: response.reasoning_summary_text.done\n',
               'data: {"type":"response.reasoning_summary_text.done","item_id":"rs_direct_sse_tool","text":"need cwd before patch"}\n\n',
               'event: response.completed\n',
@@ -810,11 +803,10 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
                 }
               })}\n\n`,
             ]),
-          },
           metadata: {
             outboundStream: true,
-            __routecodexDirectPassthrough: true,
           },
+          continuationOwner: 'direct',
           usageLogInfo: {
             routeName: 'router-direct:tools',
             requestStartedAtMs: Date.now(),

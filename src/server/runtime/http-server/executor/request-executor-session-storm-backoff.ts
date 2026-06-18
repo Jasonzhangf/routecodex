@@ -2,6 +2,7 @@ import {
   readString,
   normalizeCodeKey
 } from './request-executor-error-shared.js';
+import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 import {
   extractStatusCodeFromError
@@ -40,11 +41,12 @@ export function resolveSessionStormBackoffScopes(metadata: Record<string, unknow
     seen.add(normalized);
     scopes.push(normalized);
   };
-  const sessionId = readString(metadata.sessionId);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const sessionId = readString(requestTruth.sessionId);
   if (sessionId) {
     pushScope(`session:${sessionId}`);
   }
-  const conversationId = readString(metadata.conversationId);
+  const conversationId = readString(requestTruth.conversationId);
   if (conversationId) {
     pushScope(`conversation:${conversationId}`);
   }

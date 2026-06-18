@@ -67,6 +67,33 @@ function buildMimoAnthropicStopSse(): string {
   ].join('\n');
 }
 
+function buildOpenAiResponsesCompletedStopSse(): string {
+  const response = {
+    id: 'resp_openai_responses_stop_sse',
+    object: 'response',
+    status: 'completed',
+    model: 'gpt-test',
+    output: [{
+      id: 'msg_openai_responses_stop_sse',
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+    }],
+    output_text: 'I stopped without schema.',
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+  };
+  return [
+    'event: response.completed',
+    `data: ${JSON.stringify({ type: 'response.completed', response })}`,
+    '',
+    'event: response.done',
+    `data: ${JSON.stringify({ type: 'response.done', response })}`,
+    '',
+    ''
+  ].join('\n');
+}
+
 describe('provider response Rust native plan', () => {
   beforeEach(() => {
     recordResponsesResponseMock.mockClear();
@@ -415,6 +442,45 @@ describe('provider response Rust native plan', () => {
     expect(sseBody).toContain('stop_message_flow');
     expect(sseBody).toContain('event: response.done');
     expect(sseBody).toContain('"status":"requires_action"');
+  });
+
+  it('streams stopless CLI command for relay OpenAI Responses SSE completed stop', async () => {
+    const suffix = `responses_sse_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const context: Record<string, unknown> = {
+      requestId: `req_provider_response_responses_sse_stopless_cli_projection_stream_${suffix}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: `provider-response-responses-sse-stopless-cli-projection-stream-${suffix}`,
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true,
+      capturedEntryRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+      }
+    };
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-responses',
+      providerResponse: {
+        __sse_responses: Readable.from([buildOpenAiResponsesCompletedStopSse()])
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: true,
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+    });
+
+    expect(result.body?.object).toBe('response');
+    expect(result.body?.status).toBe('requires_action');
+    expect(JSON.stringify(result.body)).toContain('exec_command');
+    expect(JSON.stringify(result.body)).toContain('routecodex hook run reasoning_stop');
+    expect(result.__sse_responses).toBeDefined();
+    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(sseBody).toContain('exec_command');
+    expect(sseBody).toContain('routecodex hook run reasoning_stop');
+    expect(sseBody).toContain('event: response.done');
+    expect(sseBody).toContain('"status":"requires_action"');
+    expect(sseBody).not.toContain('resp_openai_responses_stop_sse');
   });
 
   it('uses Rust streamPipe effect plan for streaming response path', async () => {

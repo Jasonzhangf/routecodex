@@ -251,6 +251,388 @@ fn normalize_responses_history_items(items: Vec<Value>) -> Vec<Value> {
         .collect::<Vec<_>>()
 }
 
+const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
+    "routecodex hook run stop_message_auto",
+    "routecodex servertool run stop_message_auto",
+    "routecodex hook run reasoning_stop",
+    "routecodex servertool run reasoning_stop",
+];
+
+fn build_responses_text_guidance_input_item(text: String) -> Value {
+    serde_json::json!({
+        "type": "message",
+        "role": "user",
+        "content": [{ "type": "input_text", "text": text }]
+    })
+}
+
+fn is_shell_like_tool_name(raw_name: &str) -> bool {
+    matches!(
+        raw_name.trim().to_ascii_lowercase().as_str(),
+        "exec_command"
+            | "run_command"
+            | "bash"
+            | "sh"
+            | "zsh"
+            | "terminal"
+            | "shell"
+            | "write_stdin"
+    )
+}
+
+fn read_exec_command_cmd(arguments: Option<&Value>) -> Option<String> {
+    let raw = match arguments {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Object(obj)) => obj
+            .get("cmd")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| obj.get("command").and_then(Value::as_str).map(ToOwned::to_owned))?,
+        _ => return None,
+    };
+    if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&raw) {
+        return obj
+            .get("cmd")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| obj.get("command").and_then(Value::as_str).map(ToOwned::to_owned));
+    }
+    Some(raw)
+}
+
+fn parse_stopless_tool_output_payload(value: &Value) -> Option<Map<String, Value>> {
+    match value {
+        Value::Object(row) => Some(row.clone()),
+        Value::String(text) => serde_json::from_str::<Value>(text)
+            .ok()
+            .and_then(|parsed| parsed.as_object().cloned()),
+        _ => None,
+    }
+}
+
+fn is_stopless_tool_output_payload(value: &Value) -> bool {
+    parse_stopless_tool_output_payload(value)
+        .and_then(|row| {
+            read_trimmed_string(row.get("toolName"))
+                .or_else(|| read_trimmed_string(row.get("tool_name")))
+        })
+        .is_some_and(|tool_name| tool_name == "stop_message_auto")
+}
+
+fn is_stop_hook_function_call(row: &Map<String, Value>) -> bool {
+    let item_type = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if item_type != "function_call" && item_type != "tool_call" {
+        return false;
+    }
+    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
+    if !is_shell_like_tool_name(name.as_str()) {
+        return false;
+    }
+    let Some(cmd) = read_exec_command_cmd(row.get("arguments")) else {
+        return false;
+    };
+    STOP_HOOK_COMMAND_MARKERS
+        .iter()
+        .any(|marker| cmd.contains(marker))
+}
+
+fn read_stopless_schema_feedback_text(row: &Map<String, Value>, repeat_count: u32) -> Option<String> {
+    let feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))?
+        .as_object()?;
+    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
+        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
+    let missing_fields = feedback
+        .get("missingFields")
+        .or_else(|| feedback.get("missing_fields"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    if missing_fields.is_empty() {
+        return None;
+    }
+    let joined = missing_fields.join(", ");
+    match reason_code.as_str() {
+        "stop_schema_missing" => Some(if repeat_count <= 1 {
+            if joined.is_empty() {
+                "继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段。".to_string()
+            } else {
+                format!("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：{joined}。")
+            }
+        } else if joined.is_empty() {
+            "如果任务已经完成，就按下面 schema 补齐收尾字段；如果任务还没完成，不要停，继续执行当前任务。".to_string()
+        } else {
+            format!(
+                "如果任务已经完成，就按下面 schema 补齐缺失字段：{joined}；如果任务还没完成，不要停，继续执行当前任务。"
+            )
+        }),
+        "stop_schema_reason_missing" => Some(format!("这次先把 reason 补齐：{joined}。")),
+        "stop_schema_continue_next_step" => Some(format!(
+            "现在还不能收尾，先补齐这些信息再继续：{joined}。"
+        )),
+        "stop_schema_terminal_missing_fields" => Some(format!(
+            "你已经表达想停，但收尾字段还没补齐：{joined}。"
+        )),
+        _ => Some(format!("先补齐这些字段：{joined}。")),
+    }
+}
+
+fn render_stopless_schema_guidance_text(schema_guidance: &Value) -> Option<String> {
+    let guidance = schema_guidance.as_object()?;
+    let required_fields = guidance
+        .get("requiredFields")
+        .or_else(|| guidance.get("required_fields"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    let stopreason_values = guidance
+        .get("stopreasonValues")
+        .or_else(|| guidance.get("stopreason_values"))
+        .and_then(Value::as_object);
+    let mut lines = Vec::<String>::new();
+    if !required_fields.is_empty() {
+        lines.push(format!(
+            "收尾时至少带上这些字段：{}。",
+            required_fields.join(", ")
+        ));
+    }
+    if let Some(values) = stopreason_values {
+        let finished = values.get("finished").and_then(Value::as_i64).unwrap_or(0);
+        let blocked = values.get("blocked").and_then(Value::as_i64).unwrap_or(1);
+        let continue_needed = values
+            .get("continueNeeded")
+            .or_else(|| values.get("continue_needed"))
+            .and_then(Value::as_i64)
+            .unwrap_or(2);
+        lines.push(format!(
+            "stopreason 取值：{finished}=finished，{blocked}=blocked，{continue_needed}=continue_needed。"
+        ));
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn read_stopless_tool_result_snapshot_text(row: &Map<String, Value>) -> Option<String> {
+    let repeat_count = row
+        .get("repeatCount")
+        .or_else(|| row.get("repeat_count"))
+        .and_then(Value::as_u64)
+        .map(|value| value as u32);
+    let max_repeats = row
+        .get("maxRepeats")
+        .or_else(|| row.get("max_repeats"))
+        .and_then(Value::as_u64)
+        .map(|value| value as u32);
+    let schema_feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object);
+    let reason_code = schema_feedback
+        .and_then(|feedback| {
+            feedback
+                .get("reasonCode")
+                .or_else(|| feedback.get("reason_code"))
+        })
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let missing_fields = schema_feedback
+        .and_then(|feedback| {
+            feedback
+                .get("missingFields")
+                .or_else(|| feedback.get("missing_fields"))
+        })
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    if repeat_count.is_none() && reason_code.is_none() && missing_fields.is_empty() {
+        return None;
+    }
+    let mut segments = Vec::<String>::new();
+    if let Some(repeat) = repeat_count {
+        if let Some(max) = max_repeats {
+            segments.push(format!("repeatCount={repeat}/{max}"));
+        } else {
+            segments.push(format!("repeatCount={repeat}"));
+        }
+    }
+    if let Some(reason) = reason_code {
+        segments.push(format!("reasonCode={reason}"));
+    }
+    if !missing_fields.is_empty() {
+        segments.push(format!("missingFields={}", missing_fields.join(", ")));
+    }
+    Some(format!("上一轮执行结果：{}。", segments.join("；")))
+}
+
+fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(row) = parse_stopless_tool_output_payload(&Value::String(trimmed.to_string())) {
+        let tool_name = read_trimmed_string(row.get("toolName"))
+            .or_else(|| read_trimmed_string(row.get("tool_name")))
+            .unwrap_or_default();
+        if tool_name == "stop_message_auto" {
+            let mut parts = Vec::<String>::new();
+            let repeat_count = row
+                .get("repeatCount")
+                .and_then(Value::as_u64)
+                .map(|value| value as u32)
+                .unwrap_or(1);
+            if let Some(snapshot) = read_stopless_tool_result_snapshot_text(&row) {
+                parts.push(snapshot);
+            }
+            if let Some(schema_feedback) = read_stopless_schema_feedback_text(&row, repeat_count) {
+                parts.push(schema_feedback);
+            }
+            if let Some(prompt) = read_trimmed_string(row.get("continuationPrompt"))
+                .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
+            {
+                parts.push(prompt);
+            }
+            if let Some(schema_guidance) = row
+                .get("schemaGuidance")
+                .or_else(|| row.get("schema_guidance"))
+                .and_then(render_stopless_schema_guidance_text)
+            {
+                parts.push(schema_guidance);
+            }
+            if !parts.is_empty() {
+                return parts.join("\n");
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn is_stopless_guidance_message(entry: &Value) -> bool {
+    let Some(row) = entry.as_object() else {
+        return false;
+    };
+    if row.get("type").and_then(Value::as_str) != Some("message") {
+        return false;
+    }
+    if row.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let Some(content) = row.get("content").and_then(Value::as_array) else {
+        return false;
+    };
+    if content.len() != 1 {
+        return false;
+    }
+    let Some(text) = content[0].get("text").and_then(Value::as_str) else {
+        return false;
+    };
+    text.contains("stopreason")
+        && (text.contains("finished")
+            || text.contains("blocked")
+            || text.contains("continue_needed")
+            || text.contains("收尾时至少带上这些字段"))
+}
+
+fn keep_only_latest_stopless_guidance(items: Vec<Value>) -> Vec<Value> {
+    let last_guidance_index = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| is_stopless_guidance_message(entry).then_some(index))
+        .last();
+    let Some(last_guidance_index) = last_guidance_index else {
+        return items;
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            if is_stopless_guidance_message(&entry) && index != last_guidance_index {
+                None
+            } else {
+                Some(entry)
+            }
+        })
+        .collect()
+}
+
+fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
+    let auto_stop_hook_call_ids: HashSet<String> = items
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|row| {
+            let item_type = read_trimmed_string(row.get("type"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !is_bridge_tool_output_item_type(item_type.as_str()) {
+                return None;
+            }
+            let output = row.get("output")?;
+            if !is_stopless_tool_output_payload(output) {
+                return None;
+            }
+            read_bridge_function_call_id(row)
+        })
+        .collect();
+    let mut normalized = Vec::<Value>::with_capacity(items.len());
+    for item in items {
+        let Some(row) = item.as_object() else {
+            normalized.push(item);
+            continue;
+        };
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if item_type == "function_call" || item_type == "tool_call" {
+            let Some(call_id) = read_bridge_function_call_id(row) else {
+                normalized.push(item);
+                continue;
+            };
+            if auto_stop_hook_call_ids.contains(call_id.as_str())
+                || is_stop_hook_function_call(row)
+            {
+                continue;
+            }
+            normalized.push(item);
+            continue;
+        }
+        if is_bridge_tool_output_item_type(item_type.as_str()) {
+            let call_id = read_bridge_function_call_id(row).unwrap_or_default();
+            if auto_stop_hook_call_ids.contains(call_id.as_str()) {
+                if let Some(output_value) = row.get("output") {
+                    let rendered = match output_value {
+                        Value::String(raw_output) => {
+                            build_stop_hook_guidance_text_from_output(raw_output)
+                        }
+                        other => build_stop_hook_guidance_text_from_output(
+                            &serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+                        ),
+                    };
+                    normalized.push(build_responses_text_guidance_input_item(rendered));
+                }
+                continue;
+            }
+        }
+        normalized.push(item);
+    }
+    keep_only_latest_stopless_guidance(normalized)
+}
+
 fn normalize_message_content_part_for_request_history(part: &Value) -> Option<Value> {
     let row = part.as_object()?;
     let part_type = row
@@ -845,6 +1227,7 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
+    let merged_input = collapse_auto_stop_hook_pairs_in_history(merged_input);
     let full_input = normalize_responses_history_items(merged_input.clone());
     payload.insert("input".to_string(), Value::Array(merged_input));
 
@@ -1435,6 +1818,7 @@ fn restore_responses_continuation_payload(
         }
     }
 
+    let delta_input = collapse_auto_stop_hook_pairs_in_history(delta_input);
     payload.insert(
         "input".to_string(),
         Value::Array(normalize_responses_history_items(delta_input.clone())),
@@ -1453,7 +1837,7 @@ fn restore_responses_continuation_payload(
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
-            "fullInput": normalize_responses_history_items(input_items.clone()),
+            "fullInput": normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(input_items.clone())),
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1502,6 +1886,7 @@ fn materialize_responses_continuation_payload(
             strip_leading_pending_function_call_replay(&suffix_delta, &pending_call_ids);
         let suffix_delta =
             collapse_duplicate_pending_tool_batch_replay(&suffix_delta, &pending_call_ids);
+        let suffix_delta = collapse_auto_stop_hook_pairs_in_history(suffix_delta);
         if suffix_delta.is_empty() {
             return Value::Null;
         }
@@ -1510,7 +1895,7 @@ fn materialize_responses_continuation_payload(
         let submitted_details = collect_submitted_tool_output_details(&suffix_delta);
         let mut full_input = prefix.clone();
         full_input.extend(suffix_delta.clone());
-        let full_input = normalize_responses_history_items(full_input);
+        let full_input = normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(full_input));
 
         let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
             .as_object()
@@ -1575,12 +1960,13 @@ fn materialize_responses_continuation_payload(
         strip_leading_pending_function_call_replay(&continuation_delta, &pending_call_ids);
     let continuation_delta =
         collapse_duplicate_pending_tool_batch_replay(&continuation_delta, &pending_call_ids);
+    let continuation_delta = collapse_auto_stop_hook_pairs_in_history(continuation_delta);
 
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
     let submitted_details = collect_submitted_tool_output_details(&continuation_delta);
     let mut full_input = prefix.clone();
     full_input.extend(continuation_delta.clone());
-    let full_input = normalize_responses_history_items(full_input);
+    let full_input = normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(full_input));
 
     let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
         .as_object()
@@ -1741,9 +2127,10 @@ pub fn plan_responses_handler_entry_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        convert_responses_output_to_input_items, materialize_responses_continuation_payload,
-        plan_responses_handler_entry, prepare_responses_conversation_entry,
-        restore_responses_continuation_payload, resume_responses_conversation_payload,
+        build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
+        materialize_responses_continuation_payload, plan_responses_handler_entry,
+        prepare_responses_conversation_entry, restore_responses_continuation_payload,
+        resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -1877,6 +2264,93 @@ mod tests {
         assert_eq!(full_input.len(), 3);
         assert_eq!(full_input[1]["type"], json!("function_call"));
         assert_eq!(full_input[2]["type"], json!("function_call_output"));
+    }
+
+    #[test]
+    fn resume_collapses_stopless_history_to_latest_guidance_only() {
+        let resumed = resume_responses_conversation_payload(
+            &json!({
+                "requestId": "req-stopless-1",
+                "basePayload": { "model": "gpt-5.5", "store": true },
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "这是第三轮 stopless 恢复测试" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_third_round_1",
+                        "call_id": "call_third_round_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":1,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_third_round_1",
+                        "call_id": "call_third_round_1",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；先把手头能确认的结果拿回来。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_third_round_2",
+                        "call_id": "call_third_round_2",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":2,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                    }
+                ]
+            }),
+            "resp-third-round-2",
+            &json!({
+                "tool_outputs": [{
+                    "tool_call_id": "call_third_round_2",
+                    "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。\",\"repeatCount\":3,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                }],
+                "stream": false
+            }),
+            Some("req-stopless-2"),
+        )
+        .unwrap();
+
+        let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], json!("message"));
+        assert_eq!(input[1]["type"], json!("message"));
+        assert_eq!(input[1]["role"], json!("user"));
+        let guidance = input[1]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(guidance.contains("继续往下做"));
+        assert!(guidance.contains("stopreason"));
+        let serialized = serde_json::to_string(input).unwrap();
+        assert!(!serialized.contains("call_third_round_1"));
+        assert!(!serialized.contains("call_third_round_2"));
+        assert!(!serialized.contains("\"function_call_output\""));
+
+        let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
+        let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
+        assert_eq!(full_input.len(), 2);
+    }
+
+    #[test]
+    fn stopless_resume_guidance_for_first_missing_schema_round_stays_short() {
+        let text = build_stop_hook_guidance_text_from_output(
+            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+        );
+        assert!(text.contains("上一轮执行结果：repeatCount=1；reasonCode=stop_schema_missing；missingFields=stopreason, reason, next_step。"));
+        assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
+        assert!(!text.contains("如果任务还没完成，不要停，继续执行当前任务"));
+        assert!(text.contains("收尾时至少带上这些字段：stopreason, reason, next_step"));
+        assert!(text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+    }
+
+    #[test]
+    fn stopless_resume_guidance_for_second_missing_schema_round_must_expand_branching() {
+        let text = build_stop_hook_guidance_text_from_output(
+            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+        );
+        assert!(text.contains("上一轮执行结果：repeatCount=2；reasonCode=stop_schema_missing；missingFields=stopreason, reason, next_step。"));
+        assert!(text.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
+        assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
     }
 
     #[test]

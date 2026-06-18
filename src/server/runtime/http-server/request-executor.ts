@@ -88,7 +88,7 @@ import { resolveProviderRequestContext } from './executor/provider-request-conte
 import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
-import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
+import { deriveFinishReason } from '../../utils/finish-reason.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import {
@@ -152,7 +152,6 @@ import {
   waitScopedErrorBackoffWithGate
 } from './executor/request-executor-global-error-backoff.js';
 import {
-  bodyContainsReasoningStopFinalizedMarker,
   detectAssistantSanitizationPlaceholder,
   detectEmptyProviderRequestPayload,
   detectRetryableEmptyAssistantResponse,
@@ -171,6 +170,7 @@ import {
   resolveRequestExecutorProviderErrorReportPlan,
   shouldApplyProviderTransportBackoff
 } from './executor/request-executor-provider-failure.js';
+import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
 import { buildProviderRetryTelemetryPlan } from './executor/request-executor-retry-telemetry.js';
 import {
   isLastAvailableProvider429,
@@ -837,16 +837,17 @@ export class HubRequestExecutor implements RequestExecutor {
           requestId: input.requestId,
           attempt
         });
+        const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
         registerRequestLogContext(providerContext.requestId, {
           logSessionColorKey: mergedMetadata.logSessionColorKey,
           clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
           client_tmux_session_id: mergedMetadata.client_tmux_session_id,
           tmuxSessionId: mergedMetadata.tmuxSessionId,
           tmux_session_id: mergedMetadata.tmux_session_id,
-          sessionId: mergedMetadata.sessionId,
-          session_id: mergedMetadata.session_id,
-          conversationId: mergedMetadata.conversationId,
-          conversation_id: mergedMetadata.conversation_id
+          sessionId: requestTruth.sessionId,
+          session_id: requestTruth.sessionId,
+          conversationId: requestTruth.conversationId,
+          conversation_id: requestTruth.conversationId
         });
         const { providerProtocol, providerModel, providerLabel } = providerContext;
         if (clientHeadersForAttempt) {
@@ -1226,12 +1227,6 @@ export class HubRequestExecutor implements RequestExecutor {
             backfillResponsesOutputTextIfMissing(convertedBodyRecord);
           }
           const finishReason = (() => {
-            if (
-              convertedBodyRecord
-              && typeof convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY] === 'string'
-            ) {
-              return String(convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY]);
-            }
             const fromConverted = deriveFinishReason(convertedBodyRecord);
             if (fromConverted) {
               return fromConverted;
@@ -1511,7 +1506,6 @@ export const __requestExecutorTestables = {
   hasRequestedToolsInSemantics,
   isRequiredToolCallTurn,
   isToolResultFollowupTurn,
-  bodyContainsReasoningStopFinalizedMarker,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
   resolveSessionStormBackoffScope,

@@ -121,10 +121,13 @@ verification:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
+      - tests/servertool/stopless-vr-route-hint.spec.ts
+      - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/stop-message-auto.goal-default.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -135,9 +138,11 @@ verification:
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoning_stop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
-      - "Command input must not contain continuationPrompt/schemaGuidance/raw prompt text; CLI stdout must carry continuationPrompt/schemaGuidance for the next model turn."
+      - "Command input must stay concise (`flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`); CLI stdout must carry continuationPrompt/schemaGuidance plus structured feedback for req_chatprocess rewrite."
       - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
+      - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
+      - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
       - "Validation must prove omitted caller `sessionId/requestId/sessionDir` no longer blocks stopless CLI projection or CLI execution, and that no persisted writeback path is required."
       - "Validation must prove `responsesRequestContext.sessionId/conversationId` stays continuation-only and cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
@@ -237,6 +242,9 @@ verification:
     unit:
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - src/providers/core/runtime/provider-error-catalog.ts
+      - src/providers/core/runtime/http-request-executor.ts
+      - src/providers/core/runtime/provider-request-header-orchestrator.ts
+      - src/providers/core/runtime/transport/oauth-header-preflight.ts
     contract:
       - tests/red-tests/error_chain_singleton_truth.test.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
@@ -296,6 +304,72 @@ verification:
       - npm run build:min
     notes:
       - "If route instruction parsing changes, include routing instruction regression set."
+
+  - feature_id: hub.route_metadata_surface
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+    contract:
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+      - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-custom-payload-carrier-owner-queryability
+    build:
+      - npm run build:min
+    notes:
+      - "Request-route metadata input must stay queryable as a dedicated Rust route-control surface and must not be hidden behind broad crate ownership."
+
+  - feature_id: vr.route_retry_pin_surface
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+    contract:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:vr-no-ts-runtime
+      - npm run verify:architecture-custom-payload-carrier-owner-queryability
+    build:
+      - npm run build:min
+    notes:
+      - "VR retry-provider-pin reading and forced-target selection must stay queryable as a dedicated file-scoped surface."
+
+  - feature_id: hub.pipeline_contract_surface
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+    contract:
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-custom-payload-carrier-owner-queryability
+    build:
+      - npm run build:min
+    notes:
+      - "Hub route-control and response.metadata contract descriptors must stay queryable as a dedicated Rust contract surface."
+
+  - feature_id: server.rust_contract_surface
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+    contract:
+      - tests/red-tests/server_module_help_contract.test.ts
+      - tests/sharedmodule/server-module-help.live.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-custom-payload-carrier-owner-queryability
+    build:
+      - npm run build:min
+    notes:
+      - "Server contract descriptors must stay queryable as a dedicated Rust contract surface instead of falling back to broad crate ownership."
 
   - feature_id: virtual_router.primary_exhausted_to_default_pool
     change_risk: high
@@ -404,6 +478,9 @@ verification:
     residue:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
+      - npm run verify:client-response-internal-carrier-surface
+      - npm run verify:architecture-custom-payload-carrier-owner-queryability
+      - npm run verify:architecture-custom-payload-carrier-runtime-manifest
       - npm run verify:repo-sanity
     build:
       - npm run build:min
@@ -432,24 +509,24 @@ verification:
   - feature_id: hub.metadata_center_mainline
     change_risk: high
     unit:
-      - src/server/runtime/http-server/executor-metadata.ts
-      - src/server/runtime/http-server/executor/request-executor-attempt-state.ts
-      - src/server/runtime/http-server/executor/servertool-adapter-context.ts
+      - src/server/runtime/http-server/metadata-center/metadata-center.ts
+      - src/server/runtime/http-server/metadata-center/request-truth-readers.ts
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/server/handlers/handler-response-common.ts
     contract:
-      - tests/server/http-server/executor-metadata.spec.ts
-      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
-      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
       - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
+      - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
+      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
     integration:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
     smoke: []
     build:
+      - npm run verify:architecture-metadata-center-manifest-code-sync
       - npm run build:min
     notes:
-      - "Current stage is doc/index-only; these gates define the minimum validation surface once implementation starts."
-      - "Migration must prove request truth, continuation context, and tmux/client attachment scope no longer drift through repeated merge/backfill."
+      - "Registry core and response closeout release remain here; request capture, attempt merge, and servertool adapter context each moved to file-scoped sub-features."
+      - "Manifest/code sync must prove every metadata-center family and slot is backed by a real type, state bucket, writer, reader, and release path."
+      - "The first-batch `runtime_control` carrier and host-side projection reader now belong to this owner; validation must keep them queryable without claiming writer migration is complete."
       - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
       - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
       - "Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal."
@@ -465,6 +542,51 @@ verification:
       - "Retired provider-key native export/wrapper/parser must stay deleted; provider-key log parsing does not justify a Rust/NAPI control surface without runtime consumers."
       - "Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts."
       - "Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge."
+
+  - feature_id: hub.metadata_center_request_capture
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor-metadata.ts
+    contract:
+      - tests/server/http-server/executor-metadata.spec.ts
+      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
+
+  - feature_id: hub.metadata_center_attempt_merge
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+    contract:
+      - tests/server/http-server/executor-metadata.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Attempt merge must preserve metadata-center truth over pipeline-result drift and must not recreate flat metadata backfill."
+      - "Validation must prove provider target/model compatibility observation stays in `MetadataCenter.provider_observation` and is still readable by servertool/provider context readers without reviving flat `metadata.target` / `metadata.compatibilityProfile`."
+
+  - feature_id: hub.metadata_center_servertool_context
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/executor/servertool-adapter-context.ts
+    contract:
+      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Servertool adapter context must project request-local truth and captured origin request only; relay-only continuation state must not become request truth."
 
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium
@@ -1075,12 +1197,29 @@ verification:
     notes:
       - "handler family must not own quota/health/routing state; calls into manager or llmswitch-core."
 
+  - feature_id: daemon_admin.auth_gate_shell
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/daemon-admin-routes.ts
+    contract:
+      - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
+    integration:
+      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
+      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - "Auth/local gate shell must reject non-local access before sub-handler dispatch and must not own daemon state mutation semantics."
+
   - feature_id: server.http_runtime_entry
     change_risk: medium
     unit:
       - src/server/runtime/http-server/index.ts
     contract:
       - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
+      - tests/server/runtime/http-server/index.request-truth-contract.spec.ts
     integration:
       - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
     smoke:
@@ -1088,7 +1227,87 @@ verification:
     build:
       - npm run build:min
     notes:
-      - "entry shell only: lifecycle, port registry, route wiring, restart runtime."
+      - "index shell only: port registry, per-port dispatch, and runtime manager wiring."
+
+  - feature_id: server.http_runtime_lifecycle
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/http-server-lifecycle.ts
+    contract:
+      - tests/server/runtime/http-server/entry-port-snapshot-isolation.red.spec.ts
+      - tests/server/runtime/http-server/port-context-isolation.red.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - "Lifecycle shell owns init/restart/start/stop and handler-context assembly only; per-request semantics stay outside."
+
+  - feature_id: server.provider_response_conversion_host
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/provider-response-converter.ts
+    contract:
+      - tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+    integration:
+      - tests/server/runtime/request-executor.unified-semantics.spec.ts
+    smoke:
+      - npm run verify:architecture-ci
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Host converter must stay on stream/body capture plus Rust handoff; TS fallback projection must not reappear."
+
+  - feature_id: server.response_inspection_helpers
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/executor/request-executor-response-inspect.ts
+    contract:
+      - tests/server/runtime/http-server/executor/request-executor-response-inspect.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Inspection helpers must stay pure reads; payload mutation or recovery logic belongs elsewhere."
+
+  - feature_id: server.servertool_followup_dispatch_surface
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
+    contract:
+      - tests/server/runtime/http-server/executor/servertool-followup-dispatch.contract.spec.ts
+      - tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts
+      - tests/server/runtime/http-server/executor/servertool-followup-model-pin-regression.spec.ts
+    integration:
+      - tests/server/handlers/responses-handler.stop-followup-metadata.blackbox.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-ci
+    build:
+      - npm run build:min
+    notes:
+      - "Followup dispatch host may execute nested reenter/client-inject glue only; no TS followup semantics or fallback."
+
+  - feature_id: server.servertool_followup_metadata_surface
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/executor/servertool-followup-metadata.ts
+    contract:
+      - tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Nested followup metadata projection must preserve continuity headers without upgrading relay-only context into request truth."
 
   - feature_id: server.models_capability_contract
     change_risk: high
@@ -1111,11 +1330,14 @@ verification:
     unit:
       - src/server/handlers/responses-handler.ts
       - src/server/handlers/chat-handler.ts
+      - src/server/handlers/handler-utils.ts
     contract:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
+      - tests/server/handlers/handler-utils.metadata-contract.spec.ts
     integration:
       - tests/server/handlers/chat-handler.started-sse-error.spec.ts
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
+      - tests/server/handlers/handler-utils.metadata.spec.ts
     smoke:
       - npm run verify:server-function-map-boundary
       - npm run verify:architecture-ci
@@ -1134,6 +1356,7 @@ verification:
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
     integration: []
     smoke:
+      - npm run verify:client-response-internal-carrier-surface
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
       - npm run verify:function-map-compile-gate
@@ -1186,6 +1409,7 @@ verification:
       - tests/sharedmodule/responses-continuation-store.spec.ts
     integration: []
     smoke:
+      - npm run verify:client-response-internal-carrier-surface
       - npm run verify:server-function-map-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -1195,6 +1419,7 @@ verification:
       - "Continuation lifecycle orchestration for capture/record/finalize and conversation clear-policy semantics stay behind the lifecycle bridge surface."
       - "responses-continuation-store contract must lock both message-content legalization (`output_text/commentary -> input_text`) and reasoning-history legalization (`reasoning.content` must not replay into next request payload)."
       - "responses-continuation-store contract must also lock replay-safe persistence: internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields must not survive record/replay."
+      - "responses-continuation-store contract must also prove completed stopless tool pairs are collapsed to the latest guidance only during resume/restore/materialize, so old stopless `function_call/function_call_output` history cannot poison later turns."
 
   - feature_id: cli.command_surface
     change_risk: medium

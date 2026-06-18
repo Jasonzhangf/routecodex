@@ -133,15 +133,19 @@
           StoplessState03RuntimeSnapshotResolved[&quot;StoplessState03RuntimeSnapshotResolved&quot;]
           StoplessCli04ProjectionPlanned[&quot;StoplessCli04ProjectionPlanned&quot;]
           StoplessCli06ClientExecuted[&quot;StoplessCli06ClientExecuted&quot;]
-          StoplessReq08NextTurnMaterialized[&quot;StoplessReq08NextTurnMaterialized&quot;]
+          StoplessReq07ContinuationRestored[&quot;StoplessReq07ContinuationRestored&quot;]
+          StoplessReq08GuidanceRewritten[&quot;StoplessReq08GuidanceRewritten&quot;]
+          StoplessReq09SchemaContractInjected[&quot;StoplessReq09SchemaContractInjected&quot;]
           VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
 
           StoplessResp01StopDetected --&gt;|stl-01| StoplessResp02SchemaGateEvaluated
           StoplessResp02SchemaGateEvaluated --&gt;|stl-02| StoplessState03RuntimeSnapshotResolved
           StoplessState03RuntimeSnapshotResolved --&gt;|stl-03| StoplessCli04ProjectionPlanned
           StoplessCli04ProjectionPlanned -.-&gt;|stl-04| StoplessCli06ClientExecuted
-          StoplessCli06ClientExecuted -.-&gt;|stl-05| StoplessReq08NextTurnMaterialized
-          StoplessReq08NextTurnMaterialized --&gt;|stl-06| VrRoute04SelectedTarget</pre>
+          StoplessCli06ClientExecuted -.-&gt;|stl-05| StoplessReq07ContinuationRestored
+          StoplessReq07ContinuationRestored --&gt;|stl-06| StoplessReq08GuidanceRewritten
+          StoplessReq08GuidanceRewritten --&gt;|stl-07| StoplessReq09SchemaContractInjected
+          StoplessReq09SchemaContractInjected --&gt;|stl-08| VrRoute04SelectedTarget</pre>
         <h2>Edge Owners and Current Status</h2>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>owner_feature_id</th><th>status</th><th>mainline edge note</th></tr></thead>
@@ -149,10 +153,12 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>stl-01</td><td>stop response detected</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td><code>runServerToolOrchestration</code> routes stopless detection into the servertool handler.</td></tr>
         <tr><td>stl-02</td><td>runtime snapshot resolved</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>stopless state is restored from runtime metadata or the current request <code>tool_outputs</code>, not from persisted file state.</td></tr>
-        <tr><td>stl-03</td><td>CLI projection planned</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow</code> builds the client-visible CLI command with status-only input.</td></tr>
+        <tr><td>stl-03</td><td>CLI projection planned</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow</code> builds the client-visible CLI command with concise structured input: <code>flowId/repeatCount/maxRepeats/triggerHint</code> plus optional <code>schemaFeedback{reasonCode,missingFields}</code>.</td></tr>
         <tr><td>stl-04</td><td>client executes the CLI</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td><code>routecodex hook run reasoning_stop</code> executes without <code>sessionDir/sessionId/requestId</code> flags.</td></tr>
-        <tr><td>stl-05</td><td>CLI result materialized for next turn</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>auto-projected CLI result is restored from the next request body/runtime metadata and not replayed as model-owned history.</td></tr>
-        <tr><td>stl-06</td><td>VR routes stopless turn to thinking</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>route selection forces the next turn into thinking rather than reusing the stopless CLI result as history.</td></tr>
+        <tr><td>stl-05</td><td>CLI result restored into next request scope</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>auto-projected CLI result is restored from the next request body/runtime metadata; no file persistence/sessionDir fallback is allowed.</td></tr>
+        <tr><td>stl-06</td><td>next-turn guidance rewritten</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>responses/chat bridge collapses the stopless tool pair into model-transparent natural-language guidance plus missing/error feedback; only the latest stopless guidance may survive, and raw historical tool pairs must not replay into later turns.</td></tr>
+        <tr><td>stl-07</td><td>req-side schema contract rebound</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>req_chatprocess must physically rebind the stopless schema contract onto the next request mainline: chat/messages use a system message, <code>/v1/responses</code> uses <code>instructions</code> which the bridge must materialize back into the outbound system message.</td></tr>
+        <tr><td>stl-08</td><td>VR routes stopless turn to thinking</td><td><code>hub.servertool_stopless_cli_continuation</code></td><td>anchored</td><td>route selection forces the next turn into thinking rather than reusing the stopless CLI result as history.</td></tr>
         </tbody>
         </table>
         <h2>Owner / Allowed / Forbidden Path Summary</h2>
@@ -166,7 +172,11 @@
           <li><code>cargo test -p servertool-core cli_contract --lib</code></li>
           <li><code>cargo test -p servertool-core persisted_lookup --lib</code></li>
           <li><code>cargo test -p servertool-cli --test cli_blackbox</code></li>
+          <li><code>cargo test -p router-hotpath-napi test_req_process_responses_input_still_materializes_stopless_contract --lib -- --nocapture</code></li>
+          <li><code>node --experimental-vm-modules ./node_modules/.bin/jest tests/responses/responses-openai-bridge.spec.ts --runInBand</code></li>
+          <li><code>node --experimental-vm-modules ./node_modules/.bin/jest tests/cli/servertool-command.spec.ts --runInBand</code></li>
           <li><code>node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts --runInBand</code></li>
+          <li><code>node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-vr-route-hint.spec.ts --runInBand</code></li>
           <li><code>node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/servertool-cli-projection.spec.ts --runInBand</code></li>
           <li><code>npm run verify:architecture-mainline-call-map</code></li>
           <li><code>npm run verify:function-map-compile-gate</code></li>
@@ -182,7 +192,10 @@
         <ul>
           <li>stopless no longer depends on file persistence, tmux, or <code>ROUTECODEX_SESSION_DIR</code>.</li>
           <li>stopless CLI command and CLI stdout no longer require <code>sessionId/requestId</code>.</li>
+          <li>CLI command payload stays concise/structured; natural-language corrective guidance is generated in req_chatprocess from <code>schemaFeedback + schemaGuidance</code>, not embedded into the command itself.</li>
           <li>next-turn restoration is now locked to current request <code>tool_outputs</code> / runtime metadata.</li>
+          <li>continuation / restore / materialize must collapse completed stopless <code>function_call + function_call_output</code> pairs into a single guidance message and keep only the latest guidance.</li>
+          <li><code>/v1/responses</code> stopless turns now have an explicit two-owner contract: req owner preserves schema contract in <code>instructions</code>, bridge owner materializes it back into the outbound system message.</li>
           <li>stopless is not treated as protocol-independent continuation; it must stay out of persisted continuation/file-state owners.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation context only for <code>/v1/responses</code> owner flows; it must not be upgraded into request session truth, stopless activation input, stop-message scope, or state-key material.</li>
         </ul>
@@ -190,7 +203,11 @@
         <ul>
           <li>stopless does not depend on tmux, file state, or <code>sessionDir</code>.</li>
           <li>CLI projection stays in the stopless owner.</li>
+          <li>CLI input is concise structured feedback only; model-visible natural language comes from req_chatprocess rewrite.</li>
           <li>the next turn is materialized from current request CLI truth / runtime metadata, not from a second fallback path.</li>
+          <li>old stopless tool pairs never survive into continuation history; only the latest guidance is allowed to cross turns.</li>
+          <li><code>/v1/responses</code> next turn cannot lose the schema contract between req_chatprocess and responses bridge; provider-request must still contain the stopless system/schema instruction.</li>
+          <li>VR still routes the rewritten stopless turn to <code>thinking</code>, not <code>tools</code>, even when historical tool route hints exist.</li>
           <li><code>responsesRequestContext</code> remains a continuation carrier only and never materializes request <code>sessionId/conversationId</code>.</li>
         </ul>
       </article>

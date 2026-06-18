@@ -3,10 +3,10 @@ import { describe, expect, it } from '@jest/globals';
 import { normalizeResponsesClientPayloadForHttp } from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts';
 
 describe('responses-response-bridge direct JSON protocol guard', () => {
-  it('RED: direct passthrough metadata must not skip Responses replay-safe client projection', async () => {
+  it('RED: direct owner side-channel must not skip Responses replay-safe client projection', async () => {
     const output = await normalizeResponsesClientPayloadForHttp({
       entryEndpoint: '/v1/responses',
-      metadata: { __routecodexDirectPassthrough: true },
+      metadata: {},
       hasSsePayload: () => false,
       payload: {
         id: 'resp_direct_json_guard',

@@ -1039,9 +1039,6 @@ fn detect_empty_assistant_payload_contract_signal(
     payload: &Value,
 ) -> Option<PayloadContractSignalOutput> {
     let row = payload.as_object()?;
-    if row.contains_key("__sse_responses") {
-        return None;
-    }
 
     if let Some(choices) = row.get("choices").and_then(|v| v.as_array()) {
         if let Some(first_choice) = choices.first().and_then(|v| v.as_object()) {

@@ -6,7 +6,9 @@
 
 ## 2. 当前缺口
 
-`provider-response-converter.ts` 在 stopless 拦截后走 `buildServerToolSseWrapperBody`，该函数把 `exec_command` 工具结果以 SSE `event:function_call` 帧注入下一轮——客户端/模型仍感知工具调用，不是纯文本续轮。
+历史缺口：`provider-response-converter.ts` 曾在 stopless 拦截后走 SSE wrapper builder，并把工具结果以 SSE `event:function_call` 帧注入下一轮，导致客户端/模型仍感知工具调用。
+
+当前规则：该 wrapper builder 已删除，内部控制字段不得混入请求/响应 payload；stopless/finish reason/SSE stream 状态只能走 chat process 正常语义或 runtime side-channel / MetadataCenter。
 
 ## 3. 实现方案
 

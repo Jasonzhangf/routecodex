@@ -164,7 +164,7 @@ export async function runFollowupMainline(args: {
     requestId: string;
     body?: JsonObject;
     metadata?: JsonObject;
-  }) => Promise<{ body?: JsonObject; __sse_responses?: unknown; format?: string }>;
+  }) => Promise<{ body?: JsonObject; sseStream?: unknown; format?: string }>;
   clientInjectDispatch?: (options: {
     entryEndpoint: string;
     requestId: string;

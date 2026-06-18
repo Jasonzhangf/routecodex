@@ -44,6 +44,7 @@ describe('executor-metadata binding fallback', () => {
   it('does not materialize request session truth from responsesRequestContext carried in request metadata', async () => {
     jest.resetModules();
     const { buildRequestMetadata } = await import('../../../../src/server/runtime/http-server/executor-metadata.js');
+    const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
 
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses',
@@ -70,6 +71,8 @@ describe('executor-metadata binding fallback', () => {
 
     expect(metadata.sessionId).toBeUndefined();
     expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.responsesRequestContext).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readContinuationContext().responsesRequestContext).toBeUndefined();
   });
 
   it('restores client inject scope from conversation binding when api-key carries session scope only', async () => {

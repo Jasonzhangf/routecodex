@@ -14,7 +14,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   assertClientResponseHasNoInternalCarriers,
-  hasSsePayload,
   sendPipelineResponse,
   type SsePayloadShape,
 } from '../../src/server/handlers/handler-response-utils.js';
@@ -35,6 +34,10 @@ const FORBIDDEN_FIELDS = [
   'upstreamRequestId',
   'providerStack',
 ];
+
+function hasSseStream(result: { sseStream?: unknown }): boolean {
+  return result.sseStream !== undefined;
+}
 
 describe('server SSE success exit guard (Phase Server-C e2e)', () => {
   describe('assertClientResponseHasNoInternalCarriers — direct unit guard', () => {
@@ -58,15 +61,15 @@ describe('server SSE success exit guard (Phase Server-C e2e)', () => {
     });
   });
 
-  describe('hasSsePayload — SSE dispatch detection (per hasSsePayload contract)', () => {
-    it('detects SSE payload shape (top-level __sse_responses key)', () => {
-      const sseBody = { __sse_responses: { events: [] } };
-      expect(hasSsePayload(sseBody)).toBe(true);
+  describe('sseStream side-channel detection', () => {
+    it('detects SSE payload shape (top-level sseStream key)', () => {
+      const sseBody = { sseStream: { events: [] } };
+      expect(hasSseStream(sseBody)).toBe(true);
     });
 
     it('does not treat JSON body as SSE', () => {
       const jsonBody = { id: 'x', choices: [] };
-      expect(hasSsePayload(jsonBody)).toBe(false);
+      expect(hasSseStream(jsonBody)).toBe(false);
     });
   });
 

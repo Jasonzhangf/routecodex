@@ -64,6 +64,23 @@ export type MetadataCenterContinuationContext = {
   stickyScope?: string;
 };
 
+export type MetadataCenterRuntimeControl = {
+  routeHint?: string;
+  routeName?: string;
+  routeId?: string;
+  providerProtocol?: string;
+  providerFamily?: string;
+  retryProviderKey?: string;
+  preselectedRoute?: Record<string, unknown>;
+  serverToolFollowup?: boolean;
+  serverToolFollowupSource?: string;
+  stoplessGoalStatus?: string;
+  stopMessageEnabled?: boolean;
+  stopMessageExcludeDirect?: boolean;
+  streamIntent?: string;
+  clientAbort?: boolean;
+};
+
 export type MetadataCenterProviderObservation = {
   target?: Record<string, unknown>;
   providerKey?: string;
@@ -75,8 +92,24 @@ export type MetadataCenterProviderObservation = {
   finishReason?: string;
 };
 
+export type MetadataCenterClientAttachmentScope = {
+  daemonId?: string;
+  tmuxSessionId?: string;
+  tmuxTarget?: string;
+  workdir?: string;
+};
+
+export type MetadataCenterDebugSnapshot = {
+  snapshotId?: string;
+  bridgeHistory?: unknown[];
+  traceMarkers?: unknown[];
+};
+
 export type MetadataCenterState = {
   requestTruth: Partial<Record<keyof MetadataCenterRequestTruth, MetadataCenterSlot>>;
   continuationContext: Partial<Record<keyof MetadataCenterContinuationContext, MetadataCenterSlot>>;
+  runtimeControl: Partial<Record<keyof MetadataCenterRuntimeControl, MetadataCenterSlot>>;
   providerObservation: Partial<Record<keyof MetadataCenterProviderObservation, MetadataCenterSlot>>;
+  clientAttachmentScope: Partial<Record<keyof MetadataCenterClientAttachmentScope, MetadataCenterSlot>>;
+  debugSnapshot: Partial<Record<keyof MetadataCenterDebugSnapshot, MetadataCenterSlot>>;
 };

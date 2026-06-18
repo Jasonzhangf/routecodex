@@ -11,10 +11,8 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
     apply_anthropic_tool_alias_semantics, apply_post_governed_media_cleanup,
     resolve_governance_context,
 };
-#[cfg(test)]
-use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::{
-    maybe_apply_servertool_orchestration, read_runtime_metadata, resolve_client_inject_ready,
+    maybe_apply_servertool_orchestration, resolve_client_inject_ready,
 };
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 
@@ -55,46 +53,29 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
 
 fn request_already_has_stopless_system_instruction(request: &Map<String, Value>) -> bool {
     request
-        .get("messages")
-        .and_then(Value::as_array)
-        .map(|messages| {
-            messages.iter().any(|message| {
-                let Some(message_obj) = message.as_object() else {
-                    return false;
-                };
-                let role = message_obj.get("role").and_then(Value::as_str).unwrap_or("");
-                if role.trim().eq_ignore_ascii_case("system") {
-                    let content = message_obj
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    return content.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed");
-                }
-                false
-            })
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(|content| {
+            content.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed")
         })
         .unwrap_or(false)
 }
 
-fn prepend_stopless_system_instruction(request: &mut Map<String, Value>) {
+fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
     if request_already_has_stopless_system_instruction(request) {
         return;
     }
-    let messages = request
-        .entry("messages".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !messages.is_array() {
-        *messages = Value::Array(Vec::new());
+    if !request
+        .get("input")
+        .map(|value| matches!(value, Value::Array(_)))
+        .unwrap_or(false)
+    {
+        return;
     }
-    if let Some(message_array) = messages.as_array_mut() {
-        message_array.insert(
-            0,
-            serde_json::json!({
-                "role": "system",
-                "content": STOPLESS_SYSTEM_INSTRUCTION
-            }),
-        );
-    }
+    request.insert(
+        "instructions".to_string(),
+        Value::String(STOPLESS_SYSTEM_INSTRUCTION.to_string()),
+    );
 }
 
 pub fn apply_req_process_tool_governance(
@@ -107,11 +88,10 @@ pub fn apply_req_process_tool_governance(
     let metadata = normalize_record(input.metadata);
     let request_metadata = Value::Object(metadata.clone());
     let mut request = normalize_record(input.request);
-    let runtime_metadata = read_runtime_metadata(&metadata);
     let client_inject_ready = resolve_client_inject_ready(&metadata);
     apply_chat_process_request_sanitizer(&mut request);
     if client_inject_ready {
-        prepend_stopless_system_instruction(&mut request);
+        inject_stopless_system_instruction(&mut request);
     }
     normalize_apply_patch_freeform_tool_schema(&mut request);
 

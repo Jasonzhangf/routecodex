@@ -163,6 +163,26 @@ function buildStopSchemaFinalPlan(chatResponse: JsonObject): ServerToolHandlerPl
   };
 }
 
+function buildStopSchemaFeedback(args: {
+  schemaGate: { reason_code?: string; missing_fields?: string[] };
+}): JsonObject | undefined {
+  const reasonCode = typeof args.schemaGate.reason_code === 'string'
+    ? args.schemaGate.reason_code.trim()
+    : '';
+  if (!reasonCode) {
+    return undefined;
+  }
+  const missingFields = Array.isArray(args.schemaGate.missing_fields)
+    ? [...args.schemaGate.missing_fields]
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+    : [];
+  return {
+    reasonCode,
+    missingFields
+  };
+}
+
 function writeStoplessLearnedNoteFromRustPlan(args: {
   adapterContext: Record<string, unknown>;
   requestId: string;
@@ -462,6 +482,7 @@ const handler: ServerToolHandler = async (
 
     const usedAt = Date.now();
     const stateUpdate = handlerResult.stateUpdate || {};
+    const schemaFeedback = buildStopSchemaFeedback({ schemaGate });
     const persistPlan = planStopMessagePersistSnapshot({
       schemaGate,
       decision,
@@ -497,11 +518,13 @@ const handler: ServerToolHandler = async (
             decision: effectiveDecision as unknown as JsonObject,
             assistantStopText,
             stopSchemaTriggerHint: schemaGate.reason_code,
+            ...(schemaFeedback ? { stopSchemaFeedback: schemaFeedback } : {}),
             serverToolLoopState: {
               flowId: FLOW_ID,
               repeatCount: persistPlan.nextUsed,
               maxRepeats: persistPlan.nextMaxRepeats,
-              triggerHint: schemaGate.reason_code
+              triggerHint: schemaGate.reason_code,
+              ...(schemaFeedback ? { schemaFeedback } : {})
             }
           }
           }

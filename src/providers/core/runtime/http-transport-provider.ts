@@ -369,7 +369,7 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   protected async wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, _context: ProviderContext): Promise<UnknownObject> {
-    return { __sse_responses: stream } as UnknownObject;
+    return { sseStream: stream } as UnknownObject;
   }
 
   protected async performHealthCheck(url: string): Promise<boolean> {

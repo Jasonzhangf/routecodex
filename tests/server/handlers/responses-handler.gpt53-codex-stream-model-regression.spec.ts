@@ -28,8 +28,7 @@ describe('responses-handler gpt-5.3-codex stream regression', () => {
           'x-upstream-mode': 'sse',
           'x-provider-stream-requested': '1'
         },
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             'event: response.created\n',
             `data: ${JSON.stringify({
               type: 'response.created',
@@ -124,8 +123,7 @@ describe('responses-handler gpt-5.3-codex stream regression', () => {
           'x-upstream-mode': 'sse',
           'x-provider-stream-requested': '1'
         },
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             'event: response.created\n',
             `data: ${JSON.stringify({
               type: 'response.created',
@@ -216,8 +214,7 @@ describe('responses-handler gpt-5.3-codex stream regression', () => {
           'x-upstream-mode': 'sse',
           'x-provider-stream-requested': '1'
         },
-        body: {
-          __sse_responses: Readable.from([
+        sseStream: Readable.from([
             'event: response.created\n',
             `data: ${JSON.stringify({
               type: 'response.created',

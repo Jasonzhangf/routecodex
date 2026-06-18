@@ -119,7 +119,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
               cleanup: async () => undefined,
               processIncoming: async () => {
                 providerCalls.push('primary');
-                return { status: 200, data: { mode: 'sse', __sse_responses: createTerminatingStream() } };
+                return { status: 200, data: { mode: 'sse', sseStream: createTerminatingStream() } };
               }
             }
           };
