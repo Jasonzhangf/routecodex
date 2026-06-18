@@ -47,6 +47,7 @@ families:
       - serverToolFollowup
       - serverToolFollowupSource
       - stoplessGoalStatus
+      - stopless
       - stopMessageEnabled
       - stopMessageExcludeDirect
       - streamIntent

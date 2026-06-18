@@ -35,6 +35,17 @@ export type RuntimeControlProjection = {
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
   stoplessGoalStatus?: string;
+  stopless?: {
+    sessionId?: string;
+    flowId?: string;
+    repeatCount?: number;
+    maxRepeats?: number;
+    triggerHint?: string;
+    continuationPrompt?: string;
+    schemaFeedback?: Record<string, unknown>;
+    active?: boolean;
+    updatedAt?: number;
+  };
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
   streamIntent?: string;
@@ -44,7 +55,26 @@ export type RuntimeControlProjection = {
 export type RuntimeServerToolProjection = RuntimeRequestTruthIdentifiers & {
   assignedModelId?: string;
   compatibilityProfile?: string;
+  stopless?: RuntimeControlProjection['stopless'];
 };
+
+export function writeStoplessRuntimeControl(args: {
+  metadata: Record<string, unknown>;
+  value: NonNullable<RuntimeControlProjection['stopless']>;
+  writer: {
+    module: string;
+    symbol: string;
+    stage: string;
+  };
+  reason?: string;
+}): void {
+  MetadataCenter.attach(args.metadata).writeRuntimeControl(
+    'stopless',
+    args.value,
+    args.writer,
+    args.reason
+  );
+}
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -117,6 +147,7 @@ export function readRuntimeControlProjection(
   const serverToolFollowup = readBoolean(runtimeControl?.serverToolFollowup);
   const serverToolFollowupSource = readTrimmedString(runtimeControl?.serverToolFollowupSource);
   const stoplessGoalStatus = readTrimmedString(runtimeControl?.stoplessGoalStatus);
+  const stopless = asFlatRecord(runtimeControl?.stopless);
   const stopMessageEnabled = readBoolean(runtimeControl?.stopMessageEnabled);
   const stopMessageExcludeDirect = readBoolean(runtimeControl?.stopMessageExcludeDirect);
   const streamIntent = readTrimmedString(runtimeControl?.streamIntent);
@@ -132,6 +163,25 @@ export function readRuntimeControlProjection(
     ...(serverToolFollowup !== undefined ? { serverToolFollowup } : {}),
     ...(serverToolFollowupSource ? { serverToolFollowupSource } : {}),
     ...(stoplessGoalStatus ? { stoplessGoalStatus } : {}),
+    ...(stopless
+      ? {
+          stopless: {
+            ...(readTrimmedString(stopless.sessionId) ? { sessionId: readTrimmedString(stopless.sessionId) } : {}),
+            ...(readTrimmedString(stopless.flowId) ? { flowId: readTrimmedString(stopless.flowId) } : {}),
+            ...(typeof stopless.repeatCount === 'number' ? { repeatCount: stopless.repeatCount } : {}),
+            ...(typeof stopless.maxRepeats === 'number' ? { maxRepeats: stopless.maxRepeats } : {}),
+            ...(readTrimmedString(stopless.triggerHint) ? { triggerHint: readTrimmedString(stopless.triggerHint) } : {}),
+            ...(readTrimmedString(stopless.continuationPrompt)
+              ? { continuationPrompt: readTrimmedString(stopless.continuationPrompt) }
+              : {}),
+            ...(asFlatRecord(stopless.schemaFeedback)
+              ? { schemaFeedback: asFlatRecord(stopless.schemaFeedback) }
+              : {}),
+            ...(typeof stopless.active === 'boolean' ? { active: stopless.active } : {}),
+            ...(typeof stopless.updatedAt === 'number' ? { updatedAt: stopless.updatedAt } : {}),
+          }
+        }
+      : {}),
     ...(stopMessageEnabled !== undefined ? { stopMessageEnabled } : {}),
     ...(stopMessageExcludeDirect !== undefined ? { stopMessageExcludeDirect } : {}),
     ...(streamIntent ? { streamIntent } : {}),
@@ -153,9 +203,11 @@ export function readRuntimeServerToolProjection(
   const compatibilityProfile =
     providerObservation.compatibilityProfile
     ?? readTrimmedString(target?.compatibilityProfile);
+  const runtimeControl = readRuntimeControlProjection(metadata);
   return {
     ...requestTruth,
     ...(assignedModelId ? { assignedModelId } : {}),
     ...(compatibilityProfile ? { compatibilityProfile } : {}),
+    ...(runtimeControl.stopless ? { stopless: runtimeControl.stopless } : {}),
   };
 }

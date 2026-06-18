@@ -15,11 +15,12 @@ fn has_non_empty_array(value: Option<&Value>) -> bool {
 }
 
 fn read_servertool_followup_source(request_semantics: Option<&Value>) -> String {
-    request_semantics
+    let Some(row) = request_semantics.and_then(Value::as_object) else {
+        return String::new();
+    };
+    row.get("runtime_control")
         .and_then(Value::as_object)
-        .and_then(|row| row.get("__routecodex"))
-        .and_then(Value::as_object)
-        .and_then(|row| read_string(row.get("serverToolFollowupSource")))
+        .and_then(|runtime| read_string(runtime.get("serverToolFollowupSource")))
         .unwrap_or_default()
 }
 
@@ -965,10 +966,19 @@ mod request_semantics_tests {
     #[test]
     fn reasoning_stop_followup_is_not_tool_result_followup() {
         let semantics = json!({
-            "__routecodex": { "serverToolFollowupSource": "servertool.reasoning_stop_continue" },
+            "runtime_control": { "serverToolFollowupSource": "servertool.reasoning_stop_continue" },
             "messages": [{ "role": "tool", "tool_call_id": "call_1", "content": "ok" }]
         });
         assert!(!is_tool_result_followup_turn_value(Some(&semantics)));
+    }
+
+    #[test]
+    fn legacy_rt_reasoning_stop_source_does_not_control_followup_semantics() {
+        let semantics = json!({
+            "__rt": { "serverToolFollowupSource": "servertool.reasoning_stop_continue" },
+            "messages": [{ "role": "tool", "tool_call_id": "call_1", "content": "ok" }]
+        });
+        assert!(is_tool_result_followup_turn_value(Some(&semantics)));
     }
 
     #[test]

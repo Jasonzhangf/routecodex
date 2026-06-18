@@ -404,19 +404,13 @@ fn should_replace_servertool_adapter_captured_tools(
         return true;
     }
 
-    let rt = base_context.get("__rt").and_then(Value::as_object);
-    let is_servertool_followup = rt
+    let runtime_control = base_context
+        .get("runtime_control")
+        .and_then(Value::as_object);
+    let is_servertool_followup = runtime_control
         .and_then(|row| row.get("serverToolFollowup"))
         .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || base_context
-            .get("serverToolFollowup")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || base_context
-            .get("isServerToolFollowup")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        .unwrap_or(false);
     if !is_servertool_followup {
         return false;
     }
@@ -450,9 +444,11 @@ fn read_provider_response_metadata(value: Option<&Value>) -> Option<&Map<String,
         .and_then(Value::as_object)
 }
 
-fn read_provider_response_rt(metadata: Option<&Map<String, Value>>) -> Option<&Map<String, Value>> {
+fn read_provider_response_runtime_control(
+    metadata: Option<&Map<String, Value>>,
+) -> Option<&Map<String, Value>> {
     metadata
-        .and_then(|row| row.get("__rt"))
+        .and_then(|row| row.get("runtime_control"))
         .and_then(Value::as_object)
 }
 
@@ -586,37 +582,25 @@ fn merge_provider_response_unique_tools(
 }
 
 fn read_followup_raw<'a>(
-    processed_rt: Option<&'a Map<String, Value>>,
-    standardized_rt: Option<&'a Map<String, Value>>,
-    request_metadata_rt: Option<&'a Map<String, Value>>,
-    processed_metadata: Option<&'a Map<String, Value>>,
-    standardized_metadata: Option<&'a Map<String, Value>>,
-    request_metadata: Option<&'a Map<String, Value>>,
+    processed_runtime_control: Option<&'a Map<String, Value>>,
+    standardized_runtime_control: Option<&'a Map<String, Value>>,
+    request_runtime_control: Option<&'a Map<String, Value>>,
 ) -> Option<&'a Value> {
-    processed_rt
+    processed_runtime_control
         .and_then(|row| row.get("serverToolFollowup"))
-        .or_else(|| standardized_rt.and_then(|row| row.get("serverToolFollowup")))
-        .or_else(|| request_metadata_rt.and_then(|row| row.get("serverToolFollowup")))
-        .or_else(|| processed_metadata.and_then(|row| row.get("serverToolFollowup")))
-        .or_else(|| standardized_metadata.and_then(|row| row.get("serverToolFollowup")))
-        .or_else(|| request_metadata.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| standardized_runtime_control.and_then(|row| row.get("serverToolFollowup")))
+        .or_else(|| request_runtime_control.and_then(|row| row.get("serverToolFollowup")))
 }
 
 fn read_followup_source<'a>(
-    processed_rt: Option<&'a Map<String, Value>>,
-    standardized_rt: Option<&'a Map<String, Value>>,
-    request_metadata_rt: Option<&'a Map<String, Value>>,
-    processed_metadata: Option<&'a Map<String, Value>>,
-    standardized_metadata: Option<&'a Map<String, Value>>,
-    request_metadata: Option<&'a Map<String, Value>>,
+    processed_runtime_control: Option<&'a Map<String, Value>>,
+    standardized_runtime_control: Option<&'a Map<String, Value>>,
+    request_runtime_control: Option<&'a Map<String, Value>>,
 ) -> Option<String> {
-    processed_rt
-        .and_then(|row| row.get("clientInjectSource"))
-        .or_else(|| standardized_rt.and_then(|row| row.get("clientInjectSource")))
-        .or_else(|| request_metadata_rt.and_then(|row| row.get("clientInjectSource")))
-        .or_else(|| processed_metadata.and_then(|row| row.get("clientInjectSource")))
-        .or_else(|| standardized_metadata.and_then(|row| row.get("clientInjectSource")))
-        .or_else(|| request_metadata.and_then(|row| row.get("clientInjectSource")))
+    processed_runtime_control
+        .and_then(|row| row.get("serverToolFollowupSource"))
+        .or_else(|| standardized_runtime_control.and_then(|row| row.get("serverToolFollowupSource")))
+        .or_else(|| request_runtime_control.and_then(|row| row.get("serverToolFollowupSource")))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -713,24 +697,19 @@ fn resolve_provider_response_request_semantics_value(
         }
     }
 
-    let processed_rt = read_provider_response_rt(processed_metadata);
-    let standardized_rt = read_provider_response_rt(standardized_metadata);
-    let request_metadata_rt = read_provider_response_rt(request_metadata_record);
+    let processed_runtime_control = read_provider_response_runtime_control(processed_metadata);
+    let standardized_runtime_control =
+        read_provider_response_runtime_control(standardized_metadata);
+    let request_runtime_control = read_provider_response_runtime_control(request_metadata_record);
     let servertool_followup = boolish_true(read_followup_raw(
-        processed_rt,
-        standardized_rt,
-        request_metadata_rt,
-        processed_metadata,
-        standardized_metadata,
-        request_metadata_record,
+        processed_runtime_control,
+        standardized_runtime_control,
+        request_runtime_control,
     ));
     let followup_source = read_followup_source(
-        processed_rt,
-        standardized_rt,
-        request_metadata_rt,
-        processed_metadata,
-        standardized_metadata,
-        request_metadata_record,
+        processed_runtime_control,
+        standardized_runtime_control,
+        request_runtime_control,
     );
     if !servertool_followup && followup_source.is_none() {
         return Value::Object(normalized_base);
@@ -2818,9 +2797,9 @@ mod tests {
                     ]
                 }
             },
-            "__rt": {
+            "runtime_control": {
                 "serverToolFollowup": true,
-                "clientInjectSource": "servertool.reasoning_stop_guard"
+                "serverToolFollowupSource": "servertool.reasoning_stop_guard"
             }
         });
 
@@ -2834,6 +2813,80 @@ mod tests {
         assert_eq!(tools[0]["function"]["name"], "exec_command");
         assert_eq!(tools[1]["function"]["name"], "apply_patch");
         assert_eq!(tools[2]["function"]["name"], "reasoning.stop");
+    }
+
+    #[test]
+    fn test_legacy_flat_followup_metadata_does_not_merge_followup_tools() {
+        let processed = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "reasoning.stop" } }
+            ]
+        });
+        let request_metadata = json!({
+            "requestSemantics": {
+                "tools": {
+                    "clientToolsRaw": [
+                        { "type": "function", "function": { "name": "exec_command" } },
+                        { "type": "function", "function": { "name": "apply_patch" } }
+                    ]
+                }
+            },
+            "serverToolFollowup": true,
+            "clientInjectSource": "servertool.reasoning_stop_guard"
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+        let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["function"]["name"], "exec_command");
+        assert_eq!(tools[1]["function"]["name"], "apply_patch");
+        assert!(
+            !tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "reasoning.stop")
+        );
+    }
+
+    #[test]
+    fn test_legacy_rt_followup_metadata_does_not_merge_followup_tools() {
+        let processed = json!({
+            "tools": [
+                { "type": "function", "function": { "name": "reasoning.stop" } }
+            ]
+        });
+        let request_metadata = json!({
+            "requestSemantics": {
+                "tools": {
+                    "clientToolsRaw": [
+                        { "type": "function", "function": { "name": "exec_command" } },
+                        { "type": "function", "function": { "name": "apply_patch" } }
+                    ]
+                }
+            },
+            "__rt": {
+                "serverToolFollowup": true,
+                "clientInjectSource": "servertool.reasoning_stop_guard"
+            }
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+        let tools = output["tools"]["clientToolsRaw"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["function"]["name"], "exec_command");
+        assert_eq!(tools[1]["function"]["name"], "apply_patch");
+        assert!(
+            !tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "reasoning.stop")
+        );
     }
 
     #[test]

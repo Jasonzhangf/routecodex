@@ -1,3 +1,38 @@
+## 2026-06-18 MetadataCenter stopless runtime-control slice
+
+- Goal slice implemented: stopless/servertool followup control semantics now write `runtime_control.stopless` through the bound `MetadataCenter` side-channel; the write is fail-fast when the request-local MetadataCenter binding is absent.
+- Rust followup readers tightened:
+  - `chat_node_result_semantics.rs` reads reasoning-stop followup source only from `runtime_control.serverToolFollowupSource`.
+  - `chat_servertool_orchestration.rs` reads servertool followup / source only from `runtime_control.serverToolFollowup` and `runtime_control.serverToolFollowupSource`, not flat metadata or `__rt`.
+  - Added negative Rust coverage proving legacy flat / `__rt` followup control markers no longer activate followup tool merge or reasoning-stop suppression.
+- TS side-channel bridge fix:
+  - `runtime-metadata.ts::ensureRuntimeMetadata(...)` preserves the request-local `Symbol.for('routecodex.metadataCenter')` binding across native metadata normalization so servertool/stop-message handlers do not lose MetadataCenter state.
+  - `stop-message-auto.ts` writes stopless state with local writer stage `stop_message_auto_runtime_control_writer`, avoiding canonical node-id leakage in host labels.
+- Architecture truth synced:
+  - `docs/architecture/metadata-center-manifest.yml` declares `runtime_control.stopless`.
+  - function-map / mainline-call-map / verification-map now distinguish completed stopless writer migration from still-partial request-route writer migration.
+- Verification:
+  - `cargo test -p router-hotpath-napi chat_servertool_orchestration --lib -- --nocapture` PASS (43 tests)
+  - `cargo test -p router-hotpath-napi chat_node_result_semantics --lib -- --nocapture` PASS (14 tests)
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stop-message-compare-context.spec.ts tests/servertool/stopless-metadata-center.spec.ts tests/servertool/stopless-metadata-writer-ownership.spec.ts --runInBand` PASS (11 tests)
+  - focused followup/provider-response Jest PASS (11 tests)
+  - `npm run audit:custom-payload-carriers` PASS; `__routecodex*` runtime files=9 / hits=14, `__sse_*` runtime files=0
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS; routecodex unique-owner=9, ambiguous=0
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS
+  - `npm run verify:architecture-metadata-center-manifest-code-sync` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-ci` PASS after serial rerun; first parallel attempt failed only because concurrent build removed a transient Rust `target/debug/deps/rmeta*` path during scan
+  - `npx tsc --noEmit --pretty false` PASS
+  - `npm run build:min` PASS
+  - `git diff --check` PASS
+  - live 5555 health: `ready=true pipelineReady=true version=0.90.3143`
+  - live `/v1/responses` smoke sample: `/Volumes/extension/.rcc/codex-samples/openai-responses/port-5555/req_1781786919393_7ec6abe3`
+  - sample scan: provider-request/provider-response contain no `__routecodex`, `__sse_`, `__rt`, `payload_side_channel`, `runtime_control`, `serverToolFollowup`, or `stoplessGoalStatus`; curl SSE response used standard `response.metadata:{}` only.
+- Remaining scope:
+  - request-route runtime-control writer lane (`retryProviderKey`, `preselectedRoute`) remains partial and should be migrated in a separate slice.
+  - broader Rust `__rt` runtime side-channel still exists for non-payload internal metadata carrier lanes; this slice only locks stopless/followup control semantics.
+
 ## 2026-06-18 internal metadata request-write topology plan
 
 - Jason clarified the next cleanup rule: request nodes should not perform unnecessary metadata writes; only necessary request-scoped control truth may be written to `MetadataCenter`, especially `runtime_control`.

@@ -526,7 +526,7 @@ verification:
     notes:
       - "Registry core and response closeout release remain here; request capture, attempt merge, and servertool adapter context each moved to file-scoped sub-features."
       - "Manifest/code sync must prove every metadata-center family and slot is backed by a real type, state bucket, writer, reader, and release path."
-      - "The first-batch `runtime_control` carrier and host-side projection reader now belong to this owner; validation must keep them queryable without claiming writer migration is complete."
+      - "The first-batch `runtime_control` carrier and host-side projection reader now belong to this owner; stopless followup materialization is covered by bound MetadataCenter side-channel tests, while broader request-route writer migration remains partial."
       - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
       - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
       - "Retired zero-consumer Hub protocol spec public wrappers must stay deleted; provider outbound sanitizer is the live bridge, while protocol spec/allowlist builders remain Rust-internal."

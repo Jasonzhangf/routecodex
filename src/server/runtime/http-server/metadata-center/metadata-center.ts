@@ -227,6 +227,7 @@ export class MetadataCenter {
       serverToolFollowup: this.state.runtimeControl.serverToolFollowup?.value as boolean | undefined,
       serverToolFollowupSource: this.state.runtimeControl.serverToolFollowupSource?.value as string | undefined,
       stoplessGoalStatus: this.state.runtimeControl.stoplessGoalStatus?.value as string | undefined,
+      stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
       streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,

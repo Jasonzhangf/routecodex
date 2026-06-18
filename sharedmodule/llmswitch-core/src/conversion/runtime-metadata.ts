@@ -7,6 +7,33 @@ import {
 
 export type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+function preserveMetadataCenterBinding(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>
+): void {
+  const sourceCenter = Reflect.get(source, METADATA_CENTER_SYMBOL);
+  if (sourceCenter !== undefined) {
+    Reflect.set(target, METADATA_CENTER_SYMBOL, sourceCenter);
+  }
+  const sourceMetadata = source.metadata;
+  const targetMetadata = target.metadata;
+  if (
+    sourceMetadata
+    && typeof sourceMetadata === 'object'
+    && !Array.isArray(sourceMetadata)
+    && targetMetadata
+    && typeof targetMetadata === 'object'
+    && !Array.isArray(targetMetadata)
+  ) {
+    const metadataCenter = Reflect.get(sourceMetadata as Record<string, unknown>, METADATA_CENTER_SYMBOL);
+    if (metadataCenter !== undefined) {
+      Reflect.set(targetMetadata as Record<string, unknown>, METADATA_CENTER_SYMBOL, metadataCenter);
+    }
+  }
+}
+
 export function readRuntimeMetadata(carrier?: Record<string, unknown> | null): JsonObject | undefined {
   if (!carrier || typeof carrier !== 'object') {
     return undefined;
@@ -20,6 +47,7 @@ export function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObj
     throw new Error('ensureRuntimeMetadata requires object carrier');
   }
   const nextCarrier = ensureRuntimeMetadataCarrierWithNative(carrier);
+  preserveMetadataCenterBinding(carrier, nextCarrier as Record<string, unknown>);
   for (const key of Object.keys(carrier)) {
     if (!Object.prototype.hasOwnProperty.call(nextCarrier, key)) {
       delete (carrier as Record<string, unknown>)[key];

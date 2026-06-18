@@ -54,6 +54,7 @@ import {
   planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import crypto from 'node:crypto';
+import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../stopless-metadata-carrier.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
@@ -235,6 +236,39 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
     maxRepeats: state.maxRepeats
   };
   metadata.__rt = rt;
+}
+
+function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown>, args: {
+  sessionId?: string;
+  flowId: string;
+  repeatCount: number;
+  maxRepeats: number;
+  triggerHint?: string;
+  continuationPrompt?: string;
+  schemaFeedback?: JsonObject;
+  active: boolean;
+}): void {
+  writeStoplessRuntimeControlToBoundMetadataCenter({
+    metadata,
+    value: {
+      ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+      flowId: args.flowId,
+      repeatCount: args.repeatCount,
+      maxRepeats: args.maxRepeats,
+      ...(args.triggerHint ? { triggerHint: args.triggerHint } : {}),
+      ...(args.continuationPrompt ? { continuationPrompt: args.continuationPrompt } : {}),
+      ...(args.schemaFeedback ? { schemaFeedback: args.schemaFeedback } : {}),
+      active: args.active,
+      updatedAt: Date.now()
+    },
+    writer: {
+      module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
+      symbol: 'attachStoplessRuntimeControlToMetadata',
+      stage: 'stop_message_auto_runtime_control_writer'
+    },
+    reason: 'stopless-runtime-state',
+    required: true
+  });
 }
 
 function attachStopMessageRuntimeStateToFollowup(followup: unknown, state: {
@@ -509,6 +543,23 @@ const handler: ServerToolHandler = async (
     return {
       flowId: FLOW_ID,
       finalize: async () => {
+        const metadata =
+          record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+            ? record.metadata as Record<string, unknown>
+            : {};
+        if (metadata !== record.metadata) {
+          record.metadata = metadata;
+        }
+        attachStoplessRuntimeControlToMetadata(metadata, {
+          sessionId: typeof record.sessionId === 'string' ? record.sessionId : undefined,
+          flowId: FLOW_ID,
+          repeatCount: persistPlan.nextUsed,
+          maxRepeats: persistPlan.nextMaxRepeats,
+          ...(schemaGate.reason_code ? { triggerHint: schemaGate.reason_code } : {}),
+          ...(typeof effectiveDecision.followup_text === 'string' ? { continuationPrompt: effectiveDecision.followup_text } : {}),
+          ...(schemaFeedback ? { schemaFeedback } : {}),
+          active: true
+        });
         return {
           chatResponse: ctx.base,
           execution: {

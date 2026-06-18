@@ -6,6 +6,7 @@ import {
   readStopMessageCompareContext,
   type StopMessageCompareContext
 } from '../../sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
 
 const BASE_CONTEXT: StopMessageCompareContext = {
   armed: true,
@@ -94,6 +95,16 @@ describe('servertool stop-message compare context', () => {
       remaining: 1,
       stage: 'entry'
     });
+  });
+
+  test('attach preserves request-local MetadataCenter binding on metadata side-channel', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    const adapterContext: Record<string, unknown> = { metadata };
+
+    attachStopMessageCompareContext(adapterContext, BASE_CONTEXT);
+
+    expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
   });
 
 

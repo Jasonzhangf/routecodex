@@ -64,6 +64,18 @@ export type MetadataCenterContinuationContext = {
   stickyScope?: string;
 };
 
+export type MetadataCenterStoplessRuntimeControl = {
+  sessionId?: string;
+  flowId?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  triggerHint?: string;
+  continuationPrompt?: string;
+  schemaFeedback?: Record<string, unknown>;
+  active?: boolean;
+  updatedAt?: number;
+};
+
 export type MetadataCenterRuntimeControl = {
   routeHint?: string;
   routeName?: string;
@@ -75,6 +87,7 @@ export type MetadataCenterRuntimeControl = {
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
   stoplessGoalStatus?: string;
+  stopless?: MetadataCenterStoplessRuntimeControl;
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
   streamIntent?: string;
