@@ -2710,7 +2710,7 @@ owners:
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
   - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses SSE path uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
+    summary: "/v1/responses SSE path is a locked business module with one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
     owner_kind: ts_bridge
     owner_scope: "/v1/responses SSE path uses one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"
     owner_module: src/modules/llmswitch/bridge/responses-sse-bridge.ts
@@ -2772,17 +2772,20 @@ owners:
       - sharedmodule/llmswitch-core/rust-core
     required_tests:
       - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
+      - tests/red-tests/server_responses_sse_business_module_contract.test.ts
       - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     required_gates:
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:responses-sse-business-module
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
       - "Response SSE bridge may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
+      - "SSE terminal/probe/incomplete-repair is a locked business module: terminal-state parse, finish_reason/probe synthesis, stream-end repair, incomplete projection, and required_action closeout all belong to `responses-sse-bridge.ts` and must not regrow as handler-local semantics."
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, required_action frame parsing, terminal-state parsing, client-close cleanup gating, probe finish_reason resolution, or stream-end repair decisions; those stay behind the dedicated SSE bridge surface."
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface

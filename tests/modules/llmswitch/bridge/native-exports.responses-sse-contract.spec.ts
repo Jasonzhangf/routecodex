@@ -1,6 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { projectResponsesSseFrameForClientNative } from '../../../../src/modules/llmswitch/bridge/native-exports.js';
+import {
+  buildResponsesTerminalSseFramesFromProbeNative,
+  projectResponsesSseFrameForClientNative,
+  updateResponsesContractProbeFromSseChunkNative
+} from '../../../../src/modules/llmswitch/bridge/native-exports.js';
 
 describe('native-exports responses SSE contract', () => {
   it('calls router_hotpath SSE projection with the native multi-arg contract', () => {
@@ -76,5 +80,50 @@ describe('native-exports responses SSE contract', () => {
         applyPatchCallIds: ['call_patch'],
       })
     );
+  });
+
+  it('materializes chat completion chunk tool_calls into standard terminal responses frames', () => {
+    const chunk = [
+      'data: {"id":"chatcmpl_req_tool_terminal","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_req_tool_terminal","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"exec_command","arguments":""}}]},"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_req_tool_terminal","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"cmd\\":\\"pwd\\"}"}}]},"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_req_tool_terminal","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":""},"finish_reason":"tool_calls"}]}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+
+    const probe = updateResponsesContractProbeFromSseChunkNative(chunk, {});
+    expect(probe).not.toEqual({});
+    expect(probe).toEqual(
+      expect.objectContaining({
+        id: 'chatcmpl_req_tool_terminal',
+        status: 'requires_action',
+        output: [
+          expect.objectContaining({
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+            status: 'completed'
+          })
+        ]
+      })
+    );
+
+    const frames = buildResponsesTerminalSseFramesFromProbeNative(
+      probe,
+      'req_chat_chunk_tool_terminal'
+    );
+    const wire = frames.join('');
+    expect(wire).toContain('event: response.output_item.added');
+    expect(wire).toContain('event: response.function_call_arguments.done');
+    expect(wire).toContain('event: response.output_item.done');
+    expect(wire).toContain('event: response.completed');
+    expect(wire).toContain('event: response.done');
+    expect(wire).not.toContain('event: response.required_action');
   });
 });

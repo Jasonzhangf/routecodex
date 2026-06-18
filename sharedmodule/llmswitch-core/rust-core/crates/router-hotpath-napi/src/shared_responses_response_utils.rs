@@ -780,6 +780,157 @@ fn parse_sse_block(block: &str) -> Option<(String, Value)> {
     Some((event_name, parsed))
 }
 
+fn ensure_probe_chat_tool_call_buffers<'a>(
+    probe: &'a mut Map<String, Value>,
+) -> &'a mut Map<String, Value> {
+    let entry = probe
+        .entry("__chat_tool_call_buffers".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(Map::new());
+    }
+    entry.as_object_mut().expect("chat tool call buffers object")
+}
+
+fn upsert_probe_chat_tool_call_delta(
+    probe: &mut Map<String, Value>,
+    parsed_obj: &Map<String, Value>,
+    delta_calls: &[Value],
+) {
+    let top_level_id = read_trimmed_string(parsed_obj.get("id"));
+    let buffers = ensure_probe_chat_tool_call_buffers(probe);
+    for call in delta_calls {
+        let Some(call_obj) = call.as_object() else {
+            continue;
+        };
+        let index = call_obj
+            .get("index")
+            .and_then(Value::as_u64)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "0".to_string());
+        let entry = buffers.entry(index.clone()).or_insert_with(|| {
+            Value::Object(Map::from_iter([(
+                "type".to_string(),
+                Value::String("function_call".to_string()),
+            )]))
+        });
+        if !entry.is_object() {
+            *entry = Value::Object(Map::new());
+        }
+        let Some(buffer_obj) = entry.as_object_mut() else {
+            continue;
+        };
+        buffer_obj.insert("type".to_string(), Value::String("function_call".to_string()));
+
+        let call_id = read_trimmed_string(call_obj.get("id"))
+            .or_else(|| read_trimmed_string(call_obj.get("call_id")));
+        if let Some(call_id) = call_id {
+            buffer_obj.insert("call_id".to_string(), Value::String(call_id.clone()));
+            if !buffer_obj.contains_key("id") {
+                buffer_obj.insert(
+                    "id".to_string(),
+                    Value::String(format!("fc_{}", call_id.trim_start_matches("call_"))),
+                );
+            }
+        } else if !buffer_obj.contains_key("call_id") {
+            let fallback_seed = top_level_id
+                .clone()
+                .unwrap_or_else(|| "chat_tool".to_string());
+            let synthetic_call_id = format!("call_{}_{}", fallback_seed, index);
+            buffer_obj.insert(
+                "call_id".to_string(),
+                Value::String(synthetic_call_id.clone()),
+            );
+            buffer_obj.insert(
+                "id".to_string(),
+                Value::String(format!(
+                    "fc_{}",
+                    synthetic_call_id.trim_start_matches("call_")
+                )),
+            );
+        }
+
+        let function_obj = call_obj.get("function").and_then(Value::as_object);
+        if let Some(name_fragment) = function_obj
+            .and_then(|row| row.get("name"))
+            .and_then(Value::as_str)
+        {
+            let merged_name = format!(
+                "{}{}",
+                buffer_obj
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                name_fragment
+            );
+            if !merged_name.is_empty() {
+                buffer_obj.insert("name".to_string(), Value::String(merged_name));
+            }
+        }
+        if let Some(arguments_fragment) = function_obj
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+        {
+            let merged_arguments = format!(
+                "{}{}",
+                buffer_obj
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                arguments_fragment
+            );
+            buffer_obj.insert("arguments".to_string(), Value::String(merged_arguments));
+        }
+    }
+}
+
+fn materialize_probe_output_from_chat_tool_call_buffers(probe: &mut Map<String, Value>) {
+    let Some(buffers) = probe
+        .get("__chat_tool_call_buffers")
+        .and_then(Value::as_object)
+        .cloned()
+    else {
+        return;
+    };
+    for buffer in buffers.values() {
+        let Some(buffer_obj) = buffer.as_object() else {
+            continue;
+        };
+        let call_id = read_trimmed_string(buffer_obj.get("call_id"));
+        let name = read_trimmed_string(buffer_obj.get("name"));
+        let arguments = read_trimmed_string(buffer_obj.get("arguments"));
+        if call_id.is_none() || name.is_none() {
+            continue;
+        }
+        let call_id = call_id.unwrap_or_default();
+        let name = name.unwrap_or_default();
+        let arguments = arguments.unwrap_or_default();
+        upsert_probe_output_item(
+            probe,
+            &serde_json::json!({
+                "id": read_trimmed_string(buffer_obj.get("id"))
+                    .unwrap_or_else(|| format!("fc_{}", call_id.trim_start_matches("call_"))),
+                "type": "function_call",
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+                "status": "completed"
+            }),
+        );
+    }
+    if probe
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|output| !output.is_empty())
+        .unwrap_or(false)
+    {
+        probe.insert(
+            "status".to_string(),
+            Value::String("requires_action".to_string()),
+        );
+    }
+}
+
 fn merge_response_probe_fields(probe: &mut Map<String, Value>, response: &Map<String, Value>) {
     if let Some(id) = read_trimmed_string(response.get("id")) {
         probe.insert("id".to_string(), Value::String(id));
@@ -908,6 +1059,11 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         let is_function_call_arguments_done =
             event_name == "response.function_call_arguments.done"
                 || parsed_type == "response.function_call_arguments.done";
+        let is_chat_completion_chunk = parsed_obj
+            .get("object")
+            .and_then(Value::as_str)
+            .map(|value| value == "chat.completion.chunk")
+            .unwrap_or(false);
         if event_name == "response.completed" || parsed_type == "response.completed" {
             probe.insert("__seen_response_completed".to_string(), Value::Bool(true));
         }
@@ -927,10 +1083,45 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
             parsed_type.as_str(),
             "response.output_item.done" | "response.output_item.added"
         );
+        if is_chat_completion_chunk {
+            if let Some(id) = read_trimmed_string(parsed_obj.get("id")) {
+                probe.insert("id".to_string(), Value::String(id));
+            }
+            if let Some(model) = read_trimmed_string(parsed_obj.get("model")) {
+                probe.insert("model".to_string(), Value::String(model));
+            }
+            let delta_calls = parsed_obj
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+                .and_then(Value::as_object)
+                .and_then(|choice| choice.get("delta"))
+                .and_then(Value::as_object)
+                .and_then(|delta| delta.get("tool_calls"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if !delta_calls.is_empty() {
+                upsert_probe_chat_tool_call_delta(&mut probe, parsed_obj, delta_calls.as_slice());
+            }
+            let chat_finish_reason = parsed_obj
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+                .and_then(Value::as_object)
+                .and_then(|choice| choice.get("finish_reason"))
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            if chat_finish_reason.as_deref() == Some("tool_calls") {
+                materialize_probe_output_from_chat_tool_call_buffers(&mut probe);
+            }
+        }
         if response.is_none()
             && required_action.is_none()
             && event_name != "response.required_action"
             && parsed_type != "response.required_action"
+            && !is_chat_completion_chunk
             && !is_function_call_arguments_done
             && (!is_output_item_event || output_item.is_none())
         {
@@ -1567,6 +1758,45 @@ mod tests {
         assert!(wire.contains("event: response.output_item.done"));
         assert!(wire.contains("event: response.completed"));
         assert!(wire.contains("event: response.done"));
+    }
+
+    #[test]
+    fn chat_completion_tool_call_chunks_materialize_required_action_terminal_frames() {
+        let chunk = concat!(
+            "data: {\"id\":\"chatcmpl_req_tool_terminal\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_req_tool_terminal\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_req_tool_terminal\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_req_tool_terminal\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let probe_json = update_responses_contract_probe_from_sse_chunk_json(
+            serde_json::to_string(chunk).unwrap(),
+            "{}".to_string(),
+        )
+        .unwrap();
+        let probe: Value = serde_json::from_str(&probe_json).unwrap();
+        assert_eq!(probe["id"], "chatcmpl_req_tool_terminal");
+        assert_eq!(probe["status"], "requires_action");
+        let output = probe["output"].as_array().cloned().unwrap_or_default();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["type"], "function_call");
+        assert_eq!(output[0]["call_id"], "call_1");
+        assert_eq!(output[0]["name"], "exec_command");
+        assert_eq!(output[0]["arguments"], "{\"cmd\":\"pwd\"}");
+
+        let frames_json = build_responses_terminal_sse_frames_from_probe_json(
+            probe_json,
+            "req_chat_chunk_tool_terminal".to_string(),
+        )
+        .unwrap();
+        let frames: Vec<String> = serde_json::from_str(&frames_json).unwrap();
+        let wire = frames.join("");
+        assert!(wire.contains("event: response.output_item.added"));
+        assert!(wire.contains("event: response.function_call_arguments.done"));
+        assert!(wire.contains("event: response.output_item.done"));
+        assert!(wire.contains("event: response.completed"));
+        assert!(wire.contains("event: response.done"));
+        assert!(!wire.contains("event: response.required_action"));
     }
 
     #[test]

@@ -1387,6 +1387,7 @@ verification:
       - src/server/handlers/handler-response-utils.ts
     contract:
       - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
+      - tests/red-tests/server_responses_sse_business_module_contract.test.ts
       - tests/server/handlers/handler-response-sse-wrapper-contract.spec.ts
     integration:
       - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
@@ -1394,12 +1395,14 @@ verification:
     smoke:
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:responses-sse-business-module
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
       - "Response SSE bridge must stay facade-only and must not grow TS response protocol semantics."
       - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
+      - "Locked business-module rule: any drift of terminal-state parse, probe synthesis, or stream-end repair back into `handler-response-sse.ts` must fail static gate and red-test before runtime."
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
