@@ -5451,3 +5451,41 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 剩余风险：
   - 这轮只锁 manifest/code 同步和 family registry，不迁移 `runtime_control` writer，也不删除 `__routecodex_*` payload residue。
   - 未做 live probe；本轮改动主要是 architecture gate + TS registry family，未触发安装/重启。
+
+## 2026-06-18 active goal post-commit closure audit
+
+- 当前远端状态：
+  - `HEAD == origin/main == 4b3451cb964e96a5c5104123a5367608976e621c`
+  - 仅剩未跟踪过程样本目录：`tests/fixtures/goal-request-user-input-real-samples/runs/`
+- 当前目标要求的 post-commit gates 已复跑：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-review-surface` PASS
+    - mainline call map / node-id consistency / pending binding budget / wiki sync / wiki HTML sync / manifest sync / metadata-center code sync / mainline manifest sync / topology doc sync / browser smoke 全部 PASS
+    - browser smoke 检查 `14` 个 wiki HTML 页面
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+    - `87` 个 features 均有 source anchor、verification-map coverage、required_tests/required_gates
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci-longtail` PASS
+    - deleted-path 防复活、duplicate owner、TS owner ban、build tiering、custom payload carrier containment / owner-queryability / runtime manifest 全部 PASS
+    - 当前 custom payload carrier baseline：`__routecodex*` runtime allowlisted files=`25`，其中 `payload_side_channel=10`；`__sse_*` runtime files=`0`；`response.metadata` runtime files=`4`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-ci` PASS
+    - no-fallback、VR no fallback、nonadjacent conversion、metadata leak boundary、client response internal carrier surface、SSE architecture boundary、error pipeline、function-map bidir required-tests、longtail 全部串联通过
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build:min` PASS
+  - `git diff --check` PASS
+- `build:min` 生成 tracked version/build-info 更新：
+  - `package.json` / `package-lock.json`: `0.90.3130 -> 0.90.3131`
+  - `src/build-info.ts`: `version='0.90.3131'`, `buildTime='2026-06-18T07:42:55.469Z'`
+- 当前结论：
+  - review surface / function map / mainline call map / wiki / manifest / longtail gate 已由当前状态证据证明清绿。
+  - build/install/live 仍需用当前 `0.90.3131` 安装态补证，不能沿用旧 `0.90.3105` 安装证据。
+- 安装态补证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_INPLACE_BUILD=1 ROUTECODEX_BUILD_RESTART_ONLY=1 ./scripts/install-global.sh`
+    - build/min 链进入并完成，global install 成功
+    - runtime snapshot installed: `routecodex-0.90.3131-2026-06-18T074631Z`
+    - `/Users/fanzhang/.rcc/install/current -> releases/routecodex-0.90.3131-2026-06-18T074631Z`
+    - 注意：脚本尾部 snapshot refresh 后一度无进程输出，`ps` 未见 install/npm/node/rsync 相关进程后用 Ctrl-C 收回前台；退出码 `130` 不代表构建/安装失败，安装结果以 snapshot/current、CLI version、restart 和 health 为准。
+  - `routecodex --version` => `0.90.3131`
+  - `rcc --version` => `0.90.3131`
+  - `routecodex restart --port 5555` PASS，`http://127.0.0.1:5555/health` => `ready=true pipelineReady=true version=0.90.3131`
+  - `routecodex restart --port 5520` PASS，`http://127.0.0.1:5520/health` => `ready=true pipelineReady=true version=0.90.3131`
+- 完成性判断：
+  - 本目标的 review surface 漂移、function-map/mainline/wiki/manifest 机器锁、CI/local build gate、防复活 deleted/residue gate、瘦身候选表与当前安装态 smoke 均已有当前状态证据。
+  - 当前不宣称 `__routecodex*` runtime 已清零；真实状态仍是 25 个 allowlisted runtime files，其中 10 个 `payload_side_channel` 属于后续 MetadataCenter/runtime side-channel migration 工作。
