@@ -10,6 +10,10 @@ import {
   detectProviderResponseShapeWithNative,
   readFollowupClientInjectSourceWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import {
+  readRuntimeControlFromBoundMetadataCenter,
+  writeRuntimeControlToBoundMetadataCenter
+} from './stopless-metadata-carrier.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;
@@ -52,14 +56,31 @@ function markServertoolResponseOrchestration(adapterContext: AdapterContext): vo
   if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
     return;
   }
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata: adapterContext as Record<string, unknown>,
+    key: 'servertoolResponseOrchestration',
+    value: true,
+    writer: {
+      module: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+      symbol: 'markServertoolResponseOrchestration',
+      stage: 'HubRespChatProcess03Governed.servertool_orchestration'
+    },
+    reason: 'servertool-response-stage-orchestration',
+    required: true
+  });
+}
+
+function projectRuntimeControlSideChannel(adapterContext: AdapterContext, runtimeControl: Record<string, unknown> | undefined): void {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext) || !runtimeControl) {
+    return;
+  }
   const record = adapterContext as Record<string, unknown>;
-  const currentRt =
-    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-      ? (record.__rt as Record<string, unknown>)
-      : {};
-  record.__rt = {
-    ...currentRt,
-    servertoolResponseOrchestration: true
+  const existing = record.runtime_control && typeof record.runtime_control === 'object' && !Array.isArray(record.runtime_control)
+    ? record.runtime_control as Record<string, unknown>
+    : {};
+  record.runtime_control = {
+    ...existing,
+    ...runtimeControl
   };
 }
 
@@ -67,12 +88,8 @@ export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  const runtimeMeta =
-    options.adapterContext &&
-    typeof options.adapterContext === 'object' &&
-    !Array.isArray(options.adapterContext)
-      ? ((options.adapterContext as Record<string, unknown>).__rt as Record<string, unknown> | undefined)
-      : undefined;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);
   const followupSource = readFollowupClientInjectSourceWithNative(options.adapterContext as Record<string, unknown>);
   const allowReasoningStopFollowupReentry =
     followupSource === 'servertool.reasoning_stop_guard'
@@ -80,7 +97,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   const stoplessEligibleFollowup = isStopEligibleForServerTool(options.payload, options.adapterContext);
 
   if (
-    runtimeMeta?.serverToolFollowup === true
+    runtimeControl?.serverToolFollowup === true
     && options.allowFollowup !== true
     && !allowReasoningStopFollowupReentry
     && !stoplessEligibleFollowup
@@ -115,6 +132,10 @@ export async function runServertoolResponseStageOrchestrationShell(
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
   markServertoolResponseOrchestration(options.adapterContext);
+  projectRuntimeControlSideChannel(
+    options.adapterContext,
+    readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>)
+  );
   const orchestration = await runServerToolOrchestration({
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,

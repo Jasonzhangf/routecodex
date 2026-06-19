@@ -73,7 +73,8 @@ function buildBaseOptions(pipelineMetadata: Record<string, unknown>, requestId =
 
 function bindPipelineMetadataFollowupTruth(
   pipelineMetadata: Record<string, unknown>,
-  sessionId: string
+  sessionId: string,
+  initialGoalState?: Record<string, unknown>
 ): MetadataCenter {
   const center = MetadataCenter.attach(pipelineMetadata);
   center.writeRequestTruth(
@@ -94,7 +95,47 @@ function bindPipelineMetadataFollowupTruth(
       stage: 'test'
     }
   );
+  if (initialGoalState) {
+    writeGoalState(center, initialGoalState);
+  }
   return center;
+}
+
+function buildActiveGoalState(): Record<string, unknown> {
+  return {
+    status: 'active',
+    objective: 'keep going',
+    updatedAt: Date.now(),
+    createdAt: Date.now(),
+  };
+}
+
+function writeGoalState(center: MetadataCenter, state: Record<string, unknown>): void {
+  center.writeRuntimeControl(
+    'stoplessGoal',
+    { state, status: state.status },
+    {
+      module: 'tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts',
+      symbol: 'writeGoalState',
+      stage: 'test'
+    }
+  );
+  center.writeRuntimeControl(
+    'stoplessGoalStatus',
+    String(state.status),
+    {
+      module: 'tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts',
+      symbol: 'writeGoalState',
+      stage: 'test'
+    }
+  );
+}
+
+function readGoalState(center: MetadataCenter): Record<string, unknown> | undefined {
+  const state = center.readRuntimeControl().stoplessGoal?.state;
+  return state && typeof state === 'object' && !Array.isArray(state)
+    ? state as Record<string, unknown>
+    : undefined;
 }
 
 async function loadConverter() {
@@ -142,21 +183,15 @@ describe('provider-response-converter goal active stopless guard', () => {
 
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-http400',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'keep going',
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-      },
     };
-    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http400');
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http400', buildActiveGoalState());
 
     for (let index = 1; index <= 4; index += 1) {
       await expect(
         convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_goal_followup_http400_${index}`), createDeps() as any)
       ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
-      expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
-      expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(index);
+      expect(readGoalState(center)?.status).toBe('active');
+      expect(readGoalState(center)?.consecutiveIrrecoverableErrors).toBe(index);
       expect(center.readRuntimeControl().stoplessGoalStatus).toBe('active');
     }
 
@@ -164,9 +199,9 @@ describe('provider-response-converter goal active stopless guard', () => {
       convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_goal_followup_http400_5'), createDeps() as any)
     ).rejects.toThrow('previous_response_id is only supported on Responses WebSocket v2');
 
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
-    expect((pipelineMetadata.stoplessGoalState as any)?.errorClass).toBe('repeated_irrecoverable_error');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(5);
+    expect(readGoalState(center)?.status).toBe('stopped');
+    expect(readGoalState(center)?.errorClass).toBe('repeated_irrecoverable_error');
+    expect(readGoalState(center)?.consecutiveIrrecoverableErrors).toBe(5);
     expect(center.readRuntimeControl().stoplessGoalStatus).toBe('stopped');
     expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalled();
   });
@@ -193,14 +228,8 @@ describe('provider-response-converter goal active stopless guard', () => {
     const convertProviderResponseIfNeeded = await loadConverter();
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-http502',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'keep going',
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-      },
     };
-    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http502');
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-http502', buildActiveGoalState());
 
     for (let index = 1; index <= 5; index += 1) {
       await expect(
@@ -208,8 +237,8 @@ describe('provider-response-converter goal active stopless guard', () => {
       ).rejects.toThrow('Upstream request failed');
     }
 
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(5);
+    expect(readGoalState(center)?.status).toBe('stopped');
+    expect(readGoalState(center)?.consecutiveIrrecoverableErrors).toBe(5);
   });
 
   it('resets consecutive error count after a successful non-error followup turn', async () => {
@@ -243,24 +272,18 @@ describe('provider-response-converter goal active stopless guard', () => {
     const convertProviderResponseIfNeeded = await loadConverter();
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-reset-errors',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'keep going',
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-      },
     };
-    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-reset-errors');
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-reset-errors', buildActiveGoalState());
 
     await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_1'), createDeps() as any)).rejects.toThrow('bad request');
     await expect(convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_err_2'), createDeps() as any)).rejects.toThrow('bad request');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(2);
+    expect(readGoalState(center)?.consecutiveIrrecoverableErrors).toBe(2);
 
     const result = await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_reset_success'), createDeps() as any);
     expect((result as any).body?.status).toBe('requires_action');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveIrrecoverableErrors).toBe(0);
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(0);
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
+    expect(readGoalState(center)?.consecutiveIrrecoverableErrors).toBe(0);
+    expect(readGoalState(center)?.consecutiveNoProgress).toBe(0);
+    expect(readGoalState(center)?.status).toBe('active');
   });
 
   it('stops active goal after 5 consecutive finish_reason=stop responses', async () => {
@@ -286,26 +309,20 @@ describe('provider-response-converter goal active stopless guard', () => {
     const convertProviderResponseIfNeeded = await loadConverter();
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-stop-streak',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'keep going',
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-      },
     };
-    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-streak');
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-streak', buildActiveGoalState());
 
     for (let index = 1; index <= 4; index += 1) {
       const result = await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, `req_stop_${index}`), createDeps() as any);
       expect((result as any).body?.status).toBe('completed');
-      expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
-      expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(index);
+      expect(readGoalState(center)?.status).toBe('active');
+      expect(readGoalState(center)?.consecutiveNoProgress).toBe(index);
     }
 
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_5'), createDeps() as any);
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('stopped');
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(5);
-    expect((pipelineMetadata.stoplessGoalState as any)?.errorClass).toBe('repeated_no_progress_stop');
+    expect(readGoalState(center)?.status).toBe('stopped');
+    expect(readGoalState(center)?.consecutiveNoProgress).toBe(5);
+    expect(readGoalState(center)?.errorClass).toBe('repeated_no_progress_stop');
   });
 
   it('resets stop streak when followup yields tool_calls progress', async () => {
@@ -339,24 +356,18 @@ describe('provider-response-converter goal active stopless guard', () => {
     const convertProviderResponseIfNeeded = await loadConverter();
     const pipelineMetadata: Record<string, unknown> = {
       sessionId: 'goal-followup-stop-reset',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'keep going',
-        updatedAt: Date.now(),
-        createdAt: Date.now(),
-      },
     };
-    bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-reset');
+    const center = bindPipelineMetadataFollowupTruth(pipelineMetadata, 'goal-followup-stop-reset', buildActiveGoalState());
 
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_1'), createDeps() as any);
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_2'), createDeps() as any);
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(2);
+    expect(readGoalState(center)?.consecutiveNoProgress).toBe(2);
 
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_tool'), createDeps() as any);
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(0);
+    expect(readGoalState(center)?.consecutiveNoProgress).toBe(0);
 
     await convertProviderResponseIfNeeded(buildBaseOptions(pipelineMetadata, 'req_stop_reset_3'), createDeps() as any);
-    expect((pipelineMetadata.stoplessGoalState as any)?.consecutiveNoProgress).toBe(1);
-    expect((pipelineMetadata.stoplessGoalState as any)?.status).toBe('active');
+    expect(readGoalState(center)?.consecutiveNoProgress).toBe(1);
+    expect(readGoalState(center)?.status).toBe('active');
   });
 });

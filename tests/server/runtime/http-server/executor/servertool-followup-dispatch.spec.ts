@@ -50,6 +50,22 @@ function metadataWithFollowupRuntimeControl(
   return metadata;
 }
 
+function metadataWithServerToolLoopRuntimeControl(
+  value: Record<string, unknown>
+): Record<string, unknown> {
+  const metadata = metadataWithFollowupRuntimeControl('servertool.stop_message');
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'serverToolLoopState',
+    value,
+    {
+      module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+      symbol: 'metadataWithServerToolLoopRuntimeControl',
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
+
 function metadataWithFollowupSourceRuntimeControl(source: string): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
   MetadataCenter.attach(metadata).writeRuntimeControl(
@@ -576,7 +592,7 @@ describe('servertool followup dispatch helper', () => {
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
-        flowId: input.metadata?.__rt?.serverToolLoopState?.flowId
+        flowId: readBoundRuntimeControl(input.metadata).serverToolLoopState?.flowId
       }
     }));
 
@@ -589,13 +605,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_loopstate_enabled_nested',
       body: { input: 'continue' },
-      metadata: metadataWithFollowupRuntimeControl('servertool.stop_message', {
-        __rt: {
-          serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
-          stopMessageEnabled: false,
-          routecodexPortStopMessageEnabled: false
-        }
-      }),
+      metadata: metadataWithServerToolLoopRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -620,7 +630,7 @@ describe('servertool followup dispatch helper', () => {
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
-        flowId: input.metadata?.__rt?.serverToolLoopState?.flowId,
+        flowId: readBoundRuntimeControl(input.metadata).serverToolLoopState?.flowId,
         policy: input.metadata?.__rt?.stopMessageFollowupPolicy
       }
     }));
@@ -634,14 +644,25 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_policy_enabled_nested',
       body: { input: 'continue' },
-      metadata: metadataWithFollowupRuntimeControl(undefined, {
-        __rt: {
-          serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
-          stopMessageFollowupPolicy: 'preserve_eligibility',
-          stopMessageEnabled: false,
-          routecodexPortStopMessageEnabled: false
-        }
-      }),
+      metadata: (() => {
+        const metadata = metadataWithFollowupRuntimeControl(undefined, {
+          __rt: {
+            stopMessageFollowupPolicy: 'preserve_eligibility',
+            stopMessageEnabled: false,
+            routecodexPortStopMessageEnabled: false
+          }
+        });
+        MetadataCenter.attach(metadata).writeRuntimeControl(
+          'serverToolLoopState',
+          { flowId: 'stop_message_flow', repeatCount: 1 },
+          {
+            module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
+            symbol: 'does not preserve stopMessage eligibility from removed preserve policy',
+            stage: 'test'
+          }
+        );
+        return metadata;
+      })(),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -662,7 +683,7 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        loopState: input.metadata?.__rt?.serverToolLoopState,
+        loopState: readBoundRuntimeControl(input.metadata).serverToolLoopState,
         policy: input.metadata?.__rt?.stopMessageFollowupPolicy
       }
     }));
@@ -676,12 +697,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_root_budget_nested',
       body: { input: 'continue' },
-      metadata: metadataWithFollowupRuntimeControl(undefined, {
-        serverToolLoopState: { flowId: 'stop_message_flow', maxRepeats: 3, repeatCount: 1 },
-        __rt: {
-          serverToolLoopState: { flowId: 'stop_message_flow', repeatCount: 1 },
-        }
-      }),
+      metadata: metadataWithServerToolLoopRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -1576,10 +1592,7 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata).not.toHaveProperty('extraFields');
     expect(nestedInput?.metadata).not.toHaveProperty('extra_fields');
     expect(nestedInput?.metadata).not.toHaveProperty('responseFormat');
-    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('responsesContext');
-    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('responses_context');
-    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extraFields');
-    expect(nestedInput?.metadata?.__rt).not.toHaveProperty('extra_fields');
+    expect(nestedInput?.metadata?.__rt).toBeUndefined();
     expect(nestedInput?.body?.semantics).toBeUndefined();
   });
 

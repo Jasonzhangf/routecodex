@@ -35,6 +35,32 @@ function hasRccFenceInRequestPayload(payload: unknown): boolean {
   }
 }
 
+const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
+  'serverToolFollowup',
+  'serverToolFollowupSource',
+  'serverToolFollowupMode',
+  'servertoolResponseOrchestration',
+  'serverToolLoopState',
+  'stopMessageState',
+  'stopMessageClientInject',
+  'stopMessageClientInjectReady',
+  'stopMessageClientInjectReason',
+  'stopMessageClientInjectSessionScope',
+  'stopMessageClientInjectTmuxSessionId',
+  'stoplessGoal',
+  'stoplessGoalHadDirective',
+  'stoplessGoalState',
+  'stoplessGoalStateSource',
+  'stoplessGoalStatus',
+  'stoplessGoalDirectiveTypes'
+] as const;
+
+function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, unknown>): void {
+  for (const key of SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS) {
+    delete metadata[key];
+  }
+}
+
 function syncStoplessGoalStateFromCapturedRequest(
   baseContext: Record<string, unknown>,
   onError?: (error: unknown) => void
@@ -85,9 +111,19 @@ export function buildServerToolAdapterContext(args: {
   const baseContext: Record<string, unknown> = {
     ...metadataBag
   };
+  stripServertoolRuntimeControlMetadataFields(baseContext);
+  const inheritedRuntime = asFlatRecord(baseContext.__rt);
+  if (inheritedRuntime) {
+    stripServertoolRuntimeControlMetadataFields(inheritedRuntime);
+    if (!Object.keys(inheritedRuntime).length) {
+      delete baseContext.__rt;
+    }
+  }
   const metadataCenter = MetadataCenter.read(metadataBag);
   if (metadataCenter) {
     MetadataCenter.bind(baseContext, metadataCenter);
+  } else {
+    MetadataCenter.attach(baseContext);
   }
   const originRequest = args.entryOriginRequest;
   const originRecord = asFlatRecord(originRequest);
@@ -137,26 +173,68 @@ export function buildServerToolAdapterContext(args: {
     : undefined;
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
-  const rt = asFlatRecord(baseContext.__rt) ?? {};
   const providerFamily = readNonEmptyString(metadataBag.providerFamily)?.toLowerCase();
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol)
-    ?? readNonEmptyString(rt.clientProtocol)
     ?? (args.entryEndpoint.includes('/v1/responses') ? 'openai-responses' : undefined);
-  baseContext.__rt = {
-    ...rt,
-    ...(runtimeControl.serverToolFollowup === true ? { serverToolFollowup: true } : {}),
-    ...(clientProtocol ? { clientProtocol } : {}),
-    ...(providerFamily ? { providerFamily } : {}),
-    ...(typeof stopMessagePortEnabled === 'boolean' ? { stopMessagePortEnabled } : {}),
-    stopMessageClientInjectReady: stopMessageInjectReadiness.ready,
-    stopMessageClientInjectReason: stopMessageInjectReadiness.reason,
-    ...(stopMessageInjectReadiness.sessionScope
-      ? { stopMessageClientInjectSessionScope: stopMessageInjectReadiness.sessionScope }
-      : {}),
-    ...(stopMessageInjectReadiness.tmuxSessionId
-      ? { stopMessageClientInjectTmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
-      : {})
-  };
+  const baseCenter = MetadataCenter.attach(baseContext);
+  if (runtimeControl.serverToolFollowup === true) {
+    baseCenter.writeRuntimeControl(
+      'serverToolFollowup',
+      true,
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+        symbol: 'buildServerToolAdapterContext',
+        stage: 'ServertoolAdapterContextRuntimeControl'
+      },
+      'servertool adapter context projection'
+    );
+  }
+  if (providerFamily) {
+    baseCenter.writeRuntimeControl(
+      'providerFamily',
+      providerFamily,
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+        symbol: 'buildServerToolAdapterContext',
+        stage: 'ServertoolAdapterContextRuntimeControl'
+      },
+      'servertool adapter provider family projection'
+    );
+  }
+  if (typeof stopMessagePortEnabled === 'boolean') {
+    baseCenter.writeRuntimeControl(
+      'stopMessageEnabled',
+      stopMessagePortEnabled,
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+        symbol: 'buildServerToolAdapterContext',
+        stage: 'ServertoolAdapterContextRuntimeControl'
+      },
+      'servertool adapter stop-message port projection'
+    );
+  }
+  baseCenter.writeRuntimeControl(
+    'stopMessageClientInject',
+    {
+      ready: stopMessageInjectReadiness.ready,
+      reason: stopMessageInjectReadiness.reason,
+      ...(stopMessageInjectReadiness.sessionScope
+        ? { sessionScope: stopMessageInjectReadiness.sessionScope }
+        : {}),
+      ...(stopMessageInjectReadiness.tmuxSessionId
+        ? { tmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
+        : {})
+    },
+    {
+      module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+      symbol: 'buildServerToolAdapterContext',
+      stage: 'ServertoolAdapterContextRuntimeControl'
+    },
+    'servertool adapter client inject readiness'
+  );
+  if (clientProtocol) {
+    baseContext.clientProtocol = clientProtocol;
+  }
 
   const compatProfile = serverToolProjection.compatibilityProfile;
   if (compatProfile) {

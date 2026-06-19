@@ -12,6 +12,7 @@ import type { RoutingInstructionState } from '../../sharedmodule/llmswitch-core/
 import { runServertoolResponseStageOrchestrationShell } from '../../sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stage3-reentry-sessions');
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 function buildStopResponse(content = 'done'): JsonObject {
   return {
@@ -72,6 +73,17 @@ function setStoplessMode(sessionId: string, mode: 'on' | 'off' | 'endless'): voi
   saveRoutingInstructionStateSync(stateKey, next);
 }
 
+function bindRuntimeControl(adapterContext: Record<string, unknown>, runtimeControl: Record<string, unknown>): Record<string, unknown> {
+  const stored = { ...runtimeControl };
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => stored,
+    writeRuntimeControl: (key: string, value: unknown) => {
+      stored[key] = value;
+    }
+  });
+  return adapterContext;
+}
+
 describe('resp_process stage3 servertool followup reentry', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -90,14 +102,16 @@ describe('resp_process stage3 servertool followup reentry', () => {
 
     const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse('再次停止') as any,
-      adapterContext: {
-        sessionId,
-        capturedChatRequest: {
-          model: 'gpt-test',
-          messages: [{ role: 'user', content: '继续执行' }]
+      adapterContext: bindRuntimeControl(
+        {
+          sessionId,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续执行' }]
+          }
         },
-        __rt: { serverToolFollowup: true }
-      } as unknown as AdapterContext,
+        { serverToolFollowup: true }
+      ) as unknown as AdapterContext,
       requestId: 'req_stage3_reentry_guard',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
@@ -118,11 +132,13 @@ describe('resp_process stage3 servertool followup reentry', () => {
   test('non-reasoning followup still bypasses orchestration', async () => {
     const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse('普通 followup') as any,
-      adapterContext: {
-        sessionId: 'stage3-bypass-normal-followup',
-        clientInjectSource: 'servertool.followup',
-        __rt: { serverToolFollowup: true }
-      } as unknown as AdapterContext,
+      adapterContext: bindRuntimeControl(
+        {
+          sessionId: 'stage3-bypass-normal-followup',
+          clientInjectSource: 'servertool.followup'
+        },
+        { serverToolFollowup: true, serverToolFollowupSource: 'servertool.followup' }
+      ) as unknown as AdapterContext,
       requestId: 'req_stage3_bypass_normal_followup',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',

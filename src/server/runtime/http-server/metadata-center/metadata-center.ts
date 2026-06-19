@@ -257,10 +257,16 @@ export class MetadataCenter {
       preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
       serverToolFollowup: this.state.runtimeControl.serverToolFollowup?.value as boolean | undefined,
       serverToolFollowupSource: this.state.runtimeControl.serverToolFollowupSource?.value as string | undefined,
+      serverToolFollowupMode: this.state.runtimeControl.serverToolFollowupMode?.value as string | undefined,
+      servertoolResponseOrchestration: this.state.runtimeControl.servertoolResponseOrchestration?.value as boolean | undefined,
       stoplessGoalStatus: this.state.runtimeControl.stoplessGoalStatus?.value as string | undefined,
+      stoplessGoal: this.state.runtimeControl.stoplessGoal?.value as MetadataCenterRuntimeControl['stoplessGoal'] | undefined,
       stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
+      stopMessageState: this.state.runtimeControl.stopMessageState?.value as MetadataCenterRuntimeControl['stopMessageState'] | undefined,
+      serverToolLoopState: this.state.runtimeControl.serverToolLoopState?.value as MetadataCenterRuntimeControl['serverToolLoopState'] | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
+      stopMessageClientInject: this.state.runtimeControl.stopMessageClientInject?.value as MetadataCenterRuntimeControl['stopMessageClientInject'] | undefined,
       streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,
       clientAbort: this.state.runtimeControl.clientAbort?.value as boolean | undefined
     };

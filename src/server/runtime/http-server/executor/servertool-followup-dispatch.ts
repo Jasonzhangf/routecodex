@@ -554,26 +554,13 @@ async function buildServerToolNestedInput(args: {
   writeFollowupRuntimeControlToMetadata(nestedMetadata, materializedFollowup.runtimeControl);
   delete nestedMetadata.requestSemantics;
   delete nestedMetadata.stopMessageFollowupPolicy;
-  const nestedRtForPolicy = nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
-    ? (nestedMetadata.__rt as Record<string, unknown>)
-    : undefined;
-  if (nestedRtForPolicy) {
-    delete nestedRtForPolicy.stopMessageFollowupPolicy;
-  }
-  const nestedRuntime =
-    nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
-      ? (nestedMetadata.__rt as Record<string, unknown>)
-      : {};
   const nestedRuntimeControl = readRuntimeControlProjection(nestedMetadata);
   const runtimeFollowupSource =
     typeof nestedRuntimeControl.serverToolFollowupSource === 'string' && nestedRuntimeControl.serverToolFollowupSource.trim()
       ? nestedRuntimeControl.serverToolFollowupSource.trim()
       : undefined;
   const hasExplicitFollowupSource = typeof runtimeFollowupSource === 'string';
-  const hasExplicitFollowupFlow =
-    nestedRuntime.serverToolLoopState
-    && typeof nestedRuntime.serverToolLoopState === 'object'
-    && !Array.isArray(nestedRuntime.serverToolLoopState);
+  const hasExplicitFollowupFlow = Boolean(nestedRuntimeControl.serverToolLoopState);
   const runtimeStopMessageDisabled = nestedRuntimeControl.stopMessageEnabled === false;
   if ((hasExplicitFollowupSource || hasExplicitFollowupFlow) && !runtimeStopMessageDisabled) {
     writeStopMessageEnabledRuntimeControl(
@@ -636,14 +623,12 @@ async function buildServerToolNestedInput(args: {
     nestedMetadata.routeHint = routeNameCandidate;
   }
   if (portModeCandidate) {
-    const rt =
-      nestedMetadata.__rt && typeof nestedMetadata.__rt === 'object' && !Array.isArray(nestedMetadata.__rt)
-        ? (nestedMetadata.__rt as Record<string, unknown>)
-        : {};
-    nestedMetadata.__rt = {
-      ...rt,
-      serverToolFollowupMode: portModeCandidate
-    };
+    MetadataCenter.attach(nestedMetadata).writeRuntimeControl(
+      'serverToolFollowupMode',
+      portModeCandidate,
+      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
+      'servertool followup port mode projection'
+    );
   }
 
   const body = await cloneNestedBodyWithSemantics(

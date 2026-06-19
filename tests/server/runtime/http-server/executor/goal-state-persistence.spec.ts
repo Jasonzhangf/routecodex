@@ -22,16 +22,28 @@ describe('goal-state-persistence', () => {
     const { MetadataCenter } = await import(
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
+    const goalState = {
+      status: 'active',
+      objective: 'continue',
+      updatedAt: 1,
+      createdAt: 1
+    };
     const mergedMetadata: Record<string, unknown> = {
-      clientTmuxSessionId: 'tmux-1',
-      stoplessGoalState: {
-        status: 'active',
-        objective: 'continue',
-        updatedAt: 1,
-        createdAt: 1
-      }
+      clientTmuxSessionId: 'tmux-1'
     };
     const center = MetadataCenter.attach(mergedMetadata);
+    center.writeRuntimeControl(
+      'stoplessGoal',
+      {
+        state: goalState,
+        status: 'active'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts',
+        symbol: 'persists stopless goal state with session truth from MetadataCenter when flat metadata fields are absent',
+        stage: 'test'
+      }
+    );
     center.writeRequestTruth(
       'sessionId',
       'truth-session',
@@ -60,8 +72,60 @@ describe('goal-state-persistence', () => {
         sessionId: 'truth-session',
         conversationId: 'truth-conversation'
       }),
-      mergedMetadata.stoplessGoalState
+      goalState
     );
+    const persistedContext = mockPersistStoplessGoalStateSnapshot.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(persistedContext).not.toHaveProperty('stopMessageClientInjectSessionScope');
+  });
+
+  it('persists explicit stop message scope through MetadataCenter without flat adapter fields', async () => {
+    jest.resetModules();
+    mockPersistStoplessGoalStateSnapshot.mockReset();
+
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+    const goalState = {
+      status: 'active',
+      objective: 'continue',
+      updatedAt: 1,
+      createdAt: 1
+    };
+    const mergedMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(mergedMetadata);
+    center.writeRuntimeControl(
+      'stoplessGoal',
+      {
+        state: goalState,
+        status: 'active'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts',
+        symbol: 'persists explicit stop message scope through MetadataCenter without flat adapter fields',
+        stage: 'test'
+      }
+    );
+    center.writeRuntimeControl(
+      'stopMessageClientInject',
+      {
+        sessionScope: 'tmux:explicit-scope'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/goal-state-persistence.spec.ts',
+        symbol: 'persists explicit stop message scope through MetadataCenter without flat adapter fields',
+        stage: 'test'
+      }
+    );
+
+    const { persistGoalStateFromMergedMetadata } = await loadGoalStatePersistenceModule();
+    persistGoalStateFromMergedMetadata(mergedMetadata);
+
+    expect(mockPersistStoplessGoalStateSnapshot).toHaveBeenCalledTimes(1);
+    const persistedContext = mockPersistStoplessGoalStateSnapshot.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(persistedContext).not.toHaveProperty('stopMessageClientInjectSessionScope');
+    expect(MetadataCenter.read(persistedContext)?.readRuntimeControl().stopMessageClientInject).toEqual({
+      sessionScope: 'tmux:explicit-scope'
+    });
   });
 
   it('does not persist stopless goal state when neither explicit scope nor request truth exists', async () => {

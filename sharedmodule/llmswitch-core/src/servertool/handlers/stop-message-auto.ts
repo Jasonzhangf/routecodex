@@ -54,7 +54,11 @@ import {
   planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import crypto from 'node:crypto';
-import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../stopless-metadata-carrier.js';
+import {
+  readRuntimeControlFromBoundMetadataCenter,
+  writeRuntimeControlToBoundMetadataCenter,
+  writeStoplessRuntimeControlToBoundMetadataCenter
+} from '../stopless-metadata-carrier.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
@@ -218,26 +222,37 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
   used: number;
   stageMode: string;
 }): void {
-  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? metadata.__rt as Record<string, unknown>
-    : {};
-  rt.stopMessageState = {
-    stopMessageText: state.text,
-    ...(state.providerKey ? { stopMessageProviderKey: state.providerKey } : {}),
-    stopMessageMaxRepeats: state.maxRepeats,
-    stopMessageUsed: state.used,
-    stopMessageStageMode: state.stageMode
+  const writer = {
+    module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
+    symbol: 'attachStopMessageRuntimeStateToMetadata',
+    stage: 'stop_message_auto_runtime_control_writer'
   };
-  const loopState = rt.serverToolLoopState && typeof rt.serverToolLoopState === 'object' && !Array.isArray(rt.serverToolLoopState)
-    ? { ...(rt.serverToolLoopState as Record<string, unknown>) }
-    : {};
-  rt.serverToolLoopState = {
-    ...loopState,
-    flowId: FLOW_ID,
-    repeatCount: state.used,
-    maxRepeats: state.maxRepeats
-  };
-  metadata.__rt = rt;
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata,
+    key: 'stopMessageState',
+    value: {
+      stopMessageText: state.text,
+      ...(state.providerKey ? { stopMessageProviderKey: state.providerKey } : {}),
+      stopMessageMaxRepeats: state.maxRepeats,
+      stopMessageUsed: state.used,
+      stopMessageStageMode: state.stageMode
+    },
+    writer,
+    reason: 'stop-message-runtime-state',
+    required: true
+  });
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata,
+    key: 'serverToolLoopState',
+    value: {
+      flowId: FLOW_ID,
+      repeatCount: state.used,
+      maxRepeats: state.maxRepeats
+    },
+    writer,
+    reason: 'stop-message-loop-state',
+    required: true
+  });
 }
 
 function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown>, args: {
@@ -327,11 +342,16 @@ const handler: ServerToolHandler = async (
   }
   const record = ctx.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(ctx.adapterContext as unknown as Record<string, unknown>) ?? {};
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(record);
   const previousCompare = readStopMessageCompareContext(ctx.adapterContext);
 
   // ── Build native decision context ──
-  const followupFlowId = readServerToolFollowupFlowId(rt)
-    || (rt.serverToolFollowup === true ? '__servertool_followup__' : '');
+  const runtimeLoopState =
+    runtimeControl?.serverToolLoopState && typeof runtimeControl.serverToolLoopState === 'object' && !Array.isArray(runtimeControl.serverToolLoopState)
+      ? runtimeControl.serverToolLoopState as Record<string, unknown>
+      : undefined;
+  const followupFlowId = readServerToolFollowupFlowId(runtimeLoopState)
+    || (runtimeControl?.serverToolFollowup === true ? '__servertool_followup__' : '');
   if (followupFlowId && followupFlowId !== FLOW_ID) {
     const stopGateway = resolveStopGatewayContext(ctx.base, ctx.adapterContext);
     attachStopMessageCompareContext(ctx.adapterContext, {

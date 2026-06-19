@@ -3,6 +3,7 @@ import {
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { readRuntimeControlFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -13,12 +14,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function buildServertoolScopeMetadata(record: Record<string, unknown>): Record<string, unknown> {
   const runtime = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(record);
+  const stopMessageClientInject = asRecord(runtimeControl?.stopMessageClientInject);
+  const runtimeControlScope = typeof stopMessageClientInject?.sessionScope === 'string'
+    ? stopMessageClientInject.sessionScope.trim()
+    : '';
   const metadata = asRecord(record.metadata);
-  return {
+  const merged = {
     ...(metadata ?? {}),
     ...(runtime ?? {}),
     ...record
   };
+  delete merged.stopMessageClientInjectSessionScope;
+  delete merged.stopMessageClientInjectScope;
+  if (runtimeControlScope) {
+    merged.stopMessageClientInjectSessionScope = runtimeControlScope;
+  }
+  return merged;
 }
 
 export function resolveServertoolPersistentScopeKey(adapterContext: unknown): string | undefined {

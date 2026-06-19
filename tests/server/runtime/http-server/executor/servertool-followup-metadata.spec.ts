@@ -2,6 +2,20 @@ import { describe, expect, it } from '@jest/globals';
 import {
   buildServerToolNestedRequestMetadata
 } from '../../../../../src/server/runtime/http-server/executor/servertool-followup-metadata.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function metadataWithFollowupRuntimeControl(metadata: Record<string, unknown> = {}): Record<string, unknown> {
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'serverToolFollowup',
+    true,
+    {
+      module: 'tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts',
+      symbol: 'metadataWithFollowupRuntimeControl',
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
 
 describe('servertool followup nested request metadata', () => {
   it('preserves only continuity headers and strips clientRequestId for followup reenter', () => {
@@ -14,15 +28,14 @@ describe('servertool followup nested request metadata', () => {
           authorization: 'Bearer should-forward'
         }
       },
-      extraMetadata: {
-        __rt: { serverToolFollowup: true },
+      extraMetadata: metadataWithFollowupRuntimeControl({
         clientHeaders: {
           'anthropic-session-id': 'sess_123',
           'anthropic-conversation-id': 'conv_456',
           authorization: 'Bearer should-forward'
         },
         clientRequestId: 'req_from_client'
-      },
+      }),
       entryEndpoint: '/v1/messages'
     });
 
@@ -45,9 +58,7 @@ describe('servertool followup nested request metadata', () => {
           conversationId: 'conv_relay_ctx'
         }
       },
-      extraMetadata: {
-        __rt: { serverToolFollowup: true }
-      },
+      extraMetadata: metadataWithFollowupRuntimeControl(),
       entryEndpoint: '/v1/responses'
     });
 
@@ -65,9 +76,7 @@ describe('servertool followup nested request metadata', () => {
           }
         }
       },
-      extraMetadata: {
-        __rt: { serverToolFollowup: true }
-      },
+      extraMetadata: metadataWithFollowupRuntimeControl(),
       entryEndpoint: '/v1/responses'
     });
 
@@ -78,14 +87,13 @@ describe('servertool followup nested request metadata', () => {
   it('backfills daemon tmux and workdir continuity tokens from preserved headers', () => {
     const metadata = buildServerToolNestedRequestMetadata({
       baseMetadata: {},
-      extraMetadata: {
-        __rt: { serverToolFollowup: true },
+      extraMetadata: metadataWithFollowupRuntimeControl({
         clientHeaders: {
           'x-routecodex-session-daemon-id': 'daemon_1',
           'x-routecodex-client-tmux-session-id': 'tmux_1',
           'x-routecodex-workdir': '/tmp/followup-workdir'
         }
-      },
+      }),
       entryEndpoint: '/v1/responses'
     });
 
@@ -112,16 +120,15 @@ describe('servertool followup nested request metadata', () => {
           extraFields: { store: true }
         }
       },
-      extraMetadata: {
+      extraMetadata: metadataWithFollowupRuntimeControl({
         responses_context: { previous_response_id: 'resp_2' },
         extra_fields: { store: true },
         systemInstructions: ['legacy'],
         __rt: {
-          serverToolFollowup: true,
           responses_context: { previous_response_id: 'resp_rt_2' },
           extra_fields: { store: true }
         }
-      },
+      }),
       entryEndpoint: '/v1/responses'
     });
 
@@ -133,10 +140,7 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata).not.toHaveProperty('extra_fields');
     expect(metadata).not.toHaveProperty('responseFormat');
     expect(metadata).not.toHaveProperty('systemInstructions');
-    expect(metadata.__rt).not.toHaveProperty('responsesContext');
-    expect(metadata.__rt).not.toHaveProperty('responses_context');
-    expect(metadata.__rt).not.toHaveProperty('extraFields');
-    expect(metadata.__rt).not.toHaveProperty('extra_fields');
+    expect(metadata.__rt).toBeUndefined();
   });
 
   it('does not inherit provider selection metadata for followup reentry', () => {
@@ -165,9 +169,7 @@ describe('servertool followup nested request metadata', () => {
           target: { providerKey: 'crs1.key1.gpt-5.3-codex' }
         }
       },
-      extraMetadata: {
-        __rt: { serverToolFollowup: true }
-      },
+      extraMetadata: metadataWithFollowupRuntimeControl(),
       entryEndpoint: '/v1/responses'
     });
 
@@ -178,8 +180,8 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata).not.toHaveProperty('targetProviderKey');
     expect(metadata).not.toHaveProperty('__routecodexPreselectedRoute');
     expect(metadata).not.toHaveProperty('target');
-    expect(metadata.__rt).toHaveProperty('serverToolFollowup', true);
     expect(metadata.__rt).toHaveProperty('routeName', 'thinking');
+    expect(metadata.__rt).not.toHaveProperty('serverToolFollowup');
     expect(metadata.__rt).not.toHaveProperty('providerKey');
     expect(metadata.__rt).not.toHaveProperty('runtimeKey');
     expect(metadata.__rt).not.toHaveProperty('targetProviderKey');
@@ -202,9 +204,7 @@ describe('servertool followup nested request metadata', () => {
           targetProviderKey: 'minimax.key1.MiniMax-M3'
         }
       },
-      extraMetadata: {
-        __rt: { serverToolFollowup: true }
-      },
+      extraMetadata: metadataWithFollowupRuntimeControl(),
       entryEndpoint: '/v1/responses'
     });
 
@@ -212,7 +212,6 @@ describe('servertool followup nested request metadata', () => {
     expect(metadata).not.toHaveProperty('providerKey');
     expect(metadata).not.toHaveProperty('targetProviderKey');
     expect(metadata).not.toHaveProperty('target');
-    expect(metadata.__rt).not.toHaveProperty('providerKey');
-    expect(metadata.__rt).not.toHaveProperty('targetProviderKey');
+    expect(metadata.__rt).toBeUndefined();
   });
 });

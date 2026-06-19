@@ -79,6 +79,27 @@ const STOP_MESSAGE_CONTROL_METADATA_KEYS = [
   'routecodexPortStopMessageEnabled'
 ] as const;
 
+const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
+  'serverToolFollowup',
+  'serverToolFollowupSource',
+  'serverToolFollowupMode',
+  'servertoolResponseOrchestration',
+  'serverToolLoopState',
+  'stopMessageFollowupPolicy',
+  'stopMessageState',
+  'stopMessageClientInject',
+  'stopMessageClientInjectReady',
+  'stopMessageClientInjectReason',
+  'stopMessageClientInjectSessionScope',
+  'stopMessageClientInjectTmuxSessionId',
+  'stoplessGoal',
+  'stoplessGoalHadDirective',
+  'stoplessGoalState',
+  'stoplessGoalStateSource',
+  'stoplessGoalStatus',
+  'stoplessGoalDirectiveTypes'
+] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -141,6 +162,12 @@ function stripProviderSelectionMetadataFields(metadata: Record<string, unknown>)
 
 function stripStopMessageControlMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of STOP_MESSAGE_CONTROL_METADATA_KEYS) {
+    delete metadata[key];
+  }
+}
+
+function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, unknown>): void {
+  for (const key of SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS) {
     delete metadata[key];
   }
 }
@@ -328,6 +355,7 @@ export function buildServerToolNestedRequestMetadata(args: {
   stripMappableSemanticsMetadataFields(out);
   stripProviderSelectionMetadataFields(out);
   stripStopMessageControlMetadataFields(out);
+  stripServertoolRuntimeControlMetadataFields(out);
 
   if (
     args.requestSemantics &&
@@ -358,6 +386,10 @@ export function buildServerToolNestedRequestMetadata(args: {
       stripMappableSemanticsMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
       stripProviderSelectionMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
       stripStopMessageControlMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
+      stripServertoolRuntimeControlMetadataFields((out as Record<string, unknown>).__rt as Record<string, unknown>);
+      if (!Object.keys((out as Record<string, unknown>).__rt as Record<string, unknown>).length) {
+        delete (out as Record<string, unknown>).__rt;
+      }
     }
   } catch (error) {
     args.onMergeRuntimeMetaError?.(error);

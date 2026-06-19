@@ -189,8 +189,12 @@ function readCurrentGoalState(args: {
   pipelineMetadata?: Record<string, unknown>;
 }): StoplessGoalProjection | undefined {
   const persisted = readPersistedGoalState(args.adapterContext);
-  const metadataState = asGoalProjection(args.pipelineMetadata?.stoplessGoalState);
-  const adapterState = asGoalProjection(args.adapterContext.stoplessGoalState);
+  const metadataState = asGoalProjection(
+    MetadataCenter.read(args.pipelineMetadata)?.readRuntimeControl().stoplessGoal?.state
+  );
+  const adapterState = asGoalProjection(
+    MetadataCenter.read(args.adapterContext)?.readRuntimeControl().stoplessGoal?.state
+  );
   const candidates = [persisted, metadataState, adapterState].filter((candidate): candidate is StoplessGoalProjection => Boolean(candidate));
   if (!candidates.length) {
     return undefined;
@@ -242,8 +246,17 @@ function writeProjectedGoalState(args: {
   pipelineMetadata?: Record<string, unknown>;
   state: StoplessGoalProjection;
 }): StoplessGoalProjection {
-  args.adapterContext.stoplessGoalState = args.state;
-  MetadataCenter.attach(args.adapterContext).writeRuntimeControl(
+  const adapterCenter = MetadataCenter.attach(args.adapterContext);
+  adapterCenter.writeRuntimeControl(
+    'stoplessGoal',
+    {
+      state: args.state,
+      status: args.state.status
+    },
+    PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+    'provider response goal-state projection'
+  );
+  adapterCenter.writeRuntimeControl(
     'stoplessGoalStatus',
     args.state.status,
     PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
@@ -316,8 +329,8 @@ function persistGoalProgressLedger(args: {
 }
 
 function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boolean {
-  const directScope = readNonEmptyString(adapterContext.stopMessageClientInjectSessionScope)
-    ?? readNonEmptyString(adapterContext.stopMessageClientInjectScope);
+  const clientInject = MetadataCenter.read(adapterContext)?.readRuntimeControl().stopMessageClientInject;
+  const directScope = readNonEmptyString(clientInject?.sessionScope);
   if (directScope) {
     return true;
   }
@@ -501,7 +514,16 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   if (adapterCenter && !pipelineCenter) {
     MetadataCenter.bind(pipelineMetadata, adapterCenter);
   } else if (adapterCenter && pipelineCenter && pipelineCenter !== adapterCenter) {
-    const stoplessGoalStatus = adapterCenter.readRuntimeControl().stoplessGoalStatus;
+    const runtimeControl = adapterCenter.readRuntimeControl();
+    const stoplessGoalStatus = runtimeControl.stoplessGoalStatus;
+    if (runtimeControl.stoplessGoal) {
+      pipelineCenter.writeRuntimeControl(
+        'stoplessGoal',
+        runtimeControl.stoplessGoal,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response goal-state pipeline sync'
+      );
+    }
     if (typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()) {
       pipelineCenter.writeRuntimeControl(
         'stoplessGoalStatus',
@@ -512,11 +534,7 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
     }
   }
   const adapterRt = asRecord((options.adapterContext as Record<string, unknown>).__rt);
-  const adapterGoalState = asRecord((options.adapterContext as Record<string, unknown>).stoplessGoalState);
-  if (
-    !adapterRt
-    && !adapterGoalState
-  ) {
+  if (!adapterRt) {
     return;
   }
   const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
@@ -524,12 +542,8 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
     ...metadataRt,
     ...(Array.isArray(adapterRt?.hubStageTop) && adapterRt.hubStageTop.length > 0
       ? { hubStageTop: adapterRt.hubStageTop }
-      : {}),
-    ...(Array.isArray(adapterRt?.stoplessGoalDirectiveTypes) ? { stoplessGoalDirectiveTypes: adapterRt.stoplessGoalDirectiveTypes } : {})
+      : {})
   };
-  if (adapterGoalState) {
-    (pipelineMetadata as Record<string, unknown>).stoplessGoalState = adapterGoalState;
-  }
 }
 
 function readRuntimeControlForProviderResponseConverter(

@@ -8,6 +8,7 @@ import {
 } from '../../native/router-hotpath/native-virtual-router-routing-state.js';
 import { planStoplessGoalStateSyncWithNative } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
+import { writeRuntimeControlToBoundMetadataCenter } from '../stopless-metadata-carrier.js';
 
 type StoplessGoalStateSyncResult = {
   stickyKey: string;
@@ -44,6 +45,7 @@ type LegacyReasoningStopRoutingState = RoutingInstructionState & {
 
 const RCC_FENCE_OPEN = '<**rcc**>';
 const STOPLESS_GOAL_RUNTIME_SCOPE_REQUIRED = 'STOPLESS_GOAL_RUNTIME_SCOPE_REQUIRED';
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 function createEmptyRoutingInstructionState(): LegacyReasoningStopRoutingState {
   return {
@@ -257,25 +259,48 @@ function applyGoalStateToAdapterRecord(args: {
   hadDirective: boolean;
   directiveTypes: string[];
 }): void {
-  if (args.state) {
-    args.record.stoplessGoalState = args.state;
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata: args.record,
+    key: 'stoplessGoal',
+    value: {
+      ...(args.state ? { state: args.state } : {}),
+      ...(args.hadDirective ? { hadDirective: true } : {}),
+      source: args.hadDirective ? 'directive' : 'persisted',
+      ...(args.state?.status ? { status: args.state.status } : {}),
+      ...(args.directiveTypes.length > 0 ? { directiveTypes: args.directiveTypes } : {})
+    },
+    writer: {
+      module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.ts',
+      symbol: 'applyGoalStateToAdapterRecord',
+      stage: 'stopless_goal_runtime_control_writer'
+    },
+    reason: 'stopless-goal-state-sync',
+    required: true
+  });
+  if (args.state?.status) {
+    writeRuntimeControlToBoundMetadataCenter({
+      metadata: args.record,
+      key: 'stoplessGoalStatus',
+      value: args.state.status,
+      writer: {
+        module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.ts',
+        symbol: 'applyGoalStateToAdapterRecord',
+        stage: 'stopless_goal_runtime_control_writer'
+      },
+      reason: 'stopless-goal-status-sync',
+      required: true
+    });
   }
-  if (args.directiveTypes.length > 0) {
-    args.record.stoplessGoalDirectiveTypes = args.directiveTypes;
-  }
-  const rt = (asRecord(args.record.__rt) ?? {}) as Record<string, unknown>;
-  args.record.__rt = {
-    ...rt,
-    ...(args.hadDirective ? { stoplessGoalHadDirective: true } : {}),
-    stoplessGoalStateSource: args.hadDirective ? 'directive' : 'persisted',
-    ...(args.state?.status ? { stoplessGoalStatus: args.state.status } : {}),
-    ...(args.directiveTypes.length > 0 ? { stoplessGoalDirectiveTypes: args.directiveTypes } : {})
-  };
 }
 
 export function readStoplessGoalState(adapterContext: unknown): StoplessGoalStateReadResult {
   const direct = asRecord(adapterContext);
-  const directState = direct?.stoplessGoalState;
+  const metadataCenter = direct ? Reflect.get(direct, METADATA_CENTER_SYMBOL) as {
+    readRuntimeControl?: () => { stoplessGoal?: { state?: unknown } };
+  } | undefined : undefined;
+  const directState = metadataCenter && typeof metadataCenter.readRuntimeControl === 'function'
+    ? metadataCenter.readRuntimeControl().stoplessGoal?.state
+    : undefined;
   const stickyKey = resolveServertoolPersistentScopeKey(adapterContext) ?? '';
   if (isStoplessGoalStateSnapshot(directState)) {
     return {

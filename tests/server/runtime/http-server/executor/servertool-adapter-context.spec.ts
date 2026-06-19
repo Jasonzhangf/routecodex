@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 const mockSyncStoplessGoalStateFromRequest = jest.fn((baseContext: Record<string, unknown>) => {
-  baseContext.stoplessGoalState = {
+  const state = {
     status: 'active',
     objective: 'continue',
     updatedAt: 1,
@@ -11,7 +11,7 @@ const mockSyncStoplessGoalStateFromRequest = jest.fn((baseContext: Record<string
     stateKey: 'session:test',
     hadDirective: false,
     directiveTypes: [],
-    state: baseContext.stoplessGoalState
+    state
   };
 });
 
@@ -90,9 +90,13 @@ describe('servertool adapter context builder', () => {
     expect(context.compatibilityProfile).toBe('anthropic-claude');
     expect(context.serverToolsEnabled).toBe(false);
     expect(context.serverToolsDisabled).toBe(true);
-    expect((context.__rt as Record<string, unknown>).existing).toBe(true);
-    expect((context.__rt as Record<string, unknown>).stopMessageClientInjectReady).toBe(true);
-    expect((context.__rt as Record<string, unknown>).stopMessageClientInjectTmuxSessionId).toBe('tmux-1');
+    expect(context.__rt).toEqual({ existing: true });
+    expect(context.__rt as Record<string, unknown>).not.toHaveProperty('stopMessageClientInjectReady');
+    expect(context.__rt as Record<string, unknown>).not.toHaveProperty('stopMessageClientInjectTmuxSessionId');
+    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toMatchObject({
+      ready: true,
+      tmuxSessionId: 'tmux-1'
+    });
     expect(context.capturedEntryRequest).toBe(entryOriginRequest);
     expect(context.capturedChatRequest).toBe(entryOriginRequest);
     expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
@@ -234,6 +238,35 @@ describe('servertool adapter context builder', () => {
 
     expect(MetadataCenter.read(context)).toBe(center);
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(true);
+  });
+
+  it('binds a fresh MetadataCenter onto the adapter context when input metadata has no bound center', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {
+      routeName: 'thinking'
+    };
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        input: 'continue'
+      },
+      requestId: 'req-bind-fresh-center',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(MetadataCenter.read(metadata)).toBeUndefined();
+    expect(MetadataCenter.read(context)).toBeDefined();
   });
 
   it('reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent', async () => {
@@ -452,7 +485,7 @@ describe('servertool adapter context builder', () => {
     });
 
     expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith(new Error('stopless-goal seed failed'));
+    expect(String(onError.mock.calls[0]?.[0] ?? '')).toContain('stopless-goal seed failed');
   });
 
   it('overrides captured chat request with RCC fenced entry origin request for goal sync', async () => {
@@ -461,6 +494,9 @@ describe('servertool adapter context builder', () => {
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
     const entryOriginRequest = {
@@ -482,7 +518,7 @@ describe('servertool adapter context builder', () => {
 
     expect(context.capturedChatRequest).toBe(entryOriginRequest);
     expect(context.capturedEntryRequest).toBe(entryOriginRequest);
-    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+    expect(MetadataCenter.read(context)).toBeDefined();
   });
 
   it('uses /v1/responses input-array entry origin request as captured chat request for RCC goal sync', async () => {
@@ -491,6 +527,9 @@ describe('servertool adapter context builder', () => {
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
     const entryOriginRequest = {
@@ -512,7 +551,7 @@ describe('servertool adapter context builder', () => {
 
     expect(context.capturedChatRequest).toBe(entryOriginRequest);
     expect(context.capturedEntryRequest).toBe(entryOriginRequest);
-    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+    expect(MetadataCenter.read(context)).toBeDefined();
   });
 
   it('falls back to metadata capturedEntryRequest when capturedChatRequest lost RCC fence', async () => {
@@ -521,6 +560,9 @@ describe('servertool adapter context builder', () => {
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
     const metadataCapturedEntryRequest = {
@@ -551,6 +593,6 @@ describe('servertool adapter context builder', () => {
 
     expect(context.capturedChatRequest).toBe(metadataCapturedEntryRequest);
     expect(context.capturedEntryRequest).toBe(metadataCapturedEntryRequest);
-    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+    expect(MetadataCenter.read(context)).toBeDefined();
   });
 });

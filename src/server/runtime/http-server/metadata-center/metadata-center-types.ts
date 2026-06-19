@@ -76,6 +76,37 @@ export type MetadataCenterStoplessRuntimeControl = {
   updatedAt?: number;
 };
 
+export type MetadataCenterStopMessageState = {
+  stopMessageText?: string;
+  stopMessageProviderKey?: string;
+  stopMessageMaxRepeats?: number;
+  stopMessageUsed?: number;
+  stopMessageStageMode?: string;
+};
+
+export type MetadataCenterServerToolLoopState = {
+  flowId?: string;
+  repeatCount?: number;
+  maxRepeats?: number;
+  triggerHint?: string;
+  schemaFeedback?: Record<string, unknown>;
+};
+
+export type MetadataCenterStopMessageClientInject = {
+  ready?: boolean;
+  reason?: string;
+  sessionScope?: string;
+  tmuxSessionId?: string;
+};
+
+export type MetadataCenterStoplessGoalRuntime = {
+  state?: Record<string, unknown>;
+  hadDirective?: boolean;
+  source?: 'directive' | 'persisted' | string;
+  status?: string;
+  directiveTypes?: string[];
+};
+
 export type MetadataCenterRuntimeControl = {
   routeHint?: string;
   routeName?: string;
@@ -86,10 +117,16 @@ export type MetadataCenterRuntimeControl = {
   preselectedRoute?: Record<string, unknown>;
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
+  serverToolFollowupMode?: string;
+  servertoolResponseOrchestration?: boolean;
   stoplessGoalStatus?: string;
+  stoplessGoal?: MetadataCenterStoplessGoalRuntime;
   stopless?: MetadataCenterStoplessRuntimeControl;
+  stopMessageState?: MetadataCenterStopMessageState;
+  serverToolLoopState?: MetadataCenterServerToolLoopState;
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
+  stopMessageClientInject?: MetadataCenterStopMessageClientInject;
   streamIntent?: string;
   clientAbort?: boolean;
 };
