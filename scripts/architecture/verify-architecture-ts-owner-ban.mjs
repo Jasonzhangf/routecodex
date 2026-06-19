@@ -12,6 +12,7 @@ const TS_OWNER_WHITELIST = new Set([
   'snapshot.stage_contract', // src/utils is the only allowed TS owner for snapshot stage selector
   'error.provider_failure_policy', // provider runtime catalog/classification truth, with policy applied in Rust VR
   'error.backoff_action_queue', // host-side blocking wait executor; fixed policy is mapped and migration target remains Rust
+  'error.session_storm_boundary', // host-side session-local storm fence; migration target remains Rust
   'daemon_admin.command_handlers', // HTTP handler projection shell
   'server.http_runtime_entry', // HTTP entry shell
   'server.responses_handler_family', // handler family projection shell
