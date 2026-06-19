@@ -98,6 +98,7 @@ mod request_stage;
 mod response_stage;
 pub(crate) mod responses;
 mod shared_tool_text_guidance;
+mod single_tool_call_history;
 mod thinking_history;
 mod tool_text_request_guidance;
 pub(crate) mod universal_shape_filter;

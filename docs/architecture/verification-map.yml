@@ -961,6 +961,24 @@ verification:
     notes:
       - "c4m/crs request compat and chat-style function tool normalization must stay inside Rust stage3 compat; TS bridge may only call the native stage runner."
 
+  - feature_id: openai_chat.single_tool_call_history_compat
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/single_tool_call_history.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/request_stage.rs
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/core.rs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run verify:openai-chat-single-tool-call-history-compat-rust-only
+      - bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi openai_chat_single_tool_call_history --lib -- --nocapture'
+    build:
+      - npm run build:base
+    notes:
+      - "Positive proof: `chat:single-tool-call-history` splits historical and latest assistant parallel tool-call turns into single-call turns in Rust request compat."
+      - "Negative proof: no profile keeps the original parallel history shape; single tool-call history stays unchanged."
+
   - feature_id: responses.function_tool_normalization
     change_risk: high
     unit:

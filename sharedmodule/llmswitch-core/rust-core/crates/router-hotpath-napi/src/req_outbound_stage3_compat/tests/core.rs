@@ -221,6 +221,245 @@ fn test_openai_responses_strips_historical_reasoning_content_without_profile() {
 }
 
 #[test]
+fn openai_chat_single_tool_call_history_profile_splits_parallel_assistant_tool_calls() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "user", "content": "run both"},
+                {
+                    "role": "assistant",
+                    "content": "I will run them.",
+                    "tool_calls": [
+                        {"id": "call_a", "type": "function", "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}},
+                        {"id": "call_b", "type": "function", "function": {"name": "exec_command", "arguments": "{\"cmd\":\"date\"}"}}
+                    ]
+                },
+                {"role": "tool", "tool_call_id": "call_a", "content": "/tmp"},
+                {"role": "tool", "tool_call_id": "call_b", "content": "today"}
+            ],
+            "tools": [{"type": "function", "function": {"name": "exec_command", "parameters": {"type": "object"}}}]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:single-tool-call-history".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_single_tool_history".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-pro".to_string()),
+            client_model_id: Some("gpt-5.4".to_string()),
+            original_model_id: Some("gpt-5.4".to_string()),
+            provider_id: Some("tokenrelay".to_string()),
+            provider_key: Some("tokenrelay.key1.deepseek-v4-pro".to_string()),
+            runtime_key: Some("tokenrelay.key1".to_string()),
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert_eq!(
+        result.applied_profile.as_deref(),
+        Some("chat:single-tool-call-history")
+    );
+    let messages = result.payload["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 5);
+    assert_eq!(messages[1]["role"], "assistant");
+    assert_eq!(messages[1]["content"], "I will run them.");
+    assert_eq!(messages[1]["tool_calls"].as_array().unwrap().len(), 1);
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_a");
+    assert_eq!(messages[2]["role"], "assistant");
+    assert!(messages[2]["content"].is_null());
+    assert_eq!(messages[2]["tool_calls"].as_array().unwrap().len(), 1);
+    assert_eq!(messages[2]["tool_calls"][0]["id"], "call_b");
+    assert_eq!(messages[3]["tool_call_id"], "call_a");
+    assert_eq!(messages[4]["tool_call_id"], "call_b");
+}
+
+#[test]
+fn openai_chat_single_tool_call_history_profile_splits_history_and_latest_parallel_turns() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "user", "content": "older request"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "hist_a", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                        {"id": "hist_b", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
+                    ]
+                },
+                {"role": "tool", "tool_call_id": "hist_a", "content": "older a"},
+                {"role": "tool", "tool_call_id": "hist_b", "content": "older b"},
+                {"role": "user", "content": "latest request"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "latest_a", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                        {"id": "latest_b", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                        {"id": "latest_c", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:single-tool-call-history".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_history_and_latest".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: Some("tools".to_string()),
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-pro".to_string()),
+            client_model_id: Some("gpt-5.4".to_string()),
+            original_model_id: Some("gpt-5.4".to_string()),
+            provider_id: Some("tokenrelay".to_string()),
+            provider_key: Some("tokenrelay.key1.deepseek-v4-pro".to_string()),
+            runtime_key: Some("tokenrelay.key1".to_string()),
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let messages = result.payload["messages"].as_array().unwrap();
+    let assistant_tool_ids: Vec<String> = messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+        .map(|message| {
+            let calls = message["tool_calls"].as_array().expect("tool calls");
+            assert_eq!(calls.len(), 1);
+            calls[0]["id"].as_str().unwrap().to_string()
+        })
+        .collect();
+
+    assert_eq!(
+        assistant_tool_ids,
+        vec!["hist_a", "hist_b", "latest_a", "latest_b", "latest_c"]
+    );
+}
+
+#[test]
+fn openai_chat_parallel_assistant_tool_calls_stay_unchanged_without_profile() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {"id": "call_a", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                        {"id": "call_b", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_parallel_no_profile".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-pro".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let messages = result.payload["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["tool_calls"].as_array().unwrap().len(), 2);
+    assert!(result.applied_profile.is_none());
+}
+
+#[test]
+fn openai_chat_single_tool_call_history_profile_leaves_single_call_unchanged() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {"id": "call_a", "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:single-tool-call-history".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_single_profile".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("deepseek-v4-pro".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    let messages = result.payload["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["tool_calls"].as_array().unwrap().len(), 1);
+    assert_eq!(messages[0]["tool_calls"][0]["id"], "call_a");
+    assert_eq!(
+        result.applied_profile.as_deref(),
+        Some("chat:single-tool-call-history")
+    );
+}
+
+#[test]
 fn test_profile_selection() {
     let input = ReqOutboundCompatInput {
         payload: json!({"model": "deepseek-chat"}),

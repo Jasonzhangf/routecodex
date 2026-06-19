@@ -81,6 +81,11 @@ pub(super) fn is_glm_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:glm")
 }
 
+pub(super) fn is_single_tool_call_history_profile(profile: &str) -> bool {
+    profile_matches(profile, "chat:single-tool-call-history")
+        || profile_matches(profile, "openai-chat:single-tool-call-history")
+}
+
 pub(super) fn has_request_stage(profile: &str) -> bool {
     !is_responses_output2choices_profile(profile)
 }

@@ -1717,6 +1717,37 @@ owners:
     notes:
       - "c4m/crs request compat and chat-style function tool normalization must remain in Rust stage3 compat; TS may only invoke `runReqOutboundStage3CompatJson`."
 
+  - feature_id: openai_chat.single_tool_call_history_compat
+    status: active
+    summary: "OpenAI chat providers that reject historical parallel tool-call turns must split assistant history into single-tool-call turns only in Rust req_outbound compat"
+    owner_kind: rust_ssot
+    owner_scope: "OpenAI chat historical single-tool-call history compat must be owned by Rust req_outbound stage3 compat only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+    canonical_types:
+      - HubReqOutbound05ProviderSemantic
+      - ProviderReqOutbound06WirePayload
+    canonical_builders:
+      - split_parallel_tool_call_assistant_history
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/core.rs
+    required_gates:
+      - npm run verify:openai-chat-single-tool-call-history-compat-rust-only
+      - npm run verify:architecture-ci
+    migration_target: rust
+    notes:
+      - "This compat is invoked by the shared `run_req_outbound_stage3_compat_json` stage runner owned by `responses.request_compat_normalization`; only the single-tool-call history helper is canonical to this feature."
+      - "Historical assistant `tool_calls.len()>1` repair for OpenAI chat providers belongs in Rust req_outbound compat only; TS and Hub Pipeline must not own this provider-wire compatibility."
+      - "The compat is profile-gated and must not become a provider-key special case in Hub or HTTP server layers."
+
   - feature_id: responses.function_tool_normalization
     status: active
     summary: "chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust"

@@ -1,5 +1,15 @@
 ## 2026-06-19 tokenrelay deepseek-v4-pro / 5555 direct diagnosis
 
+- 2026-06-19 18:47 最新确认与纠偏：
+  - 当前问题必须以 5555 relay 为准，不能用 5557 provider-direct 结论替代；tokenrelay 是 OpenAI/chat provider，`/v1/responses` inbound 经 5555 relay 后应发 OpenAI `/v1/chat/completions` wire。
+  - 17:57 样本 `req_1781863064200_8333b451` 的 provider request 已确认：URL 为 `/v1/chat/completions`，`body.model=deepseek-v4-pro`，`stream=true`，不是模型名错误，也不是 raw `/v1/responses` 直发。
+  - 该样本内历史 assistant `tool_calls` 计数为 `{1:81,2:1,3:1}`；直接 upstream 原样 stream=true 返回 `This model only supports single tool-calls at once!`。
+  - 只把 assistant 多 `tool_calls` 拆成多个 assistant turn、每个 turn 单 `tool_calls` 后，同一 upstream stream=true replay 返回 HTTP 200。
+  - 修复点应在 Rust `req_outbound_stage3_compat` 的 OpenAI-chat provider-wire compat；不能改 Hub Pipeline 标准语义，也不能把 tokenrelay `type` 改成 responses。
+  - 当前修复遍历整个 outbound `messages` 数组，不是只改当前轮；历史轮和 latest/current 轮的 parallel `tool_calls` 都会被拆。
+  - 已补红测锁定：历史轮 + 最后/latest 轮同时带 parallel `tool_calls` 时都会被拆；无 profile 时保持原 parallel shape；single-call turn 不变。
+  - 5555 live 当前版本为 `0.90.3187`，`/health` 返回 `ready=true pipelineReady=true`。
+
 - 2026-06-19 17:16:19 最新 provider curl/config 复核真相：
   - upstream `https://token-relay-v2-production.up.railway.app/v1/chat/completions` 直打 `deepseek-v4-pro` 返回 HTTP 200；
   - upstream `https://token-relay-v2-production.up.railway.app/v1/responses` 直打同模型同最小 payload 也返回 HTTP 200；

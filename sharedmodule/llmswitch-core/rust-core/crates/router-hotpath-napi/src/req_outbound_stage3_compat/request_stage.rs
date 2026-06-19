@@ -7,13 +7,14 @@ use super::profile::{
     build_compat_result, has_request_stage, is_claude_code_profile, is_deepseek_web_profile,
     is_gemini_profile, is_glm_profile, is_lmstudio_profile, is_qwen_profile,
     is_qwenchat_web_profile, is_responses_c4m_profile, is_responses_crs_profile,
-    pick_compat_profile, provider_protocol_matches,
+    is_single_tool_call_history_profile, pick_compat_profile, provider_protocol_matches,
 };
 use super::qwen::apply_qwen_request_compat;
 use super::responses::{
     apply_responses_c4m_request_compat, apply_responses_crs_request_compat,
     normalize_responses_function_tools, strip_responses_reasoning_content_for_provider_wire,
 };
+use super::single_tool_call_history::split_parallel_tool_call_assistant_history;
 use super::thinking_history::{
     ensure_deepseek_anthropic_thinking_block_for_tool_use_history,
     ensure_deepseek_thinking_content_for_assistant_history,
@@ -237,6 +238,22 @@ pub fn run_req_outbound_stage3_compat(
             {
                 return Ok(CompatResult {
                     payload: apply_gemini_request_compat(payload, &adapter_context),
+                    applied_profile: Some(profile_id.to_string()),
+                    native_applied: true,
+                    rate_limit_detected: None,
+                });
+            }
+            return Ok(build_compat_result(payload, None));
+        }
+
+        if is_single_tool_call_history_profile(profile_id) {
+            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+            {
+                if let Some(root) = payload.as_object_mut() {
+                    split_parallel_tool_call_assistant_history(root);
+                }
+                return Ok(CompatResult {
+                    payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
                     rate_limit_detected: None,
