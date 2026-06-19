@@ -227,11 +227,42 @@ fn drop_apply_patch_shell_fallback_tool_calls_from_payload(payload: &mut Value) 
     dropped
 }
 
-fn maybe_repair_malformed_exec_command_name(function: &mut Map<String, Value>) -> bool {
+fn should_preserve_structured_tool_name(
+    raw_name: &str,
+    requested_tool_name_keys: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(normalized_name) = normalize_routecodex_tool_name(Some(raw_name)) else {
+        return false;
+    };
+    let normalized_key = normalized_name.trim().to_ascii_lowercase();
+    if normalized_key.is_empty()
+        || matches!(
+            normalized_key.as_str(),
+            "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+        )
+    {
+        return false;
+    }
+    if requested_tool_name_keys.contains(normalized_key.as_str()) {
+        return true;
+    }
+    raw_name.contains('.')
+        && !raw_name.contains('/')
+        && !raw_name.contains(char::is_whitespace)
+        && normalized_name == raw_name.trim()
+}
+
+fn maybe_repair_malformed_exec_command_name(
+    function: &mut Map<String, Value>,
+    requested_tool_name_keys: &std::collections::HashSet<String>,
+) -> bool {
     let Some(raw_name) = read_trimmed_string(function.get("name")) else {
         return false;
     };
     let lowered = raw_name.to_ascii_lowercase();
+    if should_preserve_structured_tool_name(raw_name.as_str(), requested_tool_name_keys) {
+        return false;
+    }
     // Guard: keep canonical snake_case tool identifiers untouched.
     if !raw_name.contains(char::is_whitespace)
         && raw_name.contains('_')
@@ -360,7 +391,8 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
                 }
             }
 
-            let _ = maybe_repair_malformed_exec_command_name(function);
+            let _ =
+                maybe_repair_malformed_exec_command_name(function, &requested_tool_name_keys);
             let Some(name) = read_trimmed_string(function.get("name")) else {
                 continue;
             };

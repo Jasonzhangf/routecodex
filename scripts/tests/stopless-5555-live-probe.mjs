@@ -107,11 +107,16 @@ async function requestJson(url, body, extraHeaders = {}) {
   };
 }
 
-function extractExecCommand(responseBody) {
+function extractRequiredActionToolCalls(responseBody) {
   const toolCalls = responseBody?.required_action?.submit_tool_outputs?.tool_calls;
   if (!Array.isArray(toolCalls)) {
-    return null;
+    return [];
   }
+  return toolCalls.filter((item) => item && typeof item === 'object');
+}
+
+function extractExecCommand(responseBody) {
+  const toolCalls = extractRequiredActionToolCalls(responseBody);
   const call = toolCalls.find(
     (item) => item?.name === 'exec_command' || item?.function?.name === 'exec_command'
   );
@@ -126,6 +131,21 @@ function extractExecCommand(responseBody) {
   return {
     toolCallId: call.tool_call_id || call.id || null,
     command: typeof parsed?.cmd === 'string' ? parsed.cmd : null
+  };
+}
+
+function extractReasoningStop(responseBody) {
+  const toolCalls = extractRequiredActionToolCalls(responseBody);
+  const call = toolCalls.find(
+    (item) => item?.name === 'reasoning.stop' || item?.function?.name === 'reasoning.stop'
+  );
+  if (!call) {
+    return null;
+  }
+  const rawArgs = call?.function?.arguments ?? call?.arguments;
+  return {
+    toolCallId: call.tool_call_id || call.id || null,
+    arguments: typeof rawArgs === 'string' ? rawArgs : null
   };
 }
 
@@ -177,6 +197,7 @@ export function materializeProbeResponseBody(responseBody) {
 export function summarizeAttempt(model, attempt, response) {
   const materializedBody = materializeProbeResponseBody(response.body);
   const execCommand = extractExecCommand(materializedBody);
+  const reasoningStop = extractReasoningStop(materializedBody);
   const outputText = typeof materializedBody?.output_text === 'string'
     ? materializedBody.output_text
     : extractOutputText(materializedBody);
@@ -191,9 +212,12 @@ export function summarizeAttempt(model, attempt, response) {
     errorCode: materializedBody?.error?.code ?? null,
     errorMessage: materializedBody?.error?.message ?? null,
     hasExecCommand: Boolean(execCommandText),
+    hasReasoningStop: Boolean(reasoningStop?.toolCallId),
     isStopMessageAutoExecCommand: isStopMessageAutoCommand(execCommandText),
     toolCallId: execCommand?.toolCallId ?? null,
     execCommand: execCommandText,
+    reasoningStopToolCallId: reasoningStop?.toolCallId ?? null,
+    reasoningStopArguments: reasoningStop?.arguments ?? null,
     outputText,
     leakedStopSchema: looksLikeStopSchema(outputText),
     rawBody: response.body ?? null
@@ -266,7 +290,8 @@ async function main() {
       'This probe only accepts live stopless evidence from managed non-direct routes.',
       'Default model is gpt-5.5 because earlier verified 5555 live stopless samples entered managed search through router-gpt-5.5, while explicit MiniMax/mimo model probes later regressed into direct/thinking invalid paths.',
       routeHint ? `Route hint is forced to ${routeHint}.` : 'No explicit route hint.',
-      'If a response completes with leaked stop schema text and no exec_command, treat it as a direct/no-stopless invalid entry rather than a passed stopless run.'
+      'Current live success contract accepts either stopless exec_command CLI projection or proactive required_action.reasoning.stop tool call.',
+      'If a response completes with leaked stop schema text and no structured tool call, treat it as a direct/no-stopless invalid entry rather than a passed stopless run.'
     ],
     routeHint: routeHint || null,
     health: null,
@@ -300,6 +325,13 @@ async function main() {
       if (summary.hasExecCommand && !summary.isStopMessageAutoExecCommand) {
         report.finalStatus = 'invalid_non_stopless_exec_command_path';
         continue;
+      }
+      if (summary.hasReasoningStop && !summary.hasExecCommand) {
+        report.chosenModel = model;
+        report.finalStatus = 'reasoning_stop_requires_action';
+        await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
+        console.log(JSON.stringify(report, null, 2));
+        return;
       }
       if (!summary.hasExecCommand) {
         continue;

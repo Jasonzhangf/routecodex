@@ -132,6 +132,73 @@ fn test_govern_response_preserves_requested_shell_command_name_for_openai_chat()
 }
 
 #[test]
+fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_when_requested() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": { "requestedToolNames": ["exec_command", "reasoning.stop"] },
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "",
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_reasoning_stop",
+                        "type": "function",
+                        "function": {
+                            "name": "reasoning.stop",
+                            "arguments": "{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"verified\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_preserve_reasoning_stop".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["name"], "reasoning.stop");
+    let args = call["function"]["arguments"].as_str().unwrap_or("");
+    assert!(args.contains("\"stopreason\":0"));
+    assert!(!args.contains("\"cmd\":\"reasoning.stop\""));
+}
+
+#[test]
+fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_without_requested_tools() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "",
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_reasoning_stop_ns",
+                        "type": "function",
+                        "function": {
+                            "name": "reasoning.stop",
+                            "arguments": "{\"stopreason\":2,\"reason\":\"continue\",\"next_step\":\"run focused tests\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_preserve_reasoning_stop_ns".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["name"], "reasoning.stop");
+    let args = call["function"]["arguments"].as_str().unwrap_or("");
+    assert!(args.contains("\"stopreason\":2"));
+    assert!(!args.contains("\"cmd\":\"reasoning.stop\""));
+}
+
+#[test]
 fn test_prepare_payload_for_governance_does_not_guess_function_style_apply_patch_semantics() {
     let payload = serde_json::json!({
         "object": "response",

@@ -46,4 +46,37 @@ describe('stopless live probe SSE closeout parsing', () => {
     expect(summary.hasExecCommand).toBe(false);
     expect(summary.outputText).toContain('5555 live submit_tool_outputs');
   });
+
+  test('summarizeAttempt recognizes proactive reasoning.stop required_action as live stopless path', () => {
+    const summary = summarizeAttempt('gpt-5.5', 1, {
+      status: 200,
+      body: {
+        id: 'resp_reasoning_stop_1',
+        status: 'requires_action',
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_reasoning_stop_1',
+                tool_call_id: 'call_reasoning_stop_1',
+                type: 'function',
+                name: 'reasoning.stop',
+                function: {
+                  name: 'reasoning.stop',
+                  arguments: '{"stopreason":"2","reason":"first round"}'
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(summary.responseStatus).toBe('requires_action');
+    expect(summary.hasExecCommand).toBe(false);
+    expect(summary.hasReasoningStop).toBe(true);
+    expect(summary.reasoningStopToolCallId).toBe('call_reasoning_stop_1');
+    expect(summary.reasoningStopArguments).toContain('"stopreason":"2"');
+  });
 });
