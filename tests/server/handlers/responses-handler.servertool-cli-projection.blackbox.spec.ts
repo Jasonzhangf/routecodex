@@ -1,5 +1,6 @@
 import { runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -12,6 +13,11 @@ function isolateSessionDir(label: string): void {
   const dir = path.join(process.cwd(), '.tmp', 'jest-servertool-blackbox', `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   fs.mkdirSync(dir, { recursive: true });
   process.env.ROUTECODEX_SESSION_DIR = dir;
+}
+
+function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterContext: T): T {
+  MetadataCenter.attach(adapterContext);
+  return adapterContext;
 }
 
 describe('servertool CLI projection blackbox', () => {
@@ -83,7 +89,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-lifecycle',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -99,7 +105,7 @@ describe('servertool CLI projection blackbox', () => {
             stopMessageStageMode: 'on'
           }
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_lifecycle',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -166,7 +172,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-loop-guard-resume-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -201,7 +207,7 @@ describe('servertool CLI projection blackbox', () => {
             }
           ]
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_loop_guard',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -237,7 +243,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-schema-feedback-lock',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -253,7 +259,7 @@ describe('servertool CLI projection blackbox', () => {
             stopMessageStageMode: 'on'
           }
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_schema_feedback_lock',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -292,7 +298,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-third-no-schema-terminal',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -308,7 +314,7 @@ describe('servertool CLI projection blackbox', () => {
             stopMessageStageMode: 'on'
           }
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_third_no_schema_terminal',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -344,7 +350,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-allow-stop-terminal',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -360,7 +366,7 @@ describe('servertool CLI projection blackbox', () => {
             stopMessageStageMode: 'on'
           }
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_allow_stop_terminal',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -409,7 +415,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: {
+      adapterContext: bindStoplessMetadataCenter({
         sessionId: 'sess-stop-cli-legacy-shape-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -444,7 +450,7 @@ describe('servertool CLI projection blackbox', () => {
             }
           ]
         }
-      } as any,
+      } as any),
       requestId: 'req_stop_cli_legacy_shape_guard',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',

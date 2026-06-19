@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { writeStoplessRuntimeControl } from '../../src/server/runtime/http-server/metadata-center/request-truth-readers.ts';
 import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../../sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 
 describe('stopless metadata center helper', () => {
   it('writes stopless runtime control into MetadataCenter as the request-local control truth', () => {
@@ -96,5 +97,115 @@ describe('stopless metadata center helper', () => {
         required: true
       })
     ).toThrow(/requires a bound MetadataCenter/);
+  });
+
+  it('preserves stopless MetadataCenter binding when adapter root lacks the symbol but metadata bag already owns it', async () => {
+    const metadata: Record<string, unknown> = {
+      __rt: {
+        stopMessageState: {
+          stopMessageText: '继续推进当前任务。',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 1
+        }
+      }
+    };
+    const center = MetadataCenter.attach(metadata);
+
+    const adapterContext: Record<string, unknown> = {
+      requestId: 'req-stopless-rootless-center',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: 'sess-stopless-rootless-center',
+      metadata,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续执行' }]
+      }
+    };
+
+    await runServerSideToolEngine({
+      chatResponse: {
+        id: 'chatcmpl-stopless-rootless-center',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '阶段结束'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: adapterContext as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopless-rootless-center',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => ({ body: {} as any })
+    });
+
+    expect(center.readRuntimeControl().stopless).toEqual(
+      expect.objectContaining({
+        sessionId: 'sess-stopless-rootless-center',
+        flowId: 'stop_message_flow',
+        active: true
+      })
+    );
+  });
+
+  it('inherits stopless MetadataCenter binding from adapter root when metadata bag is created during finalize', async () => {
+    const adapterContext: Record<string, unknown> = {
+      requestId: 'req-stopless-root-center',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: 'sess-stopless-root-center',
+      __rt: {
+        stopMessageState: {
+          stopMessageText: '继续推进当前任务。',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 1
+        }
+      },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续执行' }]
+      }
+    };
+    const center = MetadataCenter.attach(adapterContext);
+
+    await runServerSideToolEngine({
+      chatResponse: {
+        id: 'chatcmpl-stopless-root-center',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '阶段结束'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: adapterContext as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopless-root-center',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => ({ body: {} as any })
+    });
+
+    expect(adapterContext.metadata).toEqual(expect.any(Object));
+    expect(center.readRuntimeControl().stopless).toEqual(
+      expect.objectContaining({
+        sessionId: 'sess-stopless-root-center',
+        flowId: 'stop_message_flow',
+        active: true
+      })
+    );
+    expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
   });
 });

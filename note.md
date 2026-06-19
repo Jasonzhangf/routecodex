@@ -6165,3 +6165,17 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 红绿测试：
   - 新增 `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts`
   - 场景：第一个 provider 在 `rebindResponsesConversationRequestId` 抛 `HTTP_502`，route pool 还有第二个 provider；预期不向客户端报错，而是 reroute 到第二个 provider 成功完成。
+
+## 2026-06-19 stopless MetadataCenter review slice
+
+- 重新检查最新 HEAD 后确认：`sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` 的 runtime 绑定逻辑已在 HEAD 收敛为正确形态，当前未提交源码不再需要额外 fallback。
+- 审计发现并修正测试问题：
+  - 原新增测试只覆盖 `metadata` bag 已有 MetadataCenter 的路径，不能证明 adapter root 继承分支；
+  - 补充 `adapter root has MetadataCenter, metadata bag is created during finalize` 黑盒，证明 finalize 后 runtime_control.stopless 写回同一个 request-local center；
+  - `responses-handler.servertool-cli-projection.blackbox.spec.ts` 的 stopless 场景补 MetadataCenter 绑定，保留 required fail-fast，不把缺绑定降级成静默跳过。
+- 验证已跑：
+  - `tests/servertool/stopless-metadata-center.spec.ts` PASS
+  - `tests/servertool/stopless-cli-continuation.spec.ts` + `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts` PASS
+  - `npm run verify:servertool-rust-only` PASS
+  - `git diff --check` PASS
+- 未提交范围说明：`tests/fixtures/goal-request-user-input-real-samples/runs/**` 是本地 replay 输出产物，当前只被 note 引用，未被测试/脚本消费，不纳入提交。
