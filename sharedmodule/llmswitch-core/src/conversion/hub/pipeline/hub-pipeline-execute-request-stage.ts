@@ -74,12 +74,6 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
   if (typeof runtimeControl.stoplessGoalStatus === 'string' && runtimeControl.stoplessGoalStatus.trim()) {
     out.stoplessGoalStatus = runtimeControl.stoplessGoalStatus.trim();
   }
-  if (typeof runtimeControl.serverToolFollowup === 'boolean') {
-    out.serverToolFollowup = runtimeControl.serverToolFollowup;
-  }
-  if (typeof runtimeControl.serverToolFollowupSource === 'string' && runtimeControl.serverToolFollowupSource.trim()) {
-    out.serverToolFollowupSource = runtimeControl.serverToolFollowupSource.trim();
-  }
   return out;
 }
 

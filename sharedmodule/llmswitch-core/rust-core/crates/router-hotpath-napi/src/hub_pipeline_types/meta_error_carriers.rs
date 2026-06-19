@@ -78,6 +78,9 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     let Some(source) = metadata.as_object() else {
         return MetaRoute03RouteCarrier { control };
     };
+    let runtime_control = source
+        .get("runtime_control")
+        .and_then(|value| value.as_object());
 
     copy_normalized_string_array(source, &mut control, "allowedProviders");
     copy_normalized_string_array(source, &mut control, "excludedProviderKeys");
@@ -98,14 +101,16 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     {
         control.insert("serverToolRequired".to_string(), Value::Bool(true));
     }
-    if source
-        .get("serverToolFollowup")
+    if runtime_control
+        .and_then(|row| row.get("serverToolFollowup"))
         .and_then(|value| value.as_bool())
         .unwrap_or(false)
     {
         control.insert("serverToolFollowup".to_string(), Value::Bool(true));
     }
-    copy_non_empty_string(source, &mut control, "serverToolFollowupSource");
+    if let Some(runtime_control) = runtime_control {
+        copy_non_empty_string(runtime_control, &mut control, "serverToolFollowupSource");
+    }
     if let Some(port) = source
         .get("routecodexLocalPort")
         .and_then(|value| value.as_i64())

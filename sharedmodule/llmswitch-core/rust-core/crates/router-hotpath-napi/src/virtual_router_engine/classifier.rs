@@ -59,7 +59,9 @@ impl RoutingClassifier {
         let latest_message_from_user = features.latest_message_from_user;
         let stopless_followup = features
             .metadata
-            .get("serverToolFollowup")
+            .get("runtime_control")
+            .and_then(|v| v.as_object())
+            .and_then(|rt| rt.get("serverToolFollowup"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let last_tool_category = if latest_message_from_user {
@@ -602,7 +604,7 @@ mod tests {
         let features = RoutingFeatures {
             latest_message_from_user: false,
             has_tool_call_responses: true,
-            metadata: json!({ "serverToolFollowup": true }),
+            metadata: json!({ "runtime_control": { "serverToolFollowup": true } }),
             ..Default::default()
         };
 
@@ -610,6 +612,24 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn legacy_followup_metadata_does_not_force_thinking() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tool_call_responses: true,
+            metadata: json!({
+                "serverToolFollowup": true,
+                "__rt": { "serverToolFollowup": true }
+            }),
+            ..Default::default()
+        };
+
+        let result = test_classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(!result.reasoning.contains("thinking:user-input"));
     }
 
     // Without serverToolFollowup, tool-role continuation goes to tools (not thinking).

@@ -82,18 +82,12 @@ pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
 }
 
 pub(crate) fn is_server_tool_followup_request(metadata: &Value) -> bool {
-    let rt = metadata.get("__rt").and_then(|v| v.as_object());
-    if let Some(rt) = rt {
-        if let Some(flag) = rt.get("serverToolFollowup") {
-            if flag.as_bool() == Some(true) {
-                return true;
-            }
-            if let Some(text) = flag.as_str() {
-                return text.trim().eq_ignore_ascii_case("true");
-            }
-        }
-    }
-    false
+    metadata
+        .get("runtime_control")
+        .and_then(|v| v.as_object())
+        .and_then(|rt| rt.get("serverToolFollowup"))
+        .and_then(|flag| flag.as_bool())
+        .unwrap_or(false)
 }
 
 pub(crate) fn build_scoped_session_key(scope: &str) -> String {
@@ -126,7 +120,10 @@ pub(crate) fn extract_runtime_now_ms(metadata: &Value) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_continuation_request, resolve_routing_state_key, resolve_stop_message_scope};
+    use super::{
+        is_continuation_request, is_server_tool_followup_request, resolve_routing_state_key,
+        resolve_stop_message_scope,
+    };
     use serde_json::json;
 
     #[test]
@@ -291,5 +288,21 @@ mod tests {
         });
 
         assert_eq!(resolve_stop_message_scope(&metadata), None);
+    }
+
+    #[test]
+    fn servertool_followup_request_reads_runtime_control_only() {
+        assert!(is_server_tool_followup_request(&json!({
+            "runtime_control": { "serverToolFollowup": true },
+            "serverToolFollowup": false,
+            "__rt": { "serverToolFollowup": false }
+        })));
+        assert!(!is_server_tool_followup_request(&json!({
+            "serverToolFollowup": true,
+            "__rt": { "serverToolFollowup": true }
+        })));
+        assert!(!is_server_tool_followup_request(&json!({
+            "runtime_control": { "serverToolFollowup": "true" }
+        })));
     }
 }

@@ -1,5 +1,4 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { ensureRuntimeMetadata } from '../conversion/runtime-metadata.js';
 
 export async function reenterServerToolBackend(args: {
   reenterPipeline: (options: {
@@ -22,8 +21,6 @@ export async function reenterServerToolBackend(args: {
     ...(routeHint ? { routeHint } : {}),
     ...(args.metadata ?? {})
   };
-  const rt = ensureRuntimeMetadata(merged as unknown as Record<string, unknown>);
-  (rt as Record<string, unknown>).serverToolFollowup = true;
   return await args.reenterPipeline({
     entryEndpoint: args.entryEndpoint,
     requestId: args.requestId,

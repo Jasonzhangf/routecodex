@@ -959,8 +959,7 @@ mod tests {
             "endpoint": "/v1/chat/completions",
             "requestId": "test-followup-route-hint:stop_followup",
             "routeHint": "search",
-            "serverToolFollowup": true,
-            "__rt": { "serverToolFollowup": true }
+            "runtime_control": { "serverToolFollowup": true }
         });
 
         let result = core
@@ -991,9 +990,10 @@ mod tests {
             "endpoint": "/v1/chat/completions",
             "requestId": "test-stopless-strip-tools-hint",
             "routeHint": "tools",
-            "serverToolFollowup": true,
-            "serverToolFollowupSource": "servertool.stop_message",
-            "__rt": { "serverToolFollowup": true }
+            "runtime_control": {
+                "serverToolFollowup": true,
+                "serverToolFollowupSource": "servertool.stop_message"
+            }
         });
 
         let result = core
@@ -1032,9 +1032,10 @@ mod tests {
             "endpoint": "/v1/chat/completions",
             "requestId": "test-stopless-strip-search-hint",
             "routeHint": "search",
-            "serverToolFollowup": true,
-            "serverToolFollowupSource": "servertool.stop_message",
-            "__rt": { "serverToolFollowup": true }
+            "runtime_control": {
+                "serverToolFollowup": true,
+                "serverToolFollowupSource": "servertool.stop_message"
+            }
         });
 
         let result = core

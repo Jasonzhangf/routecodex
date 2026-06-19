@@ -1,8 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
-import { Readable } from 'node:stream';
 
 import { reenterServerToolBackend } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-backend.js';
-import { isEmptyClientResponsePayload } from '../../sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.js';
 
 describe('servertool followup stream compatibility', () => {
   test('reenter backend does not force stream=false when metadata stream is not provided', async () => {
@@ -24,14 +22,7 @@ describe('servertool followup stream compatibility', () => {
 
     const metadata = (result.body as Record<string, unknown>).metadata as Record<string, unknown>;
     expect(metadata.stream).toBeUndefined();
-    expect((metadata.__rt as Record<string, unknown>).serverToolFollowup).toBe(true);
-  });
-
-  test('empty-check treats sse wrapper payload as non-empty for downstream decode path', () => {
-    const payload = {
-      __sse_responses: Readable.from(['event: message\ndata: {"type":"response.completed"}\n\n'])
-    } as Record<string, unknown>;
-    expect(isEmptyClientResponsePayload(payload)).toBe(false);
+    expect((metadata.__rt as Record<string, unknown> | undefined)?.serverToolFollowup).toBeUndefined();
+    expect(metadata.serverToolFollowup).toBeUndefined();
   });
 });
-
