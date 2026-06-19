@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3172",
+  "version": "0.90.3187",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -248,7 +248,8 @@
     "verify-mainline-call-map-binding-state": "node scripts/architecture/verify-mainline-call-map-binding-state.mjs",
     "verify:function-map-test-coverage-integrity": "node scripts/architecture/verify-function-map-test-coverage-integrity.mjs",
     "verify:architecture-topology-type-consistency": "node scripts/architecture/verify-architecture-topology-type-consistency.mjs",
-    "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs"
+    "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs",
+    "verify:request-executor-routepool-contract": "node scripts/architecture/verify-request-executor-routepool-contract.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

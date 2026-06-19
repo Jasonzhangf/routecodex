@@ -324,6 +324,7 @@ function isRouterDirectRelayableSkip(reason: unknown): boolean {
     || message === 'direct_payload_requires_hub_relay'
     || message === 'client_tools_require_hub_relay'
     || message === 'stopless_servertool_requires_hub_relay'
+    || message === 'target_outbound_profile_requires_hub_relay'
     || message === 'servertool_followup_requires_hub_relay';
 }
 
@@ -685,7 +686,12 @@ export class RouteCodexHttpServer {
       return true;
     }
     const normalizedKey = key.toLowerCase();
-    return allowed.some((providerId) => normalizedKey === providerId || normalizedKey.startsWith(`${providerId}.`));
+    return allowed.some((providerId) => {
+      if (normalizedKey === providerId || normalizedKey.startsWith(`${providerId}.`)) {
+        return true;
+      }
+      return providerId.startsWith(`${normalizedKey}.`);
+    });
   }
 
   private async buildHubPipelineConfigForRoutingPolicyGroup(
@@ -1660,6 +1666,27 @@ export class RouteCodexHttpServer {
     const providerKey = target.providerKey.trim();
     const runtimeKey = typeof target.runtimeKey === 'string' && target.runtimeKey.trim() ? target.runtimeKey.trim() : providerKey;
     const providerType = typeof target.providerType === 'string' ? target.providerType : '';
+    const targetOutboundProfile =
+      typeof target.outboundProfile === 'string' && target.outboundProfile.trim()
+        ? target.outboundProfile.trim()
+        : undefined;
+    if (targetOutboundProfile && targetOutboundProfile !== inboundProtocol) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: 'target_outbound_profile_requires_hub_relay',
+        inboundProtocol,
+        outboundProfile: targetOutboundProfile,
+        providerKey,
+      });
+      return {
+        used: false,
+        reason: 'target_outbound_profile_requires_hub_relay',
+        preselectedRoute: {
+          target,
+          decision: routingDecision,
+          diagnostics: routeResult.diagnostics,
+        },
+      };
+    }
     if (retryState.retryProviderKey && providerKey !== retryState.retryProviderKey) {
       this.logStage('router-direct.retry.forced_provider_mismatch', input.requestId, {
         expectedProviderKey: retryState.retryProviderKey,

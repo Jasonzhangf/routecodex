@@ -46,6 +46,11 @@ describe('request-executor excluded provider reselection plan', () => {
         routingDecision: {
           routeName: 'thinking',
           pool: ['openai.key1.gpt-5.4-medium'],
+          routePool: [
+            'openai.key1.gpt-5.4-medium',
+            'openai.key2.gpt-5.4-medium',
+            'openai.key3.gpt-5.4-medium',
+          ],
         },
         providerPayload: { body: { model: 'gpt-5.4-medium' } },
         target: {
@@ -214,7 +219,7 @@ describe('request-executor excluded provider reselection plan', () => {
     });
   });
 
-  it('does not infer fallback routePool from pool when explicit routePool is missing', () => {
+  it('treats routingDecision.pool as an explicit routePool carrier when excluded provider is reselected', () => {
     const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
       inputRequestId: 'req-no-explicit-routepool',
       providerRequestId: 'req-no-explicit-routepool',
@@ -253,8 +258,19 @@ describe('request-executor excluded provider reselection plan', () => {
     });
 
     expect(resolved).toEqual({
-      kind: 'retry_next_attempt',
-      initialRoutePool: null
+      kind: 'resolved',
+      mergedMetadata: {
+        clientRequestId: 'req-no-explicit-routepool'
+      },
+      mergedClientHeaders: undefined,
+      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
+      providerPayload: { body: { model: 'gpt-test' } },
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M3',
+        runtimeKey: 'minimax.key1',
+        compatibilityProfile: 'openai:responses'
+      },
+      initialRoutePool: ['minimax.key1.MiniMax-M3']
     });
   });
 

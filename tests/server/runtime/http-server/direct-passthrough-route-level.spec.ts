@@ -1616,6 +1616,145 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
+  it('router-direct reroutes by decision.routePool when decision.pool is narrowed to current provider', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4';
+    const secondProviderKey = '1token.key1.gpt-5.4';
+    const direct502 = () => Object.assign(new Error('HTTP 502: upstream provider error'), {
+      statusCode: 502,
+      status: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+    });
+    const firstDirectSend = jest.fn(async () => { throw direct502(); });
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_routepool_switch',
+        object: 'response',
+        status: 'completed',
+        output_text: 'ok',
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: 'gpt-5.4',
+        },
+        decision: {
+          routeName: 'longcontext',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'longcontext:token-threshold',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct reroute must not enter HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: '1token',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_routepool_switch',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        },
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(outcome.auditContext.providerKey).toBe(secondProviderKey);
+    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_routepool_switch' });
+    expect(firstDirectSend).toHaveBeenCalledTimes(1);
+    expect(secondDirectSend).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledTimes(2);
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
   it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
@@ -1745,6 +1884,1133 @@ describe('direct passthrough route-level', () => {
       expect(secondStandardSend).not.toHaveBeenCalled();
       expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(1);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct recoverable 502 switches provider before client-visible upstream error', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4';
+    const secondProviderKey = '1token.key1.gpt-5.4';
+    const direct502 = Object.assign(new Error('HTTP 502: Upstream provider error'), {
+      statusCode: 502,
+      status: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+    });
+    const firstDirectSend = jest.fn(async () => { throw direct502; });
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_http_502_switched',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_ok',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'pong' },
+            ],
+          },
+        ],
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: 'gpt-5.4',
+        },
+        decision: {
+          routeName: 'longcontext',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'longcontext:test',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct recoverable 502 must stay off standard executor'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: '1token',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        }),
+      });
+      const bodyText = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(bodyText).toContain('resp_router_direct_http_502_switched');
+      expect(bodyText).toContain('pong');
+      expect(bodyText).not.toContain('HTTP_HANDLER_ERROR');
+      expect(bodyText).not.toContain('Upstream provider error');
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondDirectSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct recoverable returned 502 response switches provider before client-visible upstream error', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4';
+    const secondProviderKey = '1token.key1.gpt-5.4';
+    const firstDirectSend = jest.fn(async () => ({
+      status: 502,
+      data: {
+        error: {
+          message: 'Upstream provider error',
+          code: 'HTTP_502',
+        },
+      },
+    }));
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_returned_http_502_switched',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_ok',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'pong' },
+            ],
+          },
+        ],
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: 'gpt-5.4',
+        },
+        decision: {
+          routeName: 'longcontext',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'longcontext:test-returned-502',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct returned recoverable 502 must stay off standard executor'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: '1token',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'router-gpt-5.4',
+          stream: false,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'resp_router_direct_returned_http_502_switched',
+        object: 'response',
+        status: 'completed',
+      }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondDirectSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct recoverable nested response.status=502 switches provider before client-visible upstream error', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const secondProviderKey = 'minimax.key1.MiniMax-M3';
+    const firstDirectSend = jest.fn(async () => ({
+      response: {
+        status: 502,
+        data: {
+          error: {
+            message: 'Upstream provider error',
+            code: 'HTTP_502',
+          },
+        },
+      },
+      data: {
+        error: {
+          message: 'Upstream provider error',
+          code: 'HTTP_502',
+        },
+      },
+    }));
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_nested_response_status_502_switched',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_ok_nested_status',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'pong' },
+            ],
+          },
+        ],
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: providerKey === firstProviderKey ? 'gpt-5.4-mini' : 'MiniMax-M3',
+        },
+        decision: {
+          routeName: 'default',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'default:route-selected',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct nested response.status=502 must stay off standard executor'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'minimax',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'MiniMax-M3' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'resp_router_direct_nested_response_status_502_switched',
+        object: 'response',
+        status: 'completed',
+      }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondDirectSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct responses body error switches provider before client-visible upstream error', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const secondProviderKey = 'minimax.key1.MiniMax-M3';
+    const firstDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        error: {
+          message: 'Upstream provider error',
+          code: 'HTTP_502',
+          status: 502,
+        },
+      },
+    }));
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_body_error_switched',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_ok_body_error',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'pong' },
+            ],
+          },
+        ],
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: providerKey === firstProviderKey ? 'gpt-5.4-mini' : 'MiniMax-M3',
+        },
+        decision: {
+          routeName: 'default',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'default:route-selected',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct body error must stay off standard executor'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'minimax',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'MiniMax-M3' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'resp_router_direct_body_error_switched',
+        object: 'response',
+        status: 'completed',
+      }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondDirectSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: 5520 default mixed-protocol backup relays into Hub after first direct provider fails', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const secondProviderKey = 'minimax.key1.MiniMax-M3';
+    const firstDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        error: {
+          message: 'Upstream provider error',
+          code: 'HTTP_502',
+          status: 502,
+        },
+      },
+    }));
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_router_direct_default_mixed_protocol_relay',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_default_mixed_protocol_relay',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'relay-ok' },
+            ],
+          },
+        ],
+      },
+      metadata: { relayed: true },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      const isBackup = providerKey === secondProviderKey;
+      return {
+        target: {
+          providerKey,
+          providerType: isBackup ? 'anthropic' : 'openai',
+          outboundProfile: isBackup ? 'anthropic-messages' : 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: isBackup ? 'MiniMax-M3' : 'gpt-5.4-mini',
+        },
+        decision: {
+          routeName: 'default',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'default:route-selected',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => {
+        throw new Error('mixed-protocol relay must not re-enter bare hubPipeline.execute mock');
+      }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    jest.spyOn(server as any, 'executePipeline').mockImplementation(executePipeline);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'minimax',
+        providerType: 'anthropic',
+        providerFamily: 'anthropic',
+        providerProtocol: 'anthropic-messages',
+        runtime: { modelId: 'MiniMax-M3' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async () => {
+            throw new Error('mixed-protocol backup must relay through hub instead of direct send');
+          }),
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'resp_router_direct_default_mixed_protocol_relay',
+        object: 'response',
+        status: 'completed',
+      }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(executePipeline).toHaveBeenCalledTimes(1);
+      expect(route).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: router-direct relays selected responses provider when target outboundProfile is chat', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const providerKey = 'tokenrelay.key1.deepseek-v4-pro';
+    const directSend = jest.fn(async () => {
+      throw new Error('responses process=chat provider must not receive raw router-direct payload');
+    });
+    const executePipeline = jest.fn(async (input: Record<string, unknown>) => {
+      const metadata = input.metadata && typeof input.metadata === 'object'
+        ? (input.metadata as Record<string, unknown>)
+        : {};
+      const center = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const preselected = center.preselectedRoute && typeof center.preselectedRoute === 'object'
+        ? (center.preselectedRoute as Record<string, unknown>)
+        : undefined;
+      expect((preselected?.target as Record<string, unknown> | undefined)?.providerKey).toBe(providerKey);
+      expect((preselected?.target as Record<string, unknown> | undefined)?.outboundProfile).toBe('openai-chat');
+      return {
+        status: 200,
+        body: {
+          id: 'resp_router_direct_responses_chat_profile_relay',
+          object: 'response',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              id: 'msg_router_direct_responses_chat_profile_relay',
+              status: 'completed',
+              role: 'assistant',
+              content: [
+                { type: 'output_text', text: 'relay-chat-profile-ok' },
+              ],
+            },
+          ],
+        },
+        metadata: { relayed: true },
+      };
+    });
+    const route = jest.fn(() => ({
+      target: {
+        providerKey,
+        providerType: 'responses',
+        outboundProfile: 'openai-chat',
+        runtimeKey: providerKey,
+        modelId: 'deepseek-v4-pro',
+        responsesConfig: { process: 'chat', streaming: 'always' },
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: [providerKey],
+        routePool: [providerKey],
+        reason: 'thinking:user-input',
+      },
+      diagnostics: {},
+    }));
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => {
+        throw new Error('router-direct outboundProfile relay must use executePipeline preselected route path');
+      }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline]
+    ]);
+    jest.spyOn(server as any, 'executePipeline').mockImplementation(executePipeline);
+    (server as any).providerHandles = new Map([
+      [providerKey, {
+        runtimeKey: providerKey,
+        providerId: 'tokenrelay',
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'deepseek-v4-pro' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: directSend,
+        },
+      }],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5555',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: true,
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: 'historical turn' }] },
+            { role: 'assistant', content: [{ type: 'output_text', text: 'history' }] },
+            { role: 'user', content: [{ type: 'input_text', text: 'reply ok' }] },
+          ],
+        }),
+      });
+      const bodyText = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(bodyText).toContain('resp_router_direct_responses_chat_profile_relay');
+      expect(bodyText).toContain('relay-chat-profile-ok');
+      expect(directSend).not.toHaveBeenCalled();
+      expect(executePipeline).toHaveBeenCalledTimes(1);
+      expect(route).toHaveBeenCalledTimes(1);
+    } finally {
+      await server.stop();
+    }
+  }, 15000);
+
+  it('HTTP BLACKBOX: 5520 default reroutes even when first provider runtime registry only exposes alias runtime key', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const firstRuntimeKey = 'asxs.crsa';
+    const secondProviderKey = '1token.key1.gpt-5.4-mini';
+    const firstDirectSend = jest.fn(async () => {
+      throw Object.assign(new Error('HTTP 503: upstream provider error'), {
+        statusCode: 503,
+        status: 503,
+        code: 'HTTP_503',
+        upstreamCode: 'HTTP_503',
+      });
+    });
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_default_alias_runtime_switch',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            id: 'msg_default_alias_runtime_switch',
+            status: 'completed',
+            role: 'assistant',
+            content: [
+              { type: 'output_text', text: 'pong' },
+            ],
+          },
+        ],
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+        ? (metadata.__rt as Record<string, unknown>)
+        : {};
+      const retryProviderKey = typeof rt.retryProviderKey === 'string'
+        ? rt.retryProviderKey
+        : undefined;
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey === firstProviderKey ? firstRuntimeKey : secondProviderKey,
+          modelId: 'gpt-5.4-mini',
+        },
+        decision: {
+          routeName: 'default',
+          pool: [providerKey],
+          routePool: [firstProviderKey, secondProviderKey],
+          reason: 'default:route-selected',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 0,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => {
+        throw new Error('alias-runtime reroute must stay off HubPipeline');
+      }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstRuntimeKey, {
+        runtimeKey: firstRuntimeKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: '1token',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+    (server as any).providerKeyToRuntimeKey = new Map([
+      [firstProviderKey, firstRuntimeKey],
+      [firstRuntimeKey, firstRuntimeKey],
+      [secondProviderKey, secondProviderKey],
+    ]);
+
+    await (server as any).initialize();
+    (server as any).runtimeReadyResolved = true;
+    (server as any).runtimeReadyResolve?.();
+    await (server as any).startPortListener({
+      port: 0,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5520',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    });
+    const boundPort = (server as any).server.address().port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${boundPort}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          stream: false,
+          input: 'ping',
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({
+        id: 'resp_router_direct_default_alias_runtime_switch',
+        object: 'response',
+        status: 'completed',
+      }));
+      expect(firstDirectSend).toHaveBeenCalledTimes(1);
+      expect(secondDirectSend).toHaveBeenCalledTimes(1);
+      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
     }

@@ -108,7 +108,9 @@ export function resolveRequestExecutorPipelineAttempt(args: {
 
   let initialRoutePool = args.initialRoutePool;
   const routingDecision = args.pipelineResult.routingDecision as Record<string, unknown> | undefined;
-  const explicitRoutePool = normalizeExplicitRoutePool(routingDecision?.routePool);
+  const explicitRoutePool = normalizeExplicitRoutePool(
+    Array.isArray(routingDecision?.routePool) ? routingDecision?.routePool : routingDecision?.pool
+  );
   initialRoutePool = mergeObservedRoutePoolChain(initialRoutePool, explicitRoutePool);
   const routePoolForAttempt = initialRoutePool && initialRoutePool.length > 0
     ? [...initialRoutePool]
@@ -164,6 +166,16 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     });
   }
   if (args.excludedProviderKeys.has(target.providerKey)) {
+    if (!initialRoutePool && routePoolForAttempt.length === 0) {
+      throw Object.assign(
+        new Error(`Virtual router reselected excluded provider ${target.providerKey} without explicit routePool`),
+        {
+          code: 'ERR_EXCLUDED_PROVIDER_RESELECTED_MISSING_ROUTE_POOL',
+          requestId: args.inputRequestId,
+          providerKey: target.providerKey
+        }
+      );
+    }
     const reselectedExcludedPlan = resolveExcludedProviderReselectionPlan({
       providerKey: target.providerKey,
       routePool: routePoolForAttempt,

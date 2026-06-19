@@ -1,4 +1,5 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
   const providers = Object.fromEntries(
@@ -122,6 +123,114 @@ describe('virtual router native provider unavailable cooldown details', () => {
       { requestId: 'req-native-concurrency-runtime-key' } as any
     );
     expect(result.target.providerKey).toBe(providerKey);
+    expect(result.decision.routeName).toBe('default');
+  });
+
+  it('keeps the last default-pool provider selectable even after 3 recoverable provider errors trigger ~30m cooldown truth', () => {
+    const providerKey = 'recoverable.key1.gpt-test';
+    const engine = new VirtualRouterEngine();
+    engine.initialize({
+      routing: {
+        default: [
+          {
+            id: 'default-primary',
+            priority: 100,
+            mode: 'priority',
+            targets: [providerKey]
+          }
+        ]
+      },
+      providers: {
+        [providerKey]: {
+          providerKey,
+          providerType: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test-key' },
+          outboundProfile: 'openai-chat',
+          runtimeKey: 'recoverable.key1',
+          modelId: 'gpt-test'
+        }
+      },
+      classifier: {},
+      loadBalancing: { strategy: 'priority' },
+      health: {
+        failureThreshold: 3,
+        cooldownMs: 30_000,
+        fatalCooldownMs: 120_000
+      }
+    } as any);
+
+    for (let index = 1; index <= 3; index += 1) {
+      engine.handleProviderError({
+        code: 'HTTP_500',
+        message: `upstream internal error #${index}`,
+        stage: 'provider.send',
+        status: 500,
+        runtime: {
+          requestId: `req-recoverable-${index}`,
+          routeName: 'default',
+          providerKey,
+          runtimeKey: 'recoverable.key1'
+        },
+        timestamp: Date.now(),
+        details: {
+          errorClassification: 'recoverable',
+          routePoolSize: 1
+        }
+      } as any);
+    }
+
+    const status = engine.getStatus();
+    const healthEntry = status.health?.find((entry: any) =>
+      entry.providerKey === providerKey || entry.providerKey === providerKey.replace('.key1.', '.1.')
+    );
+    expect(healthEntry?.state).toBe('tripped');
+
+    const result = engine.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-last-default-after-recoverable-three-strikes' } as any
+    );
+
+    expect(result.target.providerKey).toBe(providerKey);
+    expect(result.decision.routeName).toBe('default');
+  });
+
+  it('switches to the alternative provider after 3 recoverable errors instead of emptying the pool', () => {
+    const providerA = 'recoverable.key1.gpt-test';
+    const providerB = 'recoverable.key2.gpt-test';
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig([providerA, providerB]));
+
+    for (let index = 1; index <= 3; index += 1) {
+      engine.handleProviderError({
+        code: 'HTTP_500',
+        message: `upstream internal error #${index}`,
+        stage: 'provider.send',
+        status: 500,
+        runtime: {
+          requestId: `req-recoverable-alt-${index}`,
+          routeName: 'default',
+          providerKey: providerA,
+          runtimeKey: 'deepseek.key1'
+        },
+        timestamp: Date.now(),
+        details: {
+          errorClassification: 'recoverable',
+          routePoolSize: 2
+        }
+      } as any);
+    }
+
+    const result = engine.route(
+      {
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      { requestId: 'req-recoverable-alt-failure' } as any
+    );
+
+    expect(result.target.providerKey).toBe(providerB);
     expect(result.decision.routeName).toBe('default');
   });
 });

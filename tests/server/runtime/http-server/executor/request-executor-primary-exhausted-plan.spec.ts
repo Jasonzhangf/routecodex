@@ -55,6 +55,52 @@ describe('request-executor primary exhausted plan bridge', () => {
     });
   });
 
+  it('[forward] current G3 sample resolves search->default planner output', () => {
+    const searchProvider = 'search.key1.gpt-5.4';
+    const defaultProvider = 'default.key1.MiniMax-M3';
+    const context = coreUtilsModule.resolvePrimaryExhaustedRoutingContextFromError({
+      code: 'PROVIDER_NOT_AVAILABLE',
+      details: {
+        primaryExhaustedRouteName: 'search',
+        primaryExhaustedTargets: [searchProvider],
+        unavailableRoutePools: [
+          {
+            routeName: 'search',
+            poolId: 'search-primary',
+            poolTargets: [searchProvider],
+          },
+          {
+            routeName: 'default',
+            poolId: 'default-primary',
+            poolTargets: [defaultProvider],
+          },
+        ],
+      },
+    });
+
+    expect(context).toEqual({
+      route: 'search',
+      exhaustedTargets: [searchProvider],
+    });
+
+    const plan = coreUtilsModule.resolvePrimaryExhaustedPlan({
+      route: context?.route ?? '',
+      exhaustedTargets: context?.exhaustedTargets ?? [],
+      knownTargets: [searchProvider, defaultProvider],
+      tiers: [
+        { id: 'search-primary', targets: [searchProvider], priority: 200 },
+        { id: 'default-primary', targets: [defaultProvider], priority: 100, backup: true },
+      ],
+    });
+
+    expect(plan).toEqual({
+      status: 'default_pool',
+      defaultPoolTargets: [defaultProvider],
+      fromTierId: 'default-primary',
+      fromTierPriority: 100,
+    });
+  });
+
   it('[reverse] does not guess exhausted route from metadata or routingPolicyGroup when VR error lacks route truth', () => {
     const context = coreUtilsModule.resolvePrimaryExhaustedRoutingContextFromError({
       code: 'PROVIDER_NOT_AVAILABLE',

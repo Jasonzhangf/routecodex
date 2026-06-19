@@ -1,10 +1,12 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
+const detectRetryableEmptyAssistantResponseMock = jest.fn(() => null);
+
 jest.unstable_mockModule(
   '../../../../../src/server/runtime/http-server/executor/request-executor-response-contract.js',
   () => ({
     detectAssistantSanitizationPlaceholder: jest.fn(() => null),
-    detectRetryableEmptyAssistantResponse: jest.fn(() => null),
+    detectRetryableEmptyAssistantResponse: detectRetryableEmptyAssistantResponseMock,
     persistPayloadContractProviderSnapshots: jest.fn(async () => undefined)
   })
 );
@@ -35,6 +37,63 @@ function baseArgs(overrides: Record<string, unknown>) {
 }
 
 describe('processSuccessfulProviderResponse usage protocol accounting', () => {
+  it('raises missing required tool call for responses completed payload that only contains reasoning summary', async () => {
+    jest.resetModules();
+    detectRetryableEmptyAssistantResponseMock.mockResolvedValueOnce({
+      marker: 'responses_missing_required_tool_call',
+      reason: 'responses status=completed but output text/tool_calls are empty'
+    });
+    const { processSuccessfulProviderResponse } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-executor-provider-response.js'
+    );
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: { name: 'exec_command' }
+          }
+        ]
+      },
+      responses: {
+        toolChoice: 'required'
+      },
+      messages: [
+        {
+          role: 'user',
+          content: 'continue'
+        }
+      ]
+    };
+
+    await expect(processSuccessfulProviderResponse(baseArgs({
+      requestSemantics,
+      converted: {
+        status: 200,
+        body: {
+          status: 'completed',
+          output_text: '',
+          output: [
+            {
+              type: 'reasoning',
+              summary: [
+                {
+                  type: 'summary_text',
+                  text: 'I have all the information I need. Let me create the hook file now.'
+                }
+              ]
+            }
+          ]
+        }
+      } as any
+    }) as any)).rejects.toMatchObject({
+      code: 'MISSING_REQUIRED_TOOL_CALL',
+      statusCode: 502,
+      requestExecutorProviderErrorStage: 'host.response_contract'
+    });
+  });
+
   it('escalates 200 business error payloads into provider failure path instead of treating them as success', async () => {
     const { processSuccessfulProviderResponse } = await import(
       '../../../../../src/server/runtime/http-server/executor/request-executor-provider-response.js'

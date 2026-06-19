@@ -21,6 +21,7 @@
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 import { detectInboundProtocolFromRequest } from './provider-direct-pipeline.js';
+import { extractResponseStatus } from './executor/provider-response-utils.js';
 
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */
 export interface RouterDirectAuditContext {
@@ -85,6 +86,28 @@ export interface RouterDirectSkipped {
 
 export type RouterDirectOutcome = RouterDirectResult | RouterDirectSkipped;
 
+function isRouterDirectRecoverableResponseStatus(status: number | undefined): status is number {
+  if (typeof status !== 'number' || !Number.isFinite(status)) {
+    return false;
+  }
+  return status === 429 || status >= 500;
+}
+
+function buildRouterDirectResponseError(response: unknown, status: number): Error {
+  const message = `router-direct provider returned recoverable HTTP ${status}`;
+  const error = new Error(message) as Error & {
+    status: number;
+    statusCode: number;
+    code: string;
+    response: unknown;
+  };
+  error.status = status;
+  error.statusCode = status;
+  error.code = `HTTP_${status}`;
+  error.response = response;
+  return error;
+}
+
 /**
  * Execute the same-protocol direct path for a router-mode port.
  *
@@ -147,6 +170,12 @@ export async function executeRouterDirectPipeline(
   } catch (error) {
     await input.onProviderError?.(error, auditContext);
     throw error;
+  }
+  const responseStatus = extractResponseStatus(response);
+  if (isRouterDirectRecoverableResponseStatus(responseStatus)) {
+    const responseError = buildRouterDirectResponseError(response, responseStatus);
+    await input.onProviderError?.(responseError, auditContext);
+    throw responseError;
   }
   const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
 

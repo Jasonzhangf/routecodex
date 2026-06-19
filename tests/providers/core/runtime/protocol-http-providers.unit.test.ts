@@ -608,6 +608,53 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(capturedBody.tools).toEqual([{ type: 'function', function: { name: 'exec_command' } }]);
   });
 
+  test('ResponsesProvider direct passthrough prefers selected provider modelId over inbound routeParams.model', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-selected-model-id',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'tokenrelay',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    let capturedBody: any;
+    provider.httpClient = {
+      postStream: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.4',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      modelId: 'deepseek-v4-pro',
+      target: {
+        providerKey: 'tokenrelay.key1.deepseek-v4-pro',
+        runtimeKey: 'tokenrelay.key1.deepseek-v4-pro',
+        modelId: 'deepseek-v4-pro'
+      },
+      metadata: {
+        routeParams: {
+          model: 'gpt-5.4',
+        }
+      }
+    });
+
+    await expect(provider.processIncomingDirect(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(capturedBody.model).toBe('deepseek-v4-pro');
+  });
+
   test('ResponsesProvider sends historical tool input content to transport', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-historical-tool-content-reject',

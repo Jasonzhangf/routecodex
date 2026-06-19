@@ -78,6 +78,45 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toContain('minimax.key1.MiniMax-M3');
   });
 
+  it('preserves base exclusion for non-streaming recoverable 429 with alternative candidates', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 429: overload'), {
+      statusCode: 429,
+      code: 'HTTP_429_2056',
+      upstreamCode: 'HTTP_429_2056'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429_2056',
+        upstreamCode: 'HTTP_429_2056',
+        reason: 'HTTP 429: overload'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      runtimeKey: 'mini27.key1',
+      logicalRequestChainKey: 'req-preserve-base-exclusion-429',
+      logicalChainRetryLimitStageRequestId: 'req-preserve-base-exclusion-429',
+      routePool: ['mini27.key1.MiniMax-M2.7', 'minimax.key1.MiniMax-M3'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: false
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.requestLocalTransient).toBe(false);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
+    expect(Array.from(excludedProviderKeys)).toEqual(['mini27.key1.MiniMax-M2.7']);
+  });
+
   it('reroutes recoverable HTTP 502 immediately when an alternative provider exists', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();

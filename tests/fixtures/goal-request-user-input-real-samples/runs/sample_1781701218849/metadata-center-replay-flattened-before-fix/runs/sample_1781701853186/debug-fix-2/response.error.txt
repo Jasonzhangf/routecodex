@@ -1,0 +1,3 @@
+event: error
+data: {"type":"error","status":502,"error":{"message":"Upstream provider error","code":"HTTP_HANDLER_ERROR","request_id":"anthropic-messages-unknown-unknown-20260617T211053221-361412-1866"}}
+

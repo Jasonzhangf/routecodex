@@ -1,0 +1,29 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "targetUrl": "http://127.0.0.1:5555/v1/chat/completions",
+  "wantsSse": false,
+  "status": 200,
+  "statusText": "OK",
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "1077",
+    "content-type": "application/json; charset=utf-8",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
+    "date": "Wed, 17 Jun 2026 13:01:08 GMT",
+    "etag": "W/\"435-FPa975zdYCfiHpVn2KABHgHxfOI\"",
+    "keep-alive": "timeout=5",
+    "origin-agent-cluster": "?1",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=15552000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-dns-prefetch-control": "off",
+    "x-download-options": "noopen",
+    "x-frame-options": "SAMEORIGIN",
+    "x-permitted-cross-domain-policies": "none",
+    "x-provider-stream-requested": "0",
+    "x-upstream-mode": "sse",
+    "x-xss-protection": "0"
+  }
+}

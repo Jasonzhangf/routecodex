@@ -35,6 +35,11 @@
 
 如果这些事实分别由 `request-executor`、`provider runtime`、`error reporter`、`router` 各自推一次，系统就一定漂移。
 
+新增边界：
+- provider `availability/quota/upstream transport` 错误属于 **provider/server truth**；
+- session/local deterministic bad state 属于 **session truth**；
+- 两者禁止混写同一 ledger，禁止一份 provider 错误同时推进 provider cooldown/exclusion 与 session storm backoff。
+
 ### 2. emit 不是 policy
 `emitProviderError(...)`、event bus、registry、center 这类模块只负责 **传输事件**，不负责定义 retry/reroute/backoff/fail 语义。
 
@@ -191,6 +196,36 @@ reporter 只能透传，不得 fallback 成另一套语义。
 - hooks 固定：`record` / `wait_start` / `wait_end`
 - 禁止：`softWaitTimeoutMs`、本地 waiter queue、jitter、Retry-After、指数退避、env backoff 常量
 
+### Rule 6.1: provider availability 错误不得进入 session_storm
+以下错误默认属于 provider/server truth，只能推进 provider/router policy，不得写 `session_storm`：
+- `429 / 502 / 503 / 504`
+- `fetch failed` / upstream timeout / network transport errors
+- `PROVIDER_NOT_AVAILABLE` / `ERR_NO_PROVIDER_TARGET`
+- upstream busy/cooldown/quota/provider unavailable 及其等价归一错误
+
+这些错误允许进入的 action category 仅限：
+- `provider_recoverable`
+- `provider_transport`
+- `provider_traffic_saturated`
+- 或 Router/VR health/cooldown 侧的 provider/server truth
+
+禁止行为：
+- 因 provider availability 错误对 `sessionId/conversationId/workdir/daemon/clientType/anonymous` 建 session storm cooldown
+- 让不同 session 因同一 provider availability 事实产生分裂真相
+- 在 provider pool 尚有候选时，先被 session storm gate 阻塞，覆盖 provider failover/default pool mainline
+
+### Rule 6.2: session_storm 只允许 session-local deterministic bad state
+`session_storm` 只允许承载当前 session/conversation 自身的 deterministic bad state，例如：
+- invalid client tool args
+- broken continuation / malformed session-local replay payload
+- fixed malformed followup/bootstrap state
+- 明确证明“换 provider 也不会好”的当前会话污染
+
+判定规则：
+- 若错误本质是 provider availability / upstream capacity / provider transport，不得进入 `session_storm`
+- 若错误本质是当前 session 自己的 deterministic invalid state，才允许进入 `session_storm`
+- `session_storm` 不得承担 provider health、provider cooldown、provider exclusion、default-pool fallback 的任何语义
+
 ### Rule 7: provider traffic saturation
 - 并发/RPM 满时，先释放 traffic state lock，再通过 `provider_traffic_saturated` 队列 blocking wait 一次。
 - 醒后重查；仍满则抛 `ProviderTrafficSaturatedError`，由上层错误链/Virtual Router 切 provider。
@@ -219,6 +254,12 @@ reporter 只能透传，不得 fallback 成另一套语义。
   - 记录 telemetry
 - 删除本地重复 helper
 
+### Phase C.1：session_storm 语义去污染
+- `request-executor-session-storm-backoff.ts` 只保留 session-local deterministic error contract
+- 物理删除 provider availability / transport / busy / pool exhaustion 进入 `session_storm` 的判定
+- `request-executor-provider-send-failure.ts` 不得再把 provider recoverable error 写进 session scope
+- 先锁红测再删除旧判定
+
 ### Phase D：Provider runtime 去脑化
 - `provider-error-classifier.ts` 降级或删除
 - `base-provider.ts` / `responses-provider.ts` 不再自产 recoverable/health 语义
@@ -234,6 +275,11 @@ reporter 只能透传，不得 fallback 成另一套语义。
 - 构建、安装、重启、真实请求验证
 
 ## 验收信号
+
+新增验收：
+1. 同端口同 provider 池下，一个 session 连续 provider availability 错误，不得单独污染另一个 session 的 provider truth，也不得把本 session 错误会话化成 `session_storm`。
+2. `429 / 503 / fetch failed / PROVIDER_NOT_AVAILABLE` 黑盒验证不得命中 `session_storm` 记录。
+3. provider pool mainline 必须先执行 provider failover / pool exhaustion / default-pool decision，再决定是否 client-visible；`session_storm` 不得抢先拦截这条主线。
 1. 仓内只剩一个地方能定义 recoverability。
 2. 仓内只剩一个地方能定义 affectsHealth。
 3. `request-executor` 不再保留独立 exclusion/backoff/health 判定 helper。

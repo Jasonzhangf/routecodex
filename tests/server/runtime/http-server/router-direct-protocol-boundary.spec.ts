@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { resetSessionStormBackoffStateForTests } from '../../../../src/server/runtime/http-server/executor/request-executor-session-storm-backoff';
+import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 describe('router direct protocol boundary', () => {
   afterEach(() => {
@@ -173,9 +174,11 @@ describe('router direct protocol boundary', () => {
     );
 
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(executePipelineSpy.mock.calls[0]?.[0]?.metadata).toEqual(expect.objectContaining({
-      __routecodexPreselectedRoute: preselectedRoute,
+    const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
+    expect(relayMetadata.__rt).toEqual(expect.objectContaining({
+      preselectedRoute,
     }));
+    expect(readRuntimeControlProjection(relayMetadata).preselectedRoute).toEqual(preselectedRoute);
   });
 
   it('does not record router-direct storm backoff when protocol mismatch is relayed', async () => {

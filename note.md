@@ -1,5 +1,19 @@
 ## 2026-06-19 tokenrelay deepseek-v4-pro / 5555 direct diagnosis
 
+- 2026-06-19 17:16:19 最新 provider curl/config 复核真相：
+  - upstream `https://token-relay-v2-production.up.railway.app/v1/chat/completions` 直打 `deepseek-v4-pro` 返回 HTTP 200；
+  - upstream `https://token-relay-v2-production.up.railway.app/v1/responses` 直打同模型同最小 payload 也返回 HTTP 200；
+  - 本地 `http://127.0.0.1:5557/v1/chat/completions` 返回 HTTP 200；
+  - 本地 `http://127.0.0.1:5557/v1/responses` 返回 HTTP 502，但最新 diag `~/.rcc/diag/error-openai-responses-router-deepseek-v4-pro-20260619T171619674-371209-1968.json` 证明这不是 upstream 502，而是本地 preflight 拒绝：`Provider mode with protocolBehavior=direct requires matching protocols: inbound=openai-responses, provider=openai-chat`。
+- 结论：`tokenrelay` 当前“不可用”至少包含一个已锁死的本地协议声明问题，不是 upstream `/v1/responses` 普遍不可用。
+- 配置差异真相：
+  - `~/.rcc/provider/tokenrelay/config.v2.toml` 缺少 `[provider.responses]` 块；
+  - 多个可正常承接 responses 入口的 provider（如 `1token/asxs/cc/XL`）均显式声明 `[provider.responses] process = "chat"` 与 `streaming = "always"`。
+- 5555 live 日志真相（2026-06-19 16:29:27、17:03:00）：
+  - virtual router 确实命中过 `tokenrelay.key1.deepseek-v4-pro`；
+  - 命中后 provider-switch 记录 `stage=provider.send status=502 code=HTTP_502`，并继续 reroute 到后续 provider；
+  - 因此“没有命中 tokenrelay”不是事实，当前应继续区分：provider-mode direct 协议映射错误 vs router 5555 路径上的 payload/relay send 失败。
+
 - 5557 provider-direct installed sample `req_1781847365527_fa0b4ed0/provider-request.json` confirmed `body.model=deepseek-v4-pro`.
 - Direct curl to tokenrelay upstream `/v1/responses` with old 5555 failing sample `openai-responses-router-gpt-5.4-20260619T131216066-369320-79/provider-request.json` and only `model` rewritten to `deepseek-v4-pro` reproduced HTTP 500 `NoneType object is not subscriptable`.
 - Tokenrelay minimal `/v1/responses` with `deepseek-v4-pro` succeeds, but old payload with historical `input` slice of last 5/20 items still fails even without tools/client_metadata/Responses control fields. This points to tokenrelay Responses-history compatibility, not model availability.
@@ -6641,3 +6655,12 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - `npx tsc --noEmit -p sharedmodule/llmswitch-core/tsconfig.json` ✅
 
 **剩余**：B2（has_evidence 解析）和 B3（schemaFeedback 跨 turn 持久化）未修复，作为下一轮独立切片。
+
+## 2026-06-19T09:10:17.248Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260619T170948548-371145-1904
+- sessionId: 019edea6-627e-7bf3-940e-f7060563fd99
+- stopReason: B1 修复完成并验证推送
+- evidence: cargo check --workspace 0 err, cargo test 53/8 (8 pre-existing), jest stopless-cli-continuation 10/10, tsc --noEmit 0 err, 7 new Rust tests PASS
+
+no_change_count 和 fail_fast 必须全在 Rust 一侧完成，TS 只能做桥接。hash 不能包含 user-controlled 字段（assistantStopText），否则状态永远无法收敛。

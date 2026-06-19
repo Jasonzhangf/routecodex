@@ -1,0 +1,32 @@
+{
+  "id": "resp_084eae9a3aa3529b016a329a8f08ac819981d379e241471cd6",
+  "object": "response",
+  "created_at": 1781701263,
+  "status": "completed",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "temperature": 1,
+  "top_p": 0.98,
+  "output": [
+    {
+      "id": "fc_084eae9a3aa3529b016a329a911a008199afe87b41a7c225a8",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "call_HneD2hhIvTjuiN9cl7IOwu2F",
+      "name": "exec_command",
+      "arguments": "{\"cmd\":\"cd /Users/fanzhang/Documents/github/routecodex && bd create --no-db --parent routecodex-278 --title \\\"hub pipeline: reasoning-stop 死语义与反向依赖真源整改\\\" --type task --priority P0 2>/dev/null\",\"justification\":\"\",\"login\":true,\"max_output_tokens\":500,\"prefix_rule\":[\"bd\",\"create\"],\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"tty\":false,\"workdir\":\"/Users/fanzhang/Documents/github/routecodex\",\"yield_time_ms\":1000}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 42672,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 133,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 42805,
+    "prompt_tokens": 42672,
+    "completion_tokens": 133
+  }
+}

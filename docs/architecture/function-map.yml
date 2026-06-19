@@ -452,9 +452,9 @@ owners:
 
   - feature_id: error.provider_failure_policy
     status: active
-    summary: "provider error cataloging, runtime classification, router policy application, client-disconnect and upstream-stream-incomplete routing"
+    summary: "provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate"
     owner_kind: provider_runtime
-    owner_scope: "provider error cataloging, runtime classification, router policy application"
+    owner_scope: "provider/server error cataloging, runtime classification, router policy application, availability/cooldown truth"
     owner_module: src/providers/core/runtime
     canonical_types:
       - ErrorErr03RuntimeClassified
@@ -482,6 +482,44 @@ owners:
     notes:
       - "Catalog/classification truth starts in provider runtime, router applies policy, executor consumes decision only."
       - "Client-disconnect 499 and upstream_stream_incomplete both flow through the same provider policy chain; client projection remains a separate ErrorErr06 owner."
+      - "Provider availability/quota/upstream transport errors are provider/server truth, not session truth."
+      - "429/502/503/504, fetch-failed, provider-unavailable, and pool-exhaustion class errors must not write session_storm cooldown state."
+
+  - feature_id: error.session_storm_boundary
+    status: active
+    summary: "session-local deterministic bad-state storm fence; explicitly forbidden from carrying provider availability or cooldown truth"
+    owner_kind: ts_runtime_owner
+    owner_scope: "session-local deterministic bad-state storm fence only"
+    owner_module: src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
+    canonical_types:
+      - SessionStormBackoffScope
+      - SessionStormBackoffState
+    canonical_builders:
+      - resolveSessionStormBackoffScopes
+      - isSessionStormBackoffCandidate
+      - consumeSessionStormBackoffMs
+    allowed_paths:
+      - src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
+      - src/server/runtime/http-server/executor/request-executor-request-state.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts
+      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
+      - tests/server/runtime/http-server/request-executor.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - src/server/handlers
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
+      - tests/server/runtime/http-server/request-executor.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Only session-local deterministic bad state may enter session_storm."
+      - "Provider availability/quota/upstream transport errors must never enter session_storm."
+      - "session_storm must not own provider health, provider cooldown, provider exclusion, default-pool fallback, or route exhaustion semantics."
 
   - feature_id: error.backoff_action_queue
     status: active
@@ -530,6 +568,7 @@ owners:
       - "Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat."
       - "Categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup."
       - "Provider traffic saturation records provider_traffic_saturated, waits once through this queue, then raises saturation if still full so Virtual Router can switch provider even in priority mode."
+      - "The queue owner does not decide which semantic family an error belongs to; provider availability vs session-local deterministic truth is decided upstream by error.provider_failure_policy + error.session_storm_boundary."
       - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner."
 
   - feature_id: vr.route_selection

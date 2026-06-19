@@ -20,31 +20,39 @@ describe('request-executor session storm backoff', () => {
     resetSessionStormBackoffStateForTests();
   });
 
-  test('treats any surfaced error as storm candidate and cycles through unified 1s-2s-3s waits', () => {
+  test('does not treat generic surfaced application errors as session storm candidates', () => {
     const error = new Error(
       'router-direct failed without relay: protocol mismatch: inbound=openai-responses, provider=openai-chat'
     );
 
-    expect(isSessionStormBackoffCandidate(error)).toBe(true);
-    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(1000);
-    jest.setSystemTime(new Date('2026-06-09T00:00:01.000Z'));
-    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(2000);
-    jest.setSystemTime(new Date('2026-06-09T00:00:03.000Z'));
-    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(3000);
-    jest.setSystemTime(new Date('2026-06-09T00:00:06.000Z'));
-    expect(consumeSessionStormBackoffMs('session:any-error', error)).toBe(1000);
-    expect(peekSessionStormBackoffWaitMs('session:any-error')).toBe(1000);
+    expect(isSessionStormBackoffCandidate(error)).toBe(false);
+    expect(peekSessionStormBackoffWaitMs('session:any-error')).toBe(0);
   });
 
-  test('routes hard-block candidates through the unified queue', () => {
-    const genericError = new Error('upstream protocol error');
-    expect(consumeSessionStormBackoffMs('session:generic', genericError)).toBe(1000);
-
+  test('routes only session-local hard-block candidates through the unified queue', () => {
     const clientToolArgsError = Object.assign(
       new Error('converted provider tool call has invalid client arguments'),
       { code: 'CLIENT_TOOL_ARGS_INVALID' }
     );
+    expect(isSessionStormBackoffCandidate(clientToolArgsError)).toBe(true);
     expect(consumeSessionStormBackoffMs('session:hard-block', clientToolArgsError)).toBe(1000);
+  });
+
+  test('does not treat provider availability errors as session storm candidates', () => {
+    const provider429 = Object.assign(new Error('HTTP 429: upstream rate limited'), {
+      statusCode: 429,
+      code: 'HTTP_429',
+      upstreamCode: 'HTTP_429'
+    });
+    const providerUnavailable = Object.assign(
+      new Error('No available providers after applying routing instructions'),
+      { code: 'PROVIDER_NOT_AVAILABLE' }
+    );
+    const fetchFailed = new Error('fetch failed');
+
+    expect(isSessionStormBackoffCandidate(provider429)).toBe(false);
+    expect(isSessionStormBackoffCandidate(providerUnavailable)).toBe(false);
+    expect(isSessionStormBackoffCandidate(fetchFailed)).toBe(false);
   });
 
   test('does not derive session storm scope from flat request metadata without metadata center truth', () => {

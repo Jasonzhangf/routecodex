@@ -7,6 +7,7 @@ export type RequestExecutorNativeRetryPolicyInput = {
   isStreamingRequest?: boolean;
   hostContractFailure?: boolean;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  errorCode?: string;
   promptTooLong?: boolean;
   existingExclusion?: boolean;
 };

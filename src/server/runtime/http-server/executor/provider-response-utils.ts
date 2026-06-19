@@ -6,8 +6,45 @@ export function extractResponseStatus(response: unknown): number | undefined {
   if (!response || typeof response !== 'object') {
     return undefined;
   }
-  const candidate = (response as { status?: unknown }).status;
-  return typeof candidate === 'number' ? candidate : undefined;
+  const record = response as {
+    status?: unknown;
+    response?: { status?: unknown };
+    data?: { error?: { status?: unknown; http_status?: unknown; code?: unknown } };
+    body?: { error?: { status?: unknown; http_status?: unknown; code?: unknown } };
+  };
+  for (const candidate of [
+    record.data?.error?.http_status,
+    record.data?.error?.status,
+    record.body?.error?.http_status,
+    record.body?.error?.status,
+  ]) {
+    if (typeof candidate === 'number') {
+      return candidate;
+    }
+  }
+  for (const code of [
+    record.data?.error?.code,
+    record.body?.error?.code,
+  ]) {
+    if (typeof code === 'string') {
+      const match = code.match(/(\d{3})/);
+      if (match) {
+        const parsed = Number(match[1]);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+  }
+  const direct = record.status;
+  if (typeof direct === 'number') {
+    return direct;
+  }
+  const nested = record.response?.status;
+  if (typeof nested === 'number') {
+    return nested;
+  }
+  return undefined;
 }
 
 export function normalizeProviderResponse(response: unknown): PipelineExecutionResult {

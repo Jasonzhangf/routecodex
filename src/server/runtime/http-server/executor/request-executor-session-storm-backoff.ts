@@ -1,3 +1,6 @@
+/**
+ * feature_id: error.session_storm_boundary
+ */
 import {
   readString,
   normalizeCodeKey
@@ -150,44 +153,27 @@ export function isSessionStormBackoffCandidate(error: unknown): boolean {
   if (isDeterministicMalformedResponseStorm(error)) {
     return true;
   }
+  const status = extractStatusCodeFromError(error);
   const codeSource =
     error && typeof error === 'object'
       ? (error as { code?: unknown }).code
       : undefined;
-  const code = normalizeCodeKey(codeSource);
-  if (code === 'PROVIDER_NOT_AVAILABLE' || code === 'ERR_NO_PROVIDER_TARGET') {
-    return true;
-  }
-  const status = extractStatusCodeFromError(error);
-  if (status === 429 || status === 502 || status === 503 || status === 504) {
-    return true;
-  }
   const message =
     error instanceof Error
       ? error.message
       : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
         ? String((error as { message?: unknown }).message)
         : String(error ?? '');
-  const normalized = message.trim().toLowerCase();
   const known = normalizeKnownProviderError({
     statusCode: status,
-    code: code,
+    code: normalizeCodeKey(codeSource),
     upstreamCode: error && typeof error === 'object' ? (error as { upstreamCode?: unknown }).upstreamCode : undefined,
     message,
   });
   if (known) {
-    return true;
+    return false;
   }
-  if (
-    normalized.includes('fetch failed')
-    || normalized.includes('all providers unavailable')
-    || normalized.includes('no available providers after applying routing instructions')
-    || normalized.includes('connect timeout')
-    || normalized.includes('request timeout')
-  ) {
-    return true;
-  }
-  return Boolean(normalized);
+  return false;
 }
 
 export function resolveSessionStormBackoffBaseMs(): number {

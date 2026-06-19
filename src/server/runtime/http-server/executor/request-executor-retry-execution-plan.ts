@@ -30,6 +30,11 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
+function isReroutableHostResponseContractRetryError(retryError: RetryErrorSnapshot): boolean {
+  return retryError.errorCode === 'EMPTY_ASSISTANT_RESPONSE'
+    || retryError.errorCode === 'MISSING_REQUIRED_TOOL_CALL';
+}
+
 export const ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID = 'feature_id: error.execution_decision_consumer';
 
 export type RequestExecutorErrorErr04RouterPolicyEnvelope = {
@@ -77,7 +82,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
   abortSignal?: AbortSignal;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
-  const hostContractFailure = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
+  const hostContractStage = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
+  const hostContractFailure = hostContractStage && !isReroutableHostResponseContractRetryError(args.retryError);
   const classification = resolveRequestExecutorProviderErrorClassification({
     error: args.error,
     retryError: args.retryError,
@@ -118,15 +124,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
     isStreamingRequest: args.isStreamingRequest === true,
     hostContractFailure,
     forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry === true,
+    errorCode: args.retryError.errorCode,
     promptTooLong: args.promptTooLong === true,
     existingExclusion: baseExclusionPlan.excludedCurrentProvider,
   });
-  const exclusionPlan = nativeExecutionPolicy.excludeCurrentProvider
+  const exclusionPlan = (nativeExecutionPolicy.excludeCurrentProvider || baseExclusionPlan.excludedCurrentProvider)
       ? {
           excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
             providerKey: args.providerKey,
             excludedProviderKeys: args.excludedProviderKeys
-          })
+          }) || baseExclusionPlan.excludedCurrentProvider
         }
       : { excludedCurrentProvider: false };
   const requestLocalTransient =
@@ -160,9 +167,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && !requestLocalTransient;
 
   const hasTerminalAlternativeCandidate =
-    exclusionPlan.excludedCurrentProvider
-    && !holdOnLastAvailable429
-    && hasAlternativeCandidate;
+    !holdOnLastAvailable429
+    && hasAlternativeCandidate
+    && (
+      exclusionPlan.excludedCurrentProvider
+      || classification === 'unrecoverable'
+      || classification === 'periodic_recovery'
+    );
   const terminalPeriodicPolicyDecision =
     shouldRerouteTerminalPeriodicRecovery({
       classification,

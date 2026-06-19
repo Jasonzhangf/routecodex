@@ -423,11 +423,17 @@ export class ResponsesProvider extends HttpTransportProvider {
       metadata?.routeParams && typeof metadata.routeParams === 'object' && !Array.isArray(metadata.routeParams)
         ? (metadata.routeParams as Record<string, unknown>)
         : undefined;
+    const targetModel = typeof runtimeMetadata?.target?.modelId === 'string'
+      ? runtimeMetadata.target.modelId.trim()
+      : '';
+    const runtimeModelId = typeof runtimeMetadata?.modelId === 'string'
+      ? runtimeMetadata.modelId.trim()
+      : '';
     const routeModel = typeof routeParams?.model === 'string' ? routeParams.model.trim() : '';
     const defaultModel = typeof this.serviceProfile?.defaultModel === 'string'
       ? this.serviceProfile.defaultModel.trim()
       : '';
-    const model = routeModel || defaultModel;
+    const model = targetModel || runtimeModelId || routeModel || defaultModel;
     if (model) {
       builtBody.model = model;
     }
@@ -828,8 +834,12 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (!failure) {
       return;
     }
-    const err = new Error(failure.message) as Error & { code?: string };
+    const err = new Error(failure.message) as Error & { code?: string; status?: number; statusCode?: number };
     err.code = failure.code ?? 'RESPONSES_FAILED';
+    if (typeof failure.statusCode === 'number') {
+      err.status = failure.statusCode;
+      err.statusCode = failure.statusCode;
+    }
     await emitProviderErrorAndWait({
       error: err,
       stage: 'provider.responses',
@@ -844,6 +854,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         error: failure.rawError
       }
     });
+    throw err;
   }
 }
 

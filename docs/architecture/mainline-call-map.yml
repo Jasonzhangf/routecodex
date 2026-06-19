@@ -128,7 +128,7 @@ chains:
         status: anchored
 
   - chain_id: error.mainline
-    summary: "Provider/runtime/direct failures enter unified ErrorErr chain and only then project to client-visible error."
+    summary: "Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection."
     entry_contract:
       node: ErrorErr01SourceRaised
       owner_doc: docs/design/pipeline-type-topology-and-module-boundaries.md
@@ -153,7 +153,7 @@ chains:
         callee_file: src/providers/core/runtime/provider-failure-policy-impl.ts
         owner_feature_id: error.provider_failure_policy
         semantic_input: "host-captured provider error event"
-        semantic_output: "classified runtime failure"
+        semantic_output: "classified provider/server failure with availability-vs-session boundary"
         status: anchored
       - step_id: err-03
         from_node: ErrorErr03RuntimeClassified
@@ -164,7 +164,7 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
         owner_feature_id: error.execution_decision_consumer
         semantic_input: "classified provider/runtime failure + retry/error snapshot"
-        semantic_output: "executor-visible retry execution decision"
+        semantic_output: "executor-visible provider failover/default-pool/client-projection decision; session_storm may not intercept provider availability truth"
         status: partial
       - step_id: err-04
         from_node: ErrorErr05ExecutionDecision

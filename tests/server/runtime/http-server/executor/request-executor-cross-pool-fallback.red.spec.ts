@@ -54,10 +54,10 @@ describe('request-executor cross-pool fallback red', () => {
     }));
   });
 
-  it('NEG: does not invent a fallback chain from routingDecision.pool when explicit routePool is absent', async () => {
+  it('NEG: fails fast instead of inventing fallback chain when explicit routePool is absent', async () => {
     const { __requestExecutorTestables } = await import('../../../../../src/server/runtime/http-server/request-executor.js');
 
-    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+    expect(() => __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
       inputRequestId: 'req-cross-pool-no-synthesis',
       providerRequestId: 'req-cross-pool-no-synthesis',
       attempt: 2,
@@ -92,11 +92,6 @@ describe('request-executor cross-pool fallback red', () => {
       extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
       hubStartedAtMs: Date.now() - 10,
       pipelineLabel: 'hub'
-    });
-
-    expect(resolved).toEqual({
-      kind: 'retry_next_attempt',
-      initialRoutePool: null
-    });
+    })).toThrow(/ERR_EXCLUDED_PROVIDER_RESELECTED_MISSING_ROUTE_POOL|without explicit routePool/);
   });
 });

@@ -642,8 +642,12 @@ fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_decl
 #[test]
 fn test_resolve_stop_message_router_metadata_prefers_client_tmux_and_sets_aliases() {
     let metadata = json!({
-        "stopMessageClientInjectSessionScope": "  scope-123  ",
-        "stopMessageClientInjectScope": " tmux:abc ",
+        "runtime_control": {
+            "stopMessageClientInject": {
+                "sessionScope": "  scope-123  ",
+                "scope": " tmux:abc "
+            }
+        },
         "clientTmuxSessionId": " client-tmux-1 ",
         "tmuxSessionId": "fallback-tmux"
     });
@@ -725,7 +729,11 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
         "includeEstimatedInputTokens": true,
         "metadata": {
             "estimatedInputTokens": 88,
-            "stopMessageClientInjectScope": " tmux:abc "
+            "runtime_control": {
+                "stopMessageClientInject": {
+                    "scope": " tmux:abc "
+                }
+            }
         }
     });
     let output = build_router_metadata_input(&input).expect("router metadata input");
@@ -752,6 +760,19 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
         row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
         Some(88.0)
     );
+}
+
+#[test]
+fn test_resolve_stop_message_router_metadata_ignores_legacy_flat_scope_fields() {
+    let metadata = json!({
+        "stopMessageClientInjectSessionScope": " legacy-session ",
+        "stopMessageClientInjectScope": " legacy-scope ",
+        "runtime_control": {}
+    });
+    let output = resolve_stop_message_router_metadata(&metadata);
+    let row = output.as_object().expect("object output");
+    assert!(row.get("stopMessageClientInjectSessionScope").is_none());
+    assert!(row.get("stopMessageClientInjectScope").is_none());
 }
 
 #[test]

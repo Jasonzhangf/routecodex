@@ -208,7 +208,13 @@ export function detectResponsesFailure(payload: unknown): ResponsesFailure | nul
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
   }
-  const record = payload as Record<string, unknown>;
+  const root = payload as Record<string, unknown>;
+  const record =
+    root.data && typeof root.data === 'object' && !Array.isArray(root.data)
+      ? (root.data as Record<string, unknown>)
+      : root.body && typeof root.body === 'object' && !Array.isArray(root.body)
+        ? (root.body as Record<string, unknown>)
+        : root;
   const status = typeof record.status === 'string' ? record.status : undefined;
   const errorCandidate = record.error;
   const errorRecord = errorCandidate && typeof errorCandidate === 'object' && !Array.isArray(errorCandidate)

@@ -3,6 +3,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 
 export const MAINLINE_CALL_MAP_PATH = 'docs/architecture/mainline-call-map.yml';
+export const WIKI_ROOT = 'docs/architecture/wiki';
 export const FUNCTION_MAP_PATH = 'docs/architecture/function-map.yml';
 export const MAINLINE_WIKI_PATH = 'docs/architecture/wiki/mainline-call-graph.md';
 
@@ -381,6 +382,28 @@ export function renderMainlineChainMarkdown(root, chainId, options = {}) {
     '',
     ...renderMainlineChainSection(chain, owners),
   ];
+
+  const CHAIN_PAGE_MAP = new Map([
+    ['request.mainline', 'request-mainline-call-graph'],
+    ['response.mainline', 'response-mainline-call-graph'],
+    ['error.mainline', 'error-mainline-call-graph'],
+    ['runtime.lifecycle.mainline', 'runtime-lifecycle-call-graph'],
+    ['runtime.tmux_client_binding.mainline', 'runtime-lifecycle-call-graph'],
+    ['stopless.session.mainline', 'runtime-lifecycle-call-graph'],
+    ['metadata.center.mainline', 'metadata-center-mainline-source'],
+  ]);
+  const chainLinks = (parsed.chains ?? [])
+    .filter((c) => c?.chain_id !== chainId)
+    .map((c) => {
+      const base = CHAIN_PAGE_MAP.get(c.chain_id) ?? String(c.chain_id).replace(/\./g, '-');
+      return `[${c.chain_id}](${WIKI_ROOT}/${base}.md)`;
+    });
+  if (chainLinks.length > 0) {
+    lines.push('', '## Other Chains', '');
+    lines.push(chainLinks.join(' · '));
+  }
+
+
 
   return `${lines.join('\n').trimEnd()}\n`;
 }

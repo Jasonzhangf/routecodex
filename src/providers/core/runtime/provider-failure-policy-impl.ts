@@ -50,6 +50,10 @@ function isHostFailureStage(stage?: string): boolean {
   return stage === 'host.response_contract';
 }
 
+function isRecoverableHostResponseContractCode(code?: string): boolean {
+  return code === 'EMPTY_ASSISTANT_RESPONSE' || code === 'MISSING_REQUIRED_TOOL_CALL';
+}
+
 function isProviderBusinessStatus2013(value: unknown): boolean {
   if (typeof value === 'number') {
     return value === 2013;
@@ -287,7 +291,17 @@ export function resolveProviderFailureClassification(args: {
   reason?: string;
   rateLimitKind?: ProviderFailureRateLimitKind;
 }): ProviderFailureClassification | undefined {
-  if (args.stage === 'provider.followup' || isHostFailureStage(args.stage)) {
+  const errorCode = normalizeProviderFailureCodeKey(args.errorCode ?? (args.error as { code?: unknown } | undefined)?.code);
+  const upstreamCode = normalizeProviderFailureCodeKey(
+    args.upstreamCode ?? (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode
+  );
+  if (args.stage === 'provider.followup') {
+    return undefined;
+  }
+  if (isHostFailureStage(args.stage)) {
+    if (isRecoverableHostResponseContractCode(errorCode) || isRecoverableHostResponseContractCode(upstreamCode)) {
+      return 'recoverable';
+    }
     return undefined;
   }
   if (args.rateLimitKind === 'daily_limit' || args.rateLimitKind === 'synthetic_cooldown') {
@@ -296,10 +310,6 @@ export function resolveProviderFailureClassification(args: {
   if (isProviderFailureClientDisconnect(args.error)) {
     return 'unrecoverable';
   }
-  const errorCode = normalizeProviderFailureCodeKey(args.errorCode ?? (args.error as { code?: unknown } | undefined)?.code);
-  const upstreamCode = normalizeProviderFailureCodeKey(
-    args.upstreamCode ?? (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode
-  );
   const statusCode =
     typeof args.statusCode === 'number'
       ? args.statusCode

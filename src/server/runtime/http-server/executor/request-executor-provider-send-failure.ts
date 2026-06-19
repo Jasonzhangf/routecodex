@@ -15,6 +15,7 @@ import { isPromptTooLongError } from './retry-engine.js';
 import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
+import { extractRequestExecutorProviderErrorStage } from './request-executor-error-shared.js';
 import type {
   RetryErrorSnapshot,
   BlockingRecoverableRouteHoldState,
@@ -137,6 +138,16 @@ function isRetryableProviderResponseProcessingFailure(args: {
   ) {
     return true;
   }
+  if (
+    record.retryable === true
+    && record.requestExecutorProviderErrorStage === 'host.response_contract'
+    && (
+      args.retryError.errorCode === 'EMPTY_ASSISTANT_RESPONSE'
+      || args.retryError.errorCode === 'MISSING_REQUIRED_TOOL_CALL'
+    )
+  ) {
+    return true;
+  }
   return record.retryable === true
     && record.requestExecutorProviderErrorStage === 'provider.sse_decode'
     && (
@@ -182,6 +193,9 @@ export async function processProviderSendFailure(
     throw args.error;
   }
   const retryError = args.extractRetryErrorSnapshot(args.error);
+  const resolvedFailureStage =
+    extractRequestExecutorProviderErrorStage(args.error)
+    ?? (args.phase === 'provider_response_processing' ? 'provider.send' : 'provider.send');
   if (
     args.phase !== 'provider_send'
     && !isRetryableProviderResponseProcessingFailure({
@@ -285,7 +299,7 @@ export async function processProviderSendFailure(
     dependencies: args.dependencies,
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,
-    stage: 'provider.send',
+    stage: resolvedFailureStage === 'provider.runtime_resolve' ? 'provider.runtime_resolve' : 'provider.send',
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.requestId,
     routePool: args.routePoolForAttempt,

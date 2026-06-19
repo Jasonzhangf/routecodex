@@ -199,6 +199,27 @@ pub enum StopSchemaGateAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+
+/// Record of a single schema validation failure.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaErrorFeedback {
+    /// 0-based turn number for this error
+    pub turn: u32,
+    /// reason_code for the failure
+    pub reason_code: String,
+    /// Preview of what the model actually output (first 200 chars)
+    pub assistant_text_preview: String,
+    /// Which fields were missing
+    pub missing_fields: Vec<String>,
+    /// Which fields had invalid values
+    pub invalid_fields: Vec<(String, String)>,
+    /// The schema the model actually attempted (flattened)
+    pub attempted_fields: std::collections::BTreeMap<String, serde_json::Value>,
+    /// A complete valid sample the model can copy-paste
+    pub fix_example: String,
+}
+
 pub struct StopSchemaGateDecision {
     pub action: StopSchemaGateAction,
     pub reason_code: String,
@@ -210,6 +231,7 @@ pub struct StopSchemaGateDecision {
     pub no_change_count: u32,
     pub observation_hash: String,
     pub parsed: Option<StopSchemaParsed>,
+    pub feedback_history: Vec<SchemaErrorFeedback>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -285,6 +307,7 @@ pub fn evaluate_stop_schema_gate(
     max_repeats: u32,
     prev_observation_hash: &str,
     prev_no_change_count: u32,
+    feedback_history: Vec<SchemaErrorFeedback>,
 ) -> StopSchemaGateDecision {
     let provided_cap = stop_schema_provided_max_repeats(max_repeats);
     let loop_guard_cap = STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS;
@@ -298,10 +321,12 @@ pub fn evaluate_stop_schema_gate(
                 "stop_schema_missing",
                 used,
                 loop_guard_cap,
+                assistant_text,
                 &format!("本轮缺少 stop schema。请补齐缺失字段后再判断；若缺文件、日志、命令输出或测试证据，优先调用 exec_command 继续验证。{}", STOP_SCHEMA_JSON_EXAMPLE),
                 missing,
                 no_change_count,
                 observation_hash,
+                feedback_history,
             );
         }
     };
@@ -313,6 +338,7 @@ pub fn evaluate_stop_schema_gate(
             let observation_hash = compute_schema_observation_hash("stop_schema_forcestop_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
             let no_change_count = resolve_no_change_count("stop_schema_forcestop_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
+                assistant_text,
                 "stop_schema_forcestop_reason_missing",
                 used,
                 provided_cap,
@@ -321,6 +347,7 @@ pub fn evaluate_stop_schema_gate(
                 missing,
                 no_change_count,
                 observation_hash,
+                feedback_history,
             );
         }
         return StopSchemaGateDecision {
@@ -344,6 +371,7 @@ pub fn evaluate_stop_schema_gate(
             let observation_hash = compute_schema_observation_hash("stop_schema_stopreason_missing_or_non_numeric", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
             let no_change_count = resolve_no_change_count("stop_schema_stopreason_missing_or_non_numeric", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
+                assistant_text,
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 provided_cap,
@@ -352,6 +380,7 @@ pub fn evaluate_stop_schema_gate(
                 missing,
                 no_change_count,
                 observation_hash,
+                feedback_history,
             );
         }
     };
@@ -363,6 +392,7 @@ pub fn evaluate_stop_schema_gate(
             let observation_hash = compute_schema_observation_hash("stop_schema_needs_user_input_missing_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
             let no_change_count = resolve_no_change_count("stop_schema_needs_user_input_missing_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
+                assistant_text,
                 "stop_schema_needs_user_input_missing_next_step",
                 used,
                 provided_cap,
@@ -371,6 +401,7 @@ pub fn evaluate_stop_schema_gate(
                 missing,
                 no_change_count,
                 observation_hash,
+                feedback_history,
             );
         }
         return StopSchemaGateDecision {
@@ -412,6 +443,7 @@ pub fn evaluate_stop_schema_gate(
             let observation_hash = compute_schema_observation_hash("stop_schema_terminal_missing_fields", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
             let no_change_count = resolve_no_change_count("stop_schema_terminal_missing_fields", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
+                assistant_text,
                 "stop_schema_terminal_missing_fields",
                 used,
                 provided_cap,
@@ -420,6 +452,7 @@ pub fn evaluate_stop_schema_gate(
                 missing,
                 no_change_count,
                 observation_hash,
+                feedback_history,
             );
         }
         let summary_prefix = build_allow_stop_summary_prefix_from_parsed(&parsed, stopreason, reason);
@@ -457,6 +490,7 @@ pub fn evaluate_stop_schema_gate(
         let observation_hash = compute_schema_observation_hash("stop_schema_continue_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
         let no_change_count = resolve_no_change_count("stop_schema_continue_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
         return schema_followup(
+            assistant_text,
             "stop_schema_continue_next_step",
             used,
             provided_cap,
@@ -466,6 +500,7 @@ pub fn evaluate_stop_schema_gate(
             missing_fields,
             no_change_count,
             observation_hash,
+            feedback_history,
         );
     }
 
@@ -495,6 +530,7 @@ pub fn evaluate_stop_schema_gate(
         let observation_hash = compute_schema_observation_hash("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
         let no_change_count = resolve_no_change_count("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
         return schema_followup(
+            assistant_text,
             "stop_schema_next_step_missing",
             used,
             provided_cap,
@@ -504,6 +540,7 @@ pub fn evaluate_stop_schema_gate(
             missing_fields,
             no_change_count,
             observation_hash,
+            feedback_history,
         );
     }
 
@@ -511,6 +548,7 @@ pub fn evaluate_stop_schema_gate(
     let observation_hash = compute_schema_observation_hash("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
     let no_change_count = resolve_no_change_count("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
     schema_invalid_followup(
+        assistant_text,
         "stop_schema_next_step_missing",
         used,
         provided_cap,
@@ -519,6 +557,7 @@ pub fn evaluate_stop_schema_gate(
         missing_fields,
         no_change_count,
         observation_hash,
+        feedback_history,
     )
 }
 pub fn evaluate_goal_active_stop_loop(
