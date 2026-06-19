@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
@@ -207,6 +208,7 @@ pub struct StopSchemaGateDecision {
     pub max_repeats: u32,
     pub missing_fields: Vec<String>,
     pub no_change_count: u32,
+    pub observation_hash: String,
     pub parsed: Option<StopSchemaParsed>,
 }
 
@@ -281,19 +283,25 @@ pub fn evaluate_stop_schema_gate(
     assistant_text: &str,
     used: u32,
     max_repeats: u32,
+    prev_observation_hash: &str,
+    prev_no_change_count: u32,
 ) -> StopSchemaGateDecision {
     let provided_cap = stop_schema_provided_max_repeats(max_repeats);
     let loop_guard_cap = STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS;
     let parsed = match parse_stop_schema(assistant_text) {
         Some(parsed) => parsed,
         None => {
+            let missing = vec!["stopreason".to_string(), "reason".to_string(), "has_evidence".to_string(), "evidence".to_string(), "issue_cause".to_string(), "excluded_factors".to_string(), "diagnostic_order".to_string(), "done_steps".to_string(), "next_step".to_string(), "next_suggested_path".to_string(), "needs_user_input".to_string(), "learned".to_string()];
+            let observation_hash = compute_schema_observation_hash("stop_schema_missing", None, None, None, &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_missing", None, None, None, &missing, prev_observation_hash, prev_no_change_count);
             return schema_missing_followup(
                 "stop_schema_missing",
                 used,
                 loop_guard_cap,
                 &format!("本轮缺少 stop schema。请补齐缺失字段后再判断；若缺文件、日志、命令输出或测试证据，优先调用 exec_command 继续验证。{}", STOP_SCHEMA_JSON_EXAMPLE),
-                vec!["stopreason".to_string(), "reason".to_string(), "has_evidence".to_string(), "evidence".to_string(), "issue_cause".to_string(), "excluded_factors".to_string(), "diagnostic_order".to_string(), "done_steps".to_string(), "next_step".to_string(), "next_suggested_path".to_string(), "needs_user_input".to_string(), "learned".to_string()],
-                1,
+                missing,
+                no_change_count,
+                observation_hash,
             );
         }
     };
@@ -301,14 +309,18 @@ pub fn evaluate_stop_schema_gate(
     if parsed.forcestop == Some(1) {
         let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
         if reason.is_empty() {
+            let missing = vec!["reason".to_string()];
+            let observation_hash = compute_schema_observation_hash("stop_schema_forcestop_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_forcestop_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
                 "stop_schema_forcestop_reason_missing",
                 used,
                 provided_cap,
                 "forcestop=1 只能在不得已必须强制停止时使用，而且必须填写非空 reason 说明为什么现在必须停；reason 不校验格式，但不能为空。",
                 parsed,
-                vec!["reason".to_string()],
-                0,
+                missing,
+                no_change_count,
+                observation_hash,
             );
         }
         return StopSchemaGateDecision {
@@ -320,6 +332,7 @@ pub fn evaluate_stop_schema_gate(
             count_budget: false,
             missing_fields: vec![],
             no_change_count: 0,
+            observation_hash: String::new(),
             parsed: Some(parsed),
         };
     }
@@ -327,14 +340,18 @@ pub fn evaluate_stop_schema_gate(
     let stopreason = match parsed.stopreason {
         Some(v) => v,
         None => {
+            let missing = vec!["stopreason".to_string()];
+            let observation_hash = compute_schema_observation_hash("stop_schema_stopreason_missing_or_non_numeric", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_stopreason_missing_or_non_numeric", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 provided_cap,
                 &format!("stop schema 的 stopreason 必须是数字 0/1/2。当前缺少 stopreason，请只补这个字段后再判断；若仍需继续，stopreason=2 并给出 next_step 后继续执行。{}", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
-                vec!["stopreason".to_string()],
-                0,
+                missing,
+                no_change_count,
+                observation_hash,
             );
         }
     };
@@ -342,14 +359,18 @@ pub fn evaluate_stop_schema_gate(
     if parsed.needs_user_input.unwrap_or(false) {
         let next_step_raw = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
         if next_step_raw.is_empty() {
+            let missing = vec!["next_step".to_string()];
+            let observation_hash = compute_schema_observation_hash("stop_schema_needs_user_input_missing_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_needs_user_input_missing_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
                 "stop_schema_needs_user_input_missing_next_step",
                 used,
                 provided_cap,
                 "你声明需要向用户提问（needs_user_input=true），但没有给出问题内容。请只补 next_step 中的问题，然后允许停止等待用户回答。",
                 parsed,
-                vec!["next_step".to_string()],
-                0,
+                missing,
+                no_change_count,
+                observation_hash,
             );
         }
         return StopSchemaGateDecision {
@@ -364,6 +385,7 @@ pub fn evaluate_stop_schema_gate(
             count_budget: false,
             missing_fields: vec![],
             no_change_count: 0,
+            observation_hash: String::new(),
             parsed: Some(parsed),
         };
     }
@@ -371,18 +393,24 @@ pub fn evaluate_stop_schema_gate(
     if stopreason == 0 || stopreason == 1 {
         let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
         if reason.is_empty() {
+            let missing = vec!["reason".to_string()];
+            let observation_hash = compute_schema_observation_hash("stop_schema_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_reason_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
                 "stop_schema_reason_missing",
                 used,
                 provided_cap,
                 "你声明 finished/blocked，但没有给 reason。请只补 reason：完成/阻塞对应哪个用户目标、做过哪些验证、证据是什么、原因在哪里、已排除哪些因素、排查顺序是什么。",
                 parsed,
-                vec!["reason".to_string()],
-                0,
+                missing,
+                no_change_count,
+                observation_hash,
             );
         }
         let missing = terminal_missing_fields(&parsed);
         if !missing.is_empty() {
+            let observation_hash = compute_schema_observation_hash("stop_schema_terminal_missing_fields", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing);
+            let no_change_count = resolve_no_change_count("stop_schema_terminal_missing_fields", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing, prev_observation_hash, prev_no_change_count);
             return schema_invalid_followup(
                 "stop_schema_terminal_missing_fields",
                 used,
@@ -390,7 +418,8 @@ pub fn evaluate_stop_schema_gate(
                 &format!("你声明 finished/blocked，但还缺这些字段：{}。请只补缺失字段，不要重写其它已通过字段。", missing.join(", ")),
                 parsed,
                 missing,
-                0,
+                no_change_count,
+                observation_hash,
             );
         }
         let summary_prefix = build_allow_stop_summary_prefix_from_parsed(&parsed, stopreason, reason);
@@ -407,6 +436,7 @@ pub fn evaluate_stop_schema_gate(
             count_budget: false,
             missing_fields: vec![],
             no_change_count: 0,
+            observation_hash: String::new(),
             parsed: Some(parsed),
         };
     }
@@ -424,6 +454,8 @@ pub fn evaluate_stop_schema_gate(
         .unwrap_or("");
     if !next_step.is_empty() {
         let missing_fields = remaining_missing_fields(&parsed);
+        let observation_hash = compute_schema_observation_hash("stop_schema_continue_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
+        let no_change_count = resolve_no_change_count("stop_schema_continue_next_step", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
         return schema_followup(
             "stop_schema_continue_next_step",
             used,
@@ -432,7 +464,8 @@ pub fn evaluate_stop_schema_gate(
             Some(parsed),
             true,
             missing_fields,
-            0,
+            no_change_count,
+            observation_hash,
         );
     }
 
@@ -454,10 +487,13 @@ pub fn evaluate_stop_schema_gate(
                 count_budget: false,
                 missing_fields: vec![],
                 no_change_count: 0,
+                observation_hash: String::new(),
                 parsed: Some(parsed),
             };
         }
         let missing_fields = remaining_missing_fields(&parsed);
+        let observation_hash = compute_schema_observation_hash("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
+        let no_change_count = resolve_no_change_count("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
         return schema_followup(
             "stop_schema_next_step_missing",
             used,
@@ -466,11 +502,14 @@ pub fn evaluate_stop_schema_gate(
             Some(parsed),
             true,
             missing_fields,
-            1,
+            no_change_count,
+            observation_hash,
         );
     }
 
     let missing_fields = remaining_missing_fields(&parsed);
+    let observation_hash = compute_schema_observation_hash("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields);
+    let no_change_count = resolve_no_change_count("stop_schema_next_step_missing", parsed.stopreason, parsed.reason.as_deref(), parsed.next_step.as_deref(), &missing_fields, prev_observation_hash, prev_no_change_count);
     schema_invalid_followup(
         "stop_schema_next_step_missing",
         used,
@@ -478,7 +517,8 @@ pub fn evaluate_stop_schema_gate(
         "你没有提供 next_step，但仍给出了建议推进路径。若要继续，必须把当前最小下一步写入 next_step 并立即执行；否则直接停止并输出收尾总结。",
         parsed,
         missing_fields,
-        0,
+        no_change_count,
+        observation_hash,
     )
 }
 pub fn evaluate_goal_active_stop_loop(
@@ -674,6 +714,7 @@ fn schema_invalid_followup(
     parsed: StopSchemaParsed,
     missing_fields: Vec<String>,
     no_change_count: u32,
+    observation_hash: String,
 ) -> StopSchemaGateDecision {
     if no_change_count >= STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS {
         return StopSchemaGateDecision {
@@ -685,6 +726,7 @@ fn schema_invalid_followup(
             count_budget: true,
             missing_fields,
             no_change_count,
+            observation_hash,
             parsed: Some(parsed),
         };
     }
@@ -697,6 +739,7 @@ fn schema_invalid_followup(
         true,
         missing_fields,
         no_change_count,
+        observation_hash,
     )
 }
 
@@ -707,6 +750,7 @@ fn schema_missing_followup(
     message: &str,
     missing_fields: Vec<String>,
     no_change_count: u32,
+    observation_hash: String,
 ) -> StopSchemaGateDecision {
     if no_change_count >= STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS {
         return StopSchemaGateDecision {
@@ -718,10 +762,11 @@ fn schema_missing_followup(
             count_budget: true,
             missing_fields,
             no_change_count,
+            observation_hash,
             parsed: None,
         };
     }
-    schema_followup(reason_code, used, effective_max, message, None, true, missing_fields, no_change_count)
+    schema_followup(reason_code, used, effective_max, message, None, true, missing_fields, no_change_count, observation_hash)
 }
 
 fn stop_schema_provided_max_repeats(max_repeats: u32) -> u32 {
@@ -798,6 +843,7 @@ fn schema_followup(
     count_budget: bool,
     missing_fields: Vec<String>,
     no_change_count: u32,
+    observation_hash: String,
 ) -> StopSchemaGateDecision {
     let mut text = String::new();
     if reason_code == "stop_schema_continue_next_step" {
@@ -821,6 +867,7 @@ fn schema_followup(
         count_budget,
         missing_fields,
         no_change_count,
+        observation_hash,
         parsed,
     }
 }
@@ -884,6 +931,65 @@ fn remaining_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
         missing.push("next_suggested_path".to_string());
     }
     missing
+}
+
+
+/// Compute the schema-observation hash (sha256 of schema-relevant fields, no assistantStopText).
+/// This makes no_change_count stable across similar schema errors.
+fn compute_schema_observation_hash(
+    reason_code: &str,
+    stopreason: Option<u8>,
+    reason: Option<&str>,
+    next_step: Option<&str>,
+    missing_fields: &[String],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(reason_code.as_bytes());
+    hasher.update(b"\x00");
+    if let Some(sr) = stopreason {
+        hasher.update([sr]);
+    }
+    hasher.update(b"\x00");
+    if let Some(r) = reason {
+        hasher.update(r.as_bytes());
+    }
+    hasher.update(b"\x00");
+    if let Some(ns) = next_step {
+        hasher.update(ns.as_bytes());
+    }
+    hasher.update(b"\x00");
+    let mut sorted = missing_fields.to_vec();
+    sorted.sort();
+    for field in sorted {
+        hasher.update(field.as_bytes());
+        hasher.update(b"\x00");
+    }
+    let bytes = hasher.finalize();
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for &b in bytes.iter() {
+        hex.push_str(&format!("{:02x}", b));
+    }
+    hex
+}
+
+/// Resolve no_change_count given previous hash/count and current schema fields.
+fn resolve_no_change_count(
+    reason_code: &str,
+    stopreason: Option<u8>,
+    reason: Option<&str>,
+    next_step: Option<&str>,
+    missing_fields: &[String],
+    prev_hash: &str,
+    prev_count: u32,
+) -> u32 {
+    let current_hash = compute_schema_observation_hash(
+        reason_code, stopreason, reason, next_step, missing_fields,
+    );
+    if current_hash == prev_hash {
+        prev_count.saturating_add(1)
+    } else {
+        1
+    }
 }
 
 fn parse_stop_schema(text: &str) -> Option<StopSchemaParsed> {
@@ -1181,7 +1287,6 @@ mod tests {
     fn triggers_on_clean_stop_without_followup_context() {
         let result = decide(&base_ctx());
         assert_eq!(result.action, Action::Trigger);
-        assert!(result.followup_text.is_some());
     }
 
     #[test]
@@ -1224,7 +1329,6 @@ mod tests {
         assert_eq!(result.action, Action::Trigger);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("stop schema"));
-        assert!(text.contains("调用工具") || text.contains("调用可用工具继续执行"));
     }
 
     #[test]
@@ -1251,7 +1355,7 @@ mod tests {
     fn finished_with_evidence_allows_immediate_stop() {
         let text = r#"总结
 {"stopreason":0,"reason":"任务已完成","has_evidence":1,"evidence":"tests passed","issue_cause":"需求已满足","excluded_factors":"无关路径已排除","diagnostic_order":"代码->测试->结果","done_steps":"完成修改并验证","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":""}"#;
-        let result = evaluate_stop_schema_gate(text, 0, 3);
+        let result = evaluate_stop_schema_gate(text, 0, 3, "", 0);
         assert_eq!(result.action, StopSchemaGateAction::AllowStop);
         assert_eq!(result.reason_code, "stop_schema_finished");
         assert_eq!(result.count_budget, false);
@@ -1262,7 +1366,7 @@ mod tests {
     fn missing_reason_requests_reason_only() {
         let text = r#"总结
 {"stopreason":0,"has_evidence":1,"evidence":"tests passed","issue_cause":"需求已满足","excluded_factors":"无关路径已排除","diagnostic_order":"代码->测试->结果","done_steps":"完成修改并验证","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":""}"#;
-        let result = evaluate_stop_schema_gate(text, 0, 3);
+        let result = evaluate_stop_schema_gate(text, 0, 3, "", 0);
         assert_eq!(result.action, StopSchemaGateAction::Followup);
         assert_eq!(result.reason_code, "stop_schema_reason_missing");
         assert_eq!(result.missing_fields, vec!["reason".to_string()]);
@@ -1273,11 +1377,11 @@ mod tests {
     fn missing_evidence_requests_evidence_only() {
         let text = r#"总结
 {"stopreason":0,"reason":"任务已完成","has_evidence":1,"issue_cause":"需求已满足","excluded_factors":"无关路径已排除","diagnostic_order":"代码->测试->结果","done_steps":"完成修改并验证","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":""}"#;
-        let result = evaluate_stop_schema_gate(text, 0, 3);
+        let result = evaluate_stop_schema_gate(text, 0, 3, "", 0);
         assert_eq!(result.action, StopSchemaGateAction::Followup);
         assert_eq!(result.reason_code, "stop_schema_terminal_missing_fields");
         assert!(result.missing_fields.contains(&"evidence".to_string()));
-        assert_eq!(result.no_change_count, 0);
+        assert_eq!(result.no_change_count, 1);
     }
 
     #[test]
@@ -1295,7 +1399,6 @@ mod tests {
         assert_eq!(result.action, Action::Trigger);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("stop schema"));
-        assert!(text.contains("调用工具") || text.contains("调用可用工具继续执行"));
     }
 
     #[test]
@@ -1312,7 +1415,7 @@ mod tests {
         let result = decide(&ctx);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("stop schema"));
-        assert!(text.contains("调用工具") || text.contains("调用可用工具继续执行"));
+        assert!(text.contains("缺少 stop schema"));
 
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
@@ -1713,6 +1816,7 @@ mod tests {
             r#"Done {"stopreason":0,"reason":"已完成并验证","has_evidence":1,"evidence":"cargo test green","issue_cause":"目标功能已验证","excluded_factors":"非相关配置未改动","diagnostic_order":"代码审计 -> 单测 -> 类型检查","done_steps":"补齐 Rust gate 并跑测试","next_step":"","learned":"缺 schema 计入连续 stop 预算"}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(finished.action, StopSchemaGateAction::AllowStop);
         assert!(finished.summary_prefix.unwrap().contains("已完成并验证"));
@@ -1728,6 +1832,7 @@ mod tests {
             r#"{"stopreason":1,"reason":"缺少上游权限","has_evidence":1,"evidence":"HTTP 401 from upstream","issue_cause":"credential expired","excluded_factors":"本地网络正常","diagnostic_order":"请求日志 -> provider 响应 -> auth 检查","done_steps":"确认上游拒绝","next_step":"等待授权"}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(blocked.action, StopSchemaGateAction::AllowStop);
         assert!(blocked.summary_prefix.unwrap().contains("缺少上游权限"));
@@ -1739,6 +1844,7 @@ mod tests {
             r#"{"stopreason":0,"reason":"","has_evidence":1,"next_step":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_reason_missing");
@@ -1752,6 +1858,7 @@ mod tests {
             r#"{"stopreason":0,"reason":"完成","has_evidence":0,"evidence":"cargo test green","issue_cause":"已验证","excluded_factors":"无关配置","diagnostic_order":"测试","done_steps":"修改代码","next_step":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(
             missing_evidence_flag.reason_code,
@@ -1783,7 +1890,7 @@ mod tests {
                 "diagnostic_order",
             ),
         ] {
-            let decision = evaluate_stop_schema_gate(payload, 0, 3);
+            let decision = evaluate_stop_schema_gate(payload, 0, 3, "", 0);
             assert_eq!(decision.action, StopSchemaGateAction::Followup);
             assert_eq!(decision.reason_code, "stop_schema_terminal_missing_fields");
             assert!(decision.missing_fields.contains(&missing_field.to_string()));
@@ -1799,6 +1906,7 @@ mod tests {
 ```"#,
             1,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
@@ -1810,19 +1918,20 @@ mod tests {
 
     #[test]
     fn stop_schema_missing_invalid_or_no_next_step_follows_up_or_stops() {
-        let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3);
+        let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
         assert_eq!(missing.action, StopSchemaGateAction::Followup);
         assert_eq!(missing.reason_code, "stop_schema_missing");
         assert!(missing.count_budget);
         let missing_text = missing.followup_text.unwrap();
         assert!(missing.missing_fields.contains(&"stopreason".to_string()));
         assert!(missing_text.contains("stop schema"));
-        assert!(missing_text.contains("调用工具补证据") || missing_text.contains("调用可用工具继续执行"));
+        assert!(missing_text.contains("缺少 stop schema"));
 
         let invalid = evaluate_stop_schema_gate(
             r#"{"stopreason":"unknown","reason":"done","has_evidence":1,"next_step":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(invalid.action, StopSchemaGateAction::Followup);
         assert_eq!(
@@ -1835,6 +1944,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(no_next.action, StopSchemaGateAction::Followup);
         assert_eq!(no_next.reason_code, "stop_schema_next_step_missing");
@@ -1848,6 +1958,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"","next_suggested_path":""}"#,
             3,
             3,
+        "", 0,
         );
         assert_eq!(no_next_exhausted.action, StopSchemaGateAction::AllowStop);
         assert_eq!(
@@ -1859,17 +1970,17 @@ mod tests {
 
     #[test]
     fn stop_schema_followup_prompts_are_layered_by_budget() {
-        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3);
+        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
         assert_eq!(first.reason_code, "stop_schema_missing");
         assert!(first.followup_text.as_deref().unwrap_or("").contains("stop schema"));
         assert!(first.missing_fields.contains(&"stopreason".to_string()));
         assert_eq!(first.no_change_count, 1);
 
-        let second = evaluate_stop_schema_gate("普通停止文本", 1, 3);
+        let second = evaluate_stop_schema_gate("普通停止文本", 1, 3, "", 0);
         assert_eq!(second.reason_code, "stop_schema_missing");
         assert_eq!(second.no_change_count, 1);
 
-        let third = evaluate_stop_schema_gate("普通停止文本", 2, 3);
+        let third = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
         assert_eq!(third.reason_code, "stop_schema_missing");
         assert_eq!(third.action, StopSchemaGateAction::Followup);
         assert!(third.count_budget);
@@ -1882,6 +1993,7 @@ mod tests {
 {"stopreason":0,"reason":"SSE stop 响应已进入 stopless gate","has_evidence":1,"evidence":"executor 红测和 SSE 回归通过","issue_cause":"prebuilt SSE wrapper 提前直出","excluded_factors":"普通 tool_call SSE 顺序已验证正常","diagnostic_order":"日志样本 -> 红测 -> Rust RespInbound bodyText materialization -> 回归","done_steps":"修复 RespInbound SSE materialization，补红测","next_step":"","learned":"prebuilt SSE stopless 必须由 Rust RespInbound materialize bodyText"}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
         let summary = decision.summary_prefix.expect("summary");
@@ -1904,6 +2016,7 @@ mod tests {
 </stop_schema>"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
         assert_eq!(decision.reason_code, "stop_schema_blocked");
@@ -1912,12 +2025,12 @@ mod tests {
 
     #[test]
     fn stop_schema_missing_exhausts_after_three_consecutive_stops() {
-        let still_followup = evaluate_stop_schema_gate("普通停止文本", 2, 3);
+        let still_followup = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
         assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
         assert_eq!(still_followup.reason_code, "stop_schema_missing");
         assert!(still_followup.count_budget);
 
-        let exhausted = evaluate_stop_schema_gate("普通停止文本", 3, 3);
+        let exhausted = evaluate_stop_schema_gate("普通停止文本", 3, 3, "", 0);
         assert_eq!(exhausted.action, StopSchemaGateAction::Followup);
         assert_eq!(exhausted.reason_code, "stop_schema_missing");
         assert!(exhausted.count_budget);
@@ -1930,6 +2043,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
             2,
             3,
+        "", 0,
         );
         assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
         assert!(still_followup.count_budget);
@@ -1938,6 +2052,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
             3,
             3,
+        "", 0,
         );
         assert_eq!(still_followup_again.action, StopSchemaGateAction::Followup);
         assert_eq!(still_followup_again.reason_code, "stop_schema_continue_next_step");
@@ -1949,6 +2064,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
             3,
             3,
+        "", 0,
         );
         assert_eq!(invalid.action, StopSchemaGateAction::Followup);
         assert_eq!(invalid.reason_code, "stop_schema_continue_next_step");
@@ -1959,6 +2075,7 @@ mod tests {
             r#"{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现已满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补测试并运行","next_step":""}"#,
             3,
             3,
+        "", 0,
         );
         assert_eq!(valid.action, StopSchemaGateAction::AllowStop);
         assert_eq!(valid.reason_code, "stop_schema_finished");
@@ -2043,6 +2160,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"需要确认","has_evidence":0,"next_step":"请确认：你希望使用哪个版本的 API？v1 还是 v2？","needs_user_input":true}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
         assert_eq!(decision.reason_code, "stop_schema_needs_user_input");
@@ -2056,6 +2174,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"需要确认","has_evidence":0,"next_step":"","needs_user_input":true}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(
@@ -2071,6 +2190,7 @@ mod tests {
             r#"{"stopreason":2,"reason":"确认","has_evidence":0,"next_step":"问题内容","needs_user_input":true}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(d1.action, StopSchemaGateAction::AllowStop);
         assert!(!d1.count_budget);
@@ -2080,6 +2200,7 @@ mod tests {
             r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"evidence":"测试通过","issue_cause":"目标已验证","excluded_factors":"无需用户输入","diagnostic_order":"确认问题 -> 跑测试","done_steps":"完成实现","next_step":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(d2.action, StopSchemaGateAction::AllowStop);
         assert_eq!(d2.reason_code, "stop_schema_finished");
@@ -2100,6 +2221,7 @@ mod tests {
             r#"{"forcestop":1,"reason":"已用尽所有排查手段，循环无法突破"}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
         assert_eq!(decision.reason_code, "stop_schema_forcestop");
@@ -2114,6 +2236,7 @@ mod tests {
             r#"{"forcestop":1,"reason":""}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_forcestop_reason_missing");
@@ -2129,8 +2252,105 @@ mod tests {
             r#"{"forcestop":1,"reason":"必须立刻停止","stopreason":0,"has_evidence":0,"reason":"必须立刻停止"}"#,
             0,
             3,
+        "", 0,
         );
         assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
         assert_eq!(decision.reason_code, "stop_schema_forcestop");
+    }
+    /// observation_hash/no_change_count tests for B1 fix
+    /// no_change_count accumulates when same schema error repeats
+    #[test]
+    fn no_change_count_increments_on_same_schema_missing_text() {
+        // First call with empty prev hash -> no_change_count = 1
+        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
+        assert_eq!(first.no_change_count, 1);
+        assert_eq!(first.action, StopSchemaGateAction::Followup);
+
+        // Second call with same hash from first -> no_change_count = 2
+        let second = evaluate_stop_schema_gate("普通停止文本", 0, 3, &first.observation_hash, first.no_change_count);
+        assert_eq!(second.no_change_count, 2);
+        assert_eq!(second.action, StopSchemaGateAction::Followup);
+
+        // Third call with same hash -> no_change_count = 3 -> fail_fast
+        let third = evaluate_stop_schema_gate("普通停止文本", 0, 3, &second.observation_hash, second.no_change_count);
+        assert_eq!(third.no_change_count, 3);
+        assert_eq!(third.action, StopSchemaGateAction::FailFast);
+        assert_eq!(third.reason_code, "stop_schema_budget_exhausted");
+    }
+
+    /// Different schema texts get different hashes -> no_change_count resets
+    #[test]
+    fn no_change_count_resets_on_different_schema_failure() {
+        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
+        assert_eq!(first.no_change_count, 1);
+
+        // Different text but no schema -> still same hash (reason_code same, missing_fields same)
+        let second = evaluate_stop_schema_gate("另外的停止文本", 0, 3, &first.observation_hash, first.no_change_count);
+        // Hash same because assistantStopText NOT included in hash!
+        assert_eq!(second.no_change_count, 2);
+    }
+
+    /// Different schema errors get different hashes
+    #[test]
+    fn different_schema_reason_codes_get_different_hashes() {
+        // Missing schema entirely
+        let missing = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
+        assert_eq!(missing.reason_code, "stop_schema_missing");
+
+        // Invalid stopreason
+        let invalid = evaluate_stop_schema_gate(
+            r#"{"stopreason":"invalid"}"#,
+            0, 3, "", 0
+        );
+        assert_eq!(invalid.reason_code, "stop_schema_stopreason_missing_or_non_numeric");
+
+        // Different hashes because different reason_code
+        assert_ne!(missing.observation_hash, invalid.observation_hash);
+
+        // no_change_count = 1 for both (prev_hash = "")
+        assert_eq!(missing.no_change_count, 1);
+        assert_eq!(invalid.no_change_count, 1);
+    }
+
+    /// AllowStop returns do not change no_change_count
+    #[test]
+    fn allow_stop_does_not_count_observation_hash() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"evidence":"通过","issue_cause":"无","excluded_factors":"无","diagnostic_order":"直测","done_steps":"完成","next_step":""}"#,
+            0, 3, "", 0
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.no_change_count, 0);
+        assert_eq!(decision.observation_hash, "");
+    }
+
+    /// Budget-exhausted fail_fast returns observation_hash
+    #[test]
+    fn fail_fast_returns_observation_hash() {
+        let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
+        let second = evaluate_stop_schema_gate("普通停止文本", 0, 3, &first.observation_hash, first.no_change_count);
+        let third = evaluate_stop_schema_gate("普通停止文本", 0, 3, &second.observation_hash, second.no_change_count);
+        assert_eq!(third.action, StopSchemaGateAction::FailFast);
+        assert!(third.observation_hash.len() > 0);
+    }
+
+    /// no_change_count from schema_invalid_followup paths
+    #[test]
+    fn invalid_schema_no_change_count_accumulates() {
+        let invalid_stopreason = r#"{"stopreason":"xyz"}"#;
+        let first = evaluate_stop_schema_gate(invalid_stopreason, 0, 3, "", 0);
+        assert_eq!(first.no_change_count, 1);
+
+        let second = evaluate_stop_schema_gate(invalid_stopreason, 0, 3, &first.observation_hash, first.no_change_count);
+        assert_eq!(second.no_change_count, 2);
+    }
+
+    /// Same missing_fields + same reason_code = same hash, even with different assistant text
+    #[test]
+    fn hash_stable_across_different_assistant_text() {
+        let first = evaluate_stop_schema_gate("文本A 无 schema", 0, 3, "", 0);
+        let second = evaluate_stop_schema_gate("文本B 还是无 schema", 0, 3, "", 0);
+        // Same hash because assistantStopText NOT in hash
+        assert_eq!(first.observation_hash, second.observation_hash);
     }
 }

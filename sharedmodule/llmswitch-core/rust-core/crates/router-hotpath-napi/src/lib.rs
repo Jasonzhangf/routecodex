@@ -1205,9 +1205,11 @@ pub fn evaluate_stop_schema_gate_json(
     assistant_text: String,
     used: u32,
     max_repeats: u32,
+    prev_observation_hash: String,
+    prev_no_change_count: u32,
 ) -> NapiResult<String> {
     let decision =
-        stop_message_auto_blocks::evaluate_stop_schema(&assistant_text, used, max_repeats);
+        stop_message_auto_blocks::evaluate_stop_schema(&assistant_text, used, max_repeats, &prev_observation_hash, prev_no_change_count);
     serde_json::to_string(&decision)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }

@@ -75,6 +75,7 @@ export type StopSchemaGateDecision = {
   followup_text?: string;
   count_budget?: boolean;
   no_change_count?: number;
+  observation_hash?: string;
   max_repeats?: number;
   parsed?: Record<string, unknown>;
 };
@@ -138,6 +139,8 @@ export function evaluateStopSchemaGateWithNative(args: {
   assistantText: string;
   used: number;
   maxRepeats: number;
+  prevObservationHash?: string;
+  prevNoChangeCount?: number;
 }): StopSchemaGateDecision {
   const capability = 'evaluateStopSchemaGateJson';
   const fail = (reason?: string) => failNativeRequired<StopSchemaGateDecision>(capability, reason);
@@ -146,7 +149,13 @@ export function evaluateStopSchemaGateWithNative(args: {
     if (!fn) {
       return fail('native_unavailable');
     }
-    const raw = fn(args.assistantText, args.used, args.maxRepeats);
+    const raw = fn(
+      args.assistantText,
+      args.used,
+      args.maxRepeats,
+      args.prevObservationHash ?? '',
+      args.prevNoChangeCount ?? 0
+    );
     if (typeof raw !== 'string') {
       return fail(`native_returned_non_string: ${typeof raw}`);
     }

@@ -1,3 +1,13 @@
+## 2026-06-19 tokenrelay deepseek-v4-pro / 5555 direct diagnosis
+
+- 5557 provider-direct installed sample `req_1781847365527_fa0b4ed0/provider-request.json` confirmed `body.model=deepseek-v4-pro`.
+- Direct curl to tokenrelay upstream `/v1/responses` with old 5555 failing sample `openai-responses-router-gpt-5.4-20260619T131216066-369320-79/provider-request.json` and only `model` rewritten to `deepseek-v4-pro` reproduced HTTP 500 `NoneType object is not subscriptable`.
+- Tokenrelay minimal `/v1/responses` with `deepseek-v4-pro` succeeds, but old payload with historical `input` slice of last 5/20 items still fails even without tools/client_metadata/Responses control fields. This points to tokenrelay Responses-history compatibility, not model availability.
+- Suspected owner: router-direct same-protocol eligibility ignores selected target `outboundProfile=openai-chat` / `responses.process=chat`, so it bypasses Hub Responses->Chat conversion and sends raw Responses history to tokenrelay.
+- 2026-06-19 13:55 live proof after install/restart: explicit `model=tokenrelay.deepseek-v4-pro` on `5555 /v1/responses` returns HTTP 200 with exact marker `RCC_TOKENRELAY_HUB_RELAY_1781848542`; sample `req_1781848542950_d98a1134/provider-request.json` shows `model=deepseek-v4-pro`, `inputLen=3`, no tools. This proves tokenrelay provider itself works behind 5555 router entry.
+- 2026-06-19 13:56/13:57 follow-up probes with `model=gpt-5.4` still did not route to tokenrelay: both input-text inline `<**tokenrelay.deepseek-v4-pro**>` and top-level `instructions="<**tokenrelay.deepseek-v4-pro**>"` ended on `XLC.key1.glm-5.2`, provider-request body was chat-shaped `messages[]`, `model=glm-5.2`, and request failed with upstream `model_not_found`.
+- Current live blocker is no longer tokenrelay upstream 500 on direct-model path. The remaining 5555 thinking-path blocker is that `XLC.key1.glm-5.2` failure logs `provider-switch attempt=1/6 -> 2/6 decision=provider_backoff_then_reroute`, but the live request still terminates immediately with `model_not_found` instead of producing a second `virtual-router-hit` to tokenrelay. Next owner to inspect: request-executor reroute consumption / routePool preservation after first provider failure.
+
 ## 2026-06-19 5520 GPT forwarder priority update
 
 - Runtime truth updated in `~/.rcc/config.toml`: both `fwd.paid.gpt-5.4` and `fwd.paid.gpt-5.4-mini` now order paid GPT targets as `asxs > 1token > XL > cc`.
@@ -6528,12 +6538,106 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 本轮唯一 owner 修复结论：
   - 真正导致 5520 default pool 丢失的不是 direct retry owner，而是 `http-server-runtime-setup.ts::collectConfiguredProviderIds(...)` 把 route target `fwd.*` 当成真实 providerId，导致 `deriveRoutingProviderScope(...)` 过滤掉了 `asxs/1token/XL/cc`。
   - 修复后 forwarder target 会展开出真实 provider ids，再由 runtime scope / provider registry 正常保留。
+## 2026-06-19 tokenrelay provider 接入修正
+
+- Jason 纠正流程：新增 provider 必须先 curl 直连上游完整对话，确认上游协议可用，再接入 `~/.rcc` provider；不能先拿本地 RC 端口当 provider 可用性证明。
+- tokenrelay 上游 OpenAI API 已直连验证：
+  - 非流式 `/v1/chat/completions` HTTP 200，model=`deepseek-v4-pro`，返回 `RCC_TOKENRELAY_OPENAI_CHAT_OK RCC_TOKENRELAY_CTX_A`。
+  - SSE `/v1/chat/completions` HTTP 200，18 frames，`[DONE]`，重组内容 `RCC_TOKENRELAY_OPENAI_STREAM_OK RCC_TOKENRELAY_CTX_STREAM`。
+- tokenrelay 上游 `/v1/responses` 也已直连验证：
+  - 非流式 HTTP 200，返回 `RCC_TOKENRELAY_RESPONSES_OK`。
+  - SSE HTTP 200，标准 `response.created -> response.completed -> [DONE]`，内容 `RCC_TOKENRELAY_RESPONSES_STREAM_OK`。
+- 因此 `tokenrelay` 应配置为 OpenAI provider：`baseURL=https://token-relay-v2-production.up.railway.app/v1`，`Authorization: Bearer` / `[provider.auth] type="apikey"`，禁止继续按 Anthropic provider 路径接入。
+- 接入后二次定位证明：`type="openai"` 虽可跑 `/v1/chat/completions`，但 `provider` 直通 `/v1/responses` 会报 `Provider mode with protocolBehavior=direct requires matching protocols: inbound=openai-responses, provider=openai-chat`。说明对 tokenrelay 这种同时支持 chat+responses 的上游，RC 侧必须配置成 `type="responses"`，不能只配 `type="openai"`。
 
 ## 2026-06-19 tokenrelay reroute preselectedRoute 修复
 
 - 根因锁定：router-direct 因 `target_outbound_profile_requires_hub_relay` 把一次性 `preselectedRoute` 写入 `MetadataCenter.runtime_control` 后交给 Hub；首个 provider 失败进入 provider-switch 后，下一次 executor attempt 继续携带同一个 `preselectedRoute`，Rust Hub request stage 优先消费它，导致第二轮不会重新跑 VR，也就看不到第二次 `virtual-router-hit`。
 - 唯一修复点：`decorateMetadataForAttempt(...)` 在 `attempt > 1` 时释放 `MetadataCenter.runtime_control.preselectedRoute` 并删除 legacy `__rt.preselectedRoute`，保留 `excludedProviderKeys` / `retryProviderKey` 等真正 retry 控制。
 - 新增红测：`tests/server/runtime/http-server/request-executor.spec.ts` 的 `clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay`，模拟 `XLC.key1.glm-5.2` 返回 `model_not_found/503`，断言第二轮 `preselectedRoute=false`、`excludedProviderKeys=[XLC.key1.glm-5.2]`、最终命中 `tokenrelay.key1.deepseek-v4-pro`。
-- 已验证：focused Jest 新红测 PASS；MetadataCenter / attempt-state / request-executor focused 组合 PASS；route-level mixed-protocol relay 黑盒 PASS；`tsc --noEmit` / `verify:function-map-compile-gate` / `git diff --check` / `build:min` / `install:global` PASS；5555 health `ready=true pipelineReady=true version=0.90.3187`。
-- live 复核：`gpt-5.4` thinking probe 命中 `XLC.key1.glm-5.2` 并成功，说明 key1 已会尝试；显式 `model=tokenrelay.deepseek-v4-pro` 命中 `tokenrelay.key1.deepseek-v4-pro` 并 HTTP 200，provider snapshot 显示上游 `/v1/responses`、`body.model=deepseek-v4-pro`、无 metadata。
-- 剩余风险：当前线上 XLC key1 已成功，无法用自然失败样本在线强制证明“XLC 失败后同请求 reroute tokenrelay”；该分支已由高层黑盒红测覆盖。
+- 已验证：
+  - focused Jest 新红测 PASS。
+  - MetadataCenter / attempt-state / request-executor focused 组合 PASS（7 tests）。
+  - route-level mixed-protocol relay 与 tokenrelay chat-profile relay 黑盒 PASS（2 tests；Jest 既存 open-handle 提示）。
+  - `npx tsc --noEmit --pretty false` PASS。
+  - `npm run verify:function-map-compile-gate` PASS。
+  - `git diff --check` PASS。
+  - `npm run build:min` PASS。
+  - `npm run install:global` PASS，安装态 `routecodex/rcc 0.90.3187`，`~/.rcc/install/current` 与 `/Volumes/extension/.rcc/install/current` 均为 `routecodex-0.90.3187-2026-06-19T062913Z`。
+  - `routecodex restart --port 5555` 后 health：`ready=true pipelineReady=true version=0.90.3187`。
+- live 复核：
+  - `gpt-5.4` thinking probe 在 14:31:24 命中 `XLC.key1.glm-5.2` 并直接成功，说明当前 XLC key1 已会尝试且可成功；因为没有失败，不构成在线 reroute 证明。
+  - 显式 `model=tokenrelay.deepseek-v4-pro` 在 14:32:03 命中 `tokenrelay.key1.deepseek-v4-pro`，14:32:07 HTTP 200，返回 marker `RCC_TOKENRELAY_DIRECT_1781850723`；provider snapshot 显示真正上游请求 `url=https://token-relay-v2-production.up.railway.app/v1/responses`、`body.model=deepseek-v4-pro`、`inputLen=1`、无 metadata。
+- 剩余风险：当前线上 XLC key1 已成功，无法用自然失败样本在线强制证明“XLC 失败后同请求 reroute tokenrelay”；该分支已由高层黑盒红测覆盖，后续若 XLC 再次 `model_not_found/503`，验收日志应出现第二次 `virtual-router-hit` 而不是直接投客户端错误。
+
+## 2026-06-19 servertool MetadataCenter runtime-control closeout
+
+- 当前 slice 目标：先清 servertool/followup/stopless 内部控制字段，禁止 `serverToolFollowup*`、`servertoolResponseOrchestration`、`serverToolLoopState`、`stopMessageState`、`stopMessageClientInject*`、`stoplessGoal*` 继续混在 normal metadata / `__rt` 里做 active truth。
+- 代码收口：
+  - MetadataCenter 增加 servertool runtime_control 槽位，`request-truth-readers` 投影统一读取。
+  - `servertool-adapter-context`、`servertool-followup-dispatch`、`servertool-followup-metadata` 改为写/读 `MetadataCenter.runtime_control`，nested metadata 会剥离旧 flat/`__rt` 控制键。
+  - `stop-message-auto`、`stopless-goal-state`、`response-stage-orchestration-shell`、`state-scope` 改用 MetadataCenter；需要给 Rust/native 消费时只投影到内部 `runtime_control` side-channel，不再读 `__rt.serverToolFollowup`。
+  - `goal-state-persistence`、`provider-response-converter` 的 stopless goal 状态读写改到 `runtime_control.stoplessGoal`，持久化 scope 不再临时生成 flat `stopMessageClientInjectSessionScope`。
+- 验证：
+  - focused Jest：`servertool-adapter-context` / `servertool-followup-metadata` / `goal-state-persistence` / `provider-response-converter.goal-followup-http400` PASS（32 tests）。
+  - wider servertool Jest：`servertool-followup-dispatch` / `resp-process-stage3-reentry` / goal followup / goal persistence PASS（43 tests）。
+  - `npx tsc --noEmit --pretty false` PASS。
+  - `npm run audit:custom-payload-carriers` PASS：`__routecodex* runtime=14 files=9`，`__sse_* runtime=0`，均为当前 allowlisted guard/contract surfaces。
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS；`git diff --check` PASS。
+- 剩余风险：本 slice 未做 install/restart/live 5555；仍需后续全局 review `executor-metadata`、native metadata policy、client-injection-flow、servertool backend-route 等非本 slice 残留。
+
+## 2026-06-19 Rust followup runtime_control tightening slice
+
+- 当前 slice 目标：把 VR / route metadata / followup route-hint 这一段对 `serverToolFollowup*` 的 active truth 收到 Rust `runtime_control`，并删除 TS request-stage / backend-route helper 对 flat followup 标记的回写。
+- 代码收口：
+  - Rust `virtual_router_engine::{routing::metadata,classifier,engine::route}` 与 `hub_pipeline_types/meta_error_carriers.rs` 只认 `runtime_control.serverToolFollowup` / `runtime_control.serverToolFollowupSource`；legacy flat / `__rt` followup 标记不再激活 followup route 或 thinking 强制。
+  - 删除 `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` 对 top-level `serverToolFollowup*` 的 projection。
+  - 删除 `sharedmodule/llmswitch-core/src/servertool/backend-route-backend.ts` 的 TS `__rt.serverToolFollowup=true` 写入；`tests/servertool/followup-stream-compat.spec.ts` 改为反向锁，断言 helper 不再生成 flat / `__rt` followup 标记。
+  - 顺手删除同测试里过期的 `__sse_responses` wrapper 断言，避免继续把已禁用自定义 SSE wrapper 当 runtime contract。
+- 验证：
+  - `cargo test -p router-hotpath-napi virtual_router_engine::classifier --lib -- --nocapture` PASS（21 tests）。
+  - `cargo test -p router-hotpath-napi virtual_router_engine::routing::metadata --lib -- --nocapture` PASS（11 tests）。
+  - `cargo test -p router-hotpath-napi virtual_router_engine::engine::route --lib -- --nocapture` PASS（10 tests）。
+  - `cargo test -p router-hotpath-napi hub_pipeline_types::meta_error_carriers --lib -- --nocapture` PASS（5 tests）。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/followup-stream-compat.spec.ts --runInBand --no-cache` PASS。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run audit:custom-payload-carriers` PASS；`npm run verify:servertool-rust-only` PASS；`git diff --check` PASS。
+- 剩余风险：当前只收掉 followup route/control 这一小段，`stopMessageClientInject*`、`clientInjectReady`、`clientInjectReason` 仍有 Rust/TS 混合残留，需要下一 slice 继续把 owner 真相推进到 Rust / MetadataCenter。
+
+## 2026-04-28 stopless B1 fix: observation_hash 迁移到 Rust
+
+**Bug**: 连续 3 次 schema 缺失时 `noChangeCount` 永远达不到 fail_fast 阈值。
+
+**根因**：
+1. `observationHash` 包含 `assistantStopText`（每次模型回复不同），hash 永远不同 → noChangeCount 每次重置为 1
+2. hash 比较和 fail_fast 判定分散在 TS+Rust 两侧
+
+**修复（Rust）**：
+- `stop-message-core/src/lib.rs`：
+  - 新增 `compute_schema_observation_hash()` — sha256(reasonCode, stopreason, reason, nextStep, missingFields)，**不含 assistantStopText**
+  - 新增 `resolve_no_change_count()` — pure Rust，prev_hash 一致则累加，否则重置为 1
+  - `evaluate_stop_schema_gate()` 新增 `prev_observation_hash` + `prev_no_change_count` 参数
+  - FailFast 逻辑在 Rust `schema_invalid_followup`/`schema_missing_followup` 中，`no_change_count >= 3` 时直接返回 FailFast
+  - `StopSchemaGateDecision` 新增 `observation_hash: String`
+- NAPI bridge：更新 `evaluate_stop_schema_gate_json` 签名（+2 参数）
+
+**修复（TS）**：
+- `stop-message-auto.ts`：删 `buildStopSchemaObservation()` + `resolveStopSchemaNoChangeCount()` + `crypto` import
+- TS 只传 prev hash/count 给 Rust，用 Rust 返回值更新 compare context
+
+**测试**：7 个新 Rust 测试覆盖：
+- 同一 schema 错误 3 次 → FailFast
+- 不同 assistant text 但同一 schema 错误 → hash 相同 → 累加
+- 不同 reason_code → 不同 hash → 重置
+- AllowStop → observation_hash=""、no_change_count=0
+- FailFast returns observation_hash
+- schema_invalid_followup 路径也累加
+- hash 稳定性证明
+
+**验证**：
+- `cargo check -p stop-message-core` ✅
+- `cargo check -p router-hotpath-napi` ✅（0 errors, 310 warnings 全是已有的）
+- `cargo test -p stop-message-core --lib` → 53 passed, 8 failed（8 failed 全是 pre-existing）
+- 7 个新测试全部 PASS
+- `npx tsc --noEmit -p sharedmodule/llmswitch-core/tsconfig.json` ✅
+
+**剩余**：B2（has_evidence 解析）和 B3（schemaFeedback 跨 turn 持久化）未修复，作为下一轮独立切片。
