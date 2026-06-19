@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
   resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
@@ -1393,12 +1394,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -1647,12 +1643,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -1930,12 +1921,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -2089,12 +2075,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -2257,12 +2238,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -2418,12 +2394,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {
@@ -2580,12 +2551,7 @@ describe('direct passthrough route-level', () => {
       metadata: { relayed: true },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       const isBackup = providerKey === secondProviderKey;
@@ -2722,12 +2688,7 @@ describe('direct passthrough route-level', () => {
       const metadata = input.metadata && typeof input.metadata === 'object'
         ? (input.metadata as Record<string, unknown>)
         : {};
-      const center = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const preselected = center.preselectedRoute && typeof center.preselectedRoute === 'object'
-        ? (center.preselectedRoute as Record<string, unknown>)
-        : undefined;
+      const preselected = readRuntimeControlProjection(metadata).preselectedRoute;
       expect((preselected?.target as Record<string, unknown> | undefined)?.providerKey).toBe(providerKey);
       expect((preselected?.target as Record<string, unknown> | undefined)?.outboundProfile).toBe('openai-chat');
       return {
@@ -2892,12 +2853,7 @@ describe('direct passthrough route-level', () => {
       },
     }));
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-        ? (metadata.__rt as Record<string, unknown>)
-        : {};
-      const retryProviderKey = typeof rt.retryProviderKey === 'string'
-        ? rt.retryProviderKey
-        : undefined;
+      const retryProviderKey = readRuntimeControlProjection(metadata).retryProviderKey;
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
       const providerKey = retryProviderKey ?? (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
       return {

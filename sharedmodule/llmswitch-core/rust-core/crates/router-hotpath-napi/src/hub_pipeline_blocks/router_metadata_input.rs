@@ -208,10 +208,18 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
             );
         }
 
-        if let Some(retry_provider_key) = metadata_obj
-            .get("__rt")
-            .and_then(|v| v.as_object())
+        let runtime_control = metadata_obj
+            .get("runtime_control")
+            .and_then(|value| value.as_object());
+
+        if let Some(retry_provider_key) = runtime_control
             .and_then(|rt| rt.get("retryProviderKey"))
+            .or_else(|| {
+                metadata_obj
+                    .get("__rt")
+                    .and_then(|v| v.as_object())
+                    .and_then(|rt| rt.get("retryProviderKey"))
+            })
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())

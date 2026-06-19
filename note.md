@@ -1,3 +1,22 @@
+## 2026-06-19 MetadataCenter route-control slice verification closeout
+
+- 当前边界：不再处理 tokenrelay / parallel tool call；tokenrelay 已按最新事实视为可工作。本 slice 只验证并收口 MetadataCenter route-control 未提交改动。
+- 代码方向：
+  - `index.ts` 不再把 `preselectedRoute` / `retryProviderKey` 回写到 `metadata.__rt`，只写 MetadataCenter runtime_control。
+  - TS Hub request-stage bridge 以 `metadata.runtime_control` / MetadataCenter runtime_control 为优先 truth，并从 legacy `__rt` native projection 中剥离 route/retry 控制位。
+  - Rust router metadata / hub route reader 优先读取 `metadata.runtime_control.retryProviderKey/preselectedRoute`；legacy `__rt` 只保留兼容读取。
+  - `router-direct-protocol-boundary.spec.ts` 测试 helper 改为绑定 MetadataCenter request truth；stopless relay 正向用例通过 `runtime_control.serverToolFollowup` 激活，不恢复 flat metadata 或 `__rt` truth。
+- 验证：
+  - focused Jest：`router-direct-protocol-boundary`、`direct-passthrough-route-level`、`request-executor-attempt-state.contract`、`request-executor-preselected-route.blackbox` PASS（4 suites / 39 tests）。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS。
+  - `npm run audit:custom-payload-carriers` PASS；`__routecodex* runtime=14 files=9`，`__sse_* runtime=0`；routecodex runtime hits are guard/contract surfaces, not payload_side_channel.
+  - `npm run audit:custom-payload-carrier-owner-queryability` PASS；`routecodex unique-owner=9 ambiguous=0 missing=0 missing-verification=0`。
+  - `npm run verify:architecture-custom-payload-carrier-runtime-manifest` PASS。
+  - `npm run verify:architecture-custom-payload-carrier-containment` PASS。
+  - `git diff --check` PASS。
+- 未做/风险：
+  - 当前 worktree 有并行 stop-message/servertool-core/SSE 脏改，未跑全量 architecture-ci/build/live smoke；提交时必须只 stage MetadataCenter route-control 相关文件，排除 stop schema 与 chat SSE 改动。
+
 ## 2026-06-19 5520 chat SSE context_length_exceeded error projection fix
 
 - 症状样本：5520 `/v1/chat/completions` 非流转换日志把上游真实 `context_length_exceeded` 投成 `SSE_TO_JSON_ERROR` / `SSE_DECODE_ERROR`，样本 requestId 为 `openai-chat-token.key1-gpt-5.4-20260619T212542264-373319-4078`。
@@ -233,6 +252,19 @@
   - `provider-response-converter.ts` servertool followup 错误判定不再读 `requestSemantics.__routecodex`，只读 MetadataCenter runtime-control。
   - `MetadataCenter.attach/read` 从 `instanceof` 改为结构化 duck-type，避免 Jest/ESM 多实例或 side-by-side emit 导致 side-channel 读不到。
 - 发现并物理删除了 `src/server/runtime/http-server/metadata-center/*.js/*.d.ts` 陈旧生成残留；这些文件会抢占 `.js` import，导致旧 `instanceof` 实现复活。已加入 `verify:architecture-deleted-path` gate 防复活。
+
+## 2026-06-19 MetadataCenter migration audit continuation
+
+- 本轮只做现状审计，不改 `cli_contract.rs`，不碰用户正在改的 `stop schema` 测试目录。
+- 目前确认的 canonical truth：
+  - `request-executor-attempt-state.ts` 里 `retryProviderKey` 已写入 `MetadataCenter.runtime_control`，flat `__routecodexRetryProviderKey` 只剩删除残留；
+  - `servertool-followup-dispatch.ts` / `provider-response-converter.ts` / `servertool-adapter-context.ts` 的 active 读写都已经转向 `MetadataCenter`；
+  - `chat_node_result_semantics.rs` 和 `chat_servertool_orchestration.rs` 已经从 `runtime_control` 读 followup / stopless 语义。
+- 仍然存在的 bridge / projection 面：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` 仍会把 `MetadataCenter.runtime_control` 投影成 native `__rt`，并把 `preselectedRoute` 写进 `__rt` 供 Rust bridge 消费；
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs` 仍从 `metadata.__rt.retryProviderKey` 读取桥接值；
+  - `servertool-followup-dispatch.ts` 里还保留对 legacy `requestSemantics.__routecodex` 的清理和 `runtime_control` 合并逻辑，这是删除旧真源后的兼容清道，而不是新的 payload truth。
+- 当前判断：MetadataCenter 已经是 Hub 侧控制语义真源，但 TS -> Rust 的 `__rt` 桥接仍在，不能把这轮说成“完全无 `__rt` 兼容层”；后续如果要继续收口，需要单独决定是否连桥接投影也物理删掉，或只保留最小 native ingress projection。
 - 验证：
   - focused Jest 5 suites PASS，50 tests。
   - `npx tsc --noEmit --pretty false` PASS。
@@ -6689,3 +6721,21 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - evidence: cargo check --workspace 0 err, cargo test 53/8 (8 pre-existing), jest stopless-cli-continuation 10/10, tsc --noEmit 0 err, 7 new Rust tests PASS
 
 no_change_count 和 fail_fast 必须全在 Rust 一侧完成，TS 只能做桥接。hash 不能包含 user-controlled 字段（assistantStopText），否则状态永远无法收敛。
+
+## 2026-06-19T13:02:01.361Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M2.7-20260619T210134592-373142-3901
+- sessionId: 019ededc-bfce-7e43-a92d-b8f58e2ebe85
+- stopReason: tokenrelay 502 问题需要对比 5520/5557 配置差异才能定位根因
+- evidence: 5520 成功 + x-router-relay header；5557 失败返回 HTTP_500；直测 upstream 成功
+
+5557 已正确集成 tokenrelay 模型到 /v1/models；5520 relay 机制正常；问题在 5557 的路由配置或请求处理差异
+
+## 2026-06-19T21:18+08:00 MiniMax tool_result image 400 regression closeout
+
+- 已复核 5555 当前安装版本：`routecodex --version` 为 `0.90.3188`，`/health` 返回 `ready=true pipelineReady=true`。
+- 已验证真实 5555 relay/MiniMax Anthropic wire 样本：`/Volumes/extension/.rcc/codex-samples/openai-responses/ports/5555/minimax.key1.MiniMax-M2.7/req_1781874271648_5389744b/provider-request.json`。
+- 样本出站 URL 为 `https://api.minimaxi.com/anthropic/v1/messages`，`body.model=MiniMax-M2.7`，不是 direct / OpenAI-chat。
+- 样本中 `tool_use` 与 `tool_result` 数量均为 103；含图片占位的结果保留 `tool_result.tool_use_id=call_function_fygldaf4nc2h_1`，对应前序 `tool_use.id=call_function_fygldaf4nc2h_1`，只把图片内容裁成 `[Image omitted]`，没有丢失工具结果身份。
+- 扫描 5555 samples 命中 20 个 MiniMax/MiniMonth provider-request 保留配对的 `[Image omitted]` tool_result；`20260619T21` 后日志未再出现 `tool call result does not follow tool call` / HTTP_400，MiniMax/MiniMonth 相关请求多次 `status=200`。
+- 当前同窗口仍有 tokenrelay `HTTP_502/SSE_DECODE_ERROR`，属于下一条 provider switching/SSE 问题，不是本轮 MiniMax `invalid params, tool call result does not follow tool call (2013)` 回归。

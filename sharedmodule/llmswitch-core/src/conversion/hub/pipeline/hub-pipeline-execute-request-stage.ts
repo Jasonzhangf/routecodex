@@ -29,6 +29,19 @@ function readRuntimeMetadataControl(metadata: Record<string, unknown>): Record<s
     : {};
 }
 
+function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<string, unknown> {
+  return metadata.runtime_control && typeof metadata.runtime_control === 'object' && !Array.isArray(metadata.runtime_control)
+    ? { ...(metadata.runtime_control as Record<string, unknown>) }
+    : {};
+}
+
+function stripRouteControlProjection(runtimeControl: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...runtimeControl };
+  delete out.preselectedRoute;
+  delete out.retryProviderKey;
+  return out;
+}
+
 function readRuntimeControlFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
   const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
   if (isMetadataCenterLike(symbolCenterCandidate)) {
@@ -86,24 +99,36 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
 }): Promise<HubPipelineResult> {
   const { normalized, config, routerEngine } = args;
   const entryMode = args.entryMode ?? "request_stage";
-  const runtimeControl = readRuntimeMetadataControl(normalized.metadata);
+  const legacyRuntimeProjection = readRuntimeMetadataControl(normalized.metadata);
+  const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
   const metadataCenterRuntimeControl = readRuntimeControlFromMetadataCenter(normalized.metadata);
   const nativeTopLevelRuntimeControl = projectNativeTopLevelRuntimeControl({
-    ...runtimeControl,
+    ...legacyRuntimeProjection,
+    ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,
   });
-  const route = metadataCenterRuntimeControl.preselectedRoute
-    ?? runtimeControl.preselectedRoute
+  const mergedRuntimeControl = {
+    ...runtimeControlPayload,
+    ...metadataCenterRuntimeControl,
+  };
+  const route = mergedRuntimeControl.preselectedRoute
+    ?? legacyRuntimeProjection.preselectedRoute
     ?? routerEngine.route(normalized.payload as never, normalized.metadata as never);
+  const legacyRuntimeProjectionWithoutRouteControl =
+    stripRouteControlProjection(legacyRuntimeProjection);
   const metadata = {
     ...normalized.metadata,
-    ...nativeTopLevelRuntimeControl,
-    __rt: {
-      ...runtimeControl,
-      ...metadataCenterRuntimeControl,
+    runtime_control: {
+      ...mergedRuntimeControl,
       preselectedRoute: route,
     },
+    ...nativeTopLevelRuntimeControl,
   } as Record<string, unknown>;
+  if (Object.keys(legacyRuntimeProjectionWithoutRouteControl).length > 0) {
+    metadata.__rt = legacyRuntimeProjectionWithoutRouteControl;
+  } else {
+    delete metadata.__rt;
+  }
 
   const nativePlan = runHubPipelineLibWithNative({
     config: {

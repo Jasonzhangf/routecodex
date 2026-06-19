@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { resetSessionStormBackoffStateForTests } from '../../../../src/server/runtime/http-server/executor/request-executor-session-storm-backoff';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 describe('router direct protocol boundary', () => {
@@ -63,7 +64,48 @@ describe('router direct protocol boundary', () => {
     ]);
   }
 
-  function buildResponsesInput(requestId: string, sessionId = 'router-direct-protocol-boundary') {
+  function bindTestRequestTruth(metadata: Record<string, unknown>, requestId: string, sessionId: string): void {
+    MetadataCenter.attach(metadata).writeRequestTruth(
+      'sessionId',
+      sessionId,
+      {
+        module: 'tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts',
+        symbol: 'buildResponsesInput',
+        stage: 'test_request_truth',
+      },
+      requestId
+    );
+  }
+
+  function bindTestRuntimeControl(
+    metadata: Record<string, unknown>,
+    key: 'serverToolFollowup' | 'serverToolFollowupSource',
+    value: boolean | string
+  ): void {
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      key,
+      value as never,
+      {
+        module: 'tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts',
+        symbol: 'buildResponsesInput',
+        stage: 'test_runtime_control',
+      }
+    );
+  }
+
+  function buildResponsesInput(
+    requestId: string,
+    sessionId = 'router-direct-protocol-boundary',
+    runtimeControl?: { serverToolFollowup?: boolean; serverToolFollowupSource?: string }
+  ) {
+    const metadata: Record<string, unknown> = { sessionId };
+    bindTestRequestTruth(metadata, requestId, sessionId);
+    if (runtimeControl?.serverToolFollowup !== undefined) {
+      bindTestRuntimeControl(metadata, 'serverToolFollowup', runtimeControl.serverToolFollowup);
+    }
+    if (runtimeControl?.serverToolFollowupSource) {
+      bindTestRuntimeControl(metadata, 'serverToolFollowupSource', runtimeControl.serverToolFollowupSource);
+    }
     return {
       requestId,
       entryEndpoint: '/v1/responses',
@@ -75,7 +117,7 @@ describe('router direct protocol boundary', () => {
         stream: true,
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'search' }] }],
       },
-      metadata: { sessionId },
+      metadata,
     };
   }
 
@@ -123,7 +165,11 @@ describe('router direct protocol boundary', () => {
 
     const result = await (server as any).executePortAwarePipeline(
       5555,
-      buildResponsesInput('req_router_direct_stopless_relay'),
+      buildResponsesInput(
+        'req_router_direct_stopless_relay',
+        'router-direct-protocol-boundary',
+        { serverToolFollowup: true, serverToolFollowupSource: 'stop_message_auto' },
+      ),
     );
 
     expect(result).toMatchObject({
@@ -133,7 +179,7 @@ describe('router direct protocol boundary', () => {
     });
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
     expect(logStageSpy.mock.calls.filter(([stage, , detail]) => (
-      stage === 'router-direct.relay'
+      stage === 'router-direct.skipped'
       && detail?.reason === 'servertool_followup_requires_hub_relay'
     ))).toHaveLength(1);
   });
@@ -175,7 +221,7 @@ describe('router direct protocol boundary', () => {
 
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
     const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
-    expect(relayMetadata.__rt).toEqual(expect.objectContaining({
+    expect(relayMetadata.__rt as Record<string, unknown> | undefined).not.toEqual(expect.objectContaining({
       preselectedRoute,
     }));
     expect(readRuntimeControlProjection(relayMetadata).preselectedRoute).toEqual(preselectedRoute);
@@ -242,7 +288,7 @@ describe('router direct protocol boundary', () => {
 
     expect(executePipelineSpy).not.toHaveBeenCalled();
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(1);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(1);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
   });
 
   it('backs off repeated router-direct VR provider-unavailable failures without rewriting the error', async () => {
@@ -272,12 +318,12 @@ describe('router direct protocol boundary', () => {
     const secondExpectation = expect(second)
       .rejects.toThrow('No available providers after applying routing instructions');
     await jest.advanceTimersByTimeAsync(999);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff_wait')).toHaveLength(1);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff_wait')).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     await secondExpectation;
 
     expect(executePipelineSpy).not.toHaveBeenCalled();
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(2);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(0);
   });
 

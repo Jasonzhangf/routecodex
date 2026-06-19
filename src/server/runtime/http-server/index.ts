@@ -250,14 +250,6 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   };
 }
 
-function ensureRuntimeMetadataRecord(metadata: Record<string, unknown>): Record<string, unknown> {
-  const existingRt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? (metadata.__rt as Record<string, unknown>)
-    : {};
-  metadata.__rt = existingRt;
-  return existingRt;
-}
-
 function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
   metadata: Record<string, unknown>,
   key: K,
@@ -270,10 +262,6 @@ function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retry
     HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER,
     reason
   );
-  if (key === 'preselectedRoute' || key === 'retryProviderKey') {
-    const rt = ensureRuntimeMetadataRecord(metadata);
-    rt[key] = value;
-  }
 }
 
 function readRoutingDecisionProviderPool(

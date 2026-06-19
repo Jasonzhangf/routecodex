@@ -862,6 +862,27 @@ fn test_build_router_metadata_input_preserves_forced_provider_and_disabled_alias
 }
 
 #[test]
+fn test_build_router_metadata_input_prefers_runtime_control_retry_provider_key() {
+    let input = json!({
+        "requestId": "req-runtime-control-retry",
+        "metadata": {
+            "runtime_control": {
+                "retryProviderKey": " runtime.provider.gpt-5.5 "
+            },
+            "__rt": {
+                "retryProviderKey": " legacy.provider.gpt-5.5 "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("retryProviderKey").and_then(|v| v.as_str()),
+        Some("runtime.provider.gpt-5.5")
+    );
+}
+
+#[test]
 fn test_build_router_metadata_input_preserves_routecodex_port_routing_metadata() {
     let input = json!({
         "requestId": "req-4",

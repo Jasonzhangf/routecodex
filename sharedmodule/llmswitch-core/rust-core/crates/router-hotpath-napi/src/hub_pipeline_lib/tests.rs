@@ -176,7 +176,7 @@ fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_respons
                 "tool_choice": "auto"
             },
             "metadata": {
-                "__rt": {
+                "runtime_control": {
                     "preselectedRoute": {
                         "target": {
                             "providerKey": "primary.key1.gpt-test",
