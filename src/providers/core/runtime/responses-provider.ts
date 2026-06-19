@@ -46,7 +46,7 @@ import {
   isResponsesSseAdvisoryRateLimitsBlock
 } from './responses-sse-error-guard.js';
 
-type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
+type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: {
     requestId: string;
@@ -532,10 +532,27 @@ export class ResponsesProvider extends HttpTransportProvider {
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
     const { body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
-    const stream = await httpClient.postStream(targetUrl, body, {
+    const upstreamResult = await this.postStreamOrResponse(httpClient, targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
     }, buildProviderSseStreamConfig(context));
+    if (upstreamResult.kind === 'response') {
+      await this.snapshotPhase(
+        'provider-response',
+        context,
+        {
+          mode: upstreamResult.responseKind,
+          clientStream: true,
+          payload: upstreamResult.response.data ?? null
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context);
+      return upstreamResult.response;
+    }
+    const stream = upstreamResult.stream;
 
     const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream, {
       noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
@@ -623,10 +640,27 @@ export class ResponsesProvider extends HttpTransportProvider {
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
     const { body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
-    const stream = await httpClient.postStream(targetUrl, body, {
+    const upstreamResult = await this.postStreamOrResponse(httpClient, targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
     }, buildProviderSseStreamConfig(context));
+    if (upstreamResult.kind === 'response') {
+      await this.snapshotPhase(
+        'provider-response',
+        context,
+        {
+          mode: upstreamResult.responseKind,
+          clientStream: providerStream === true,
+          payload: upstreamResult.response.data ?? null
+        },
+        headers,
+        targetUrl,
+        entryEndpoint
+      );
+      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context);
+      return upstreamResult.response;
+    }
+    const stream = upstreamResult.stream;
 
     const captureSse = providerStream === true && shouldCaptureProviderStreamSnapshots();
     const streamForHost = captureSse
@@ -686,6 +720,30 @@ export class ResponsesProvider extends HttpTransportProvider {
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
     return this.executeSseStream(options);
+  }
+
+  private async postStreamOrResponse(
+    httpClient: ResponsesHttpClient,
+    targetUrl: string,
+    body: Record<string, unknown>,
+    headers: Record<string, string>,
+    streamConfig: {
+      timeoutMs?: number;
+      idleTimeoutMs?: number;
+      headersTimeoutMs?: number;
+    }
+  ): Promise<Awaited<ReturnType<HttpClient['postStreamOrResponse']>>> {
+    if (typeof httpClient.postStreamOrResponse === 'function') {
+      return await httpClient.postStreamOrResponse(targetUrl, body, headers, streamConfig);
+    }
+    return {
+      kind: 'stream' as const,
+      stream: await httpClient.postStream(targetUrl, body, headers, streamConfig),
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      url: targetUrl
+    };
   }
 
   private async sendSubmitToolOutputsRequest(options: {

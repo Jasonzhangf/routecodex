@@ -56,6 +56,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integra
 const { HttpTransportProvider } = await import('../../../../src/providers/core/runtime/http-transport-provider.js');
 const { HttpRequestExecutor } = await import('../../../../src/providers/core/runtime/http-request-executor.js');
 const { ResponsesProvider } = await import('../../../../src/providers/core/runtime/responses-provider.js');
+const { OAuthRecoveryHandler } = await import('../../../../src/providers/core/runtime/transport/oauth-recovery-handler.js');
 const { AnthropicProtocolClient } = await import('../../../../src/client/anthropic/anthropic-protocol-client.js');
 const { DeepSeekHttpProvider } = await import('../../../../src/providers/core/runtime/deepseek-http-provider.js');
 const { attachProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
@@ -740,6 +741,172 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(provider.__captured?.headers?.Accept).toBe('text/event-stream');
     expect(provider.__snapshotHeaders?.Accept).toBe('text/event-stream');
     expect(provider.__captured?.body?.stream).toBe(true);
+  });
+
+  test('HttpTransportProvider accepts JSON response when upstream ignores SSE request', async () => {
+    const executor = new HttpRequestExecutor({
+      post: async () => {
+        throw new Error('MUST_NOT_REISSUE_JSON_REQUEST');
+      },
+      postStream: async () => {
+        throw new Error('MUST_NOT_USE_STREAM_ONLY_PATH');
+      },
+      postStreamOrResponse: async () => ({
+        kind: 'response',
+        responseKind: 'json',
+        response: {
+          data: {
+            id: 'chatcmpl-json',
+            object: 'chat.completion',
+            choices: [
+              { index: 0, message: { role: 'assistant', content: 'json-ok' }, finish_reason: 'stop' }
+            ]
+          },
+          status: 200,
+          statusText: 'OK',
+          headers: { 'content-type': 'application/json' },
+          url: 'https://example.invalid/v1/chat/completions'
+        }
+      })
+    } as any, {
+      wantsUpstreamSse: () => true,
+      getEffectiveEndpoint: () => '/chat/completions',
+      resolveRequestEndpoint: (_request: unknown, defaultEndpoint: string) => defaultEndpoint,
+      buildRequestHeaders: async () => ({ Authorization: 'Bearer test-key-1234567890' }),
+      finalizeRequestHeaders: async (headers: Record<string, string>) => headers,
+      applyStreamModeHeaders: (headers: Record<string, string>) => ({ ...headers, Accept: 'text/event-stream' }),
+      getEffectiveBaseUrl: () => 'https://example.invalid/v1',
+      buildHttpRequestBody: (request: Record<string, unknown>) => request,
+      prepareSseRequestBody: (body: Record<string, unknown>) => { body.stream = true; },
+      getEntryEndpointFromPayload: () => '/v1/chat/completions',
+      getClientRequestIdFromContext: () => undefined,
+      wrapUpstreamSseResponse: async () => {
+        throw new Error('MUST_NOT_PARSE_JSON_AS_SSE');
+      },
+      normalizeHttpError: async (error: unknown) => error as any
+    } as any);
+
+    const result = await executor.execute({
+      model: 'gpt-5.4',
+      stream: true,
+      messages: [{ role: 'user', content: 'hi' }]
+    }, { requestId: 'req-json-over-sse', providerKey: 'tokenrelay.key1.deepseek-v4-pro' } as any);
+
+    expect((result as any).data.choices[0].message.content).toBe('json-ok');
+  });
+
+  test('ResponsesProvider streaming=always accepts JSON response when upstream ignores SSE request', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-streaming-always-json-response',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        responses: { streaming: 'always' },
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      post: async () => {
+        throw new Error('MUST_NOT_REISSUE_JSON_REQUEST');
+      },
+      postStream: async () => {
+        throw new Error('MUST_NOT_USE_STREAM_ONLY_PATH');
+      },
+      postStreamOrResponse: async () => ({
+        kind: 'response',
+        responseKind: 'json',
+        response: {
+          data: {
+            id: 'resp_json',
+            object: 'response',
+            status: 'completed',
+            output: []
+          },
+          status: 200,
+          statusText: 'OK',
+          headers: { 'content-type': 'application/json' },
+          url: 'https://example.invalid/v1/responses'
+        }
+      })
+    };
+
+    const result = await provider.sendRequestInternal({
+      model: 'gpt-5.4',
+      stream: false,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
+    });
+
+    expect((result as any).data.status).toBe('completed');
+  });
+
+  test('DeepSeek auth refresh replay accepts JSON response when retry request asked for SSE', async () => {
+    const refreshCredentials = jest.fn(async () => {});
+    const handler = new OAuthRecoveryHandler({
+      authProvider: { refreshCredentials } as any,
+      providerType: 'deepseek',
+      config: {
+        id: 'deepseek-refresh-json-over-sse',
+        type: 'openai-http-provider',
+        config: {
+          auth: { type: 'oauth', rawType: 'deepseek-account' }
+        }
+      } as any,
+      httpClient: {
+        post: async () => {
+          throw new Error('MUST_NOT_REISSUE_JSON_REQUEST');
+        },
+        postStream: async () => {
+          throw new Error('MUST_NOT_USE_STREAM_ONLY_PATH');
+        },
+        postStreamOrResponse: async () => ({
+          kind: 'response',
+          responseKind: 'json',
+          response: {
+            data: {
+              id: 'chatcmpl-refresh-json',
+              object: 'chat.completion',
+              choices: [
+                { index: 0, message: { role: 'assistant', content: 'refresh-json-ok' }, finish_reason: 'stop' }
+              ]
+            },
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+            url: 'https://example.invalid/v1/chat/completions'
+          }
+        })
+      } as any
+    });
+    const wrapUpstreamSseResponse = jest.fn(async () => {
+      throw new Error('MUST_NOT_PARSE_JSON_AS_SSE');
+    });
+    const result = await handler.tryRecoverOAuthAndReplay(
+      Object.assign(new Error('expired'), { status: 401, statusCode: 401 }),
+      {
+        targetUrl: 'https://example.invalid/v1/chat/completions',
+        body: { model: 'deepseek-v4-pro', stream: true, messages: [] },
+        headers: { Authorization: 'Bearer old' },
+        wantsSse: true
+      } as any,
+      { model: 'deepseek-v4-pro', stream: true },
+      false,
+      { requestId: 'req-refresh-json-over-sse', providerKey: 'deepseek.key1.deepseek-v4-pro' } as any,
+      async () => ({ Authorization: 'Bearer refreshed' }),
+      async (headers: Record<string, string>) => headers,
+      (headers: Record<string, string>) => ({ ...headers, Accept: 'text/event-stream' }),
+      wrapUpstreamSseResponse
+    );
+
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
+    expect((result as any).data.choices[0].message.content).toBe('refresh-json-ok');
   });
 
   test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {

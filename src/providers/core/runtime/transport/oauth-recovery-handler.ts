@@ -63,6 +63,100 @@ export class OAuthRecoveryHandler {
     }
   }
 
+  private async executeRecoveredSseReplay(options: {
+    requestInfo: PreparedHttpRequest;
+    finalRetryHeaders: Record<string, string>;
+    captureSse: boolean;
+    context: ProviderContext;
+    wrapUpstreamSseResponse: (stream: NodeJS.ReadableStream, ctx: ProviderContext) => Promise<UnknownObject>;
+    extra: Record<string, unknown>;
+    snapshotStage: string;
+  }): Promise<unknown> {
+    const {
+      requestInfo,
+      finalRetryHeaders,
+      captureSse,
+      context,
+      wrapUpstreamSseResponse,
+      extra,
+      snapshotStage
+    } = options;
+    const upstreamResult = await this.context.httpClient.postStreamOrResponse(
+      requestInfo.targetUrl,
+      requestInfo.body,
+      finalRetryHeaders
+    );
+    if (upstreamResult.kind === 'response') {
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: {
+            mode: upstreamResult.responseKind,
+            captureSse,
+            transport: 'upstream-response',
+            payload: upstreamResult.response.data ?? null,
+            ...extra
+          },
+          headers: finalRetryHeaders,
+          url: requestInfo.targetUrl,
+          entryEndpoint: requestInfo.entryEndpoint,
+          clientRequestId: requestInfo.clientRequestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
+      } catch (snapshotError) {
+        this.logNonBlockingError(`writeProviderSnapshot.${snapshotStage}.json`, snapshotError, {
+          requestId: context.requestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
+      }
+      return upstreamResult.response;
+    }
+
+    const streamForHost = captureSse
+      ? attachProviderSseSnapshotStream(upstreamResult.stream, {
+        requestId: context.requestId,
+        headers: finalRetryHeaders,
+        url: requestInfo.targetUrl,
+        entryEndpoint: requestInfo.entryEndpoint,
+        clientRequestId: requestInfo.clientRequestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId,
+        extra
+      })
+      : upstreamResult.stream;
+    const wrapped = await wrapUpstreamSseResponse(streamForHost, context);
+    if (!captureSse) {
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-response',
+          requestId: context.requestId,
+          data: {
+            mode: 'sse',
+            captureSse,
+            transport: 'upstream-stream',
+            ...extra
+          },
+          headers: finalRetryHeaders,
+          url: requestInfo.targetUrl,
+          entryEndpoint: requestInfo.entryEndpoint,
+          clientRequestId: requestInfo.clientRequestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
+      } catch (snapshotError) {
+        this.logNonBlockingError(`writeProviderSnapshot.${snapshotStage}.sse`, snapshotError, {
+          requestId: context.requestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
+      }
+    }
+    return wrapped;
+  }
+
   async tryRecoverOAuthAndReplay(
     error: unknown,
     requestInfo: PreparedHttpRequest,
@@ -141,48 +235,15 @@ export class OAuthRecoveryHandler {
       let finalRetryHeaders = await finalizeRequestHeaders(retryHeaders, processedRequest);
       finalRetryHeaders = applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
       if (requestInfo.wantsSse) {
-        const upstreamStream = await this.context.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-        const streamForHost = captureSse
-          ? attachProviderSseSnapshotStream(upstreamStream, {
-            requestId: context.requestId,
-            headers: finalRetryHeaders,
-            url: requestInfo.targetUrl,
-            entryEndpoint: requestInfo.entryEndpoint,
-            clientRequestId: requestInfo.clientRequestId,
-            providerKey: context.providerKey,
-            providerId: context.providerId,
-            extra: { retry: true, authRefresh: true }
-          })
-          : upstreamStream;
-        const wrapped = await wrapUpstreamSseResponse(streamForHost, context);
-        if (!captureSse) {
-          try {
-            await writeProviderSnapshot({
-              phase: 'provider-response',
-              requestId: context.requestId,
-              data: {
-                mode: 'sse',
-                retry: true,
-                authRefresh: true,
-                captureSse,
-                transport: 'upstream-stream'
-              },
-              headers: finalRetryHeaders,
-              url: requestInfo.targetUrl,
-              entryEndpoint: requestInfo.entryEndpoint,
-              clientRequestId: requestInfo.clientRequestId,
-              providerKey: context.providerKey,
-              providerId: context.providerId
-            });
-          } catch (snapshotError) {
-            this.logNonBlockingError('writeProviderSnapshot.sse_deepseek_retry', snapshotError, {
-              requestId: context.requestId,
-              providerKey: context.providerKey,
-              providerId: context.providerId
-            });
-          }
-        }
-        return wrapped;
+        return await this.executeRecoveredSseReplay({
+          requestInfo,
+          finalRetryHeaders,
+          captureSse,
+          context,
+          wrapUpstreamSseResponse,
+          extra: { retry: true, authRefresh: true },
+          snapshotStage: 'sse_deepseek_retry'
+        });
       }
       const response = await this.context.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
       return response;
@@ -215,47 +276,15 @@ export class OAuthRecoveryHandler {
     let finalRetryHeaders = await finalizeRequestHeaders(retryHeaders, processedRequest);
     finalRetryHeaders = applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
     if (requestInfo.wantsSse) {
-      const upstreamStream = await this.context.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-      const streamForHost = captureSse
-        ? attachProviderSseSnapshotStream(upstreamStream, {
-          requestId: context.requestId,
-          headers: finalRetryHeaders,
-          url: requestInfo.targetUrl,
-          entryEndpoint: requestInfo.entryEndpoint,
-          clientRequestId: requestInfo.clientRequestId,
-          providerKey: context.providerKey,
-          providerId: context.providerId,
-          extra: { retry: true }
-        })
-        : upstreamStream;
-      const wrapped = await wrapUpstreamSseResponse(streamForHost, context);
-      if (!captureSse) {
-        try {
-          await writeProviderSnapshot({
-            phase: 'provider-response',
-            requestId: context.requestId,
-            data: {
-              mode: 'sse',
-              retry: true,
-              captureSse,
-              transport: 'upstream-stream'
-            },
-            headers: finalRetryHeaders,
-            url: requestInfo.targetUrl,
-            entryEndpoint: requestInfo.entryEndpoint,
-            clientRequestId: requestInfo.clientRequestId,
-            providerKey: context.providerKey,
-            providerId: context.providerId
-          });
-        } catch (snapshotError) {
-          this.logNonBlockingError('writeProviderSnapshot.sse_retry', snapshotError, {
-            requestId: context.requestId,
-            providerKey: context.providerKey,
-            providerId: context.providerId
-          });
-        }
-      }
-      return wrapped;
+      return await this.executeRecoveredSseReplay({
+        requestInfo,
+        finalRetryHeaders,
+        captureSse,
+        context,
+        wrapUpstreamSseResponse,
+        extra: { retry: true },
+        snapshotStage: 'sse_retry'
+      });
     }
     const response = await this.context.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
     try {

@@ -526,13 +526,28 @@ export class HttpRequestExecutor {
       ? await this.deps.executePreparedRequest(requestInfo, context, captureSse)
       : requestInfo.wantsSse
         ? await (async () => {
-            const upstreamStream = await this.httpClient.postStream(
-              requestInfo.targetUrl,
-              requestInfo.body,
-              requestInfo.headers,
-              undefined,
-              requestInfo.abortSignal
-            );
+            const upstreamResult = typeof this.httpClient.postStreamOrResponse === 'function'
+              ? await this.httpClient.postStreamOrResponse(
+                  requestInfo.targetUrl,
+                  requestInfo.body,
+                  requestInfo.headers,
+                  undefined,
+                  requestInfo.abortSignal
+                )
+              : {
+                  kind: 'stream' as const,
+                  stream: await this.httpClient.postStream(
+                    requestInfo.targetUrl,
+                    requestInfo.body,
+                    requestInfo.headers,
+                    undefined,
+                    requestInfo.abortSignal
+                  )
+                };
+            if (upstreamResult.kind === 'response') {
+              return upstreamResult.response;
+            }
+            const upstreamStream = upstreamResult.stream;
             const businessCheckedStream = await detectProviderBusinessErrorBeforeStreaming({
               stream: upstreamStream,
               context,

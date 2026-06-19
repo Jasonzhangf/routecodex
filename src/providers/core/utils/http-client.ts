@@ -8,6 +8,7 @@ import type {
   ReadableStream as WebReadableStream,
   ReadableStreamDefaultReader
 } from 'node:stream/web';
+import { Readable } from 'node:stream';
 import type { ProviderError } from '../api/provider-types.js';
 import { DEFAULT_PROVIDER, DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 
@@ -33,6 +34,21 @@ export interface HttpResponse {
   headers: Record<string, string>;
   url: string;
 }
+
+export type HttpStreamOrResponse =
+  | {
+      kind: 'stream';
+      stream: NodeJS.ReadableStream;
+      status: number;
+      statusText: string;
+      headers: Record<string, string>;
+      url: string;
+    }
+  | {
+      kind: 'response';
+      response: HttpResponse;
+      responseKind: 'json' | 'text';
+    };
 
 /**
  * HTTP客户端配置
@@ -265,6 +281,36 @@ export class HttpClient {
     },
     signal?: AbortSignal
   ): Promise<NodeJS.ReadableStream> {
+    const result = await this.postStreamOrResponse(url, data, headers, streamConfig, signal);
+    if (result.kind === 'stream') {
+      return result.stream;
+    }
+    throw Object.assign(
+      new Error(`Upstream returned non-SSE response for streaming request: ${result.responseKind}`),
+      {
+        code: 'UPSTREAM_RESPONSE_NOT_SSE',
+        status: result.response.status,
+        statusCode: result.response.status,
+        response: result.response,
+        retryable: false
+      }
+    );
+  }
+
+  /**
+   * 发送POST请求，按真实上游响应类型返回 SSE stream 或 JSON/text response。
+   */
+  async postStreamOrResponse(
+    url: string,
+    data?: unknown,
+    headers?: Record<string, string>,
+    streamConfig?: {
+      timeoutMs?: number;
+      idleTimeoutMs?: number;
+      headersTimeoutMs?: number;
+    },
+    signal?: AbortSignal
+  ): Promise<HttpStreamOrResponse> {
     const fullUrl = this.buildUrl(url);
     const finalHeaders = this.buildHeaders({ Accept: 'text/event-stream', ...(headers || {}) });
 
@@ -353,31 +399,66 @@ export class HttpClient {
         throw err;
       }
 
+      const headersObj: Record<string, string> = {};
+      response.headers.forEach((value, key) => { headersObj[key] = value; });
+      const contentType = (headersObj['content-type'] || headersObj['Content-Type'] || '').toLowerCase();
+      if (!contentType.includes('text/event-stream')) {
+        const isJson = contentType.includes('application/json') || contentType.includes('+json');
+        const responseData = isJson ? await response.json() : await response.text();
+        detachExternalAbort();
+        return {
+          kind: 'response',
+          responseKind: isJson ? 'json' : 'text',
+          response: {
+            data: responseData,
+            status: response.status,
+            statusText: response.statusText,
+            headers: headersObj,
+            url
+          }
+        };
+      }
+
       // Convert WHATWG ReadableStream to Node.js Readable for pipeline streaming
       const body = response.body as StreamBody;
       if (body) {
         if (isNodeReadable(body)) {
-          return this.wrapStreamWithTimeouts(
-            body,
-            controller,
-            idleTimeoutMs,
-            abortWithReason,
-            detachExternalAbort
-          );
+          const stream = this.wrapStreamWithTimeouts(
+              body,
+              controller,
+              idleTimeoutMs,
+              abortWithReason,
+              detachExternalAbort
+            );
+          return {
+            kind: 'stream',
+            stream,
+            status: response.status,
+            statusText: response.statusText,
+            headers: headersObj,
+            url
+          };
         }
         if (isWebReadableStream(body)) {
           try {
-            const { Readable } = await import('node:stream');
             if (typeof Readable.fromWeb === 'function') {
               const nodeStream = Readable.fromWeb(body, { highWaterMark: 256 * 1024 });
               if (isNodeReadable(nodeStream)) {
-                return this.wrapStreamWithTimeouts(
-                  nodeStream,
-                  controller,
-                  idleTimeoutMs,
-                  abortWithReason,
-                  detachExternalAbort
-                );
+                const stream = this.wrapStreamWithTimeouts(
+                    nodeStream,
+                    controller,
+                    idleTimeoutMs,
+                    abortWithReason,
+                    detachExternalAbort
+                  );
+                return {
+                  kind: 'stream',
+                  stream,
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: headersObj,
+                  url
+                };
               }
             }
           } catch (conversionError) {

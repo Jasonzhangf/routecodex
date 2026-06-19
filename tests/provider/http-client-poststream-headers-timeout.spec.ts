@@ -58,4 +58,66 @@ describe('HttpClient.postStream headers timeout', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it('postStreamOrResponse accepts JSON when upstream ignores SSE Accept header', async () => {
+    let requestCount = 0;
+    let requestAccept = '';
+    let requestBody = '';
+    const server = http.createServer((req, res) => {
+      requestCount += 1;
+      requestAccept = String(req.headers.accept || '');
+      req.on('data', (chunk) => {
+        requestBody += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+      });
+      req.on('end', () => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json'
+        });
+        res.end(JSON.stringify({ id: 'json-over-sse', ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/stream`;
+
+    const client = new HttpClient({ baseUrl: '', timeout: 5_000 });
+
+    try {
+      const result = await client.postStreamOrResponse(url, { hello: 'world' }, {} as any);
+      expect(result.kind).toBe('response');
+      if (result.kind !== 'response') {
+        throw new Error('expected JSON response');
+      }
+      expect(result.responseKind).toBe('json');
+      expect(result.response.data).toEqual({ id: 'json-over-sse', ok: true });
+      expect(requestCount).toBe(1);
+      expect(requestAccept).toBe('text/event-stream');
+      expect(JSON.parse(requestBody)).toEqual({ hello: 'world' });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('postStream fails fast instead of wrapping JSON as a fake SSE stream', async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/stream`;
+
+    const client = new HttpClient({ baseUrl: '', timeout: 5_000 });
+
+    try {
+      await expect(client.postStream(url, { hello: 'world' }, {} as any)).rejects.toMatchObject({
+        code: 'UPSTREAM_RESPONSE_NOT_SSE',
+        status: 200
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
