@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { runtimeFlags, setRuntimeFlag } from '../../src/runtime/runtime-flags.js';
 
 const writeProviderSnapshot = jest.fn(async () => {});
@@ -68,6 +68,46 @@ function createExecutorWithPreparedSseResponse() {
   } as any;
 
   return new HttpRequestExecutor({} as any, deps);
+}
+
+function createExecutorWithPreparedJsonBodyLabelledSse() {
+  const wrapUpstreamSseResponse = jest.fn(async () => {
+    throw new Error('MUST_NOT_PARSE_JSON_AS_SSE');
+  });
+  const deps = {
+    wantsUpstreamSse: () => true,
+    getEffectiveEndpoint: () => '/v1/chat/completions',
+    resolveRequestEndpoint: (_req: any, defaultEndpoint: string) => defaultEndpoint,
+    buildRequestHeaders: async () => ({ Accept: 'text/event-stream' }),
+    finalizeRequestHeaders: async (headers: Record<string, string>) => headers,
+    applyStreamModeHeaders: (headers: Record<string, string>) => headers,
+    getEffectiveBaseUrl: () => 'https://example.test',
+    buildHttpRequestBody: () => ({ model: 'deepseek-v4-pro', stream: true, messages: [] }),
+    prepareSseRequestBody: () => {},
+    getEntryEndpointFromPayload: () => '/v1/responses',
+    getClientRequestIdFromContext: () => 'req_client_json_labelled_sse',
+    wrapUpstreamSseResponse,
+    executePreparedRequest: async () => ({
+      sseStream: Readable.from([
+        JSON.stringify({
+          id: 'chatcmpl-json-labelled-sse',
+          object: 'chat.completion',
+          choices: [
+            { index: 0, message: { role: 'assistant', content: 'prepared-json-ok' }, finish_reason: 'stop' }
+          ]
+        })
+      ]),
+      headers: { 'content-type': 'text/event-stream' },
+      status: 200,
+      statusText: 'OK'
+    }),
+    normalizeHttpError: async (error: unknown) => error
+  } as any;
+
+  return {
+    executor: new HttpRequestExecutor({} as any, deps),
+    wrapUpstreamSseResponse
+  };
 }
 
 describe('HttpRequestExecutor SSE snapshot finalization', () => {
@@ -183,5 +223,24 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
       })
     });
     expect(attachProviderSseSnapshotStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats prepared-request JSON body labelled as SSE as JSON response', async () => {
+    shouldCaptureProviderStreamSnapshots.mockReturnValue(true);
+    const { executor, wrapUpstreamSseResponse } = createExecutorWithPreparedJsonBodyLabelledSse();
+
+    const result = await executor.execute(
+      {} as any,
+      {
+        requestId: 'req_prepared_json_labelled_sse',
+        startTime: Date.now(),
+        profile: {} as any,
+        providerKey: 'tokenrelay.key1.deepseek-v4-pro',
+        providerId: 'tokenrelay'
+      } as any
+    );
+
+    expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
+    expect((result as any).data.choices[0].message.content).toBe('prepared-json-ok');
   });
 });

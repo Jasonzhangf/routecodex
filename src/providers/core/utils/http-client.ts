@@ -119,6 +119,106 @@ const peekReadableStream = async (
   return '';
 };
 
+const firstNonWhitespaceChar = (text: string): string => {
+  const trimmed = text.replace(/^\uFEFF/, '').trimStart();
+  return trimmed.charAt(0);
+};
+
+const isJsonPayloadPrefix = (text: string): boolean => {
+  const first = firstNonWhitespaceChar(text);
+  return first === '{' || first === '[';
+};
+
+const concatUint8Chunks = (chunks: Uint8Array[]): Uint8Array => {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+};
+
+type WebStreamProbeResult =
+  | { kind: 'json'; data: unknown }
+  | { kind: 'stream'; stream: Uint8ReadableStream };
+
+const probeEventStreamBodyForJson = async (
+  body: Uint8ReadableStream,
+  timeoutMs: number
+): Promise<WebStreamProbeResult> => {
+  const tee = (body as Uint8ReadableStream & {
+    tee?: () => [Uint8ReadableStream, Uint8ReadableStream];
+  }).tee;
+  if (typeof tee !== 'function') {
+    return { kind: 'stream', stream: body };
+  }
+
+  const [probeBranch, streamBranch] = tee.call(body);
+  const reader = probeBranch.getReader();
+  let timeoutId: NodeJS.Timeout | undefined;
+  try {
+    const firstRead = reader.read();
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timeoutId = setTimeout(() => resolve('timeout'), timeoutMs);
+      timeoutId.unref?.();
+    });
+    const first = await Promise.race([firstRead, timeout]);
+    if (first === 'timeout') {
+      reader.cancel().catch(() => {
+        // ignore probe cleanup
+      });
+      return { kind: 'stream', stream: streamBranch };
+    }
+    if (first.done || !first.value) {
+      reader.cancel().catch(() => {
+        // ignore probe cleanup
+      });
+      return { kind: 'stream', stream: streamBranch };
+    }
+
+    const decoder = new TextDecoder();
+    const firstText = decoder.decode(first.value, { stream: true });
+    if (!isJsonPayloadPrefix(firstText)) {
+      reader.cancel().catch(() => {
+        // ignore probe cleanup
+      });
+      return { kind: 'stream', stream: streamBranch };
+    }
+
+    const chunks: Uint8Array[] = [first.value];
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      if (next.value) {
+        chunks.push(next.value);
+      }
+    }
+    try {
+      await streamBranch.cancel();
+    } catch {
+      // ignore unused branch cleanup
+    }
+    const text = new TextDecoder().decode(concatUint8Chunks(chunks));
+    return {
+      kind: 'json',
+      data: JSON.parse(text)
+    };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore release after cancel/end
+    }
+  }
+};
+
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
     return error.stack || `${error.name}: ${error.message}`;
@@ -441,8 +541,23 @@ export class HttpClient {
         }
         if (isWebReadableStream(body)) {
           try {
+            const probed = await probeEventStreamBodyForJson(body, Math.min(250, idleTimeoutMs));
+            if (probed.kind === 'json') {
+              detachExternalAbort();
+              return {
+                kind: 'response',
+                responseKind: 'json',
+                response: {
+                  data: probed.data,
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: headersObj,
+                  url
+                }
+              };
+            }
             if (typeof Readable.fromWeb === 'function') {
-              const nodeStream = Readable.fromWeb(body, { highWaterMark: 256 * 1024 });
+              const nodeStream = Readable.fromWeb(probed.stream, { highWaterMark: 256 * 1024 });
               if (isNodeReadable(nodeStream)) {
                 const stream = this.wrapStreamWithTimeouts(
                     nodeStream,

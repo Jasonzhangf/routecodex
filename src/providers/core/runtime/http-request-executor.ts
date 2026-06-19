@@ -42,6 +42,7 @@ const logHttpRequestExecutorNonBlockingError = (
 };
 
 const MAX_SSE_BUSINESS_ERROR_PEEK_BYTES = 64 * 1024;
+const MAX_STREAM_JSON_PEEK_BYTES = 1024 * 1024;
 const PROVIDER_REQUEST_INFO_LOCAL_MARKER = Symbol.for('routecodex.provider.requestInfo');
 
 type ProviderRequestInfoLocalMarker = {
@@ -89,6 +90,73 @@ function parseFirstSseDataPayload(frame: string): UnknownObject | undefined {
   } catch {
     return undefined;
   }
+}
+
+function startsWithJsonPayload(text: string): boolean {
+  const trimmed = text.replace(/^\uFEFF/, '').trimStart();
+  const first = trimmed.charAt(0);
+  return first === '{' || first === '[';
+}
+
+async function splitJsonBodyFromReadableStream(
+  stream: NodeJS.ReadableStream
+): Promise<
+  | { kind: 'json'; data: unknown }
+  | { kind: 'stream'; stream: NodeJS.ReadableStream }
+> {
+  const asyncIterable = stream as unknown as AsyncIterable<Buffer | string | Uint8Array>;
+  if (!asyncIterable || typeof asyncIterable[Symbol.asyncIterator] !== 'function') {
+    return { kind: 'stream', stream };
+  }
+
+  const iterator = asyncIterable[Symbol.asyncIterator]();
+  const buffered: Array<Buffer | string | Uint8Array> = [];
+  const first = await iterator.next();
+  if (first.done) {
+    return { kind: 'stream', stream: Readable.from([]) };
+  }
+  buffered.push(first.value);
+  const firstText = typeof first.value === 'string'
+    ? first.value
+    : Buffer.from(first.value).toString('utf8');
+  if (!startsWithJsonPayload(firstText)) {
+    async function* replay(): AsyncGenerator<Buffer | string | Uint8Array> {
+      for (const chunk of buffered) {
+        yield chunk;
+      }
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) {
+          return;
+        }
+        yield next.value;
+      }
+    }
+    return { kind: 'stream', stream: Readable.from(replay()) };
+  }
+
+  let bufferedBytes = Buffer.byteLength(firstText, 'utf8');
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
+      break;
+    }
+    buffered.push(next.value);
+    bufferedBytes += Buffer.byteLength(
+      typeof next.value === 'string' ? next.value : Buffer.from(next.value)
+    );
+    if (bufferedBytes > MAX_STREAM_JSON_PEEK_BYTES) {
+      throw Object.assign(
+        new Error('UPSTREAM_JSON_BODY_TOO_LARGE_FOR_STREAM_PROBE'),
+        { code: 'UPSTREAM_JSON_BODY_TOO_LARGE_FOR_STREAM_PROBE', statusCode: 502, status: 502 }
+      );
+    }
+  }
+
+  const bodyText = buffered
+    .map((chunk) => typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+    .join('');
+  return { kind: 'json', data: JSON.parse(bodyText) };
 }
 
 async function detectProviderBusinessErrorBeforeStreaming(args: {
@@ -607,8 +675,52 @@ export class HttpRequestExecutor {
       const sseStream = responseRecord?.sseStream;
       if (sseStream && typeof (sseStream as NodeJS.ReadableStream).pipe === 'function') {
         const upstreamStream = sseStream as NodeJS.ReadableStream;
+        const probedPreparedBody = await splitJsonBodyFromReadableStream(upstreamStream);
+        if (probedPreparedBody.kind === 'json') {
+          const jsonResponse = {
+            ...responseRecord,
+            data: probedPreparedBody.data,
+            status:
+              typeof responseRecord?.status === 'number'
+                ? responseRecord.status
+                : 200,
+            statusText:
+              typeof responseRecord?.statusText === 'string' && responseRecord.statusText.trim()
+                ? responseRecord.statusText
+                : 'OK',
+            headers:
+              responseRecord?.headers && typeof responseRecord.headers === 'object'
+                ? responseRecord.headers
+                : {}
+          };
+          try {
+            await writeProviderSnapshot({
+              phase: 'provider-response',
+              requestId: context.requestId,
+              data: jsonResponse,
+              headers: requestInfo.headers,
+              url: requestInfo.targetUrl,
+              entryEndpoint: requestInfo.entryEndpoint,
+              clientRequestId: requestInfo.clientRequestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId,
+              metadata: readProviderSnapshotMetadata(context)
+            });
+          } catch (snapshotError) {
+            logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-response.json.prepared', snapshotError, {
+              requestId: context.requestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
+            });
+          }
+          const profileBusinessError = this.deps.resolveBusinessResponseError?.(jsonResponse, context);
+          if (profileBusinessError) {
+            throw profileBusinessError;
+          }
+          return jsonResponse;
+        }
         const businessCheckedStream = await detectProviderBusinessErrorBeforeStreaming({
-          stream: upstreamStream,
+          stream: probedPreparedBody.stream,
           context,
           resolveBusinessResponseError: this.deps.resolveBusinessResponseError
         });
