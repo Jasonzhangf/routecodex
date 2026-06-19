@@ -1,3 +1,27 @@
+## 2026-06-19 5520 GPT forwarder priority update
+
+- Runtime truth updated in `~/.rcc/config.toml`: both `fwd.paid.gpt-5.4` and `fwd.paid.gpt-5.4-mini` now order paid GPT targets as `asxs > 1token > XL > cc`.
+- Verification: `routecodex config validate` PASS; `routecodex restart --port 5520` completed; `curl http://127.0.0.1:5520/health` returned `ready=true pipelineReady=true version=0.90.3171`.
+- Live evidence after restart: 5520 log shows a real request routed to `1token.key1.gpt-5.4-mini.gpt-5.5`; synthetic minimal probe still failed before useful VR evidence and is not counted as selection proof.
+
+## 2026-06-19 5520 default direct runtimeKey visibility root cause
+
+- 在线真相已锁：
+  - `~/.rcc/config.toml` 中 `gateway_priority_5520.routing.default.targets = ["fwd.paid.gpt-5.4-mini", "fwd.minimax.MiniMax-M3"]`，所以 5520 default 是多候选，不是单候选。
+  - `~/.rcc/log/config.toml/ports/5520/server-5520.log` 与 `~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260619T113755819-369238-4521.json` 证明 live 失败发生在 router-direct owner 内，错误是 `Provider not found for runtimeKey: asxs.crsa`，先于任何 provider-switch。
+- Native bootstrap 真相：
+  - `bootstrapProvidersWithNative(...)` 对 `~/.rcc/provider/asxs/config.v2.toml`（auth alias=`crsa`）产出的 `runtimeEntries` 只有两段 runtime key：`asxs.crsa`，不是 `asxs.crsa.gpt-5.4-mini`。
+  - 5520 live virtual-router 命中的 providerKey 是三段：`asxs.crsa.gpt-5.4-mini`。
+- 本地最小复现：
+  - `RouteCodexHttpServer.isProviderVisibleInMetadataScope('asxs.crsa.gpt-5.4-mini', {allowedProviders:['asxs.crsa.gpt-5.4-mini']}) === true`
+  - 但同 metadata 下 `isProviderVisibleInMetadataScope('asxs.crsa', ...) === false`
+  - 这会让 direct path 在成功解析到两段 runtime key / handle 前就把 `asxs.crsa` 判成“不可见”，后续落成 `Provider not found for runtimeKey: asxs.crsa`。
+- 最小 owner 修复：
+  - `src/server/runtime/http-server/index.ts:isProviderVisibleInMetadataScope(...)` 现在允许反向匹配：当 allowed provider 是模型级三段 key 时，对应的两段 alias runtime key 也视为可见（`providerId.startsWith(runtimeKey + '.')`）。
+- 已验证：
+  - `tests/server/runtime/http-server/provider-binding-resolution.spec.ts` 新增红测先红后绿，锁“两段 alias runtime key 在三段 allowedProviders 下仍可见”。
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts -t "5520 default mixed-protocol backup relays into Hub after first direct provider fails"` 继续 PASS，并且日志证明先 `[provider-switch]` 再 200。
+
 ## 2026-06-19 SSE body wrapper custom semantics removal slice
 
 - 当前 slice 目标：按 MetadataCenter/internal-payload 规则清理 response SSE wrapper 自定义语义，禁止 normal response body 上的 `sseStream` 驱动 SSE 或泄给客户端；SSE stream 只能走 `PipelineExecutionResult.sseStream` 这种内部执行结果 side-channel，forceSSE JSON bridge 只消费标准 Responses/chat JSON。
@@ -6179,3 +6203,328 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
   - `npm run verify:servertool-rust-only` PASS
   - `git diff --check` PASS
 - 未提交范围说明：`tests/fixtures/goal-request-user-input-real-samples/runs/**` 是本地 replay 输出产物，当前只被 note 引用，未被测试/脚本消费，不纳入提交。
+
+## 2026-06-19 provider 429 reroute root-cause slice
+
+- 线上 5555 已确认运行版本 `0.90.3168`，不是旧包残留。
+- 新锁根因：`src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts` 会先算出 `baseExclusionPlan`，但随后又用 native retry policy 的 `excludeCurrentProvider` 重新构造 `exclusionPlan`；当 native 返回 `preserve_existing_policy` 时，会把前面已经成立的 `excludedCurrentProvider=true` 清零。
+- 直接后果：non-stream recoverable 429/503 等虽然前面已判定应排除当前 provider，但执行计划层仍可能掉回 same-provider / 提前终止。
+- 已修：`exclusionPlan` 改为保留 `baseExclusionPlan.excludedCurrentProvider || nativeExecutionPolicy.excludeCurrentProvider`，禁止 native preserve 分支把 base exclusion 覆盖掉。
+- 新红测/绿测：
+  - `tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts` 新增 `HTTP_429_2056 + alternative candidate + non-stream` case，断言 `exclude_and_reroute + provider_backoff_then_reroute`。PASS。
+  - `tests/server/runtime/request-executor.single-attempt.spec.ts -t "retries and reroutes when converted response returns status 429 without error envelope"` PASS，证明执行器层消费到 reroute。
+- 仍待继续：`empty result` / `upstream_stream_incomplete` / `fetch failed` 为何还可能在池未耗尽前直接回客户端，要继续顺执行链定位。
+
+- 新发现：`tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts` 与 `tests/server/runtime/http-server/executor/request-executor-cross-pool-fallback.red.spec.ts` 中关于“no explicit routePool” 的 NEG case 现已红。
+- 红因不是实现回归，而是测试期望与当前 contract 冲突：标题写“does not infer fallback routePool from pool when explicit routePool is missing”，但断言却要求 `retry_next_attempt`。按现 contract（executor 不得从 `pool` 推断 `routePool`），这种输入只能 `resolved`，不能假设仍有候选。
+- 这也解释了为什么部分白盒测试长期测不到 live 问题：很多旧夹具只喂 `routingDecision.pool`，没有喂真实主线 contract 的 `routingDecision.routePool`。
+
+- 新收口：`resolveRequestExecutorPipelineAttempt(...)` 现在对 `excludedProviderKeys` 命中的 target 增加 fail-fast contract：若 `initialRoutePool` 为空且当前 `routePoolForAttempt` 也为空（即 VR 重选了 excluded provider，但没有 explicit routePool 真值），直接抛 `ERR_EXCLUDED_PROVIDER_RESELECTED_MISSING_ROUTE_POOL`，不再默默返回 `resolved`。
+- 对应测试已改成 contract 形态：
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts` 的 no-explicit-routePool case 现断言 fail-fast；
+  - `tests/server/runtime/http-server/executor/request-executor-cross-pool-fallback.red.spec.ts` 的 no-explicit-routePool NEG case 现断言 fail-fast。
+- focused verification:
+  - excluded-provider reselection + cross-pool fallback 2 suites PASS (10 tests)
+  - retry-execution-plan + request-executor.single-attempt focused PASS
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+
+## 2026-06-19 same-port different-session split audit
+
+- Jason 新补充的现象已在代码上找到直接解释，不是“同端口随机飘”：
+  - `src/server/runtime/http-server/executor/request-executor-request-state.ts` 在请求入口就会调用 `resolveSessionStormBackoffScopes(initialMetadata)`。
+  - `src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts` 会按 `session:<id>` / `conversation:<id>` / `workdir:<path>` / `daemon:<id>` / `clientType:<type>` / `anonymous` 建立 scope。
+  - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts` 在 provider.send / retryable response-processing 失败时，只要 `isSessionStormBackoffCandidate(error)` 为真，就会对这些 scope 记回退。
+- 当前 `isSessionStormBackoffCandidate(error)` 过宽：
+  - 429 / 502 / 503 / 504；
+  - `PROVIDER_NOT_AVAILABLE` / `ERR_NO_PROVIDER_TARGET`；
+  - `fetch failed` / `all providers unavailable` / `request timeout`；
+  - 甚至只要 message 非空，最后 `return Boolean(normalized)` 也会命中。
+- 直接后果：
+  - 同一个 5555 端口下，不同 session/conversation/workdir 会累计各自的 `session_storm` backoff；
+  - 一个 session 持续正常，另一个 session 一直被 429/backoff 拖住，在当前设计下是“可预期行为”，不是单纯上游随机。
+- 这条状态机和 Jason 要求的“provider error 三次 -> provider 出池冷却半小时 -> 池耗尽前继续切 provider/default pool”不是一回事；当前实现把大量 provider 错误混进了 session 级阻塞，极可能干扰真实 provider pool 行为。
+- 下一步要先补红测锁两件事：
+  - provider recoverable errors（429/503/fetch failed 等）不能错误地变成 session-level storm truth，或至少不能先于 provider pool failover 生效；
+  - provider pool 耗尽 / default pool / last-default-provider / singleton backoff contract 必须独立于 session storm 机制验证。
+
+## 2026-06-19 provider-vs-session error boundary architecture lock
+
+- 按 Jason 最新要求，不做局部补丁；先把 provider error / session storm 作为全局唯一策略分层锁进架构真源。
+- 已更新文档真源：
+  - `docs/design/provider-failure-policy-ssot.md`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/verification-map.yml`
+- 新收口语义：
+  - provider availability / quota / upstream transport / pool exhaustion 属于 provider/server truth；
+  - session storm 只允许 session-local deterministic bad state；
+  - `429/502/503/504`、`fetch failed`、`PROVIDER_NOT_AVAILABLE`、`ERR_NO_PROVIDER_TARGET` 等不得进入 `session_storm`；
+  - `session_storm` 不得拥有 provider health、provider cooldown、provider exclusion、default-pool fallback、route exhaustion 语义。
+- function-map 新增 `error.session_storm_boundary` owner，强制把 session storm 主线和 provider failure 主线拆开。
+- 当前还没宣称代码闭环；下一步是按这个新 owner contract 补红测，再删错误 writer / 错误 candidate 判定。
+
+## 2026-06-19 session-storm boundary first code closeout
+
+- 已先做一轮红测，把旧错误语义直接翻红：
+  - generic surfaced error 不应再是 session storm candidate；
+  - `HTTP_429` / `PROVIDER_NOT_AVAILABLE` / `provider_status_2056` / `fetch failed` 不应再是 session storm candidate；
+  - hub routing 在 provider send 前抛 `PROVIDER_NOT_AVAILABLE` 时，不应记录 `request.session_storm_backoff.recorded`。
+- 代码收口：
+  - `src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts`
+    - `isSessionStormBackoffCandidate(...)` 现在只保留 session-local deterministic bad state：
+      - `CLIENT_TOOL_ARGS_INVALID`
+      - deterministic malformed response contract errors
+    - provider availability / quota / upstream transport / known provider errors 全部退出 session storm。
+- 测试对齐：
+  - `tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts`
+  - `tests/server/runtime/http-server/request-executor.spec.ts`
+  - 同时把这组旧测试中对 flat `sessionId/conversationId` 直接形成 scope 的错误假设改回 MetadataCenter 收口后的真相（无 request truth 时只剩 workdir / daemon / clientType / anonymous）。
+- 已验证：
+  - focused Jest PASS：
+    - `tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts`
+    - `tests/server/runtime/http-server/request-executor.spec.ts`
+    - 匹配用例：`session storm|provider-unavailable|provider_status_2056|generic application errors|hub routing fails before provider send`
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+  - `npm run render:architecture-wiki-pages` PASS
+  - `npm run verify:architecture-mainline-manifest-sync` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+- 当前结论：
+  - provider availability 已从 session storm 第一层主线退出；
+  - 剩余还要继续锁的是 provider/server 级三次错误出池冷却、default pool fallback、default 最后一个 provider 不移除、singleton 阻塞等待。
+
+## 2026-06-19 stopless MetadataCenter bound-center hotfix
+
+- 线上 5555 新报错：
+  - `[convert.bridge] error {"message":"MetadataCenter runtime_control.stopless writer requires a bound MetadataCenter"}`
+- 根因锁定：
+  - `sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts` 的 stopless writer 不是通过 `MetadataCenter.read(...)`，而是直接要求目标对象上已有 `Symbol.for('routecodex.metadataCenter')` binding。
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts -> buildServerToolAdapterContext(...)` 某些响应 convert 路径会传入未绑定 center 的 metadata bag；此时 adapter context 是一个新对象，但没有 bound center，stopless writer 直接 fail-fast。
+- 最小修复：
+  - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+    - 若输入 metadata 已有 `MetadataCenter`，继续 bind 到 `baseContext`；
+    - 若没有，则显式 `MetadataCenter.attach(baseContext)`，保证 adapter context 始终带 bound center。
+- 新增 focused 锁：
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+    - 新增 `binds a fresh MetadataCenter onto the adapter context when input metadata has no bound center`
+- 已验证：
+  - focused Jest PASS：
+    - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+    - `tests/server/runtime/http-server/executor/provider-response-converter.goal-followup-http400.spec.ts`
+    - `tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts`
+    - `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts`
+  - `npx tsc --noEmit --pretty false` PASS
+  - `git diff --check` PASS
+- 边界说明：
+  - 这是 bound-center hotfix，只保证 stopless writer 不再因 adapterContext 缺 center 直接炸；
+  - 还没做 build/install/live 5555 复放，不宣称线上闭环完成。
+
+## 2026-06-19 request-executor provider-pool blackbox harness drift
+
+- 继续锁 provider pool contract 时，`tests/server/runtime/http-server/request-executor.spec.ts` 里 5 条 targeted 黑盒并不都在测真实业务语义，当前已定位 2 类 harness 漂移：
+  - `RED: recoverable 429 must continue to later pools before failing when default still has candidates` 实际命中了真实模块 `src/modules/llmswitch/bridge/native-exports.ts` 的 `native-failure-policy not available`，说明顶层 `jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', ...)` 没有覆盖到这一路执行依赖；
+  - `A1/A2/A3` singleton block 用例的成功分支只返回 `{ status: 200, body: { id, object:'response', status:'completed' } }` 或空 `providerPayload`，在当前 response contract 下会被判成 `Upstream returned empty assistant payload: responses status=completed but output text/tool_calls are empty`，并不是 provider pool 行为失败。
+- 新规则：
+  - 这些黑盒用例必须喂“当前主线最小合法 provider success shape”，不能再用过时 `completed + empty output` 夹具；
+  - 对 provider.send 失败重试逻辑的黑盒，如果 native retry policy mock 不能稳定接管，就要改为显式 spy/replace 当前模块导出，不能只靠文件顶部的 `unstable_mockModule` 假定会命中。
+
+## 2026-06-19 G3 primary_exhausted -> default_pool executor drop root cause
+
+- 新增 executor 黑盒后已锁真红，不是测试问题：
+  - `provider.primary_exhausted_to_default_pool.applied` 没有真正驱动下一轮命中 default pool；
+  - 下一轮 `pipeline.execute()` 读到的 `metadata.allowedProviders` 仍是 `undefined`。
+- 根因在 host executor 自己：
+  - `src/server/runtime/http-server/request-executor.ts` 的 G3 分支只写了当前轮局部变量 `metadataForAttempt.allowedProviders = [...plan.defaultPoolTargets]`；
+  - 但下一轮 `prepareRequestExecutorAttemptState(...)` 是基于 `initialMetadata` 重新 `decorateMetadataForAttempt(...)`，不会复用上一轮的 `metadataForAttempt`；
+  - 所以 default-pool plan 在 `continue` 之后被丢失，`allowedProviders` 根本没传到下一次 hub pipeline。
+- 修复方向已经明确：
+  - 必须把 G3 default-pool carry 写回 request-lifetime truth（至少 `initialMetadata.allowedProviders`），或引入唯一 retry-state carrier；
+  - 不能只写 attempt-local metadata。
+
+## 2026-06-19 default-pool singleton exhaustion infinite-wait closeout
+
+- 新红测 `default-pool singleton exhaustion must eventually stop instead of infinite cooldown wait` 已证实 host executor 存在无限 wait：default pool 只有 1 个 provider 且持续 recoverable exhausted 时，`provider.route_pool_cooldown_wait` 会一直 `continue`，不会自然抛错。
+- 根因：
+  - `src/server/runtime/http-server/request-executor.ts` 的 singleton pool exhaustion 分支每次都会：
+    - `excludedProviderKeys.clear()`
+    - `allowPoolExhaustedBackoffBeyondAttemptBudget = true`
+    - `continue`
+  - 但没有任何 singleton cooldown wait 次数上限；因此 default-pool singleton recoverable exhaustion 会无限循环。
+- 已修：
+  - request executor 本地新增 `singletonRoutePoolCooldownWaitAttempts` 预算；
+  - `provider.route_pool_cooldown_wait` 最多 3 次，超过后记录 `provider.route_pool_cooldown_wait.exhausted` 并显式抛 `lastError ?? pipelineError`；
+  - G3 default-pool carry 同时写回 `initialMetadata.allowedProviders`，确保 default pool 计划真正进入下一轮 attempt。
+- 已绿的关键 contract：
+  - `default-pool singleton exhaustion eventually stops instead of infinite cooldown wait`
+  - `G3: primary exhausted reroutes into default pool before surfacing provider-not-available`
+  - `G3: does not surface client error before default pool is also exhausted`
+- 剩余 focused 回归里又暴露多条旧测试合同漂移，但这些不再是 infinite loop 根因；需逐条按当前 retry policy/response contract 对齐。
+
+## 2026-06-19 XLC key1 5555 routing investigation
+
+- User question: why `XLC.key1.glm-5.2` is not attempted on 5555 even though priority is above `XLC.key2.deepseek-v4-pro`.
+- Runtime truth checked: `~/.rcc/config.toml` 5555 coding/thinking/longcontext priority targets are `XLC.key1.glm-5.2` then `XLC.key2.deepseek-v4-pro`; tools/search/web_search routes do not include XLC. `~/.rcc/provider/XLC/config.v2.toml` sets `glm-5.2 maxContext=200000`, `deepseek-v4-pro maxContext=1048576`; key1 auth uses `${XLD_API_KEY}`.
+- Version truth: `routecodex --version` and install/current are `0.90.3171`, but live 5555 `/health` and samples are `0.90.3168`; current 5555 is not latest installed runtime.
+- Live log truth: active 5555 log is `~/.rcc/log/config.toml/ports/5555/server-5555.log`, not only `~/.rcc/logs/server-5555.log`.
+- Evidence against “key1 never attempts”: provider stats for PID 36370 show `XLC.key1.glm-5.2 requestCount=19 errorCount=1 lastRequestAt=2026-06-19T01:15:02Z`; logs show successful key1 hits at 09:10:12 longcontext, 09:10:31 coding, 09:10:37 longcontext, and earlier.
+- Evidence for observed key2 behavior: after roughly 09:18, longcontext/coding samples route directly to `XLC.key2.deepseek-v4-pro` with `attempts=1`; examples include 09:18:06, 09:18:21, 09:20:32, 09:21:12, 09:24:54. Many have prompt usage around 143k-228k and longcontext reason.
+- Current likely cause: priority is applied after eligibility/health/context checks; `glm-5.2` has smaller configured context (200k) than `deepseek-v4-pro` (1048576), and key1 also has historical 429/ECONNRESET/model-format failures. Therefore key2 can be selected without first attempting key1 when key1 is not eligible/available for the request.
+- Separate unrelated live issue observed: several XLC key2 responses fail in conversion with `MetadataCenter runtime_control.stopless writer requires a bound MetadataCenter`; this explains failed client turns but not initial provider selection.
+## 2026-06-19 request-executor terminal-unrecoverable reroute contract fix
+
+- 当前 slice 目标：修正 request-executor 对 terminal `401/403 unrecoverable + route pool 仍有备选 provider` 的错误直返；真实契约应是先切下一个 provider，只有池耗尽后才把错误投给客户端。
+- 根因锁定：
+  - `resolveProviderRetryExclusionPlan(...)` 已经会对 unrecoverable/current provider 产生 exclusion；
+  - 但 `resolveProviderRetryExecutionPlan(...)` 用 `hasTerminalAlternativeCandidate = exclusionPlan.excludedCurrentProvider && hasAlternativeCandidate` 判断 terminal reroute；
+  - 该判断依赖“已排除后的状态”，导致 `401/403` 在进入 terminal unrecoverable reroute 判定前就因为 `excludedCurrentProvider=false` 被 `shouldDirectReturnUnrecoverableWithoutForcedExclusion(...)` 提前直返。
+- 最小修复：
+  - terminal alternative 判定改为基于 `classification in {unrecoverable, periodic_recovery}` 与 `hasAlternativeCandidate` 的组合真相，而不是只看 `exclusionPlan.excludedCurrentProvider`。
+  - 同时把 singleton 429 focused test 的 pipeline 调用次数从 3 调整到 4，和当前有限等待契约一致：首轮成功选中 provider -> provider 429 -> reroute 回报 unavailable/cooldown wait -> wait 后再次 route + provider success。
+- 新增锁定事实：
+  - `request-executor-pipeline-attempt.ts` 之前只读取 `routingDecision.routePool`，没有读取项目现有广泛使用的 `routingDecision.pool`；
+  - 这会让 failover / excluded-provider reselection / terminal unrecoverable reroute 在真实样本下误判“没有 alternative provider”，即使 VR 已经给了 `pool`。
+  - 已按主线唯一 builder 收口为：`routePool` 优先，缺失时读取 `pool`，避免 request-executor 主线再被字段名漂移打断。
+
+## 2026-06-19 XLC glm-5.2 context correction
+
+- Correction from Jason verified against official Z.AI docs: `glm-5.2` context length is 1M, not 200K. Official docs show `Context Length: 1M` and Quick Start uses model `glm-5.2`.
+- Runtime config defect found: `~/.rcc/provider/XLC/config.v2.toml` currently has `[provider.models."glm-5.2"] maxContext = 200000`. This stale limit can make VR classify key1 as risky/overflow for longcontext requests and prefer `XLC.key2.deepseek-v4-pro` after context eligibility filtering, despite key1 having higher priority.
+- Earlier note saying key1 context may be 200K is superseded by this verified correction.
+
+- 继续 provider-pool focused pack。发现 request-executor helper snapshot 还有第二处陈旧断言：`.` + required toolChoice 当前真实返回 null，非 responses_missing_required_tool_call。准备同步改为 toBeNull 后复跑 focused Jest。
+- focused Jest 第三处 helper snapshot drift：tests/server/runtime/http-server/request-executor.spec.ts:695 期望对象，真实返回 null。继续按真实 helper 契约收口。
+- focused Jest 新最后红点：tests/server/runtime/http-server/request-executor.spec.ts:794 旧 helper expectation 仍与真实返回 null 不一致。继续白盒收口。
+- request-executor helper snapshot 3-way split 已按文件实段收口：reasoning-only => null；chat stop plain content with required tools => null；responses required tools + plain continue text => missing_required_tool_call。待 focused Jest 复核。
+- focused Jest 仅剩最后一处 helper drift：tests/server/runtime/http-server/request-executor.spec.ts:951。准备按真实返回 null 收口。
+- focused Jest 新唯一红点已切换：helper drift 已清；现剩 request-executor.spec.ts:1626 旧白盒调用未提供 classification，真实 contract 现在 fail-fast 抛 provider failure classification missing。准备同步测试。
+- 5520 live 回归：同一 provider asxs.crsa.gpt-5.4 连续失败且无 provider-switch 日志。优先审计 route pool 是否单元素，还是 executor classification / switch telemetry 未命中。
+
+- 2026-06-19 live 5520 failover audit
+- Added router-direct blackbox test for narrowed decision.pool + full decision.routePool; expecting current behavior to expose whether direct retry loses full routePool chain.
+- Live config fact: ~/.rcc/config.toml gateway_priority_5520 longcontext targets only fwd.paid.gpt-5.4; inner provider alternatives live inside forwarder targets asxs -> 1token -> XL -> cc.
+- Live symptom reproduced via curl on 5520 /v1/responses: HTTP 502 Upstream provider error on 2026-06-19 10:18 local log time, so direct path still projects error before expected pool failover.
+
+## 2026-06-19 direct returned-502 blackbox slice
+
+- Jason 要求继续补黑盒，不信白盒。
+- 已新增 HTTP 黑盒：router-direct 首 provider 返回 `{status:502,data:{error...}}` 时，必须先走 unified error chain/provider-switch，再命中第二 provider 返回 200；禁止直接把 upstream error 回给客户端。
+- 同时在 `router-direct-pipeline.ts` 收口 direct success/failure 边界：返回型 `429/5xx` 不再当 success，统一提升为 provider error 交给现有 `onProviderError` + direct reroute consumer。
+
+- 安装链路第一次轮询无回执，已中断改为 `bash -x scripts/install-global.sh` 抓明确步骤，避免空等。
+
+- 在线版本仍是 0.90.3174；当前阻塞是 install-global 重构建链尚未跑完，不是修复代码未落地。
+
+- Jason 明确要求：不再解释，直接 build -> install:global -> restart -> online curl/log 复核。
+
+- 新锁定一条更贴近线上的黑盒：provider 返回 SDK 包装形态 `response.status=502`，router-direct 必须先 provider-switch 再 200。
+
+- 第三条黑盒（SDK 包装 `response.status=502`）已绿；开始重新 build/install/restart/online replay。
+
+- 第二轮 install:global 无回执且未落盘，已中断并切换到 bash -x 安装跟踪。
+
+## 2026-06-19 5520 default direct body-error reroute root cause
+
+- 11:07 live 5520 is now on version 0.90.3178, so not an old install issue.
+- Evidence split: search/longcontext/coding routes now log [router-direct.send] + [provider-switch] and reroute on asxs 503, but default route still fails client-visible with no router-direct.send/provider-switch log.
+- Verified code path gap: responses-provider direct JSON path calls reportResponsesFailureIfNeeded(response, context) after httpClient.post(). If upstream returns transport 200 with embedded Responses error body (e.g. response.data.error or response.data.status=failed), current detection can miss it, and reportResponsesFailureIfNeeded only emits provider error without throwing. Result: router-direct treats embedded error body as success and never enters onProviderError/decideDirectRouterRetry.
+- Next fix slice: make detectResponsesFailure unwrap response.data/body wrappers and make reportResponsesFailureIfNeeded throw normalized failure after emit; add blackbox test for router-direct default-like returned 200 + data.error shape -> provider switch before client-visible error.
+
+## 2026-06-19 5520 default routePool online truth audit (in progress)
+
+- 5520 config truth rechecked from `~/.rcc/config.toml`:
+  - `gateway_priority_5520.routing.default.targets = ["fwd.paid.gpt-5.4-mini", "fwd.minimax.MiniMax-M3"]`
+  - so default is not single-candidate config.
+- `fwd.minimax.MiniMax-M3` forwarder truth:
+  - protocol=`anthropic`
+  - only target is `minimax / MiniMax-M3`
+  - meaning the live 5520 default pool is mixed-protocol: first tier can direct `/v1/responses`, backup tier needs relay.
+- `extractProviderKeysForRoutingGroup(...)` currently expands routing-group visibility to provider-id scope only (`asxs`, `1token`, `XL`, `cc`, `minimax`), so `allowedProviders` should not by itself hide `minimax.key1.MiniMax-M3`.
+- Live 5520 log evidence for default requests (`11:02:52`, `11:07:18`, `11:23:23`) shows only:
+  - request started
+  - `[virtual-router-hit] default/... -> asxs.crsa.gpt-5.4-mini.gpt-5.4-mini reason=default:route-selected`
+  - immediate `failed: Upstream provider error`
+- Critically absent for those same requests:
+  - no `router-direct.entry`
+  - no `router-direct.send.start`
+  - no `router-direct.send.error`
+  - no `router-direct.relay`
+  - no `router-direct.failed_no_relay`
+  - no `[provider-switch]`
+- Therefore the current live failure is earlier than the unified retry policy itself: default requests are not completing the normal router-direct logging/decision path that search/coding/longcontext do complete.
+- Next slice: reproduce this exact default mixed-protocol shape in focused Jest around `executePortAwarePipeline` / router-direct boundary, prove where the path exits before `router-direct.entry/send.error`, then fix the unique owner.
+- Focused blackbox correction on `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`:
+  - initial red result (`ERR_NO_PROVIDER_TARGET`) was caused by the test wiring relay to `hubPipeline.execute` instead of the real `server.executePipeline` relay owner.
+  - after fixing the mock to hook `server.executePipeline`, the exact 5520-shaped mixed-protocol case turns green:
+    - first provider `asxs.crsa.gpt-5.4-mini` returns recoverable 502 body error
+    - `provider-switch` fires
+    - backup `minimax.key1.MiniMax-M3` is relayed through Hub
+    - client receives 200 completed response
+  - so the mainline code path for `direct first hop fail -> mixed-protocol backup relay` is locally working.
+- This means the still-broken live 5520 default behavior is likely runtime-state-specific, not simply a missing mixed-protocol relay implementation.
+- Boundary truth rechecked:
+  - `router-direct-protocol-boundary.spec.ts` now asserts current truth source, not legacy `__routecodexPreselectedRoute`:
+    - relay path injects `__rt.preselectedRoute`
+    - relay path also carries `MetadataCenter.runtime_control.preselectedRoute`
+  - focused boundary test PASS.
+- Next step: compare local green harness with live 5520 runtime for what is different in actual state:
+  - whether live default request is skipping `executePortAwarePipeline` direct branch entirely,
+  - or whether log-stage emission is suppressed by a different owner/runtime path,
+  - or whether current installed binary/log stream is not the same code path as worktree.
+
+##  5520 default routePool/runtime-binding audit in progress
+
+- Online truth re-locked: latest 12:02 non-stream + SSE replay on 5520 default still returns 502 before any visible provider-switch.
+- Latest diag `error-openai-responses-router-gpt-5.4-20260619T120229359-369242-1.json` again proves `Provider not found for runtimeKey: asxs.crsa`.
+- Live config truth re-locked via `buildVirtualRouterInputV2`: `gateway_priority_5520.default.targets = [fwd.paid.gpt-5.4-mini, fwd.minimax.MiniMax-M3]`; forwarder expands to `asxs.crsa.gpt-5.4-mini -> 1token.key1.gpt-5.4-mini -> XL.key1.gpt-5.4-mini -> cc.key1.gpt-5.4-mini`, so config is not singleton.
+- New blackbox regression added: `direct-passthrough-route-level.spec.ts` now locks `5520 default reroutes even when first provider runtime registry only exposes alias runtime key`; expected behavior is first direct send on alias runtime key succeeds to enter retry policy, then reroute to second provider without Hub fallback.
+
+- Root cause locked further: `setupRuntime()` passed `{ routing: {} }` into `deriveRoutingProviderScope(...)`, so runtime init scope collapsed to provider-port tokenrelay instead of live 5520 routing truth. Fixed owner: `src/server/runtime/http-server/http-server-runtime-setup.ts` now derives scope from `providerRuntimeArtifacts.config` / `bootstrapArtifacts.config`. Added focused runtime-scope regression in `http-server-runtime-setup.provider-merge.spec.ts`.
+
+## 2026-06-19 5520 default reroute re-audit
+
+- 当前 live 5520 版本是 `0.90.3180`，`/health` 正常，但 `~/.rcc/log/config.toml/ports/5520/server-5520.log` 中 default route 真实样本仍是 `virtual-router-hit -> asxs.crsa.gpt-5.4-mini` 后直接 `Upstream provider error`，没有 `provider-switch`。
+- focused tests 重新验证通过：
+  - `http-server-runtime-setup.provider-merge.spec.ts` 锁 runtime routing scope 不能再被空 routing placeholder 覆盖；
+  - `provider-binding-resolution.spec.ts` 锁 `asxs.crsa <- asxs.crsa.gpt-5.4-mini` 这条 alias runtime visibility；
+  - `direct-passthrough-route-level.spec.ts` 锁 router-direct recoverable 502/503 在 default route 上会先 `[provider-switch]` 再切到备选 provider。
+- 结论：repo worktree 的 direct/default failover 逻辑本地是对的，线上不对的首要怀疑点转成“安装态未吃到当前 worktree”或“live 安装包仍落在旧 build”。
+
+## 2026-06-19 5520 runtime-scope merge fix landed locally
+
+- 新增/修正的最小红测链已经闭环：
+  - `tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts`
+    - `derives runtime routing scope from the real routing config instead of an empty routing placeholder`
+    - `merges routing config across router groups before deriving runtime provider scope`
+  - `tests/server/runtime/http-server/provider-binding-resolution.spec.ts`
+    - `treats alias runtime key as visible when allowedProviders only list the model-scoped provider key`
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`
+    - `router-direct recoverable 502 switches provider before client-visible upstream error`
+    - `5520 default reroutes even when first provider runtime registry only exposes alias runtime key`
+- 这次红测先后锁住两段真实根因：
+  - router-group `config.routing` 没并进 runtime init scope，会让 5520 运行时 registry 看不到 `asxs/1token/minimax`；
+  - direct path 对两段 alias runtime key 的可见性判定过严时，会在 retry policy 前卡死成 `Provider not found for runtimeKey: asxs.crsa`。
+- 当前 worktree focused Jest 已全绿；下一步必须是 `build:min -> install:global -> restart --port 5520 -> 真实 5520 default 非流式/SSE 重放`，确认 live 日志先出现 `[provider-switch]`，再决定是否还有剩余 owner 需要修。
+
+## 2026-06-19 5520 default routePool online closeout
+
+- 安装态真相复核（`0.90.3186`）已确认修复真正进入全局包：
+  - `/opt/homebrew/lib/node_modules/routecodex/dist/server/runtime/http-server/http-server-runtime-setup.js` 已包含 `extractForwarderProviderIds(...)`。
+  - 直接用已安装 dist + `~/.rcc/config.toml` 执行 `reloadRuntime(cfg)`，`providerHandles` 已含 `asxs.crsa` / `1token.key1` / `minimax.key1`，`routingProviderScope.providerIds/providerKeys` 也已含 5520 default forwarder 展开的真实候选池。
+- 在线重启与版本：
+  - `routecodex --version` => `0.90.3186`
+  - `routecodex restart --port 5520` 完成
+  - `curl http://127.0.0.1:5520/health` => `ready=true pipelineReady=true version=0.90.3186`
+- 在线重放结果（真实 5520 `/v1/responses` default）：
+  - 非流式：`/tmp/rcx5520_postfix_default.headers/body` 返回 `HTTP/1.1 200 OK`
+  - SSE：`/tmp/rcx5520_postfix_default_sse.headers/body` 返回 `HTTP/1.1 200 OK`，标准 `response.created -> response.completed` 事件链完整
+  - 新样本 request ids：
+    - `openai-responses-router-gpt-5.4-20260619T124449504-369248-7`
+    - `openai-responses-router-gpt-5.4-20260619T124449531-369249-8`
+- 5520 日志真相：
+  - 两个新样本都命中 `default/gateway-priority-5520-priority-default -> asxs.crsa.gpt-5.4-mini.gpt-5.4-mini`
+  - 这次首选 provider 直接成功，所以没有出现 `[provider-switch]`；这是符合语义的，因为“有备选时 recoverable error 必切 provider”只在首选失败时触发，不要求成功样本强制切换。
+  - 更重要的是：旧错误 `Provider not found for runtimeKey: asxs.crsa` 已消失；新请求没有生成新的 `error-openai-responses-router-gpt-5.4-*.json`。
+- 本轮唯一 owner 修复结论：
+  - 真正导致 5520 default pool 丢失的不是 direct retry owner，而是 `http-server-runtime-setup.ts::collectConfiguredProviderIds(...)` 把 route target `fwd.*` 当成真实 providerId，导致 `deriveRoutingProviderScope(...)` 过滤掉了 `asxs/1token/XL/cc`。
+  - 修复后 forwarder target 会展开出真实 provider ids，再由 runtime scope / provider registry 正常保留。

@@ -191,4 +191,439 @@ describe('http server runtime setup provider merge', () => {
     });
   });
 
+  it('derives runtime routing scope from the real routing config instead of an empty routing placeholder', async () => {
+    const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
+
+    const capturedScopes: any[] = [];
+    const providerRuntimeArtifacts = {
+      config: {
+        routing: {
+          default: [
+            {
+              id: 'gateway-priority-5520-default',
+              targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+            },
+          ],
+        },
+      },
+      runtime: {},
+      targetRuntime: {
+        'asxs.crsa.gpt-5.4-mini': {
+          providerId: 'asxs',
+          providerType: 'responses',
+          runtimeKey: 'asxs.crsa',
+        },
+        '1token.key1.gpt-5.4-mini': {
+          providerId: '1token',
+          providerType: 'responses',
+          runtimeKey: '1token.key1',
+        },
+        'minimax.key1.MiniMax-M3': {
+          providerId: 'minimax',
+          providerType: 'anthropic',
+          runtimeKey: 'minimax.key1',
+        },
+        'tokenrelay.key1.deepseek-v4-pro': {
+          providerId: 'tokenrelay',
+          providerType: 'responses',
+          runtimeKey: 'tokenrelay.key1',
+        },
+      },
+    };
+
+    const server: any = {
+      userConfig: {
+        httpserver: {
+          ports: [
+            {
+              port: 5520,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'gateway_priority_5520',
+            },
+            {
+              port: 5557,
+              host: '127.0.0.1',
+              mode: 'provider',
+              providerBinding: 'tokenrelay.deepseek-v4-pro',
+            },
+          ],
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [
+                  {
+                    id: 'gateway-priority-5520-default',
+                    targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      config: { configPath: 'test-config.json' },
+      managerDaemon: {
+        getModule: () => undefined,
+      },
+      hubPipeline: null,
+      hubPipelineCtor: null,
+      currentRouterArtifacts: null,
+      routingProviderScope: null,
+      hubPolicyMode: 'off',
+      ensureProviderProfilesFromUserConfig: () => {},
+      resolveVirtualRouterInput: async () => ({ routing: { default: [] } }),
+      bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
+      ensureHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(_config: any) {}
+          updateVirtualRouterConfig(): void {}
+        },
+      isQuotaRoutingEnabled: () => false,
+      initializeProviderRuntimes: async () => {},
+      initializeRouteErrorHub: async () => {},
+      startSessionDaemonInjectLoop: () => {},
+      pipelineLogger: { logDebug: () => {}, logError: () => {}, logModule: () => {}, getRecentLogs: () => [] },
+      getErrorHandlingShim: () => ({ handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) }),
+      createDebugCenterShim: () => ({ logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] }),
+    };
+
+    await setupRuntime(server, server.userConfig as any);
+    capturedScopes.push(server.routingProviderScope);
+
+    expect(capturedScopes).toHaveLength(1);
+    expect(capturedScopes[0]?.providerIds).toEqual(expect.arrayContaining(['asxs', '1token', 'minimax', 'tokenrelay']));
+    expect(capturedScopes[0]?.providerKeys).toEqual(expect.arrayContaining([
+      'asxs.crsa.gpt-5.4-mini',
+      '1token.key1.gpt-5.4-mini',
+      'minimax.key1.minimax-m3',
+      'tokenrelay.key1.deepseek-v4-pro',
+    ]));
+  });
+
+  it('merges routing config across router groups before deriving runtime provider scope', async () => {
+    const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
+
+    const capturedScopes: any[] = [];
+    const capturedArtifacts: any[] = [];
+    const primaryArtifacts = {
+      config: {
+        routing: {
+          provider: [
+            {
+              id: 'tokenrelay-provider',
+              targets: ['tokenrelay.key1.deepseek-v4-pro'],
+            },
+          ],
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [
+                  {
+                    id: 'gateway-priority-5520-default',
+                    targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      runtime: {},
+      targetRuntime: {
+        'tokenrelay.key1.deepseek-v4-pro': {
+          providerId: 'tokenrelay',
+          providerType: 'responses',
+          runtimeKey: 'tokenrelay.key1',
+        },
+      },
+    };
+    const groupArtifacts = {
+      config: {
+        routing: {
+          default: [
+            {
+              id: 'gateway-priority-5520-default',
+              targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+            },
+          ],
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [
+                  {
+                    id: 'gateway-priority-5520-default',
+                    targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      runtime: {},
+      targetRuntime: {
+        'asxs.crsa.gpt-5.4-mini': {
+          providerId: 'asxs',
+          providerType: 'responses',
+          runtimeKey: 'asxs.crsa',
+        },
+        '1token.key1.gpt-5.4-mini': {
+          providerId: '1token',
+          providerType: 'responses',
+          runtimeKey: '1token.key1',
+        },
+        'minimax.key1.MiniMax-M3': {
+          providerId: 'minimax',
+          providerType: 'anthropic',
+          runtimeKey: 'minimax.key1',
+        },
+      },
+    };
+
+    const server: any = {
+      userConfig: {
+        httpserver: {
+          ports: [
+            {
+              port: 5520,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'gateway_priority_5520',
+            },
+            {
+              port: 5557,
+              host: '127.0.0.1',
+              mode: 'provider',
+              providerBinding: 'tokenrelay.deepseek-v4-pro',
+            },
+          ],
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [
+                  {
+                    id: 'gateway-priority-5520-default',
+                    targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      config: { configPath: 'test-config.json' },
+      managerDaemon: {
+        getModule: () => undefined,
+      },
+      hubPipeline: null,
+      hubPipelineCtor: null,
+      currentRouterArtifacts: null,
+      routingProviderScope: null,
+      hubPolicyMode: 'off',
+      getPortConfigs: function () {
+        return this.userConfig.httpserver.ports;
+      },
+      ensureProviderProfilesFromUserConfig: () => {},
+      buildHubPipelineConfigForRoutingPolicyGroup: async (group: string, baseConfig: any) => {
+        const routerInput = {
+          routing: {
+            default: [
+              {
+                id: `${group}-default`,
+                targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+              },
+            ],
+          },
+        };
+        const artifacts = await server.bootstrapVirtualRouter(routerInput);
+        return {
+          ...baseConfig,
+          virtualRouter: artifacts.config,
+        };
+      },
+      resolveVirtualRouterInput: async () => ({ routing: { provider: [] } }),
+      bootstrapVirtualRouter: async (input: any) => {
+        const defaultTargets =
+          Array.isArray(input?.routing?.default)
+            ? input.routing.default.flatMap((entry: any) =>
+                Array.isArray(entry?.targets) ? entry.targets : []
+              )
+            : [];
+        if (defaultTargets.includes('asxs.crsa.gpt-5.4-mini')) {
+          return groupArtifacts;
+        }
+        return primaryArtifacts;
+      },
+      ensureHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(_config: any) {}
+          updateVirtualRouterConfig(): void {}
+        },
+      isQuotaRoutingEnabled: () => false,
+      initializeProviderRuntimes: async (artifacts: any) => {
+        capturedArtifacts.push(artifacts);
+      },
+      initializeRouteErrorHub: async () => {},
+      startSessionDaemonInjectLoop: () => {},
+      pipelineLogger: { logDebug: () => {}, logError: () => {}, logModule: () => {}, getRecentLogs: () => [] },
+      getErrorHandlingShim: () => ({ handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) }),
+      createDebugCenterShim: () => ({ logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] }),
+    };
+
+    await setupRuntime(server, server.userConfig as any);
+    capturedScopes.push(server.routingProviderScope);
+
+    expect(capturedArtifacts).toHaveLength(1);
+    expect(capturedArtifacts[0]?.config?.routing).toMatchObject({
+      provider: [
+        expect.objectContaining({ targets: ['tokenrelay.key1.deepseek-v4-pro'] }),
+      ],
+      default: [
+        expect.objectContaining({
+          targets: ['asxs.crsa.gpt-5.4-mini', '1token.key1.gpt-5.4-mini', 'minimax.key1.MiniMax-M3'],
+        }),
+      ],
+    });
+    expect(capturedScopes).toHaveLength(1);
+    expect(capturedScopes[0]?.providerIds).toEqual(expect.arrayContaining(['tokenrelay', 'asxs', '1token', 'minimax']));
+    expect(capturedScopes[0]?.providerKeys).toEqual(expect.arrayContaining([
+      'tokenrelay.key1.deepseek-v4-pro',
+      'asxs.crsa.gpt-5.4-mini',
+      '1token.key1.gpt-5.4-mini',
+      'minimax.key1.minimax-m3',
+    ]));
+  });
+
+  it('derives runtime routing scope from forwarder-expanded provider ids', async () => {
+    const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
+
+    const capturedScopes: any[] = [];
+    const providerRuntimeArtifacts = {
+      config: {
+        routing: {
+          default: [
+            {
+              id: 'gateway-priority-5520-default',
+              targets: ['fwd.paid.gpt-5.4-mini', 'fwd.minimax.MiniMax-M3'],
+            },
+          ],
+        },
+        forwarders: {
+          'fwd.paid.gpt-5.4-mini': {
+            targets: [
+              { providerId: 'asxs', providerKey: 'asxs.crsa.gpt-5.4-mini' },
+              { providerId: '1token', providerKey: '1token.key1.gpt-5.4-mini' },
+            ],
+          },
+          'fwd.minimax.MiniMax-M3': {
+            targets: [
+              { providerId: 'minimax', providerKey: 'minimax.key1.MiniMax-M3' },
+            ],
+          },
+        },
+      },
+      runtime: {},
+      targetRuntime: {
+        'asxs.crsa.gpt-5.4-mini': {
+          providerId: 'asxs',
+          providerType: 'responses',
+          runtimeKey: 'asxs.crsa',
+        },
+        '1token.key1.gpt-5.4-mini': {
+          providerId: '1token',
+          providerType: 'responses',
+          runtimeKey: '1token.key1',
+        },
+        'minimax.key1.MiniMax-M3': {
+          providerId: 'minimax',
+          providerType: 'anthropic',
+          runtimeKey: 'minimax.key1',
+        },
+        'tokenrelay.key1.deepseek-v4-pro': {
+          providerId: 'tokenrelay',
+          providerType: 'responses',
+          runtimeKey: 'tokenrelay.key1',
+        },
+      },
+    };
+
+    const server: any = {
+      userConfig: {
+        httpserver: {
+          ports: [
+            {
+              port: 5520,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'gateway_priority_5520',
+            },
+            {
+              port: 5557,
+              host: '127.0.0.1',
+              mode: 'provider',
+              providerBinding: 'tokenrelay.deepseek-v4-pro',
+            },
+          ],
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [
+                  {
+                    id: 'gateway-priority-5520-default',
+                    targets: ['fwd.paid.gpt-5.4-mini', 'fwd.minimax.MiniMax-M3'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      config: { configPath: 'test-config.json' },
+      managerDaemon: { getModule: () => undefined },
+      hubPipeline: null,
+      hubPipelineCtor: null,
+      currentRouterArtifacts: null,
+      routingProviderScope: null,
+      hubPolicyMode: 'off',
+      ensureProviderProfilesFromUserConfig: () => {},
+      resolveVirtualRouterInput: async () => ({ routing: { default: [] } }),
+      bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
+      ensureHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(_config: any) {}
+          updateVirtualRouterConfig(): void {}
+        },
+      isQuotaRoutingEnabled: () => false,
+      initializeProviderRuntimes: async () => {},
+      initializeRouteErrorHub: async () => {},
+      startSessionDaemonInjectLoop: () => {},
+      pipelineLogger: { logDebug: () => {}, logError: () => {}, logModule: () => {}, getRecentLogs: () => [] },
+      getErrorHandlingShim: () => ({ handleError: async () => {}, createContext: () => ({}), getStatistics: () => ({}) }),
+      createDebugCenterShim: () => ({ logDebug: () => {}, logError: () => {}, logModule: () => {}, processDebugEvent: () => {}, getLogs: () => [] }),
+    };
+
+    await setupRuntime(server, server.userConfig as any);
+    capturedScopes.push(server.routingProviderScope);
+
+    expect(capturedScopes).toHaveLength(1);
+    expect(capturedScopes[0]?.providerIds).toEqual(expect.arrayContaining(['asxs', '1token', 'minimax', 'tokenrelay']));
+    expect(capturedScopes[0]?.providerKeys).toEqual(expect.arrayContaining([
+      'asxs.crsa.gpt-5.4-mini',
+      '1token.key1.gpt-5.4-mini',
+      'minimax.key1.minimax-m3',
+      'tokenrelay.key1.deepseek-v4-pro',
+    ]));
+  });
+
 });

@@ -93,6 +93,11 @@ async function buildAllRouterGroupArtifacts(args: {
   }
   const runtime = { ...(args.primaryArtifacts.runtime ?? {}) } as Record<string, ProviderRuntimeProfile>;
   const targetRuntime = { ...(args.primaryArtifacts.targetRuntime ?? {}) } as Record<string, ProviderRuntimeProfile>;
+  const mergedConfig = isRecord(args.primaryArtifacts.config)
+    ? structuredClone(args.primaryArtifacts.config)
+    : {};
+  const mergedRouting = isRecord(mergedConfig.routing) ? mergedConfig.routing : {};
+  mergedConfig.routing = mergedRouting;
   for (const group of groups) {
     const routerInput = await buildVirtualRouterInputV2(args.server.userConfig as Record<string, unknown>, undefined, {
       routingPolicyGroup: group,
@@ -100,9 +105,20 @@ async function buildAllRouterGroupArtifacts(args: {
     const artifacts = await args.server.bootstrapVirtualRouter(routerInput as UnknownObject);
     Object.assign(runtime, artifacts.runtime ?? {});
     Object.assign(targetRuntime, artifacts.targetRuntime ?? {});
+    const routerInputRouting = isRecord(routerInput.routing) ? routerInput.routing : undefined;
+    if (routerInputRouting) {
+      Object.assign(mergedRouting, structuredClone(routerInputRouting));
+    }
+    if (isRecord(artifacts.config) && isRecord(artifacts.config.routing)) {
+      Object.assign(mergedRouting, structuredClone(artifacts.config.routing));
+    }
   }
   return {
     ...args.primaryArtifacts,
+    config: {
+      ...mergedConfig,
+      routing: mergedRouting,
+    },
     runtime,
     targetRuntime,
   };
@@ -221,7 +237,13 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     ...(providerRuntimeArtifacts?.runtime ?? {}),
     ...(providerRuntimeArtifacts?.targetRuntime ?? {})
   } as Record<string, ProviderRuntimeProfile>;
-  const routingScope = deriveRoutingProviderScope(runtimeForScope, { routing: {} } as UnknownObject, server.userConfig);
+  const routingScope = deriveRoutingProviderScope(
+    runtimeForScope,
+    (providerRuntimeArtifacts?.config as UnknownObject | undefined)
+      ?? (bootstrapArtifacts?.config as UnknownObject | undefined)
+      ?? ({ routing: {} } as UnknownObject),
+    server.userConfig
+  );
   // Runtime-level scope cache: provider init/warmup must honor the same routing scope
   // as token/quota managers to avoid non-routed providers doing background tasks.
   server.routingProviderScope = routingScope;
@@ -396,6 +418,10 @@ function deriveRoutingProviderScope(
 function collectConfiguredProviderIds(routerInput: UnknownObject, userConfig?: UnknownObject): Set<string> {
   const routing = resolveActiveRoutingNode(routerInput);
   const ids = new Set<string>();
+  const forwarders =
+    routerInput.forwarders && typeof routerInput.forwarders === 'object' && !Array.isArray(routerInput.forwarders)
+      ? (routerInput.forwarders as Record<string, unknown>)
+      : null;
   if (!routing || typeof routing !== 'object' || Array.isArray(routing)) {
     return ids;
   }
@@ -413,6 +439,9 @@ function collectConfiguredProviderIds(routerInput: UnknownObject, userConfig?: U
         const providerId = extractProviderIdFromRouteTarget(target);
         if (providerId) {
           ids.add(providerId);
+        }
+        for (const expandedProviderId of extractForwarderProviderIds(target, forwarders)) {
+          ids.add(expandedProviderId);
         }
       }
       const loadBalancing =
@@ -522,6 +551,39 @@ function extractProviderIdFromRouteTarget(target: unknown): string | null {
     return trimmed;
   }
   return trimmed.slice(0, idx);
+}
+
+function extractForwarderProviderIds(
+  target: unknown,
+  forwarders: Record<string, unknown> | null,
+): string[] {
+  if (typeof target !== 'string' || !forwarders) {
+    return [];
+  }
+  const forwarder = forwarders[target];
+  if (!forwarder || typeof forwarder !== 'object' || Array.isArray(forwarder)) {
+    return [];
+  }
+  const targets = Array.isArray((forwarder as Record<string, unknown>).targets)
+    ? ((forwarder as Record<string, unknown>).targets as unknown[])
+    : [];
+  const ids = new Set<string>();
+  for (const entry of targets) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const providerIdRaw = typeof record.providerId === 'string' ? record.providerId.trim().toLowerCase() : '';
+    if (providerIdRaw) {
+      ids.add(providerIdRaw);
+    }
+    const providerKeyRaw = typeof record.providerKey === 'string' ? record.providerKey : '';
+    const providerIdFromKey = extractProviderIdFromRouteTarget(providerKeyRaw);
+    if (providerIdFromKey) {
+      ids.add(providerIdFromKey);
+    }
+  }
+  return [...ids];
 }
 
 async function applyRoutingScopeToManagerModules(server: any, scope: RoutingProviderScope): Promise<void> {
