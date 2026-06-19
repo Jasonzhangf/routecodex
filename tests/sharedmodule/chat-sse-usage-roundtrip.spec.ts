@@ -316,4 +316,25 @@ describe('chat SSE usage compatibility', () => {
     expect(response.choices?.[0]?.finish_reason).toBeUndefined();
     expect(response.choices?.[0]?.message?.content).toBe('hello');
   });
+
+  it('preserves upstream context length errors instead of classifying them as SSE decode failures', async () => {
+    const sseText = [
+      'event: toast',
+      'data: {"type":"error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","finish_reason":"context_length_exceeded"}',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_context_length_error',
+      model: 'gpt-5.4'
+    })).rejects.toMatchObject({
+      code: 'context_length_exceeded',
+      upstreamCode: 'context_length_exceeded',
+      status: 400,
+      statusCode: 400,
+      retryable: false,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

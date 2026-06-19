@@ -34,6 +34,16 @@ type DeepSeekWebErrorInfo = {
   raw: Record<string, unknown>;
 };
 
+type ChatSseSemanticError = Error & {
+  code?: string;
+  status?: number;
+  statusCode?: number;
+  retryable?: boolean;
+  upstreamCode?: string;
+  requestExecutorProviderErrorStage?: string;
+  context?: unknown;
+};
+
 type DeepSeekPatchAppendTarget = 'content' | 'reasoning';
 
 const hasExplicitToolWrapperProgress = (text: string): boolean => {
@@ -115,6 +125,41 @@ function normalizeDeepSeekWebFinishReason(input: {
     return 'rate_limit_exceeded';
   }
   return finishReason || code || status || 'SSE_ERROR';
+}
+
+function resolveUpstreamSseErrorPolicy(code: string): { statusCode: number; retryable: boolean } {
+  const normalized = code.trim().toLowerCase();
+  if (normalized === 'context_length_exceeded' || includesContextLengthHint(normalized)) {
+    return { statusCode: 400, retryable: false };
+  }
+  if (normalized === 'rate_limit_exceeded' || normalized.includes('rate_limit')) {
+    return { statusCode: 429, retryable: true };
+  }
+  return { statusCode: 502, retryable: true };
+}
+
+function createUpstreamSseSemanticError(input: {
+  message: string;
+  code: string;
+  errorData?: Record<string, unknown>;
+  event?: ChatSseEvent;
+  parsed?: unknown;
+}): ChatSseSemanticError {
+  const code = input.code || 'SSE_ERROR';
+  const policy = resolveUpstreamSseErrorPolicy(code);
+  const error = new Error(input.message) as ChatSseSemanticError;
+  error.code = code;
+  error.upstreamCode = code;
+  error.status = policy.statusCode;
+  error.statusCode = policy.statusCode;
+  error.retryable = policy.retryable;
+  error.requestExecutorProviderErrorStage = 'provider.sse_decode';
+  error.context = {
+    errorData: input.errorData,
+    event: input.event,
+    parsed: input.parsed
+  };
+  return error;
 }
 
 function extractDeepSeekWebErrorInfo(payload: unknown): DeepSeekWebErrorInfo | null {
@@ -804,21 +849,18 @@ export class ChatSseToJsonConverter {
         const deepseekState = this.getDeepSeekPatchState(context);
         const cachedErrorInfo = (event as unknown as Record<string, unknown>)._errorInfo as DeepSeekWebErrorInfo | null | undefined;
         if (cachedErrorInfo) {
-          const typedError = new Error(cachedErrorInfo.message) as Error & { code?: string };
-          typedError.code = cachedErrorInfo.code;
-          throw ErrorUtils.createError(
-            typedError.message,
-            CHAT_CONVERSION_ERROR_CODES.STREAM_ERROR,
-            {
-              errorData: {
-                ...cachedErrorInfo.raw,
-                code: cachedErrorInfo.code,
-                finish_reason: cachedErrorInfo.finishReason,
-                message: cachedErrorInfo.message
-              },
-              parsed
-            }
-          );
+          throw createUpstreamSseSemanticError({
+            message: cachedErrorInfo.message,
+            code: cachedErrorInfo.code,
+            errorData: {
+              ...cachedErrorInfo.raw,
+              code: cachedErrorInfo.code,
+              finish_reason: cachedErrorInfo.finishReason,
+              message: cachedErrorInfo.message
+            },
+            event,
+            parsed
+          });
         }
         const deepseekAnalysis = analyzeDeepSeekWebPayload(parsedRecord, Boolean(deepseekState.patchAppendTarget));
         if (this.tryProcessDeepSeekWebPatchEvent(parsed, context, deepseekAnalysis)) {
@@ -1477,14 +1519,13 @@ export class ChatSseToJsonConverter {
             ? errorData.finish_reason
             : 'SSE_ERROR')
       : 'SSE_ERROR';
-    const typedError = new Error(errorMessage) as Error & { code?: string };
-    typedError.code = code;
 
-    throw ErrorUtils.createError(
-      typedError.message,
-      CHAT_CONVERSION_ERROR_CODES.STREAM_ERROR,
-      { errorData, event }
-    );
+    throw createUpstreamSseSemanticError({
+      message: errorMessage,
+      code,
+      errorData,
+      event
+    });
   }
 
   /**

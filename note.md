@@ -1,3 +1,18 @@
+## 2026-06-19 5520 chat SSE context_length_exceeded error projection fix
+
+- 症状样本：5520 `/v1/chat/completions` 非流转换日志把上游真实 `context_length_exceeded` 投成 `SSE_TO_JSON_ERROR` / `SSE_DECODE_ERROR`，样本 requestId 为 `openai-chat-token.key1-gpt-5.4-20260619T212542264-373319-4078`。
+- owner：`sse.chat_stream_projection`；唯一修改点为 `sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts`，不改 provider runtime、路由、retry 或 tokenrelay 配置。
+- 根因：`processErrorEvent()` 已解析出 `finish_reason=context_length_exceeded`，但随后用 `CHAT_CONVERSION_ERROR_CODES.STREAM_ERROR` 重新创建错误；外层 `wrapSseError()` 只能看到 `CHAT_STREAM_ERROR`，最终投成 SSE decode error，丢失 provider semantic code/status/retryable。
+- 修复：新增 chat SSE upstream semantic error builder；`event:error/toast` 与 `_errorInfo` patch chunk 路径均直接抛出带 `code/upstreamCode/status/statusCode/retryable/requestExecutorProviderErrorStage` 的 semantic error，外层只补上下文，不覆盖上游错误语义。
+- 红测证据：`tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts` 新增黑盒测试，当前实现先红，收到 `code=SSE_DECODE_ERROR` / `upstreamCode=CHAT_STREAM_ERROR`；修复后转绿并断言 `code=upstreamCode=context_length_exceeded`、`status=400`、`retryable=false`。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts --runInBand` PASS（8 tests）
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc --noEmit --pretty false` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:sse-architecture-boundary` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+  - `git diff --check` PASS
+- 当前未做：尚未全局安装/重启 5520，因此不能宣称 live runtime 已更新；需要安装后用同类上游 context-window 样本复核客户端错误码。
+
 ## 2026-06-19 tokenrelay deepseek-v4-pro / 5555 direct diagnosis
 
 - 2026-06-19 18:47 最新确认与纠偏：
