@@ -18,6 +18,11 @@ import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
 
+const ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER = {
+  module: 'src/server/runtime/http-server/executor-metadata.ts',
+  symbol: 'decorateMetadataForAttempt',
+  stage: 'request_executor_attempt_metadata'
+} as const;
 
 function logExecutorMetadataNonBlocking(
   stage: string,
@@ -744,6 +749,18 @@ export function decorateMetadataForAttempt(
   }
   if (attempt > 1) {
     delete clone.__routecodexPreselectedRoute;
+    const rt = clone.__rt && typeof clone.__rt === 'object' && !Array.isArray(clone.__rt)
+      ? { ...(clone.__rt as Record<string, unknown>) }
+      : undefined;
+    if (rt && Object.prototype.hasOwnProperty.call(rt, 'preselectedRoute')) {
+      delete rt.preselectedRoute;
+      clone.__rt = rt;
+    }
+    MetadataCenter.read(clone)?.releaseRuntimeControl(
+      'preselectedRoute',
+      ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
+      'preselected route is single-use and must not pin provider retry attempts'
+    );
   }
   return clone;
 }

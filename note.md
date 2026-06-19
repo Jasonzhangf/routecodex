@@ -6528,3 +6528,12 @@ Gate: tsc PASS, verify:function-map-compile-gate PASS, verify-servertool-rust-on
 - 本轮唯一 owner 修复结论：
   - 真正导致 5520 default pool 丢失的不是 direct retry owner，而是 `http-server-runtime-setup.ts::collectConfiguredProviderIds(...)` 把 route target `fwd.*` 当成真实 providerId，导致 `deriveRoutingProviderScope(...)` 过滤掉了 `asxs/1token/XL/cc`。
   - 修复后 forwarder target 会展开出真实 provider ids，再由 runtime scope / provider registry 正常保留。
+
+## 2026-06-19 tokenrelay reroute preselectedRoute 修复
+
+- 根因锁定：router-direct 因 `target_outbound_profile_requires_hub_relay` 把一次性 `preselectedRoute` 写入 `MetadataCenter.runtime_control` 后交给 Hub；首个 provider 失败进入 provider-switch 后，下一次 executor attempt 继续携带同一个 `preselectedRoute`，Rust Hub request stage 优先消费它，导致第二轮不会重新跑 VR，也就看不到第二次 `virtual-router-hit`。
+- 唯一修复点：`decorateMetadataForAttempt(...)` 在 `attempt > 1` 时释放 `MetadataCenter.runtime_control.preselectedRoute` 并删除 legacy `__rt.preselectedRoute`，保留 `excludedProviderKeys` / `retryProviderKey` 等真正 retry 控制。
+- 新增红测：`tests/server/runtime/http-server/request-executor.spec.ts` 的 `clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay`，模拟 `XLC.key1.glm-5.2` 返回 `model_not_found/503`，断言第二轮 `preselectedRoute=false`、`excludedProviderKeys=[XLC.key1.glm-5.2]`、最终命中 `tokenrelay.key1.deepseek-v4-pro`。
+- 已验证：focused Jest 新红测 PASS；MetadataCenter / attempt-state / request-executor focused 组合 PASS；route-level mixed-protocol relay 黑盒 PASS；`tsc --noEmit` / `verify:function-map-compile-gate` / `git diff --check` / `build:min` / `install:global` PASS；5555 health `ready=true pipelineReady=true version=0.90.3187`。
+- live 复核：`gpt-5.4` thinking probe 命中 `XLC.key1.glm-5.2` 并成功，说明 key1 已会尝试；显式 `model=tokenrelay.deepseek-v4-pro` 命中 `tokenrelay.key1.deepseek-v4-pro` 并 HTTP 200，provider snapshot 显示上游 `/v1/responses`、`body.model=deepseek-v4-pro`、无 metadata。
+- 剩余风险：当前线上 XLC key1 已成功，无法用自然失败样本在线强制证明“XLC 失败后同请求 reroute tokenrelay”；该分支已由高层黑盒红测覆盖。

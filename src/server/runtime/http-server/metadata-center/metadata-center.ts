@@ -233,6 +233,19 @@ export class MetadataCenter {
     });
   }
 
+  releaseRuntimeControl<K extends keyof MetadataCenterRuntimeControl>(
+    key: K,
+    changedBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    void changedBy;
+    void reason;
+    if (!this.state.runtimeControl[key]) {
+      return;
+    }
+    delete this.state.runtimeControl[key];
+  }
+
   readRuntimeControl(): MetadataCenterRuntimeControl {
     return {
       routeHint: this.state.runtimeControl.routeHint?.value as string | undefined,

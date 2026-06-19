@@ -899,8 +899,11 @@ describe('client connection timeout hint', () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it('drops stale preselected route on retry attempts with provider exclusions', () => {
+  it('drops stale preselected route carriers on retry attempts with provider exclusions', () => {
     const preselectedRoute = {
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M3'
+      },
       decision: {
         routeName: 'search',
         providerKey: 'minimax.key1.MiniMax-M3',
@@ -908,11 +911,26 @@ describe('client connection timeout hint', () => {
       }
     };
     const baseMetadata = {
-      __routecodexPreselectedRoute: preselectedRoute
+      __routecodexPreselectedRoute: preselectedRoute,
+      __rt: {
+        preselectedRoute
+      }
     };
+    MetadataCenter.attach(baseMetadata).writeRuntimeControl(
+      'preselectedRoute',
+      preselectedRoute,
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'drops stale preselected route carriers on retry attempts with provider exclusions',
+        stage: 'test'
+      },
+      'simulate router-direct relay handoff'
+    );
 
     const firstAttempt = decorateMetadataForAttempt(baseMetadata, 1, new Set<string>());
     expect(firstAttempt.__routecodexPreselectedRoute).toEqual(preselectedRoute);
+    expect((firstAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toEqual(preselectedRoute);
+    expect(MetadataCenter.read(firstAttempt)?.readRuntimeControl().preselectedRoute).toEqual(preselectedRoute);
 
     const retryAttempt = decorateMetadataForAttempt(
       baseMetadata,
@@ -922,7 +940,10 @@ describe('client connection timeout hint', () => {
 
     expect(retryAttempt.excludedProviderKeys).toEqual(['minimax.key1.MiniMax-M3']);
     expect(retryAttempt.__routecodexPreselectedRoute).toBeUndefined();
+    expect((retryAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBeUndefined();
+    expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().preselectedRoute).toBeUndefined();
     expect(baseMetadata.__routecodexPreselectedRoute).toBe(preselectedRoute);
+    expect((baseMetadata.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBe(preselectedRoute);
   });
 });
 
