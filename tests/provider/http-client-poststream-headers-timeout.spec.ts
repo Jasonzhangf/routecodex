@@ -98,6 +98,38 @@ describe('HttpClient.postStream headers timeout', () => {
     }
   });
 
+  it('postStreamOrResponse accepts JSON body even when upstream labels it as SSE', async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8'
+      });
+      res.end(JSON.stringify({
+        id: 'chatcmpl-json-labelled-sse',
+        object: 'chat.completion',
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'json-labelled-sse-ok' }, finish_reason: 'stop' }
+        ]
+      }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const url = `http://127.0.0.1:${addr.port}/stream`;
+
+    const client = new HttpClient({ baseUrl: '', timeout: 5_000 });
+
+    try {
+      const result = await client.postStreamOrResponse(url, { hello: 'world' }, {} as any);
+      expect(result.kind).toBe('response');
+      if (result.kind !== 'response') {
+        throw new Error('expected JSON response');
+      }
+      expect(result.responseKind).toBe('json');
+      expect((result.response.data as any).choices[0].message.content).toBe('json-labelled-sse-ok');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('postStream fails fast instead of wrapping JSON as a fake SSE stream', async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, {
