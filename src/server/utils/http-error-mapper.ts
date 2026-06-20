@@ -22,7 +22,53 @@ export interface HttpErrorPayload {
 
 export const ERROR_CLIENT_PROJECTION_FEATURE_ID = 'feature_id: error.client_projection';
 
-export type ErrorErr05ExecutionDecision = unknown;
+/**
+ * Minimal structural view of the ErrorErr05ExecutionDecision needed for
+ * client-projection gating. The single owning builder is
+ * `error.execution_decision_consumer` (resolveProviderRetryExecutionPlan
+ * + resolveProviderRetryExecutionPlanExhaustionGate). The full
+ * ProviderRetryExecutionPlan is the canonical type; this view exists only
+ * here so the projection gate can be unit-tested without a full executor.
+ */
+export type ErrorErr05ExecutionDecision = {
+  mayProject: boolean;
+  policyExhausted: boolean;
+  routePoolRemainingAfterExclusion: readonly string[];
+  defaultPoolAvailable: boolean;
+};
+/**
+ * `callerMayProject` is the only client-projection predicate.
+ * Locked by docs/goals/provider-error-reroutable-until-pool-and-default-empty.md §2.1.
+ * This is a pure type-guard; it never inspects error message / status / code.
+ */
+export function callerMayProject(decision: ErrorErr05ExecutionDecision | null | undefined): boolean {
+  if (!decision || typeof decision !== 'object') {
+    return false;
+  }
+  return decision.mayProject === true && decision.policyExhausted === true;
+}
+/**
+ * Sentinel thrown by `mapErrorToHttp(decision)` when the decision is not
+ * projectable (i.e. route pool still has remaining candidates or default pool
+ * is still available). Callers must catch this and let the executor continue
+ * the reroute path; rethrowing is the correct response.
+ */
+export class EarlyProjectionBlockedError extends Error {
+  readonly code = 'EARLY_PROJECTION_BLOCKED';
+  readonly statusCode = 500;
+  readonly decision: ErrorErr05ExecutionDecision;
+  constructor(decision: ErrorErr05ExecutionDecision) {
+    super('ErrorErr05 decision is not projectable: route pool or default pool still has remaining candidates');
+    this.name = 'EarlyProjectionBlockedError';
+    this.decision = decision;
+  }
+}
+export function isEarlyProjectionBlockedError(error: unknown): boolean {
+  return error instanceof EarlyProjectionBlockedError
+    || (Boolean(error)
+      && typeof error === 'object'
+      && (error as { code?: unknown }).code === 'EARLY_PROJECTION_BLOCKED');
+}
 export type ErrorErr06ClientProjected = HttpErrorPayload;
 
 const CLIENT_DISCONNECT_PUBLIC_CODE = 'CLIENT_DISCONNECTED';
@@ -300,51 +346,12 @@ function isClientDisconnectLikeForProjection(args: {
 export function project_error_err_06_client_from_error_err_05_execution_decision(
   decision: ErrorErr05ExecutionDecision
 ): ErrorErr06ClientProjected {
-  assertErr05DecisionIsProjectable(decision);
+  if (!callerMayProject(decision)) {
+    throw new EarlyProjectionBlockedError(decision);
+  }
   return mapErrorToHttp(decision);
 }
 
-function assertErr05DecisionIsProjectable(decision: unknown): void {
-  const error = normalizeErrorPayload(decision);
-  const baseMessage = typeof error.message === 'string' ? error.message : String(decision ?? 'Unknown error');
-  const status = normalizeStatus(extractStatus(error), extractUpstreamError(error).status);
-  const normalizedCode = String(extractUpstreamError(error).code || extractString(error.code) || '').trim().toUpperCase();
-  if (normalizedCode === 'MALFORMED_REQUEST') {
-    return;
-  }
-  if (isClientDisconnectLikeForProjection({
-    status,
-    code: normalizedCode,
-    baseMessage,
-    upstreamMessage: extractUpstreamError(error).message,
-    effectiveUpstreamMessage: extractUpstreamError(error).message,
-  })) {
-    return;
-  }
-  if (!isProviderProjectionCandidate(error, status, normalizedCode)) {
-    return;
-  }
-  if (error.details?.policyExhausted === true || error.details?.candidateExhausted === true) {
-    return;
-  }
-  throw Object.assign(
-    new Error('ErrorErr06 projection requires policy/candidate exhaustion'),
-    {
-      code: 'ERROR_ERR06_POLICY_NOT_EXHAUSTED',
-      statusCode: 500,
-    }
-  );
-}
-
-function isProviderProjectionCandidate(error: RawErrorPayload, status: number, normalizedCode: string): boolean {
-  if (status >= 500 || (status >= 400 && status < 500)) {
-    return true;
-  }
-  if (normalizedCode.startsWith('HTTP_') || normalizedCode.startsWith('UPSTREAM_')) {
-    return true;
-  }
-  return Boolean(error.providerKey || error.details?.providerKey);
-}
 
 export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {
   let projected: HttpErrorPayload;

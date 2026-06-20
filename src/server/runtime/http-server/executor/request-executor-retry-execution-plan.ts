@@ -50,6 +50,73 @@ export function consume_error_err_05_execution_decision_from_error_err_04_router
   return applied.retryExecutionPlan;
 }
 
+/**
+ * ErrorErr05 execution-decision exhaustion gate.
+ *
+ * Pure derivation. The only owner of `mayProject` / `policyExhausted`.
+ * `mayProject = policyExhausted = routePoolRemainingAfterExclusion.length === 0 && !defaultPoolAvailable`.
+ *
+ * Caller MUST pass:
+ *  - `routePool` (raw current tier pool, may be undefined)
+ *  - `excludedProviderKeys` (set of keys already excluded this attempt chain)
+ *  - `defaultPoolAvailable` (VR-provided, true when a non-empty default pool exists for this routing group)
+ *
+ * Locked by docs/goals/provider-error-reroutable-until-pool-and-default-empty.md §2.1.
+ * Red test: tests/red-tests/error_chain_may_project_gate.test.ts.
+ */
+export function resolveProviderRetryExecutionPlanExhaustionGate(args: {
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+  defaultPoolAvailable: boolean;
+}): {
+  routePoolRemainingAfterExclusion: string[];
+  defaultPoolAvailable: boolean;
+  policyExhausted: boolean;
+  mayProject: boolean;
+} {
+  const rawPool = Array.isArray(args.routePool) ? args.routePool : [];
+  const remaining = rawPool.filter((candidate) => {
+    if (typeof candidate !== 'string' || candidate.length === 0) {
+      return false;
+    }
+    return !args.excludedProviderKeys.has(candidate);
+  });
+  const policyExhausted = remaining.length === 0 && args.defaultPoolAvailable === false;
+  const mayProject = policyExhausted;
+  return {
+    routePoolRemainingAfterExclusion: remaining,
+    defaultPoolAvailable: args.defaultPoolAvailable === true,
+    policyExhausted,
+    mayProject,
+  };
+}
+
+/**
+ * Build the ErrorErr05 gate fields once, then return a new plan that merges
+ * the partial decisions with the gate. Centralized so that all return paths
+ * share the same source of truth for `mayProject` / `policyExhausted`.
+ */
+function attachErrorErr05ExhaustionGate(
+  partial: Omit<ProviderRetryExecutionPlan,
+    'routePoolRemainingAfterExclusion' | 'defaultPoolAvailable' | 'policyExhausted' | 'mayProject'>,
+  routePool: string[] | undefined,
+  excludedProviderKeys: Set<string>,
+  defaultTierAvailable: boolean | undefined,
+): ProviderRetryExecutionPlan {
+  const gate = resolveProviderRetryExecutionPlanExhaustionGate({
+    routePool,
+    excludedProviderKeys,
+    defaultPoolAvailable: defaultTierAvailable === true,
+  });
+  return {
+    ...partial,
+    routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+    defaultPoolAvailable: gate.defaultPoolAvailable,
+    policyExhausted: gate.policyExhausted,
+    mayProject: gate.mayProject,
+  };
+}
+
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
 };
@@ -80,6 +147,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
   providerOwnedContinuation?: boolean;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
+  /**
+   * VR-derived truth: does the current routing group have a non-empty default
+   * fallback tier that the policy may still try?
+   *
+   * Locked by docs/goals/provider-error-reroutable-until-pool-and-default-empty.md §2.1.
+   * When `false` (or omitted), the gate treats the system as terminal-candidate-empty
+   * and `mayProject` is permitted ONLY when `routePoolRemainingAfterExclusion.length === 0`.
+   * Callers MUST wire this from `virtual_router.primary_exhausted_to_default_pool`.
+   */
+  defaultTierAvailable?: boolean;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
   const hostContractStage = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
@@ -191,7 +268,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     });
   if (!eligibilityPlan.shouldRetry && !terminalPeriodicPolicyDecision && !terminalUnrecoverablePolicyDecision) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
-    return {
+    return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: keepTerminalExclusion,
@@ -199,7 +276,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
-    };
+    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
   if (terminalPeriodicPolicyDecision || terminalUnrecoverablePolicyDecision) {
@@ -228,7 +305,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       backoffScope: retryBackoffPlan.backoffScope
     });
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
-      return {
+      return attachErrorErr05ExhaustionGate({
         shouldRetry: false,
         blockingRecoverable: eligibilityPlan.blockingRecoverable,
         excludedCurrentProvider: true,
@@ -236,9 +313,9 @@ export async function resolveProviderRetryExecutionPlan(args: {
         holdOnLastAvailable429,
         retryBackoffMs: 0,
         recoverableBackoffMs: 0
-      };
+      }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
     }
-    return {
+    return attachErrorErr05ExhaustionGate({
       shouldRetry: true,
       blockingRecoverable: false,
       excludedCurrentProvider: true,
@@ -249,7 +326,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       backoffScope: retryBackoffPlan.backoffScope,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason
-    };
+    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
   if (
@@ -259,7 +336,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       retryable: (args.error as { retryable?: boolean } | undefined)?.retryable
     })
   ) {
-    return {
+    return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: false,
@@ -267,7 +344,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
-    };
+    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
   const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
@@ -296,7 +373,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     backoffScope: retryBackoffPlan.backoffScope
   });
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
-    return {
+    return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
@@ -304,7 +381,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
-    };
+    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
   if (
     shouldCancelUnrecoverableRerouteWithoutAlternative({
@@ -313,7 +390,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       hasAlternativeCandidate
     })
   ) {
-    return {
+    return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
@@ -321,9 +398,9 @@ export async function resolveProviderRetryExecutionPlan(args: {
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       recoverableBackoffMs: 0
-    };
+    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
-  return {
+  return attachErrorErr05ExhaustionGate({
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
@@ -334,5 +411,5 @@ export async function resolveProviderRetryExecutionPlan(args: {
     backoffScope: retryBackoffPlan.backoffScope,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason
-  };
+  }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
 }

@@ -64,6 +64,16 @@ export type ProviderRetryExecutionPlan = {
   backoffScope?: ProviderRetryBackoffScope;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
+  /**
+   * ErrorErr05ExecutionDecision top-node fields.
+   * Locked by docs/goals/provider-error-reroutable-until-pool-and-default-empty.md.
+   * `policyExhausted` is the single source of truth for client projection gating.
+   * `mayProject` is the only client-projection predicate.
+   */
+  routePoolRemainingAfterExclusion: string[];
+  defaultPoolAvailable: boolean;
+  policyExhausted: boolean;
+  mayProject: boolean;
 };
 
 export type ProviderRetryTelemetryPlan = {
