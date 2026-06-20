@@ -20,7 +20,7 @@
 
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
-import { detectInboundProtocolFromRequest } from './provider-direct-pipeline.js';
+import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
 import { extractResponseStatus } from './executor/provider-response-utils.js';
 
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */
@@ -46,6 +46,7 @@ export interface RouterDirectInput {
     providerKey: string;
     providerType: string;
     runtimeKey?: string;
+    routeParams?: Record<string, unknown>;
   };
   routingDecision?: { routeName?: string; pool?: string[] };
   requestId?: string;
@@ -138,7 +139,7 @@ export async function executeRouterDirectPipeline(
     return { used: false, reason: `provider not found for runtimeKey: ${runtimeKey}` };
   }
 
-  const inboundProtocol = detectInboundProtocolFromRequest(requestInfo);
+  const inboundProtocol = resolveInboundProtocolFromEntryPath(requestInfo.path);
   const providerProtocol = providerHandle.providerProtocol;
   if (inboundProtocol !== providerProtocol) {
     return {
@@ -156,7 +157,10 @@ export async function executeRouterDirectPipeline(
     routingDecision: input.routingDecision,
   };
 
-  const payloadToSend = recordPayloadAudit(input.requestPayload, auditContext);
+  const payloadToSend = recordPayloadAudit(
+    applyDirectRouteThinkingConfig(input.requestPayload, target.routeParams),
+    auditContext,
+  );
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 
@@ -208,6 +212,53 @@ function recordPayloadAudit(
     }
   }
   return payload;
+}
+
+function readThinkingLevel(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === 'max') {
+    return 'xhigh';
+  }
+  if (['xhigh', 'high', 'medium', 'low'].includes(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveRouteThinkingLevel(routeParams?: Record<string, unknown>): string | undefined {
+  if (!routeParams) {
+    return undefined;
+  }
+  return (
+    readThinkingLevel(routeParams.thinking) ??
+    readThinkingLevel(routeParams.reasoning_effort) ??
+    readThinkingLevel(routeParams.reasoningEffort)
+  );
+}
+
+function applyDirectRouteThinkingConfig(
+  payload: Record<string, unknown>,
+  routeParams?: Record<string, unknown>,
+): Record<string, unknown> {
+  const level = resolveRouteThinkingLevel(routeParams);
+  if (!level) {
+    return payload;
+  }
+  const reasoning =
+    payload.reasoning && typeof payload.reasoning === 'object' && !Array.isArray(payload.reasoning)
+      ? { ...(payload.reasoning as Record<string, unknown>), effort: level }
+      : { effort: level };
+  return {
+    ...payload,
+    reasoning_effort: level,
+    reasoning,
+  };
 }
 
 /** Fields surfaced in audit logs/snapshots for traceability. */

@@ -139,7 +139,7 @@ fn normalize_effort(value: &str) -> Option<&'static str> {
     match normalized.as_str() {
         "minimal" | "low" => Some("low"),
         "medium" => Some("medium"),
-        "high" | "max" => Some("high"),
+        "high" | "max" | "xhigh" | "extra_high" | "extra-high" => Some("high"),
         _ => None,
     }
 }

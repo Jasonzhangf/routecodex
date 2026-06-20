@@ -2450,8 +2450,14 @@ fn normalize_anthropic_thinking_effort(value: &Value) -> Option<String> {
             let normalized = raw.trim().to_lowercase();
             if normalized == "minimal" {
                 Some("low".to_string())
-            } else if ["low", "medium", "high", "max"].contains(&normalized.as_str()) {
-                Some(normalized)
+            } else if ["low", "medium", "high", "max", "xhigh", "extra_high", "extra-high"]
+                .contains(&normalized.as_str())
+            {
+                if ["max", "xhigh", "extra_high", "extra-high"].contains(&normalized.as_str()) {
+                    Some("high".to_string())
+                } else {
+                    Some(normalized)
+                }
             } else {
                 None
             }

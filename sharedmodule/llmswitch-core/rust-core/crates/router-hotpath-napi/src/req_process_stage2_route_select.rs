@@ -135,8 +135,9 @@ fn apply_target_metadata(
         };
         normalized_metadata.insert(
             "reasoning_effort".to_string(),
-            Value::String(reasoning_effort),
+            Value::String(reasoning_effort.clone()),
         );
+        write_reasoning_effort_object(normalized_metadata, &reasoning_effort);
     }
 
     apply_route_params(normalized_metadata, target_map);
@@ -235,6 +236,7 @@ fn apply_route_params(
             "reasoning_effort".to_string(),
             Value::String(value.to_string()),
         );
+        write_reasoning_effort_object(normalized_metadata, value);
     }
     if let Some(value) = route_params
         .get("thinking_enabled")
@@ -244,6 +246,22 @@ fn apply_route_params(
     }
     if let Some(value) = route_params.get("thinking") {
         normalized_metadata.insert("thinking".to_string(), value.clone());
+    }
+}
+
+fn write_reasoning_effort_object(target: &mut Map<String, Value>, effort: &str) {
+    let trimmed = effort.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let reasoning = target
+        .entry("reasoning".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !reasoning.is_object() {
+        *reasoning = Value::Object(Map::new());
+    }
+    if let Some(reasoning_map) = reasoning.as_object_mut() {
+        reasoning_map.insert("effort".to_string(), Value::String(trimmed.to_string()));
     }
 }
 
@@ -368,6 +386,16 @@ pub fn apply_route_selection(
         input.thinking.as_deref(),
         original_reasoning_effort.as_deref(),
     );
+    if let Some(effort) = metadata_map
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+    {
+        request_map.insert("reasoning_effort".to_string(), Value::String(effort.clone()));
+        write_reasoning_effort_object(request_map, &effort);
+    }
     apply_target_to_subject(request_map, target_map, input.original_model);
     crate::virtual_router_engine::instructions::clean_routing_instruction_markers(&mut request);
 
@@ -424,6 +452,41 @@ mod tests {
         assert_eq!(result.normalized_metadata["assignedModelId"], "gpt-5.2");
         assert_eq!(result.normalized_metadata["toolCallIdStyle"], "fc");
         assert_eq!(result.normalized_metadata["reasoning_effort"], "high");
+        assert_eq!(result.normalized_metadata["reasoning"]["effort"], "high");
+        assert_eq!(result.request["reasoning_effort"], "high");
+        assert_eq!(result.request["reasoning"]["effort"], "high");
+    }
+
+    #[test]
+    fn test_apply_route_selection_preserves_xhigh_thinking_as_request_semantic_level() {
+        let input = RouteSelectionApplyInput {
+            request: serde_json::json!({
+              "model": "gpt-5.5",
+              "reasoning_effort": "low",
+              "reasoning": { "effort": "low", "summary": "auto" },
+              "messages": [],
+              "parameters": {},
+              "metadata": {}
+            }),
+            normalized_metadata: serde_json::json!({}),
+            target: serde_json::json!({
+              "providerKey": "tab.key1.gpt-5.5",
+              "providerType": "tab",
+              "modelId": "gpt-5.5",
+              "processMode": "chat"
+            }),
+            route_name: Some("thinking".to_string()),
+            original_model: Some("gpt-5.5".to_string()),
+            thinking: Some("xhigh".to_string()),
+        };
+
+        let result = apply_route_selection(input).unwrap();
+        assert_eq!(result.normalized_metadata["reasoning_effort"], "xhigh");
+        assert_eq!(result.normalized_metadata["reasoning"]["effort"], "xhigh");
+        assert_eq!(result.normalized_metadata["__thinking_source"], "config");
+        assert_eq!(result.request["reasoning_effort"], "xhigh");
+        assert_eq!(result.request["reasoning"]["effort"], "xhigh");
+        assert_eq!(result.request["reasoning"]["summary"], "auto");
     }
 
     #[test]
@@ -475,6 +538,9 @@ mod tests {
 
         let result = apply_route_selection(input).unwrap();
         assert_eq!(result.normalized_metadata["reasoning_effort"], "low");
+        assert_eq!(result.normalized_metadata["reasoning"]["effort"], "low");
+        assert_eq!(result.request["reasoning_effort"], "low");
+        assert_eq!(result.request["reasoning"]["effort"], "low");
         assert_eq!(result.normalized_metadata["__thinking_source"], "request");
     }
 }

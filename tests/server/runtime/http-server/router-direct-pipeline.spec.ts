@@ -143,6 +143,75 @@ describe('router-direct-pipeline', () => {
       expect(input.requestPayload.model).toBe('deepseek-v4-flash');
     });
 
+    it('overrides direct reasoning effort from route thinking config without entering Hub execute', async () => {
+      const requestPayload = {
+        model: 'gpt-5.5',
+        reasoning_effort: 'low',
+        reasoning: { effort: 'low', summary: 'auto' },
+        messages: [{ role: 'user', content: 'raw' }],
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'raw' }],
+        },
+        requestPayload,
+        target: {
+          providerKey: 'openai.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: openaiHandle.runtimeKey,
+          routeParams: { thinking: 'medium' },
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.gpt-5.5'] },
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).not.toBe(requestPayload);
+      expect(sentPayload.model).toBe('gpt-5.5');
+      expect(sentPayload.reasoning_effort).toBe('medium');
+      expect(sentPayload.reasoning).toEqual({ effort: 'medium', summary: 'auto' });
+      expect(requestPayload.reasoning_effort).toBe('low');
+      expect(requestPayload.reasoning).toEqual({ effort: 'low', summary: 'auto' });
+      expect(openaiHandle.instance.processIncoming).not.toHaveBeenCalled();
+    });
+
+    it('keeps direct request object untouched when route thinking config is absent', async () => {
+      const requestPayload = {
+        model: 'gpt-5.5',
+        reasoning_effort: 'low',
+        reasoning: { effort: 'low' },
+        messages: [{ role: 'user', content: 'raw' }],
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'raw' }],
+        },
+        requestPayload,
+        target: {
+          providerKey: 'openai.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: openaiHandle.runtimeKey,
+          routeParams: {},
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.gpt-5.5'] },
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      expect(openaiHandle.instance.processIncomingDirect).toHaveBeenCalledWith(requestPayload);
+    });
+
     it('passes apply_patch payload through unchanged in router direct mode', async () => {
       const applyPatchTool = {
         type: 'function',
