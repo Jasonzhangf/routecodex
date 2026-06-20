@@ -17,6 +17,26 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'session'
 ] as const;
 
+function routeEntryHasTarget(entry: unknown): boolean {
+  if (!isRecord(entry)) {
+    return false;
+  }
+  if (typeof entry.target === 'string' && entry.target.trim()) {
+    return true;
+  }
+  if (typeof entry.provider === 'string' && entry.provider.trim()) {
+    return true;
+  }
+  return Array.isArray(entry.targets)
+    && entry.targets.some((target) => typeof target === 'string' && target.trim().length > 0);
+}
+
+function routingDefaultHasExplicitTarget(routing: UnknownRecord): boolean {
+  const defaultRoute = routing.default;
+  const entries = Array.isArray(defaultRoute) ? defaultRoute : [defaultRoute];
+  return entries.some((entry) => routeEntryHasTarget(entry));
+}
+
 export interface MaterializedRouteCodexConfig {
   userConfig: UnknownRecord;
   providerProfiles: ProviderProfileCollection;
@@ -104,8 +124,13 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
             );
           }
         }
-        if (!isRecord((groupNode as UnknownRecord).routing)) {
+        const routing = isRecord((groupNode as UnknownRecord).routing)
+          ? ((groupNode as UnknownRecord).routing as UnknownRecord)
+          : undefined;
+        if (!routing) {
           errors.push(`v2 routingPolicyGroups["${groupId}"] must define routing`);
+        } else if (!routingDefaultHasExplicitTarget(routing)) {
+          errors.push(`v2 routingPolicyGroups["${groupId}"].routing.default must define an explicit non-empty default provider tier`);
         }
       }
     }

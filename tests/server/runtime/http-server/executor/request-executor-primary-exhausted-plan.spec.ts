@@ -131,4 +131,25 @@ describe('request-executor primary exhausted plan bridge', () => {
       'fwd.minimax.MiniMax-M3',
     ]);
   });
+
+  it('[forward] default tier availability is true only for a remaining default target outside current route pool', () => {
+    expect(coreUtilsModule.resolveDefaultTierAvailableForErrorErr05({
+      tiers: [
+        { id: 'thinking-primary', targets: ['primary.key1.model'], priority: 200 },
+        { id: 'thinking-default', targets: ['default.key1.model'], priority: 100, backup: true },
+      ],
+      routePool: ['primary.key1.model'],
+      excludedProviderKeys: new Set(['primary.key1.model']),
+    })).toBe(true);
+  });
+
+  it('[reverse] default tier availability is false when the remaining pool is already the default tier last provider', () => {
+    expect(coreUtilsModule.resolveDefaultTierAvailableForErrorErr05({
+      tiers: [
+        { id: 'default-primary', targets: ['default.key1.model'], priority: 100, backup: true },
+      ],
+      routePool: ['default.key1.model'],
+      excludedProviderKeys: new Set(['default.key1.model']),
+    })).toBe(false);
+  });
 });

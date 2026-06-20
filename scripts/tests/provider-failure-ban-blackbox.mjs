@@ -665,6 +665,64 @@ async function run502Scenario() {
   });
 }
 
+async function runAuthQuotaScenario({ label, status, code, marker }) {
+  return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
+    let primaryHits = 0;
+    let backupHits = 0;
+
+    const primaryUpstream = ctx.trackServer(
+      await createMockUpstream({
+        status,
+        body: {
+          error: {
+            message: `${label} primary failure`,
+            code
+          }
+        },
+        onHit: () => {
+          primaryHits += 1;
+        }
+      })
+    );
+    const backupUpstream = ctx.trackServer(
+      await createMockUpstream({
+        status: 200,
+        body: buildResponsesOkBody(marker),
+        onHit: () => {
+          backupHits += 1;
+        }
+      })
+    );
+
+    const userConfig = buildUserConfig(primaryUpstream.baseUrl, backupUpstream.baseUrl);
+    const server = ctx.trackServer(
+      await createHarnessServer({
+        userConfig,
+        RouteCodexHttpServer: ctx.RouteCodexHttpServer,
+        handleResponses: ctx.handleResponses
+      })
+    );
+
+    const first = await postResponses(server.httpHarness.baseUrl);
+    assert.equal(
+      first.status,
+      200,
+      `${label} provider error must reroute to backup instead of returning client-visible ${status}`
+    );
+    assert.match(first.body, new RegExp(marker));
+    assert.equal(primaryHits, 1, `${label} should hit failing primary exactly once before exclusion`);
+    assert.equal(backupHits, 1, `${label} should hit backup after primary exclusion`);
+
+    return {
+      status,
+      code,
+      primaryHits,
+      backupHits,
+      clientStatus: first.status
+    };
+  });
+}
+
 
 async function runPortIsolationScenario() {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
@@ -738,6 +796,24 @@ async function runPortIsolationScenario() {
 
 async function main() {
   const result503 = await run503Scenario();
+  const result401 = await runAuthQuotaScenario({
+    label: 'HTTP_401',
+    status: 401,
+    code: 'HTTP_401',
+    marker: 'ok-from-backup-401'
+  });
+  const result403 = await runAuthQuotaScenario({
+    label: 'HTTP_403',
+    status: 403,
+    code: 'HTTP_403',
+    marker: 'ok-from-backup-403'
+  });
+  const resultQuota = await runAuthQuotaScenario({
+    label: 'INSUFFICIENT_QUOTA',
+    status: 429,
+    code: 'INSUFFICIENT_QUOTA',
+    marker: 'ok-from-backup-quota'
+  });
   const resultPortIsolation = await runPortIsolationScenario();
   const include502 = process.argv.includes('--include-502');
   const result502 = include502 ? await run502Scenario() : undefined;
@@ -746,6 +822,9 @@ async function main() {
       {
         ok: true,
         scenario503: result503,
+        scenario401: result401,
+        scenario403: result403,
+        scenarioInsufficientQuota: resultQuota,
         portIsolation: resultPortIsolation,
         ...(result502 ? { scenario502: result502 } : {})
       },

@@ -1,28 +1,45 @@
 import {
+  isEarlyProjectionBlockedError,
   mapErrorToHttp,
   project_error_err_06_client_from_error_err_05_execution_decision,
 } from '../../../src/server/utils/http-error-mapper.js';
 
 describe('http-error-mapper policy-exhausted gate', () => {
-  it('[forward] provider 5xx without exhausted marker cannot enter ErrorErr06 projection', () => {
-    expect(() => project_error_err_06_client_from_error_err_05_execution_decision({
+  function decision(overrides: Record<string, unknown> = {}) {
+    return {
       message: 'HTTP 502: upstream unavailable',
       code: 'HTTP_502',
       status: 502,
       statusCode: 502,
-      requestId: 'req_test_unexhausted',
+      requestId: 'req_test',
       providerKey: 'p.q.model',
-    })).toThrow(/policy\/candidate exhaustion/);
+      routePoolRemainingAfterExclusion: [],
+      defaultPoolAvailable: false,
+      policyExhausted: true,
+      mayProject: true,
+      ...overrides,
+    };
+  }
+
+  it('[forward] ErrorErr05 mayProject=false cannot enter ErrorErr06 projection', () => {
+    expect(() => project_error_err_06_client_from_error_err_05_execution_decision({
+      ...decision({
+        requestId: 'req_test_unexhausted',
+        routePoolRemainingAfterExclusion: ['p2'],
+        policyExhausted: false,
+        mayProject: false,
+      }),
+    })).toThrow(/ErrorErr05 decision is not projectable/);
   });
 
-  it('[forward] provider 4xx without exhausted marker cannot enter ErrorErr06 projection', () => {
-    expect(() => project_error_err_06_client_from_error_err_05_execution_decision({
-      message: 'bad params',
-      code: 'HTTP_400',
-      status: 400,
-      requestId: 'req_test_400_unexhausted',
-      providerKey: 'p.q.model',
-    })).toThrow(/policy\/candidate exhaustion/);
+  it('[forward] ErrorErr05 defaultPoolAvailable=true cannot enter ErrorErr06 projection even when route pool is exhausted', () => {
+    expect(() => project_error_err_06_client_from_error_err_05_execution_decision(decision({
+      requestId: 'req_test_default_pool_available',
+      routePoolRemainingAfterExclusion: [],
+      defaultPoolAvailable: true,
+      policyExhausted: false,
+      mayProject: false,
+    }))).toThrow(/ErrorErr05 decision is not projectable/);
   });
 
   it('[forward] mapErrorToHttp remains a pure 4xx projector outside ErrorErr06 gating', () => {
@@ -54,14 +71,14 @@ describe('http-error-mapper policy-exhausted gate', () => {
   });
 
   it('[reverse] detailed upstream 4xx with exhausted marker still projects correctly', () => {
-    const payload = project_error_err_06_client_from_error_err_05_execution_decision({
+    const payload = project_error_err_06_client_from_error_err_05_execution_decision(decision({
       message: 'HTTP 400: upstream rejected payload',
       code: 'HTTP_400',
       status: 400,
       requestId: 'req_test_exhausted',
       providerKey: 'p.q.model',
       details: { policyExhausted: true, upstreamCode: 'HTTP_400', upstreamMessage: 'model not found' },
-    });
+    }));
     expect(payload.status).toBe(400);
     expect(payload.body.error.message).toBe('Upstream rejected the request');
   });
@@ -87,7 +104,23 @@ describe('http-error-mapper policy-exhausted gate', () => {
       requestId: 'req_client_abort',
     };
     expect(() => mapErrorToHttp(args)).toThrow(/client_disconnect/i);
-    expect(() => project_error_err_06_client_from_error_err_05_execution_decision(args))
+    expect(() => project_error_err_06_client_from_error_err_05_execution_decision(decision(args)))
       .toThrow(/client_disconnect/i);
+  });
+
+  it('[reverse] legacy details.policyExhausted alone is not a valid ErrorErr05 decision', () => {
+    try {
+      project_error_err_06_client_from_error_err_05_execution_decision({
+        message: 'HTTP 502: upstream unavailable',
+        code: 'HTTP_502',
+        status: 502,
+        requestId: 'req_legacy_marker_only',
+        providerKey: 'p.q.model',
+        details: { policyExhausted: true },
+      } as any);
+      throw new Error('legacy marker unexpectedly projected');
+    } catch (error) {
+      expect(isEarlyProjectionBlockedError(error)).toBe(true);
+    }
   });
 });

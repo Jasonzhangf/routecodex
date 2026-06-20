@@ -112,6 +112,43 @@ describe('request-executor-provider-failure-plan', () => {
 
     expect(plan.reportPlan.stageHint).toBe('provider.send');
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
-    expect(plan.retryExecutionPlan.backoffScope).toBe('recoverable');
+    expect(plan.retryExecutionPlan.backoffScope).toBe('provider');
+  });
+
+  test('RED: defaultTierAvailable true must flow into ErrorErr05 and block client projection when route pool is exhausted', async () => {
+    const excludedProviderKeys = new Set<string>(['p1']);
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('Upstream authentication failed'), {
+        code: 'HTTP_401',
+        upstreamCode: 'HTTP_401',
+        statusCode: 401
+      }),
+      retryError: {
+        statusCode: 401,
+        errorCode: 'HTTP_401',
+        upstreamCode: 'HTTP_401',
+        reason: 'Upstream authentication failed'
+      },
+      requestId: 'req-default-tier-available-blocks-projection',
+      providerKey: 'p1',
+      runtimeKey: 'runtime:p1',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-default-tier-available-blocks-projection',
+      logicalChainRetryLimitStageRequestId: 'logical-default-tier-available-blocks-projection',
+      routePool: ['p1'],
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.retryExecutionPlan.routePoolRemainingAfterExclusion).toEqual([]);
+    expect(plan.retryExecutionPlan.defaultPoolAvailable).toBe(true);
+    expect(plan.retryExecutionPlan.policyExhausted).toBe(false);
+    expect(plan.retryExecutionPlan.mayProject).toBe(false);
   });
 });

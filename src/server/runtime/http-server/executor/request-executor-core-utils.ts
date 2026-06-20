@@ -220,6 +220,37 @@ export function collectPrimaryExhaustedKnownTargets(
   return knownTargets;
 }
 
+export function resolveDefaultTierAvailableForErrorErr05(args: {
+  tiers?: Array<{ targets: string[]; backup?: boolean }>;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  const tiers = Array.isArray(args.tiers) ? args.tiers : [];
+  const defaultTier = tiers.find((tier) => tier.backup === true);
+  if (!defaultTier || !Array.isArray(defaultTier.targets)) {
+    return false;
+  }
+  const routePool = new Set(
+    (Array.isArray(args.routePool) ? args.routePool : [])
+      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+      .map((target) => target.trim())
+  );
+  for (const target of defaultTier.targets) {
+    if (typeof target !== 'string') {
+      continue;
+    }
+    const normalized = target.trim();
+    if (!normalized || args.excludedProviderKeys.has(normalized)) {
+      continue;
+    }
+    if (routePool.has(normalized)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 /**
  * Host-side adapter around `planPrimaryExhaustedToDefaultPoolNative` (Rust).
  *

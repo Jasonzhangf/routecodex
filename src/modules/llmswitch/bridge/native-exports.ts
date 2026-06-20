@@ -117,6 +117,29 @@ type NativeHubBridgePolicySemantics = {
 };
 
 type NativeRouterHotpathJsonBinding = {
+  classifyProviderFailureJson?: (
+    statusCode: number | undefined,
+    errorCode: string | undefined,
+    upstreamCode: string | undefined,
+    isNetworkError: boolean
+  ) => string;
+  computeProviderBackoffMsJson?: (
+    classificationJson: string,
+    attempt: number
+  ) => number;
+  resolveProviderRetryExecutionPolicyJson?: (
+    inputJson: string
+  ) => string;
+  networkErrorSetJson?: () => string;
+  isProviderFailureBlockingRecoverableJson?: (
+    classificationJson: string,
+    stage: string | undefined
+  ) => boolean;
+  shouldRetryProviderFailureJson?: (
+    classificationJson: string,
+    attempt: number,
+    maxAttempts: number
+  ) => boolean;
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
   buildResponsesPayloadFromChatJson?: (
     payloadJson: string,
@@ -178,6 +201,72 @@ let cachedChatProcessNodeResultSemantics: NativeChatProcessNodeResultSemantics |
 let sharedBindingsChecked: boolean | undefined;
 let respBindingsChecked: boolean | undefined;
 
+function buildFailurePolicyModuleFromRouterHotpathBinding(
+  binding: NativeRouterHotpathJsonBinding
+): NativeFailurePolicyModule | null {
+  if (
+    typeof binding.classifyProviderFailureJson !== 'function'
+    || typeof binding.resolveProviderRetryExecutionPolicyJson !== 'function'
+  ) {
+    return null;
+  }
+  return {
+    classifyProviderFailure: (
+      statusCode: number | undefined,
+      errorCode: string | undefined,
+      upstreamCode: string | undefined,
+      isNetworkError: boolean,
+    ) => JSON.parse(String(binding.classifyProviderFailureJson!(
+      statusCode,
+      errorCode,
+      upstreamCode,
+      isNetworkError,
+    ))) as string,
+    computeBackoffMsNative: (
+      classification: NativeFailureClassification,
+      attempt: number
+    ) => {
+      const fn = binding.computeProviderBackoffMsJson;
+      if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] computeProviderBackoffMsJson not available');
+      }
+      return Number(fn(JSON.stringify(classification), attempt));
+    },
+    resolveProviderRetryExecutionPolicyNative: (input) =>
+      JSON.parse(String(binding.resolveProviderRetryExecutionPolicyJson!(
+        JSON.stringify(input)
+      ))) as { excludeCurrentProvider: boolean; reason: string },
+    getNetworkErrorCodes: () => {
+      const fn = binding.networkErrorSetJson;
+      if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] networkErrorSetJson not available');
+      }
+      return JSON.parse(String(fn())) as string[];
+    },
+    isBlockingRecoverableNative: (
+      classification: NativeFailureClassification,
+      stage: string | undefined
+    ) => {
+      const fn = binding.isProviderFailureBlockingRecoverableJson;
+      if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] isProviderFailureBlockingRecoverableJson not available');
+      }
+      return Boolean(fn(JSON.stringify(classification), stage));
+    },
+    shouldRetryNative: (
+      classification: NativeFailureClassification,
+      attempt: number,
+      maxAttempts: number
+    ) => {
+      const fn = binding.shouldRetryProviderFailureJson;
+      if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] shouldRetryProviderFailureJson not available');
+      }
+      return Boolean(fn(JSON.stringify(classification), attempt, maxAttempts));
+    },
+  };
+}
+
 function getFailurePolicyModule(): NativeFailurePolicyModule {
   if (cachedFailurePolicyModule !== undefined) {
     if (!cachedFailurePolicyModule) {
@@ -190,7 +279,13 @@ function getFailurePolicyModule(): NativeFailurePolicyModule {
       'native/router-hotpath/native-failure-policy'
     );
   } catch {
-    cachedFailurePolicyModule = null;
+    try {
+      cachedFailurePolicyModule = buildFailurePolicyModuleFromRouterHotpathBinding(
+        getRouterHotpathJsonBindingSync()
+      );
+    } catch {
+      cachedFailurePolicyModule = null;
+    }
   }
   if (!cachedFailurePolicyModule) {
     throw new Error('[llmswitch-bridge] native-failure-policy not available');

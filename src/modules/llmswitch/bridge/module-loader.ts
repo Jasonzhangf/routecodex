@@ -104,6 +104,7 @@ function shouldPreferSourceInJest(subpath: string, impl: LlmsImpl): boolean {
     return false;
   }
   const jestDistOnlyPrefixes = [
+    'native/router-hotpath/native-failure-policy',
     'native/router-hotpath/native-virtual-router-routing-state',
     'servertool/handlers/stopless-goal-state'
   ];

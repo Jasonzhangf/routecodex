@@ -100,6 +100,7 @@ import {
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
+  resolveDefaultTierAvailableForErrorErr05,
   resolvePoolExhaustedBackoffMs,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
@@ -1859,6 +1860,21 @@ export class RouteCodexHttpServer {
           ctx.routingDecision,
           ctx.providerKey
         );
+        const routingDecisionRouteName =
+          typeof ctx.routingDecision?.routeName === 'string' ? ctx.routingDecision.routeName : undefined;
+        const routingDecisionTiers =
+          routingDecisionRouteName && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+            ? extractRoutingTiersForRoutingGroupRoute(
+              this.userConfig,
+              metadataForHub.routecodexRoutingPolicyGroup,
+              routingDecisionRouteName,
+            )
+            : [];
+        const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
+          tiers: routingDecisionTiers,
+          routePool: routingDecisionProviderPool,
+          excludedProviderKeys: retryState.excludedProviderKeys,
+        });
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1890,6 +1906,7 @@ export class RouteCodexHttpServer {
           logicalRequestChainKey: input.requestId,
           logicalChainRetryLimitStageRequestId: input.requestId,
           routePool: routingDecisionProviderPool,
+          defaultTierAvailable: defaultTierAvailableForDecision,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
@@ -2352,6 +2369,7 @@ export class RouteCodexHttpServer {
             logicalRequestChainKey: input.requestId,
             logicalChainRetryLimitStageRequestId: input.requestId,
             routePool: [context.providerKey],
+            defaultTierAvailable: false,
             excludedProviderKeys: new Set<string>(),
             recordAttempt: () => {},
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),

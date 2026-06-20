@@ -27,6 +27,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   maxAttempts: number;
   logicalRequestChainKey: string;
   routePoolForAttempt?: string[];
+  defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
   transientRetryTracker?: RequestLocalTransientRetryTracker;
   recordAttempt: (args: { error: boolean }) => void;
@@ -94,6 +95,7 @@ export async function processProviderResolveFailure(
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.requestId,
     routePool: args.routePoolForAttempt,
+    defaultTierAvailable: args.defaultTierAvailable,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,
     logStage: args.logStage,

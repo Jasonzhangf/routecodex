@@ -122,6 +122,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     routePool: args.routePool,
     excludedProviderKeys: args.excludedProviderKeys
   });
+  const hasExplicitRoutePool = Array.isArray(args.routePool) && args.routePool.length > 0;
 
   if (
     args.classification === 'recoverable'
@@ -166,7 +167,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     hasAlternativeCandidate,
     is429
   });
-  if (exclusionDecision.excludeCurrentProvider) {
+  if (exclusionDecision.excludeCurrentProvider && hasExplicitRoutePool) {
     return {
       excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
         providerKey,

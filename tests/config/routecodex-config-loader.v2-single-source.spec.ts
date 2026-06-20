@@ -177,6 +177,76 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     expect((loaded.userConfig.httpserver as any).sameProtocolBehavior).toBe('relay');
   });
 
+  it('rejects routingPolicyGroup without explicit non-empty default route skeleton', async () => {
+    const root = await mkTmp('routecodex-v2-default-skeleton-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.json');
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify({
+        version: '2.0.0',
+        virtualrouterMode: 'v2',
+        httpserver: {
+          host: '127.0.0.1',
+          port: 5555
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            default: {
+              routing: {
+                coding: [{ id: 'coding-primary', targets: ['ali-coding-plan.glm-5'] }]
+              }
+            }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    await expect(loadRouteCodexConfig(configPath)).rejects.toThrow(
+      'routingPolicyGroups["default"].routing.default'
+    );
+  });
+
+  it('rejects routingPolicyGroup whose default route has no provider targets', async () => {
+    const root = await mkTmp('routecodex-v2-default-empty-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.json');
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify({
+        version: '2.0.0',
+        virtualrouterMode: 'v2',
+        httpserver: {
+          host: '127.0.0.1',
+          port: 5555
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            default: {
+              routing: {
+                default: [{ id: 'default-empty', targets: [] }]
+              }
+            }
+          }
+        }
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    await expect(loadRouteCodexConfig(configPath)).rejects.toThrow(
+      'routingPolicyGroups["default"].routing.default'
+    );
+  });
+
   it('does not stick to a previous auto-resolved config path', async () => {
     const rootA = await mkTmp('routecodex-v2-path-a-');
     process.env.RCC_HOME = rootA;

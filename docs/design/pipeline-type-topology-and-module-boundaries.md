@@ -303,6 +303,12 @@ ErrorErr01SourceRaised
 | `ErrorErr05ExecutionDecision` | router policy result | retry/reroute/fail execution decision | 执行层只消费 policy decision | 重新分类或本地 cooldown |
 | `ErrorErr06ClientProjected` | final failure | client error response | client-safe 错误投影 | secret/metadata/snapshot 泄漏 |
 
+`ErrorErr05ExecutionDecision` 的 provider-error client projection gate 字段固定为：
+`routePoolRemainingAfterExclusion: string[]`、`defaultPoolAvailable: boolean`、`policyExhausted: boolean`、`mayProject: boolean`。
+`mayProject` / `policyExhausted` 只能由
+`routePoolRemainingAfterExclusion.length === 0 && defaultPoolAvailable === false` 派生。
+当 `defaultPoolAvailable=true` 时，即使当前 route pool 已耗尽，也必须继续回到 VR/default-pool planner，禁止进入 `ErrorErr06ClientProjected`。
+
 错误链连接标准：错误可以引用 request/response 节点 id，但不能回写 req/resp 正常 payload；错误进入 client 前必须经过 `ErrorErr06ClientProjected`。
 
 ## 6. Metadata Carrier 拓扑

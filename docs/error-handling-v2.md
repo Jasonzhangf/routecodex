@@ -120,7 +120,29 @@
    - 仅在明确允许时才 `retry_same_provider_once`
 4. `unrecoverable / periodic_recovery`
    - 由策略决定是否排除/冷却当前 provider
-   - 若还有候选继续切；无候选后才返客户端
+   - 若当前 route pool 或 default pool 仍有候选继续切；只有二者同时为空后才返客户端
+
+### 1.0.2a 2026-06-20 provider error reroutable-until-default-empty contract
+
+Jason 纠偏后的当前硬骨架：
+
+1. 所有 provider 执行期错误默认可切，包括 `401` / `403` / `INVALID_API_KEY` / `INSUFFICIENT_QUOTA` / `ACCOUNT_DISABLED` / `429` / `5xx` / transport / SSE decode / protocol error。
+2. 唯一允许进入 `ErrorErr06ClientProjected` 的停止条件是：
+   `routePoolRemainingAfterExclusion.length === 0 && defaultPoolAvailable === false`。
+3. `defaultPoolAvailable` 必须来自 VR/default-pool truth；Host / RequestExecutor / direct lane 只消费该 truth，不得本地合成 default provider 链。
+4. 每个 routing group 必须有显式非空 `routing.default` skeleton；default 最后一个 provider 不得被移出成空池。
+5. `router-direct` 必须消费 `ErrorErr05ExecutionDecision`。当当前池已空但 `defaultPoolAvailable=true` 且 `mayProject=false` 时，必须递归回 VR/default planner，禁止 rethrow。
+6. `http-error-mapper` 的 ErrorErr06 投影只能接收完整 `ErrorErr05ExecutionDecision`；legacy `details.policyExhausted` / `candidateExhausted` 不再是投影真源。
+
+验证基线：
+
+- `tests/red-tests/error_chain_may_project_gate.test.ts`
+- `tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts`
+- `tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts`
+- `tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts`
+- `tests/config/routecodex-config-loader.v2-single-source.spec.ts`
+- `cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib`
+- `npm run verify:provider-failure-ban-blackbox`
 
 ### 1.0.3 direct path 的正确职责
 
@@ -149,21 +171,22 @@
 
 禁止 `http-error-mapper` 仅凭 `status in 4xx` 就把 provider error 立即投影给客户端。
 
-### 1.0.5 当前 gap（2026-06-14 审计结论）
+### 1.0.5 已关闭 gap（2026-06-20 验证结论）
 
-1. relay path 基本对齐；
-2. `router-direct` 当前仍是 `passthrough + hooks only + fail-fast rethrow`，未完整消费 reroute decision；
-3. `provider-direct` 当前也只 report/classify，不 reroute；
-4. `http-error-mapper` 对 `400 <= status < 500` 过早投影；
-5. `HTTP_499` / `client abort request` 仍可能误入普通 provider 4xx 主链；
-6. “primary pool exhausted -> default pool” 还不是 VR 显式 contract。
+1. relay/request-executor 主路径已接入 `defaultTierAvailable -> ErrorErr05.defaultPoolAvailable`。
+2. `router-direct` 已删除 auth/quota terminal early return，并在 current pool empty + default available 时 request reroute。
+3. `provider-direct` 仍不合成 route pool，但 provider error 进入统一 ErrorErr05 plan 后再 rethrow 给 projection 边界；它不得拥有第二套路由策略。
+4. `http-error-mapper` 的 ErrorErr06 projector 已要求完整 ErrorErr05 decision；`mayProject=false` 会抛 `EARLY_PROJECTION_BLOCKED`。
+5. `HTTP_499` / `client abort request` 仍作为 `client_disconnect` health-neutral、non-projectable 边界保留。
+6. `primary pool exhausted -> default pool` 已是 Rust/VR contract，并由配置 default skeleton gate 与 live/default-pool replay 共同锁定。
 
-### 1.0.6 后续实现要求
+### 1.0.6 维护要求
 
-1. direct path 必须改成 unified decision consumer，而不是 report-only caller；
-2. 若要支持 default pool 扩池，只能改 VR 真源与其 contract/tests，不得在 host 层补 fallback；
-3. `client_disconnect` 识别必须前移到 `error.provider_failure_policy`；
-4. `ErrorErr06ClientProjected` 只能处理 exhausted/no-candidate 后的最终错误。
+1. direct path 必须保持 unified decision consumer，禁止恢复 report-only caller。
+2. default pool 扩池只能改 VR/Rust 真源与 contract/tests，不得在 Host 层补 fallback。
+3. `client_disconnect` 必须继续停在 health-neutral / non-projectable 边界。
+4. `ErrorErr06ClientProjected` 只能处理 `mayProject=true` 的最终错误。
+5. 新增 auth/quota/provider-error 场景时，必须同步覆盖正向“先切”与反向“池空才投影”测试。
 
 ## 1.1 三分类硬约束（2026-05-28）
 

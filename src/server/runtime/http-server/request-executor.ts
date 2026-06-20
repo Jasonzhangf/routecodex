@@ -65,6 +65,7 @@ import {
   isPoolExhaustedPipelineError,
   POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   mergeMetadataPreservingDefined,
+  resolveDefaultTierAvailableForErrorErr05,
   resolvePoolCooldownWaitMs,
   resolvePoolExhaustedBackoffMs,
   resolvePrimaryExhaustedRoutingContextFromError,
@@ -738,6 +739,17 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           target
         } = resolvedPipelineAttempt;
+        const routeNameForAttempt = pipelineResult.routingDecision?.routeName;
+        const routeTiersForAttempt =
+          typeof routeNameForAttempt === 'string'
+          && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
+            ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, routeNameForAttempt) ?? []
+            : [];
+        const defaultTierAvailableForAttempt = resolveDefaultTierAvailableForErrorErr05({
+          tiers: routeTiersForAttempt,
+          routePool: routePoolForAttempt,
+          excludedProviderKeys,
+        });
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
             ? target.concurrencyScopeKey.trim()
@@ -809,6 +821,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             transientRetryTracker,
             recordAttempt,
@@ -949,6 +962,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             transientRetryTracker,
             recordAttempt,
