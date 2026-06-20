@@ -8,6 +8,7 @@ import {
 export function isEmptyOpenAiChatSseBridgeError(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   return normalized.includes('openai chat sse response did not contain json data events')
+    || normalized.includes('openai chat sse response did not contain choices array')
     || normalized.includes('provider sse marker did not include materializable stream or bodytext');
 }
 

@@ -36,4 +36,21 @@ describe('provider-response-converter empty SSE failures', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('remaps empty OpenAI chat SSE bridge failures that mention choices arrays to retryable SSE decode errors', () => {
+    const error: Record<string, unknown> = { code: 'HTTP_HANDLER_ERROR' };
+    const changed = remapBridgeSseErrorToHttp(
+      error,
+      'Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain choices array'
+    );
+
+    expect(changed).toBe(true);
+    expect(error).toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      status: 502,
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

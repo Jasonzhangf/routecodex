@@ -1,5 +1,13 @@
 # RouteCodex Memory
 
+- 2026-06-20: RouteCodex 排障顺序固定为先看 `~/.rcc/codex-samples` / `/Volumes/extension/.rcc/codex-samples` 里的最新相关 sample，再查日志、配置和代码。反模式是先起临时服务、并发开多个端口或先猜请求体/路由/模型名；后续排障必须先样本后结论。
+
+- 2026-06-20: Hub Pipeline protocol selection is now a hard contract, not shape inference. Request inbound protocol is derived only from the entry path; provider outbound / response inbound protocol comes from the selected provider target; response outbound protocol comes from the original entry. Missing `providerProtocol` fails fast in TS/Rust HubPipeline, `provider-direct` only accepts entry path for inbound resolution, and Rust SSE protocol resolution no longer reads metadata override keys (`sseProtocol/clientSseProtocol/routeSseProtocol`) or defaults empty protocol to `openai-chat`. Verified by focused Rust protocol/response tests, focused provider-direct/request-executor Jest, SSE normalize/stage-residue Jest, and `tsc --noEmit`.
+
+- 2026-06-20: Restart 顺序必须先确认“当前运行配置就是要启动的配置”，再跑 `routecodex config validate`，最后才考虑 `routecodex restart --port <port>`；不能在用户恢复旧配置后直接重启。此次 XLC provider errorMapping 仍采用紧凑 `origin/to` 规则，但这只是配置语法可验证，不代表可直接启动。
+
+- 2026-06-20: Provider-configured error mapping and provider forwarder sticky are separate failure classes. Upstream provider bodies like HTTP 400 `All available accounts exhausted` must be mapped from provider config (`errorMapping.rules[]` / `extensions.errorMapping.rules[]`, each rule as `{ origin, to }`) through Rust provider bootstrap -> runtime extensions -> provider HTTP normalization before catalog/failure policy consumes the error; do not hardcode provider messages in the global catalog. Provider forwarders must not session-pin selected provider targets; `stickyKey=session` is inert legacy config in Rust `ForwarderRegistry`, and no host/executor sticky cleanup fallback should be added. Verified by focused Jest (`provider-http-executor-utils`, `provider-factory`, `virtual-router-bootstrap-provider-auth-alias`), `npm run verify:vr-forwarder-runtime`, `scripts/tests/no-provider-sticky-physical-regression.mjs`, `verify:architecture-error-chain-bypass`, and `tsc --noEmit`.
+
 - 2026-06-19: OpenAI chat provider `single-tool-call-history` compat is Rust-only in `router-hotpath-napi::req_outbound_stage3_compat`. Profile `chat:single-tool-call-history` / `openai-chat:single-tool-call-history` splits every assistant message with `tool_calls.len()>1` into multiple assistant turns with exactly one tool call each, across the full outbound `messages` array, including historical and latest/current turns. Without the profile the original parallel shape is preserved; single-call turns are unchanged. Verified by Rust focused tests (`openai_chat_single_tool_call_history`), the dedicated Rust-only gate `verify:openai-chat-single-tool-call-history-compat-rust-only`, function-map/owner-queryability gates, and the live-provider replay evidence already captured in note.md showing original upstream failure on parallel tool calls and success after splitting. Do not move this compat into Hub Pipeline or TS.
 
 - 2026-06-19: Response SSE custom wrapper semantics are forbidden on normal response bodies. `sendSsePipelineResponse(...)` may only stream from `PipelineExecutionResult.sseStream`; `body.sseStream` / `hasResponsesSsePayloadForHttp` / `hasSsePayload` are removed as canonical bridge surfaces, and `assertClientResponseHasNoInternalCarriers(...)` treats `sseStream` in client JSON payload as fail-fast internal carrier leakage. Force-SSE JSON bridge remains legal only for standard Responses/chat JSON projection. Verified by focused SSE wrapper/forceSSE/split-frame/MetadataCenter Jest, `tsc`, custom payload carrier audits, owner-queryability/runtime-manifest/containment gates, `verify:function-map-compile-gate`, full `verify:architecture-ci`, `build:min`, and `git diff --check`. Remaining audit lane: historical tests/fixtures still contain `__routecodex_stream_*` residues and need a separate cleanup slice.
@@ -2418,6 +2426,7 @@ Tags: responses-sse, stopless, default-stopless, prebuilt-sse, servertool-cli-pr
 
 ## 2026-06-07 stopless CLI projection reasoning source order
 - Stopless CLI projection reasoning must preserve the intercepted assistant stop text, not the continuation prompt. Source order is `execution.context.assistantStopText -> current finalChatResponse assistant text -> explicit default message`.
+- 2026-06-20: `schemaGuidance` struct exists but is not the final user-visible truth; if CLI blackbox expects the model to understand schema, update the final projection owner (`build_stopless_cli_model_guidance(...)`) so the emitted `modelGuidance` explicitly explains what the schema is, why it exists, and how to fill it. Do not stop at adding middle-layer fields.
 - Tests that assert stopless repeatCount/prompt layer must isolate session/tmux state files first; stale `stopMessageUsed` residue can legitimately shift the prompt from first to later layers and make the test nondeterministic.
 - Verified: `cargo test -p stop-message-core --lib`; `cargo test -p router-hotpath-napi stop_message_auto --lib`; stop-message Jest 2 suites / 68 passed / 16 skipped; `npm run verify:servertool-rust-only`; `npx tsc --noEmit --pretty false`; `git diff --check`.
 Tags: stopless, servertool-cli-projection, reasoning, test-isolation, 2026-06-07
@@ -3273,3 +3282,38 @@ Tags: apply_patch, responses, freeform, lark-grammar, rust-ssot, direct, relay, 
 - 2026-06-18 update: `verify:provider-failure-ban-blackbox` is now closed. Provider health persistence is scoped by ErrorErr runtime truth: Rust `virtual_router_engine::engine::events` reads `event.runtime.sessionDir/session_dir` before refreshing/persisting provider health, and missing runtime sessionDir fails closed instead of inheriting ambient `RCC_HOME/sessions`. The blackbox now isolates `RCC_HOME`, scans all `provider-health.json` files, and locks the only allowed path to `RCC_HOME/sessions/<serverId>/ports/<routingPolicyGroup>/provider-health.json`; it also proves 503 runtime cooldown is not persisted across restart and port/routing-group cooldowns do not bleed across groups. Verified by two Rust positive/negative tests, `provider-error-reporter.spec.ts`, `build:base`, `verify:provider-failure-ban-blackbox`, `verify:error-pipeline-contract`, public leak Jest suites, and direct-passthrough route-level Jest.
 
 - 2026-06-19: servertool followup dispatch no longer promotes or reads legacy followup control truth from normal metadata payload or `__rt`. `servertool-followup-dispatch.ts` now reads/writes only `MetadataCenter.runtime_control.serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus`; `servertool-followup-metadata.ts` merges base+extra request-scoped MetadataCenter side-channels and derives followup continuity from `readRuntimeControlProjection(out)`, not `__rt.serverToolFollowup`. Static contract now forbids `promoteLegacyFollowupControlToMetadataCenter`, flat `metadata.serverToolFollowup/isServerToolFollowup/clientInjectSource`, `rt?.serverToolFollowup/clientInjectSource/serverToolFollowupSource/stoplessGoalStatus`, and `runtimeMeta.serverToolFollowup` in these owners. Verified by focused/related Jest 69/69, `tsc --noEmit`, custom payload carrier audit/owner/manifest/containment gates, `verify:function-map-compile-gate`, `verify:architecture-ci`, `build:min`, and `git diff --check`. Live runtime was not reinstalled in this slice.
+## 2026-06-20 错误处理硬骨架：所有错误可切 + default 池不可空 + 红测锁骨架
+
+经过 Jason 纠偏，错误处理主链的"硬骨架"真相：
+
+1. **所有 provider 错误一律可切**。包括当前被分类为 `unrecoverable` 的 401/403/INVALID_API_KEY/INSUFFICIENT_QUOTA/ACCOUNT_DISABLED/INVALID_ACCESS_TOKEN 等。VR/Executor 的默认动作是"切"，不是"返"。
+2. **唯一停止条件**：相关可选池（route pool）+ default 池**同时**为空。"default 池永远不可空"是配置/VR 真源硬约束：每个 routing group 必须有显式 default fallback tier（即使 tier 内暂时没有可用 provider，骨架必须存在）。
+3. **必须有刚性骨架 + 红测锁定**。禁止任何 owner 绕过：
+   - 禁止 `router-direct` / `provider-direct` / `RequestExecutor` / `provider runtime` rethrow provider error 给客户端。
+   - 禁止 `http-error-mapper` / handler 在 `policyExhausted=false` / `candidateExhausted=false` 时投影。
+   - 禁止 "report-only" 半接入错误链。
+4. `client_disconnect` 仍是 health-neutral、不切、不投影 4xx，但不在"所有错误可切"覆盖内（属于 client transport 取消，不属于 provider failure）。
+
+这一条替代了 L92-19 中"401/403 不应 client-visible"的部分措辞。新边界：401/403 仍然**先**走 generic 502 投影（不暴露 auth 文案 / request_id），但**只有**在"pool + default 全空"时才允许投影；只要还有候选，必须先切。
+
+落地 owner：`error.provider_failure_policy`（policy 决定"切"的策略）、`error.execution_decision_consumer`（执行切并保证 default 池入栈）、`error.client_projection`（最后投影门禁 + callerMayProject 谓词）。三者必须用同一份 `routePoolRemainingAfterExclusion` + `defaultPoolAvailable` 真源，红测要锁住"切完才投"。
+
+Tags: error-chain, default-pool, architecture, 2026-06-20
+
+## 2026-06-20 provider error reroutable-until-default-empty closeout
+
+当前已验证闭环：provider 执行期错误默认先切候选/default，只有 `routePoolRemainingAfterExclusion.length === 0 && defaultPoolAvailable === false` 才允许进入 `ErrorErr06ClientProjected`。`router-direct` 不再有 401/403/auth/quota early return；当前池耗尽但 `defaultPoolAvailable=true` 时必须 request reroute 回 VR/default-pool planner。`http-error-mapper` 的 ErrorErr06 projector 只接受完整 ErrorErr05 decision；legacy `details.policyExhausted` 不再是投影真源。v2 routing group 必须有显式非空 `routing.default` skeleton。
+
+验证证据：focused Jest 9 suites / 65 tests PASS；`cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib` 5 passed；`verify:error-pipeline-contract`、`verify:provider-failure-ban-blackbox`、`verify:function-map-compile-gate`、`verify:architecture-error-chain-bypass`、`tsc --noEmit`、`build:base`、`install:global` 均 PASS。`verify:provider-failure-ban-blackbox` 现在覆盖 mock primary `HTTP_401`、`HTTP_403`、`INSUFFICIENT_QUOTA(429)`，均证明 `provider-switch -> backup -> clientStatus=200`。安装态版本 `0.90.3210` 已重启 5555，`/health` 为 `ready=true pipelineReady=true`；生产 5555 live chat 样本 `openai-chat-unknown-unknown-20260620T152014037-375547-589` 证明 `XLC.key1.glm-5.2` 503/model_not_found -> `XLC.key2.deepseek-v4-pro` 503/model_not_found -> `minimax.key1.MiniMax-M3` 200。
+
+边界：生产 5555 未通过修改真实 provider 凭据强制制造 auth/quota；auth/quota live-equivalent 由 installed dist runtime + mock upstream 黑盒验证，避免破坏生产配置。
+
+Tags: error-chain, provider-switch, default-pool, router-direct, auth-quota, live-5555, 2026-06-20
+
+- 2026-06-20: RouteCodex 排障顺序纠偏：所有问题都必须先看 codex samples 样本，再查日志、配置和代码。优先读取 `~/.rcc/codex-samples` 与 `/Volumes/extension/.rcc/codex-samples` 下最新相关的 client request、provider request、provider response、SSE/frame 样本，用真实样本锁入口协议、direct/relay mode、provider target、canonical model、请求体、metadata 泄漏和上游错误形态。禁止未看样本就先起多端口临时服务、猜测请求体/模型名/路由问题或宣称根因。
+
+Tags: codex-samples, debugging-order, real-sample-first, 2026-06-20
+
+- 2026-06-20: XLC `key2` on `https://xlapis.com/v1/chat/completions` was verified by direct curl as SSE-only for the tested deepseek models, not JSON. `deepseek-v4-pro` and `deepseek-v4-flash` returned HTTP 200 `text/event-stream` with empty `choices: []`; `glm-5.2` and `kimi-k2.6` returned HTTP 503 `model_not_found`. Server-side response conversion must classify `OpenAI chat SSE response did not contain choices array` as retryable `SSE_DECODE_ERROR` / `provider.sse_decode` so the provider failure chain can reroute instead of exposing an unclassified conversion failure. Verified focused suites: `tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts` and `tests/server/runtime/http-server/executor/request-executor-provider-send-failure.abort.spec.ts`.
+
+Tags: openai-chat, xlc, sse, provider-sse-decode, provider-switch, 2026-06-20
