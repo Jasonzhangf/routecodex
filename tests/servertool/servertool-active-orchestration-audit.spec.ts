@@ -133,6 +133,16 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
+    forbidden: [],
+    required: [
+      'planServertoolResponseStageGateWithNative',
+      'runServertoolResponseStageAutoHookPass',
+      'responseHookMatched !== true',
+      'continue_to_execution',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts',
     forbidden: [],
     required: [
@@ -175,6 +185,8 @@ const TARGETS = [
       "const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative(",
       "const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative(",
       "await runServertoolAutoHookCaller({",
+      'planServertoolResponseStageGateWithNative(',
+      'runServertoolResponseStageAutoHookPass(',
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '[servertool] native execution-branch projected missing tool call id:',
       '[servertool] native execution-branch projected missing tool call index:',

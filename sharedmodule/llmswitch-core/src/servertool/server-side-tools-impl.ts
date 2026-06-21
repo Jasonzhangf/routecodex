@@ -6,9 +6,6 @@ import type {
   ToolCall
 } from './types.js';
 import {
-  planServertoolResponseStageGateWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import {
   runServertoolIoExecutionQueue
 } from './execution-dispatch-outcome-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
@@ -19,7 +16,6 @@ import {
   filterOutExecutedToolCalls,
   stripToolOutputs
 } from './orchestration-blocks.js';
-import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js';
 import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
@@ -28,6 +24,7 @@ import {
 } from './cli-projection-runtime-shell.js';
 import { planServertoolExecutionBranchRuntimeAction } from './execution-branch-runtime-shell.js';
 import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
+import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
@@ -72,21 +69,15 @@ export const runServerSideToolEngine = async (
   const excludeToolCallNames = normalizeFilterTokenSet(options.excludeToolCallHandlerNames);
   const includeAutoHookIds = normalizeFilterTokenSet(options.includeAutoHookIds);
   const excludeAutoHookIds = normalizeFilterTokenSet(options.excludeAutoHookIds);
-  const responseHookStagePlan = planServertoolResponseStageGateWithNative({
-    payload: baseObject,
-    adapterContext: options.adapterContext as Record<string, unknown>
+  const responseStagePrePass = await runServertoolResponseStagePrePass({
+    options,
+    baseObject,
+    contextBase: contextBase as ServerToolHandlerContext,
+    includeAutoHookIds,
+    excludeAutoHookIds
   });
-  if (responseHookStagePlan.responseHookMatched) {
-    const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
-      options,
-      contextBase: contextBase as ServerToolHandlerContext,
-      includeAutoHookIds,
-      excludeAutoHookIds,
-      responseStageGatePlan: responseHookStagePlan as Record<string, unknown>
-    });
-    if (responseStageAutoHook.action === 'return_auto_hook_result') {
-      return responseStageAutoHook.result;
-    }
+  if (responseStagePrePass.action === 'return_result') {
+    return responseStagePrePass.result;
   }
 
   const baseForExecution = structuredClone(baseObject);
@@ -142,7 +133,7 @@ export const runServerSideToolEngine = async (
     contextBase: contextBase as ServerToolHandlerContext,
     includeAutoHookIds,
     excludeAutoHookIds,
-    initialResponseStageGatePlan: responseHookStagePlan as Record<string, unknown>
+    initialResponseStageGatePlan: responseStagePrePass.responseStageGatePlan
   });
 };
 

@@ -103,6 +103,7 @@ const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
+const TS_RESPONSE_STAGE_PREPASS_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
@@ -5559,6 +5560,20 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
+    'runServertoolResponseStageAutoHookPass'
+  );
+
+  const responseStagePrePassShell = readRequired(TS_RESPONSE_STAGE_PREPASS_SHELL);
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'planServertoolResponseStageGateWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
     'runServertoolResponseStageAutoHookPass'
   );
 }
