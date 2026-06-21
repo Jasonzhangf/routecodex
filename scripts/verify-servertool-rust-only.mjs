@@ -2741,8 +2741,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-state-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'appendServertoolExecutedRecordJson'],
     ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'createServertoolExecutionLoopStateWithNative'],
     ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'appendServertoolExecutedRecordWithNative'],
-    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'createServertoolExecutionLoopStateWithNative'],
-    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'appendServertoolExecutedRecordWithNative'],
+    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'createServertoolExecutionLoopStateFromNative'],
+    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'appendExecutedToolRecordFromNative'],
   ]) {
     assertContains(check, file, content, needle);
   }

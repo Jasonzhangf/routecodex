@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const getServerToolHandler = jest.fn();
 const runServertoolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
+const createServertoolExecutionLoopStateFromNative = jest.fn();
+const appendExecutedToolRecordFromNative = jest.fn();
 const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
@@ -10,8 +12,6 @@ const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
 const planServertoolExecutionOutcomeRuntimeActionWithNative = jest.fn();
 const planServertoolOutcomeWithNative = jest.fn();
 const buildServertoolOutcomePlanInputWithNative = jest.fn((input: any) => input);
-const createServertoolExecutionLoopStateWithNative = jest.fn();
-const appendServertoolExecutedRecordWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.js',
@@ -52,7 +52,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    runServertoolHandler
+    runServertoolHandler,
+    createServertoolExecutionLoopStateFromNative,
+    appendExecutedToolRecordFromNative
   })
 );
 
@@ -75,8 +77,6 @@ jest.unstable_mockModule(
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative,
-    createServertoolExecutionLoopStateWithNative,
-    appendServertoolExecutedRecordWithNative,
     isAdapterClientDisconnectedWithNative: jest.fn(() => false),
     planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 50 })),
     planServertoolClientDisconnectedErrorWithNative: jest.fn((input: any) => ({
@@ -165,6 +165,19 @@ describe('execution-dispatch-outcome-shell', () => {
       message: `[native-dispatch-contract] ${String(input?.kind ?? 'unknown')}`,
       details: input ?? {}
     }));
+    createServertoolExecutionLoopStateFromNative.mockReturnValue({
+      executedToolCalls: [],
+      executedIds: new Set<string>(),
+      executedFlowIds: []
+    });
+    appendExecutedToolRecordFromNative.mockImplementation((state: any, toolCall: any, execution?: any) => {
+      state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
+      state.executedIds.add(toolCall.id);
+      if (execution?.flowId) {
+        state.executedFlowIds.push(execution.flowId);
+        state.lastExecution = execution;
+      }
+    });
     planServertoolExecutionLoopRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.hasHandlerEntry !== true || input?.triggerMode !== 'tool_call') {
         return { action: 'skip_non_tool_call_handler' };
@@ -263,43 +276,21 @@ describe('execution-dispatch-outcome-shell', () => {
         executionFlowId: String(input?.flowId ?? 'servertool_multi')
       };
     });
-    createServertoolExecutionLoopStateWithNative.mockReturnValue({
+    createServertoolExecutionLoopStateFromNative.mockReturnValue({
       executedToolCalls: [],
-      executedIds: [],
+      executedIds: new Set<string>(),
       executedFlowIds: []
     });
-    appendServertoolExecutedRecordWithNative.mockImplementation((input: any) => {
-      const state = input?.state ?? {
-        executedToolCalls: [],
-        executedIds: [],
-        executedFlowIds: []
-      };
-      const nextExecution = input?.execution
-        ? {
-            flowId: String(input.execution.flowId ?? '').trim(),
-            ...(input.execution.followup !== undefined ? { followup: input.execution.followup } : {}),
-            ...(input.execution.context !== undefined ? { context: input.execution.context } : {})
-          }
-        : undefined;
-      const nextIds = [...(state.executedIds ?? [])];
-      const toolCallId = String(input?.toolCall?.id ?? '').trim();
-      if (toolCallId && !nextIds.includes(toolCallId)) {
-        nextIds.push(toolCallId);
+    appendExecutedToolRecordFromNative.mockImplementation((state: any, toolCall: any, execution?: any) => {
+      state.executedToolCalls.push({
+        toolCall,
+        ...(execution ? { execution } : {})
+      });
+      state.executedIds.add(toolCall.id);
+      if (execution?.flowId) {
+        state.executedFlowIds.push(execution.flowId);
+        state.lastExecution = execution;
       }
-      return {
-        executedToolCalls: [
-          ...(state.executedToolCalls ?? []),
-          {
-            toolCall: input.toolCall,
-            ...(nextExecution ? { execution: nextExecution } : {})
-          }
-        ],
-        executedIds: nextIds,
-        executedFlowIds: nextExecution?.flowId
-          ? [...(state.executedFlowIds ?? []), nextExecution.flowId]
-          : [...(state.executedFlowIds ?? [])],
-        ...(nextExecution ? { lastExecution: nextExecution } : state?.lastExecution ? { lastExecution: state.lastExecution } : {})
-      };
     });
   });
 
@@ -439,7 +430,7 @@ describe('execution-dispatch-outcome-shell', () => {
       })
     ).rejects.toThrow('[native-dispatch-contract] dispatch_spec_mismatch');
 
-    expect(createServertoolExecutionLoopStateWithNative).toHaveBeenCalledTimes(1);
+    expect(createServertoolExecutionLoopStateFromNative).toHaveBeenCalledTimes(1);
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenCalledWith({
       hasHandlerEntry: true,
       triggerMode: 'tool_call',

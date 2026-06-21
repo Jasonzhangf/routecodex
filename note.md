@@ -11007,3 +11007,5 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 23/23 PASS
   - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts` 5/5 PASS
 - 待补 live：全局安装 + `routecodex restart --port 5555` + `node scripts/tests/stopless-5555-live-probe.mjs`。
+
+- 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 里的 execution-loop state bridge 已物理迁回 `execution-handler-materialization-shell.ts`，`execution-dispatch-outcome-shell.ts` 只保留调用；`scripts/verify-servertool-rust-only.mjs` 的对应 gate 必须用现成 `readRequired()`，不能再引入不存在的 `read()`。验证：`node scripts/verify-servertool-rust-only.mjs`、`tests/servertool/execution-dispatch-outcome-shell.spec.ts`、`tests/servertool/servertool-cli-native-bridge.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/build-core.mjs`。

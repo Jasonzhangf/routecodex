@@ -20,37 +20,19 @@ import {
   planServertoolExecutionLoopEffectWithNative,
   planServertoolExecutionLoopRuntimeActionWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
-  createServertoolExecutionLoopStateWithNative,
-  appendServertoolExecutedRecordWithNative,
-  type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { materializeServertoolPlannedResult, type ServertoolExecutedRecord, type ServertoolExecutionLoopState, runServertoolHandler } from './execution-handler-materialization-shell.js';
+import {
+  appendExecutedToolRecordFromNative,
+  createServertoolExecutionLoopStateFromNative,
+  materializeServertoolPlannedResult,
+  type ServertoolExecutedRecord,
+  type ServertoolExecutionLoopState,
+  runServertoolHandler
+} from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
 export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
-
-function createServertoolExecutionLoopState(): ServertoolExecutionLoopState {
-  return hydrateExecutionLoopState(createServertoolExecutionLoopStateWithNative());
-}
-
-function appendExecutedToolRecord(
-  state: ServertoolExecutionLoopState,
-  toolCall: ServertoolExecutedRecord['toolCall'],
-  execution?: ServerToolExecution
-): void {
-  const next = hydrateExecutionLoopState(
-    appendServertoolExecutedRecordWithNative({
-      state: dehydrateExecutionLoopState(state),
-      toolCall,
-      ...(execution ? { execution } : {})
-    })
-  );
-  state.executedToolCalls = next.executedToolCalls;
-  state.executedIds = next.executedIds;
-  state.executedFlowIds = next.executedFlowIds;
-  state.lastExecution = next.lastExecution;
-}
 
 export const buildServertoolDispatchPlanInput = (args: {
   toolCalls: ToolCall[];
@@ -201,7 +183,7 @@ export async function runServertoolIoExecutionQueue(args: {
   contextBase: Omit<import('./types.js').ServerToolHandlerContext, 'toolCall'>;
   baseForExecution: JsonObject;
 }): Promise<ServertoolExecutionLoopState> {
-  const executionState = createServertoolExecutionLoopState();
+  const executionState = createServertoolExecutionLoopStateFromNative();
 
   for (const toolCall of args.dispatchPlan.executableToolCalls) {
     const entry = getServerToolHandler(toolCall.name);
@@ -244,7 +226,7 @@ export async function runServertoolIoExecutionQueue(args: {
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
       replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
-      appendExecutedToolRecord(executionState, toolCall, result.execution);
+      appendExecutedToolRecordFromNative(executionState, toolCall, result.execution);
       continue;
     }
     if (resultLoopActionPlan.action === 'apply_handler_error_tool_output') {
@@ -266,7 +248,7 @@ export async function runServertoolIoExecutionQueue(args: {
           stripAfterExecute: toolCall.stripAfterExecute
         }
       });
-      appendExecutedToolRecord(
+      appendExecutedToolRecordFromNative(
         executionState,
         errorEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
         errorEffectPlan.execution as ServerToolExecution
@@ -302,7 +284,7 @@ export async function runServertoolIoExecutionQueue(args: {
       noopFollowup,
       noopExecutionContext
     });
-    appendExecutedToolRecord(
+    appendExecutedToolRecordFromNative(
       executionState,
       noopEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
       noopEffectPlan.execution as ServerToolExecution
@@ -310,22 +292,4 @@ export async function runServertoolIoExecutionQueue(args: {
   }
 
   return executionState;
-}
-
-function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): ServertoolExecutionLoopState {
-  return {
-    executedToolCalls: state.executedToolCalls as ServertoolExecutedRecord[],
-    executedIds: new Set(state.executedIds),
-    executedFlowIds: state.executedFlowIds,
-    ...(state.lastExecution ? { lastExecution: state.lastExecution as ServerToolExecution } : {})
-  };
-}
-
-function dehydrateExecutionLoopState(state: ServertoolExecutionLoopState): NativeServertoolExecutionLoopState {
-  return {
-    executedToolCalls: state.executedToolCalls as any,
-    executedIds: [...state.executedIds],
-    executedFlowIds: state.executedFlowIds,
-    ...(state.lastExecution ? { lastExecution: state.lastExecution as any } : {})
-  };
 }

@@ -7,8 +7,11 @@ import type {
   ServerToolHandlerResult,
 } from './types.js';
 import {
+  appendServertoolExecutedRecordWithNative,
+  createServertoolExecutionLoopStateWithNative,
   planServertoolHandlerContractErrorWithNative,
   planServertoolHandlerRuntimeActionWithNative,
+  type NativeServertoolExecutionLoopState,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -36,6 +39,28 @@ export interface ServertoolExecutionLoopState {
     followup?: unknown;
     context?: unknown;
   };
+}
+
+export function createServertoolExecutionLoopStateFromNative(): ServertoolExecutionLoopState {
+  return hydrateExecutionLoopState(createServertoolExecutionLoopStateWithNative());
+}
+
+export function appendExecutedToolRecordFromNative(
+  state: ServertoolExecutionLoopState,
+  toolCall: ServertoolExecutedRecord['toolCall'],
+  execution?: ServertoolExecutedRecord['execution']
+): void {
+  const next = hydrateExecutionLoopState(
+    appendServertoolExecutedRecordWithNative({
+      state: dehydrateExecutionLoopState(state),
+      toolCall,
+      ...(execution ? { execution } : {})
+    })
+  );
+  state.executedToolCalls = next.executedToolCalls;
+  state.executedIds = next.executedIds;
+  state.executedFlowIds = next.executedFlowIds;
+  state.lastExecution = next.lastExecution;
 }
 
 function buildHandlerRuntimeActionInput(
@@ -139,4 +164,22 @@ function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocol
   }) as ProviderProtocolError & { status?: number };
   err.status = plan.status;
   return err;
+}
+
+function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): ServertoolExecutionLoopState {
+  return {
+    executedToolCalls: state.executedToolCalls as ServertoolExecutedRecord[],
+    executedIds: new Set(state.executedIds),
+    executedFlowIds: state.executedFlowIds,
+    ...(state.lastExecution ? { lastExecution: state.lastExecution as ServertoolExecutedRecord['execution'] } : {})
+  };
+}
+
+function dehydrateExecutionLoopState(state: ServertoolExecutionLoopState): NativeServertoolExecutionLoopState {
+  return {
+    executedToolCalls: state.executedToolCalls as any,
+    executedIds: [...state.executedIds],
+    executedFlowIds: state.executedFlowIds,
+    ...(state.lastExecution ? { lastExecution: state.lastExecution as any } : {})
+  };
 }
