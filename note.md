@@ -10949,3 +10949,7 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `node scripts/build-core.mjs`
 - 结论：
   - 这两个函数仍是必要 bridge，但 `ThinShell` 命名已经没有额外语义，保留真函数名即可。
+
+- 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/registry.ts` 只是命名别名壳，`registry-impl.ts` 的外部导出名已直接改成 `registerServerToolHandler` / `getServerToolHandler` / `listRegisteredServerToolHandlerNames` / `listAdHocRegisteredToolCallHandlerSpecs` / `listAutoServerToolHandlers` / `listAutoServerToolHooks` / `isRegisteredServerToolName` / `listRegisteredServerToolHandlerRecords`，`verify-servertool-rust-only.mjs` 和 `servertool-active-orchestration-audit.spec.ts` 同步把旧 `*Impl` / `as ...` 作为复活禁区。验证：`tests/config/virtual-router-builder.forwarder-10000.spec.ts`、`tests/config/virtual-router-builder.routing-policy-group.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/verify-servertool-rust-only.mjs`、`node scripts/build-core.mjs`。
+
+- 2026-06-22: `~/.rcc/config.toml` 的 `gateway_priority_5520.routing.thinking` 真源已确认是 `fwd.paid.gpt-5.4` + `fwd.glm.glm-5.2`，权重 1:1，`thinking=high`；builder 会把 `fwd.glm.glm-5.2` 展开成 `XLC.key1.glm-5.2` / `XLC.key2.glm-5.2` 两个 providerKey。`tests/config/virtual-router-builder.forwarder-10000.spec.ts` 已按这个真相断言，后续不能再回到“thinking only gpt”的旧预期。

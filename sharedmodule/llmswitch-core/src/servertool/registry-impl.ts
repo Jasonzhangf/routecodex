@@ -53,7 +53,7 @@ export interface ServerToolAutoHookDescriptor {
   handler: ServerToolHandler;
 }
 
-export const registerServerToolHandlerImpl = (
+export const registerServerToolHandler = (
   name: string,
   handler: ServerToolHandler,
   options?: {
@@ -84,7 +84,7 @@ export const registerServerToolHandlerImpl = (
   registerAdHocHandlerForTests(name, handler, options);
 };
 
-export const getServerToolHandlerImpl = (name: string): ServerToolHandlerEntry | undefined => {
+export const getServerToolHandler = (name: string): ServerToolHandlerEntry | undefined => {
   const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
   const builtinEntry = listBuiltinHandlerNames().includes(canonicalName)
     ? getBuiltinHandlerEntry(canonicalName)
@@ -104,7 +104,7 @@ export const getServerToolHandlerImpl = (name: string): ServerToolHandlerEntry |
   return undefined;
 };
 
-export function listRegisteredToolHandlerNamesImpl(): string[] {
+export function listRegisteredServerToolHandlerNames(): string[] {
   return planServertoolRegistryProjectionWithNative({
     registeredNames: [...listBuiltinHandlerNames(), ...listAdHocHandlerNames()],
     registeredRecords: [],
@@ -112,7 +112,7 @@ export function listRegisteredToolHandlerNamesImpl(): string[] {
   }).registeredNames;
 }
 
-export function listAdHocRegisteredToolCallHandlerSpecsImpl(): Array<{
+export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
   name: string;
   trigger: 'tool_call';
   executionMode: string;
@@ -121,7 +121,7 @@ export function listAdHocRegisteredToolCallHandlerSpecsImpl(): Array<{
   return listAdHocToolCallHandlerSpecs();
 }
 
-export const listAutoHandlersForRegistryImpl = (): ServerToolHandlerEntry[] => {
+export const listAutoServerToolHandlers = (): ServerToolHandlerEntry[] => {
   const entries = [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()];
   const entryByName = new Map(
     entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
@@ -139,8 +139,8 @@ export const listAutoHandlersForRegistryImpl = (): ServerToolHandlerEntry[] => {
   });
 };
 
-export const collectAutoServerToolHooksImpl = (): ServerToolAutoHookDescriptor[] => {
-  const entries = listAutoHandlersForRegistryImpl();
+export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
+  const entries = listAutoServerToolHandlers();
   const entryById = new Map(
     entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
   );
@@ -169,11 +169,11 @@ export const collectAutoServerToolHooksImpl = (): ServerToolAutoHookDescriptor[]
   });
 };
 
-export function isRegisteredToolNameImpl(name: string): boolean {
+export function isRegisteredServerToolName(name: string): boolean {
   return getServertoolToolSpec(name)?.enabled === true;
 }
 
-export function listRegisteredToolHandlerRecordsImpl(): ServerToolRegisteredHandlerRecord[] {
+export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {
   const builtinEntries = listBuiltinHandlerNames()
     .map((name) => getBuiltinHandlerEntry(name))
     .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry));
