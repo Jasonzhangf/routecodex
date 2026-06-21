@@ -403,6 +403,168 @@ fn execute_hub_pipeline_json_preserves_stopless_instructions_for_anthropic_provi
 }
 
 #[test]
+fn execute_hub_pipeline_json_rewrites_stopless_cli_result_into_provider_guidance() {
+    let stopless_cli_output = json!({
+        "ok": true,
+        "kind": "stop_message_auto",
+        "tool": "stop_message_auto",
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "summary": "stopless continuation ready",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "continuationPrompt": "继续推进当前任务。",
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_missing",
+            "missingFields": ["stopreason", "reason", "next_step"]
+        },
+        "schemaGuidance": {
+            "requiredFields": ["stopreason", "reason", "next_step"],
+            "stopreasonValues": {
+                "finished": 0,
+                "blocked": 1,
+                "continueNeeded": 2
+            },
+            "triggerHint": "no_schema"
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "no_schema"
+        }
+    });
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "mimo.key2.mimo-v2.5": {
+                        "providerKey": "mimo.key2.mimo-v2.5",
+                        "providerType": "anthropic",
+                        "runtimeKey": "mimo.key2",
+                        "modelId": "mimo-v2.5",
+                        "endpoint": "mock://mimo",
+                        "auth": { "type": "apikey", "apiKey": "mimo-key" },
+                        "outboundProfile": "anthropic-messages"
+                    }
+                },
+                "routing": {
+                    "thinking": [{
+                        "id": "thinking-priority",
+                        "mode": "priority",
+                        "targets": ["mimo.key2.mimo-v2.5"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-stopless-cli-feedback-provider-guidance",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "mimo-v2.5",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "继续执行" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_stopless_cli_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_stopless_cli_1",
+                        "output": stopless_cli_output.to_string()
+                    }
+                ],
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "execute command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "cmd": { "type": "string" } },
+                        "required": ["cmd"]
+                    }
+                }],
+                "tool_choice": "auto",
+                "stream": false
+            },
+            "metadata": {
+                "stopMessageEnabled": true,
+                "routecodexPortStopMessageEnabled": true,
+                "sessionId": "sess-stopless-cli-feedback-provider-guidance",
+                "__rt": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "mimo.key2.mimo-v2.5",
+                            "providerType": "anthropic",
+                            "runtimeKey": "mimo.key2",
+                            "modelId": "mimo-v2.5",
+                            "outboundProfile": "anthropic-messages"
+                        },
+                        "decision": { "routeName": "thinking" },
+                        "diagnostics": {}
+                    }
+                }
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true),
+        "unexpected output: {}",
+        output
+    );
+    let serialized = serde_json::to_string(&output["payload"]).unwrap();
+    assert!(
+        serialized.contains("上一轮执行结果：repeatCount=1；reasonCode=stop_schema_missing；missingFields=stopreason, reason, next_step。"),
+        "provider payload must carry exact CLI feedback, got: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"),
+        "provider payload must carry stop schema contract, got: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"),
+        "provider payload must explain missing fields naturally, got: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains("\"function_call_output\""),
+        "stopless CLI output must be rewritten, not replayed as raw tool output: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains("stop_message_auto"),
+        "provider payload must not expose internal stopless tool identity: {}",
+        serialized
+    );
+    assert!(
+        output["payload"]["tools"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .any(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("exec_command")),
+        "provider payload must keep client tool availability: {}",
+        output
+    );
+}
+
+#[test]
 fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_relay() {
     let input = json!({
         "config": {
@@ -694,6 +856,78 @@ fn anthropic_response_remaps_to_openai_responses_client_payload() {
 }
 
 #[test]
+fn openai_chat_response_remaps_to_openai_responses_client_payload() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-openai-chat-responses-remap".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_responses_remap_1",
+                "object": "chat.completion",
+                "model": "deepseek-v4-pro",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "chat response ok" },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6 }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let payload = output.payload.unwrap();
+    assert_eq!(payload["object"], json!("response"));
+    assert_eq!(payload["status"], json!("completed"));
+    assert_eq!(payload["model"], json!("deepseek-v4-pro"));
+    assert!(payload.to_string().contains("chat response ok"));
+    assert!(payload.get("choices").is_none());
+}
+
+#[test]
+fn response_path_missing_provider_protocol_fails_fast() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let error = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-missing-provider-protocol".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: String::new(),
+            payload: json!({
+                "id": "chatcmpl_missing_protocol",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "ok" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap_err();
+
+    assert_eq!(error.code, "hub_pipeline_error");
+    assert!(error.message.contains("requires providerProtocol"));
+}
+
+#[test]
 fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
@@ -967,7 +1201,7 @@ fn response_stream_stop_with_runtime_callbacks_returns_stream_and_servertool_eff
         .iter()
         .find(|effect| {
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["action"] == json!("requireRuntimeExecutor")
+                && effect.payload["action"] == json!("requireResponseHookRuntime")
         })
         .unwrap();
     assert_eq!(
@@ -1084,7 +1318,7 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
         })
         .unwrap();
-    assert_eq!(effect.payload["action"], json!("requireRuntimeExecutor"));
+    assert_eq!(effect.payload["action"], json!("requireResponseHookRuntime"));
     assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
     assert_eq!(
         effect.payload["payload"]["choices"][0]["finish_reason"],
@@ -1212,4 +1446,113 @@ fn responses_tool_call_servertool_effect_uses_resp_chatprocess_payload_not_clien
         output.payload.unwrap()["required_action"]["type"],
         json!("submit_tool_outputs")
     );
+}
+
+#[test]
+fn responses_reasoning_stop_tool_call_emits_only_stop_runtime_action() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-reasoning-stop-runtime-action".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_responses_reasoning_stop_effect",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_reasoning_stop_1",
+                            "type": "function",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"reason\":\"missing schema\",\"stopreason\":2}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let servertool_effects: Vec<_> = output
+        .effect_plan
+        .effects
+        .iter()
+        .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction"))
+        .collect();
+    assert_eq!(servertool_effects.len(), 1);
+    assert_eq!(
+        servertool_effects[0].payload["reason"],
+        json!("stop_eligible_followup")
+    );
+}
+
+#[test]
+fn responses_reasoning_stop_tool_call_emits_stop_runtime_action_without_runtime_callbacks() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-reasoning-stop-no-runtime-callbacks".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_responses_reasoning_stop_no_runtime_callbacks",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_reasoning_stop_2",
+                            "type": "function",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"reason\":\"missing schema\",\"stopreason\":2}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": {
+                    "providerInvoker": false,
+                    "reenterPipeline": false,
+                    "clientInjectDispatch": false
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let servertool_effects: Vec<_> = output
+        .effect_plan
+        .effects
+        .iter()
+        .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction"))
+        .collect();
+    assert_eq!(servertool_effects.len(), 1);
+    assert_eq!(servertool_effects[0].payload["reason"], json!("stop_eligible_followup"));
 }

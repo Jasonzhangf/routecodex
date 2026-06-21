@@ -309,6 +309,14 @@ pub fn plan_provider_response_servertool_runtime_actions(input: &Value) -> Resul
                     "stopGateway": action_record.get("stopGateway").cloned().unwrap_or(Value::Null),
                 }));
             }
+            Some("requireResponseHookRuntime") => {
+                execution_plans.push(json!({
+                    "payload": payload,
+                    "projectionStage": "HubRespChatProcess03Governed",
+                    "allowFollowup": false,
+                    "stopGateway": action_record.get("stopGateway").cloned().unwrap_or(Value::Null),
+                }));
+            }
             Some("requireRuntimeExecutor") => {
                 if !has_any_runtime_executor {
                     return Ok(json!({
@@ -386,7 +394,7 @@ mod tests {
                 {
                     "kind": "servertoolRuntimeAction",
                     "payload": {
-                        "action": "requireRuntimeExecutor",
+                        "action": "requireResponseHookRuntime",
                         "requestId": "req-1",
                         "stopGateway": {
                             "observed": true,
@@ -408,7 +416,7 @@ mod tests {
         assert_eq!(output["runtimeStateWrite"]["requestId"], json!("req-1"));
         assert_eq!(
             output["servertoolRuntimeActions"][0]["action"],
-            json!("requireRuntimeExecutor")
+            json!("requireResponseHookRuntime")
         );
         assert_eq!(
             output["servertoolRuntimeActions"][0]["stopGateway"],
@@ -464,7 +472,7 @@ mod tests {
     fn plans_servertool_runtime_action_execution_in_rust() {
         let output = plan_provider_response_servertool_runtime_actions(&json!({
             "servertoolRuntimeActions": [{
-                "action": "requireRuntimeExecutor",
+                "action": "requireResponseHookRuntime",
                 "requestId": "req-1",
                 "reason": "tool_call_dispatch",
                 "stopGateway": {

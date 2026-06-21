@@ -1,3 +1,31 @@
+## 2026-06-22 reasoningStop response-hook live replay on 5555
+
+- 全局安装与重启证据：
+  - `npm run install:global` 最终跑过完整 verify/build 链；中途因 wiki markdown / html render out-of-sync 先后执行：
+    - `node scripts/architecture/render-architecture-wiki-pages.mjs`
+    - `npm run render:architecture-wiki-html`
+  - `routecodex restart --port 5555` 与 `routecodex restart --port 5520` 均成功。
+  - `/health`：
+    - `http://127.0.0.1:5555/health` -> `ready=true version=0.90.3244`
+    - `http://127.0.0.1:5520/health` -> `ready=true version=0.90.3244`
+- 5555 live probe：
+  - 命令：`node scripts/tests/stopless-5555-live-probe.mjs`
+  - probe 输出文件：`/tmp/stopless-5555-live-probe.json`
+  - 第一轮真实结果：
+    - `hasExecCommand=false`
+    - `hasReasoningStop=true`
+    - `reasoningStopArguments={"reason":"第一轮故意缺 schema","stopreason":2}`
+  - 续轮闭环结果：
+    - `resumeChain[0].actionKind=reasoningStop`
+    - server 返回的是 `stop_message_auto` CLI output，并通过正常 `submit_tool_outputs` 闭环
+    - `resumeChain[0].status=200`
+    - `resumeChain[0].responseStatus=completed`
+    - 无 `type:error` / `status=400` / raw `reasoningStop` 泄漏到客户端
+- 当前 live 结论：
+  - 5555 上 `/v1/responses` 的 `reasoningStop` 已按 response hook 骨架正常拦截；
+  - 客户端不再收到非法 raw `reasoningStop` 注入；
+  - stopless continuation 已经通过 `stop_message_auto` 的 CLI/tool-output 正常闭环。
+
 ## 2026-06-22 reasoningStop response-hook tool_call closure
 
 - 样本边界已重新锁定：`reasoningStop` 是 response hook 的 internal stop tool，不是 client-visible tool；客户端最终只能看到 `exec_command(routecodex hook run reasoningStop ...)`。

@@ -143,7 +143,14 @@ impl HubPipelineEngine {
         let entry_provider_protocol = normalized_metadata
             .get("providerProtocol")
             .and_then(Value::as_str)
-            .unwrap_or("openai-chat")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_provider_protocol",
+                    "Rust HubPipeline requires metadata.providerProtocol",
+                )
+            })?
             .to_string();
         if direction == "response" {
             return self.execute_response_path(
@@ -683,22 +690,19 @@ fn plan_resp_chatprocess_03_servertool_runtime_actions(
     chatprocess_payload: &Value,
     request_id: &str,
 ) {
-    if !should_plan_servertool_runtime_action(metadata) {
-        return;
-    }
     let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .unwrap_or(Value::Null);
-    if stop_gateway
+    let stop_gateway_eligible = stop_gateway
         .get("eligible")
         .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    if stop_gateway_eligible {
         effects.push(HubPipelineEffect {
             kind: HubPipelineEffectKind::ServertoolRuntimeAction,
             payload: serde_json::json!({
-                "action": "requireRuntimeExecutor",
+                "action": "requireResponseHookRuntime",
                 "reason": "stop_eligible_followup",
                 "requestId": request_id,
                 "stopGateway": stop_gateway,
@@ -706,7 +710,11 @@ fn plan_resp_chatprocess_03_servertool_runtime_actions(
             }),
         });
     }
-    if response_has_tool_calls(chatprocess_payload) {
+    if !should_plan_servertool_runtime_action(metadata) {
+        return;
+    }
+    let has_tool_calls = response_has_tool_calls(chatprocess_payload);
+    if has_tool_calls && !stop_gateway_eligible {
         effects.push(HubPipelineEffect {
             kind: HubPipelineEffectKind::ServertoolRuntimeAction,
             payload: serde_json::json!({

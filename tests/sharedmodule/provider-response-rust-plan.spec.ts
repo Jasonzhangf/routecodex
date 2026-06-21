@@ -473,11 +473,11 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.object).toBe('response');
     expect(result.body?.status).toBe('requires_action');
     expect(JSON.stringify(result.body)).toContain('exec_command');
-    expect(JSON.stringify(result.body)).toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(result.body)).toContain('routecodex hook run reasoningStop');
     expect(result.__sse_responses).toBeDefined();
     const sseBody = await readStreamBody(result.__sse_responses!);
     expect(sseBody).toContain('exec_command');
-    expect(sseBody).toContain('routecodex hook run reasoning_stop');
+    expect(sseBody).toContain('routecodex hook run reasoningStop');
     expect(sseBody).toContain('event: response.done');
     expect(sseBody).toContain('"status":"requires_action"');
     expect(sseBody).not.toContain('resp_openai_responses_stop_sse');
@@ -719,7 +719,7 @@ describe('provider response Rust native plan', () => {
           expect.objectContaining({
             kind: 'servertoolRuntimeAction',
             payload: expect.objectContaining({
-              action: 'requireRuntimeExecutor',
+              action: 'requireResponseHookRuntime',
               reason: 'stop_eligible_followup',
               requestId: 'req_provider_response_servertool_stop_guard_1',
               stopGateway: expect.objectContaining({
@@ -872,7 +872,7 @@ describe('provider response Rust native plan', () => {
           expect.objectContaining({
             kind: 'servertoolRuntimeAction',
             payload: expect.objectContaining({
-              action: 'requireRuntimeExecutor',
+              action: 'requireResponseHookRuntime',
               reason: 'tool_call_dispatch',
               requestId: 'req_provider_response_servertool_tool_call_guard_1'
             })
