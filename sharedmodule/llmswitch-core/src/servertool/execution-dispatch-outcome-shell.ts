@@ -52,26 +52,6 @@ function appendExecutedToolRecord(
   state.lastExecution = next.lastExecution;
 }
 
-function assertDispatchExecutionMode(
-  options: ServerSideToolEngineOptions,
-  toolName: string,
-  nativeExecutionMode: string,
-  tsExecutionMode: string
-): void {
-  if (tsExecutionMode === nativeExecutionMode) {
-    return;
-  }
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolExecutionDispatchErrorWithNative({
-        kind: 'dispatch_spec_mismatch',
-        requestId: options.requestId,
-        toolName,
-      nativeExecutionMode,
-      tsExecutionMode
-    })
-  );
-}
-
 export const buildServertoolDispatchPlanInput = (args: {
   toolCalls: ToolCall[];
   disableToolCallHandlers: boolean;
@@ -228,13 +208,25 @@ export async function runServertoolIoExecutionQueue(args: {
     const initialLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
       hasHandlerEntry: Boolean(entry),
       triggerMode: entry?.trigger,
+      nativeExecutionMode: entry?.registration.executionMode,
+      tsExecutionMode: toolCall.executionMode,
       hasMaterializedResult: false,
       hasHandlerError: false
     });
     if (initialLoopActionPlan.action === 'skip_non_tool_call_handler') {
       continue;
     }
-    assertDispatchExecutionMode(args.options, toolCall.name, toolCall.executionMode, entry.registration.executionMode);
+    if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch') {
+      throw createServertoolProviderProtocolErrorFromPlan(
+        planServertoolExecutionDispatchErrorWithNative({
+          kind: 'dispatch_spec_mismatch',
+          requestId: args.options.requestId,
+          toolName: toolCall.name,
+          nativeExecutionMode: entry?.registration.executionMode ?? '',
+          tsExecutionMode: toolCall.executionMode
+        })
+      );
+    }
     const ctx = { ...args.contextBase, base: args.baseForExecution, toolCall };
     let planned = null;
     let lastErr: unknown;

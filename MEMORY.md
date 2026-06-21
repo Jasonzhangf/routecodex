@@ -1,5 +1,7 @@
 # RouteCodex Memory
 
+- 2026-06-22: `execution-dispatch-outcome-shell.ts` 的 execution-mode mismatch 判定已从 TS 挪到 Rust `execution_loop_runtime_action_contract`。可复用规则：对 execution loop 里的“先跳过/先报 contract 错/再看 materialized result 或 handler error”这类顺序判定，优先收进 Rust runtime action planner；TS 只消费 action 并投影现有标准错误 plan。验证通过 focused Rust contract test、`build-native-hotpath`、focused Jest（`execution-dispatch-outcome-shell` / `servertool-cli-native-bridge` / `servertool-active-orchestration-audit`）、`verify-servertool-rust-only` 和 `build-core`。
+
 - 2026-06-22: `execution-dispatch-outcome-shell.ts` 的 `ProviderProtocolError` 本地重复包装已进一步收口，现统一走 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。可复用规则：servertool TS 壳层里凡是“native 已返回标准 error plan -> TS 再 new ProviderProtocolError”的重复 helper，优先复用已有 shared error projector，不要在每个壳文件各留一份。验证通过 focused Jest（`execution-dispatch-outcome-shell` / `server-side-tools.dispatch-native` / `servertool-active-orchestration-audit`）、`verify-servertool-rust-only` 和 `build-core`。
 
 - 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts` 去掉了纯命名别名层 `*ShellShell`，相关导出现在直接指向 `execution-dispatch-outcome-shell.ts` 的真函数名。验证通过 `execution-shell.auto-hook-failfast`、`server-side-tools.failfast`、`execution-dispatch-outcome-shell`、`servertool-active-orchestration-audit`、`servertool-cli-native-bridge`、`server-side-tools.cli-projection-guard`、`verify-servertool-rust-only` 和 `build-core`。

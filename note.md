@@ -1,3 +1,27 @@
+## 2026-06-22 servertool execution-loop mismatch moved to Rust action planner
+
+- 本轮 slice：把 `execution-dispatch-outcome-shell.ts` 里的 `assertDispatchExecutionMode(...)` 物理删除，改成 Rust `execution_loop_runtime_action_contract` 直接产出 `throw_dispatch_spec_mismatch`。
+- 新 contract 输入：
+  - `nativeExecutionMode`
+  - `tsExecutionMode`
+- 新 contract 行为：
+  - `hasHandlerEntry=true` 且 `triggerMode=tool_call` 时，先判 execution-mode mismatch；
+  - mismatch 优先级高于 `hasMaterializedResult` / `hasHandlerError`。
+- TS 现在只做：
+  - 调 `planServertoolExecutionLoopRuntimeActionWithNative(...)`
+  - 若 action=`throw_dispatch_spec_mismatch`，再用现有 `planServertoolExecutionDispatchErrorWithNative(...)` 投影标准错误
+- 补充事实：
+  - `cargo test -p router-hotpath-napi servertool_core_blocks --lib -- --nocapture` 这次命中了两个现存 stop-schema bridge 失败：
+    - `builds_terminal_visible_payload_via_servertool_core_bridge`
+    - `strips_stop_schema_control_text_via_servertool_core_bridge`
+  - 这两个失败与本 slice 无关，不能拿来当“本轮红测”；本轮有效证据仍以 execution-loop contract focused、native build、focused Jest、rust-only gate 为准。
+- 验证证据：
+  - `cargo test -p servertool-core execution_loop_runtime_action_contract --lib -- --nocapture`
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-dispatch-outcome-shell.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+
 ## 2026-06-22 servertool execution-dispatch error wrapper collapse
 
 - 本轮 slice：`sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 不再本地构造 `ProviderProtocolError`，统一改用 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。
@@ -10973,3 +10997,13 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 2026-06-22: 阶段性提交 `3c0a943 refactor(servertool): delete pure-forward execution shell wrapper` 已落地；下一个目标切片按 `docs/goals/servertool-hook-skeleton-rust-only-closeout-plan-2026-06-22.md` 的 Phase B（execution-dispatch-outcome-shell.ts 收口）启动。
 
 - 2026-06-22: `execution-dispatch-outcome-shell.ts` 本轮先收掉一条明确死链：`runServertoolIoExecutionQueue(...)` 的 `appendToolOutput` 参数已物理删除，`server-side-tools-impl.ts` 不再把这条 TS tool-output 拼装通道传进执行循环；handler error tool output 现在只允许走 native `buildServertoolHandlerErrorToolOutputPayloadWithNative(...)` + `replaceJsonObjectInPlace(...)`。`sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts` 里的死 helper `appendToolOutput(...)` 也一并物理删除，并把 `orchestration-blocks.ts` 禁止 `appendToolOutput` 复活写进 `servertool-active-orchestration-audit.spec.ts` 和 `verify-servertool-rust-only.mjs`。验证：`tests/servertool/execution-dispatch-outcome-shell.spec.ts`、`tests/servertool/server-side-tools.failfast.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/verify-servertool-rust-only.mjs`。
+
+## 2026-06-22 responses native SSE submit_tool_outputs persistence race
+
+- 本轮 stopless / submit_tool_outputs 真根因不是 provider，不是 reasoningStop 泄漏，而是 `handler-response-sse.ts` 对同一 native SSE continuation probe 会并发触发多次 `persistResponsesConversationLifecycleForHttp(...)`。
+- 结果：同一 `responseId` 的 store entry 会被 capture/record/finalize 竞争覆盖，表现为 `allowContinuation=true` 但 `releasedInputPrefix=[]` 或 `input=[]`，第三轮 submit_tool_outputs 再恢复时就会 400。
+- 修复：在 `src/server/handlers/handler-response-sse.ts` 给 native SSE continuation persist 加单飞锁（同请求同一时刻只允许一个 persist 在飞）；`responses-response-bridge.ts` 补 canonical event-envelope -> response-body normalize；测试 cleanup 改为 `clearAllResponsesConversationState()`，不再维护过时 requestId 白名单。
+- 验证：
+  - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 23/23 PASS
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts` 5/5 PASS
+- 待补 live：全局安装 + `routecodex restart --port 5555` + `node scripts/tests/stopless-5555-live-probe.mjs`。

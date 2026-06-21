@@ -153,6 +153,7 @@ describe('execution-dispatch-outcome-shell', () => {
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
     expect(source).not.toContain('JSON.parse(JSON.stringify(');
+    expect(source).not.toContain('function assertDispatchExecutionMode(');
   });
 
   beforeEach(() => {
@@ -167,6 +168,15 @@ describe('execution-dispatch-outcome-shell', () => {
     planServertoolExecutionLoopRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.hasHandlerEntry !== true || input?.triggerMode !== 'tool_call') {
         return { action: 'skip_non_tool_call_handler' };
+      }
+      if (
+        typeof input?.nativeExecutionMode === 'string' &&
+        typeof input?.tsExecutionMode === 'string' &&
+        input.nativeExecutionMode.trim() !== '' &&
+        input.tsExecutionMode.trim() !== '' &&
+        input.nativeExecutionMode !== input.tsExecutionMode
+      ) {
+        return { action: 'throw_dispatch_spec_mismatch' };
       }
       if (input?.hasMaterializedResult === true) {
         return { action: 'apply_materialized_result' };
@@ -381,6 +391,8 @@ describe('execution-dispatch-outcome-shell', () => {
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenNthCalledWith(1, {
       hasHandlerEntry: true,
       triggerMode: 'tool_call',
+      nativeExecutionMode: 'guarded',
+      tsExecutionMode: 'guarded',
       hasMaterializedResult: false,
       hasHandlerError: false
     });
@@ -428,12 +440,20 @@ describe('execution-dispatch-outcome-shell', () => {
     ).rejects.toThrow('[native-dispatch-contract] dispatch_spec_mismatch');
 
     expect(createServertoolExecutionLoopStateWithNative).toHaveBeenCalledTimes(1);
+    expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenCalledWith({
+      hasHandlerEntry: true,
+      triggerMode: 'tool_call',
+      nativeExecutionMode: 'legacy',
+      tsExecutionMode: 'guarded',
+      hasMaterializedResult: false,
+      hasHandlerError: false
+    });
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
       kind: 'dispatch_spec_mismatch',
       requestId: 'req-dispatch-mismatch-1',
       toolName: 'web_search',
-      nativeExecutionMode: 'guarded',
-      tsExecutionMode: 'legacy'
+      nativeExecutionMode: 'legacy',
+      tsExecutionMode: 'guarded'
     });
   });
 
@@ -731,6 +751,8 @@ describe('execution-dispatch-outcome-shell', () => {
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenCalledWith({
       hasHandlerEntry: true,
       triggerMode: 'auto',
+      nativeExecutionMode: 'guarded',
+      tsExecutionMode: 'guarded',
       hasMaterializedResult: false,
       hasHandlerError: false
     });

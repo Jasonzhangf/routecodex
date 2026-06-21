@@ -2622,6 +2622,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'export function createServertoolExecutionLoopState(',
     'export function appendExecutedToolRecord(',
     'export function assertDispatchExecutionMode(',
+    'function assertDispatchExecutionMode(',
   ]) {
     if (executionShell.includes(marker)) {
       fail(

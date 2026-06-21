@@ -331,6 +331,7 @@ export interface ServertoolExecutionOutcomeRuntimeActionPlan {
 export interface ServertoolExecutionLoopRuntimeActionPlan {
   action:
     | 'skip_non_tool_call_handler'
+    | 'throw_dispatch_spec_mismatch'
     | 'apply_materialized_result'
     | 'apply_handler_error_tool_output'
     | 'continue_without_effect';
@@ -353,10 +354,11 @@ export interface ServertoolExecutionLoopEffectPlan {
 
 export interface ServertoolResponseStageRuntimeActionPlan {
   action:
-  | 'return_passthrough_bypass'
-  | 'run_auto_hooks'
-  | 'return_auto_hook_result'
-  | 'return_passthrough_no_auto_hook_result';
+    | 'return_passthrough_bypass'
+    | 'run_auto_hooks'
+    | 'return_auto_hook_result'
+    | 'return_required_response_hook_empty'
+    | 'return_passthrough_no_auto_hook_result';
 }
 
 export interface ServertoolEntryPreflightPlan {
@@ -1688,6 +1690,21 @@ export function planStoplessCliProjectionContextWithNative(input: {
   };
 }
 
+export function normalizeStoplessTriggerHintForMetadataWithNative(reasonCode: unknown): string {
+  const capability = 'normalizeStoplessTriggerHintForMetadataJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('normalizeStoplessTriggerHintForMetadataJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({
+    ...(typeof reasonCode === 'string' ? { reasonCode } : {})
+  }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`normalizeStoplessTriggerHintForMetadataJson native returned non-string: ${typeof resultJson}`);
+  }
+  return resultJson;
+}
+
 export function planStoplessGoalStateSyncWithNative(
   input: StoplessGoalStateSyncPlanInput,
 ): StoplessGoalStateSyncPlan {
@@ -2536,7 +2553,8 @@ export function planServertoolExecutionBranchWithNative(input: {
 export function planServertoolEnginePreflightWithNative(input: {
   hasSyntheticControlText: boolean;
   stopSignalObserved: boolean;
-  stoplessDisabledOnDirectRoute: boolean;
+  stoplessDisabledOnDirectRoute?: boolean;
+  adapterContext?: unknown;
 }): ServertoolEnginePreflightPlan {
   const capability = 'planServertoolEnginePreflightJson';
   const fn = readNativeFunction(capability);
@@ -2568,7 +2586,6 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   hasPendingInjection: boolean;
   isStopMessageFlow: boolean;
   executionContext?: unknown;
-  hasServertoolCliProjectionContext: boolean;
   stoplessAction: string;
 }): ServertoolEngineRuntimeActionPlan {
   const capability = 'planServertoolEngineRuntimeActionJson';
@@ -2576,7 +2593,15 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   if (!fn) {
     throw new Error('planServertoolEngineRuntimeActionJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
+  const payload: Record<string, unknown> = {
+    hasPendingInjection: input.hasPendingInjection,
+    isStopMessageFlow: input.isStopMessageFlow,
+    stoplessAction: input.stoplessAction
+  };
+  if (input.executionContext !== undefined) {
+    payload.executionContext = input.executionContext;
+  }
+  const resultJson = fn(JSON.stringify(payload));
   if (typeof resultJson !== 'string') {
     throw new Error(`planServertoolEngineRuntimeActionJson native returned non-string: ${typeof resultJson}`);
   }
@@ -2699,6 +2724,8 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
 export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
   hasHandlerEntry: boolean;
   triggerMode?: string;
+  nativeExecutionMode?: string;
+  tsExecutionMode?: string;
   hasMaterializedResult: boolean;
   hasHandlerError: boolean;
 }): ServertoolExecutionLoopRuntimeActionPlan {
@@ -2718,6 +2745,7 @@ export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
   const record = parsed as Record<string, unknown>;
   if (
     record.action !== 'skip_non_tool_call_handler' &&
+    record.action !== 'throw_dispatch_spec_mismatch' &&
     record.action !== 'apply_materialized_result' &&
     record.action !== 'apply_handler_error_tool_output' &&
     record.action !== 'continue_without_effect'
@@ -2791,6 +2819,7 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   responseStageNextAction?: string;
   autoHookEvaluated: boolean;
   hasAutoHookResult: boolean;
+  responseHookRequired: boolean;
 }): ServertoolResponseStageRuntimeActionPlan {
   const capability = 'planServertoolResponseStageRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2810,6 +2839,7 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     record.action !== 'return_passthrough_bypass' &&
     record.action !== 'run_auto_hooks' &&
     record.action !== 'return_auto_hook_result' &&
+    record.action !== 'return_required_response_hook_empty' &&
     record.action !== 'return_passthrough_no_auto_hook_result'
   ) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid action');
@@ -3563,6 +3593,16 @@ export function planServertoolStateLoadFailedErrorWithNative(input: {
   return parseServertoolErrorPlan(
     callServertoolErrorPlanNative('planServertoolStateLoadFailedErrorJson', input),
     'planServertoolStateLoadFailedErrorJson'
+  );
+}
+
+export function planServertoolRequiredResponseHookEmptyErrorWithNative(input: {
+  requestId: string;
+  responseHookName: string;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolRequiredResponseHookEmptyErrorJson', input),
+    'planServertoolRequiredResponseHookEmptyErrorJson'
   );
 }
 

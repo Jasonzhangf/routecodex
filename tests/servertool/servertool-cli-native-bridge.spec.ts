@@ -421,6 +421,32 @@ describe('servertool CLI native bridge', () => {
     ).toEqual({
       action: 'apply_materialized_result'
     });
+
+    expect(
+      planServertoolExecutionLoopRuntimeActionWithNative({
+        hasHandlerEntry: true,
+        triggerMode: 'tool_call',
+        nativeExecutionMode: 'guarded',
+        tsExecutionMode: 'guarded',
+        hasMaterializedResult: true,
+        hasHandlerError: true
+      })
+    ).toEqual({
+      action: 'apply_materialized_result'
+    });
+
+    expect(
+      planServertoolExecutionLoopRuntimeActionWithNative({
+        hasHandlerEntry: true,
+        triggerMode: 'tool_call',
+        nativeExecutionMode: 'guarded',
+        tsExecutionMode: 'legacy',
+        hasMaterializedResult: true,
+        hasHandlerError: true
+      })
+    ).toEqual({
+      action: 'throw_dispatch_spec_mismatch'
+    });
   });
 
   it('uses Rust-owned execution loop effect planning', () => {

@@ -37,6 +37,7 @@ const TARGETS = [
       'export function createServertoolExecutionLoopState(',
       'export function appendExecutedToolRecord(',
       'export function assertDispatchExecutionMode(',
+      'function assertDispatchExecutionMode(',
       'export function resolveServertoolHandlerExecutionSpec(',
       'args.appendToolOutput(',
       'JSON.parse(JSON.stringify(',
