@@ -164,10 +164,9 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
     'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
   ],
   'hub.servertool_backend_route_runtime': [
-    'tests/servertool/server-side-web-search.spec.ts',
-    'tests/servertool/vision-flow.spec.ts',
     'tests/servertool/servertool-mixed-tools.spec.ts',
     'tests/servertool/server-side-tools.dispatch-native.spec.ts',
+    'tests/servertool/execution-shell.backend-failfast.spec.ts',
     'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
   ],
   'hub.servertool_stopless_cli_continuation': [

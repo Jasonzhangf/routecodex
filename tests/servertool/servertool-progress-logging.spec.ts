@@ -5,6 +5,7 @@ import { runServerToolOrchestration as runServerToolOrchestrationRaw } from '../
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { serializeRoutingInstructionState, type RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 type ProgressFileLoggerModule = {
   flushServerToolProgressFileLoggerForTests?: () => Promise<void>;
   resetServerToolProgressFileLoggerForTests?: () => void;
@@ -25,6 +26,11 @@ const testIfProgressFileLogger = supportsProgressFileLogger ? test : test.skip;
 
 let flushServerToolProgressFileLoggerForTests: () => Promise<void> = async () => {};
 let resetServerToolProgressFileLoggerForTests: () => void = () => {};
+
+function bindMetadataCenter<T extends Record<string, unknown>>(context: T): T {
+  MetadataCenter.attach(context);
+  return context;
+}
 
 async function runServerToolOrchestration(
   args: Parameters<typeof runServerToolOrchestrationRaw>[0]
@@ -110,7 +116,7 @@ describe('servertool progress logging', () => {
 
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const adapterContext: AdapterContext = {
+      const adapterContext: AdapterContext = bindMetadataCenter({
         requestId: 'req-progress-1',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
@@ -121,7 +127,7 @@ describe('servertool progress logging', () => {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]
         }
-      } as any;
+      } as any);
 
       const responsesPayload: JsonObject = {
         id: 'chatcmpl-progress-1',
@@ -188,7 +194,7 @@ describe('servertool progress logging', () => {
   testIfProgressConsoleLogs('prints one stop summary log when finish_reason=stop is observed', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const adapterContext: AdapterContext = {
+      const adapterContext: AdapterContext = bindMetadataCenter({
         requestId: 'req-stop-entry-skip-1',
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-chat',
@@ -196,7 +202,7 @@ describe('servertool progress logging', () => {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]
         }
-      } as any;
+      } as any);
 
       const chatPayload: JsonObject = {
         id: 'chatcmpl-stop-entry-skip-1',
@@ -250,7 +256,7 @@ describe('servertool progress logging', () => {
   });
 
 
-  testIfProgressConsoleLogs('does not print stop summary logs when tool_calls are not stop-message eligible', async () => {
+  testIfProgressConsoleLogs('retired continue_execution flow fails fast and does not print stop_message_auto summary logs', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -289,27 +295,31 @@ describe('servertool progress logging', () => {
         ]
       };
 
-      await runServerToolOrchestration({
-        chat: toolCallPayload,
-        adapterContext,
-        requestId: 'req-noop-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        reenterPipeline: async () => ({
-          body: {
-            id: 'chatcmpl-noop-followup-1',
-            object: 'chat.completion',
-            model: 'gpt-test',
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '继续执行中' },
-                finish_reason: 'stop'
-              }
-            ]
-          } as JsonObject
-        }),
-        clientInjectDispatch: async () => ({ ok: true })
+      await expect(
+        runServerToolOrchestration({
+          chat: toolCallPayload,
+          adapterContext,
+          requestId: 'req-noop-1',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          reenterPipeline: async () => ({
+            body: {
+              id: 'chatcmpl-noop-followup-1',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content: '继续执行中' },
+                  finish_reason: 'stop'
+                }
+              ]
+            } as JsonObject
+          }),
+          clientInjectDispatch: async () => ({ ok: true })
+        })
+      ).rejects.toMatchObject({
+        code: 'SERVERTOOL_REENTER_RETIRED'
       });
 
       const lines = spy.mock.calls.map((c) => String(c[0] ?? ''));

@@ -253,17 +253,21 @@ owners:
       - "servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
       - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
       - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
+      - "Response hook gate must cover both `finish_reason=stop` text/fence schema and `finish_reason=tool_calls` registered internal servertool calls. For stopless, `reasoningStop.arguments` is the schema source for the tool-call trigger arm."
+      - "`reasoningStop` is a model-facing/internal servertool name, not a client-executable tool. It must be intercepted by the response hook gate; clients may only receive shell `exec_command(routecodex hook run reasoningStop ...)` when the schema gate requires client execution/feedback."
       - "Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass."
       - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (internal `stop_message_auto`, public CLI alias `reasoningStop`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
       - "If `finish_reason=stop` arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed."
       - "For invalid/malformed schema, the stop hook must return concise structured feedback (`reasonCode`, `missingFields`) plus schemaGuidance, and req_chatprocess must rewrite the paired tool result into natural-language corrective guidance instead of replaying raw tool history."
       - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook."
       - "When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history."
+      - "When the client executes the shell projection and submits the result, request-side hooks must restore model-visible history as `reasoningStop -> function_call_output`; raw `exec_command` shell history must not become model truth."
       - "For `/v1/responses`, req-side stopless contract cannot rely on `messages` only: the request mainline must preserve the contract in `instructions`, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build."
       - "CLI command input stays concise/status-only: `flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string."
       - "Client-visible exec_command must use the public stopless alias `reasoningStop`; the client payload must not leak internal marker `__servertool_cli_projection`."
       - "NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only."
       - "NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback."
+      - "Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd=\"reasoningStop\")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests."
       - "Model side must stay unaware of stopless identity; stopless CLI command and CLI stdout no longer require `sessionId/requestId/sessionDir`, and persisted writeback must stay absent."
       - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter."
@@ -964,10 +968,10 @@ owners:
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
-      - tests/servertool/server-side-web-search.spec.ts
-      - tests/servertool/vision-flow.spec.ts
       - tests/servertool/servertool-mixed-tools.spec.ts
-      - tests/servertool/followup-bootstrap-replay.spec.ts
+      - tests/servertool/server-side-tools.dispatch-native.spec.ts
+      - tests/servertool/execution-shell.backend-failfast.spec.ts
+      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -976,6 +980,7 @@ owners:
       - "Rust owns followupPlan `entryEndpoint` precedence and payload/injection source recognition."
       - "Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning."
       - "TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors."
+      - "Retired backend/reenter/bootstrap replay mainline must fail fast through the native contract; do not restore deleted bootstrap replay tests as active required coverage."
       - "Do not restore local `followupPlan.payload` / `followupPlan.injection` / `entryEndpoint` scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS."
 
   - feature_id: error.provider_failure_policy

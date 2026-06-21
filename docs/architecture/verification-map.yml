@@ -533,11 +533,9 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/server-side-web-search.spec.ts
-      - tests/servertool/vision-flow.spec.ts
       - tests/servertool/servertool-mixed-tools.spec.ts
       - tests/servertool/server-side-tools.dispatch-native.spec.ts
-      - tests/servertool/followup-bootstrap-replay.spec.ts
+      - tests/servertool/execution-shell.backend-failfast.spec.ts
       - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     smoke:
       - npm run verify:servertool-rust-only

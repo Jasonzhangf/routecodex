@@ -13,6 +13,7 @@ import {
 import type { JsonObject } from "../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js";
 import type { AdapterContext } from "../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js";
 import { resetStopMessageRuntimeConfigCacheForTests } from "../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js";
+import { MetadataCenter } from "../../src/server/runtime/http-server/metadata-center/metadata-center.js";
 
 const SESSION_DIR = path.join(
   process.cwd(),
@@ -102,7 +103,7 @@ function buildLengthChatResponse(): JsonObject {
 }
 
 function buildAdapterContext(sessionId: string): AdapterContext {
-  return {
+  const adapterContext = {
     requestId: `req-${sessionId}`,
     entryEndpoint: "/v1/chat/completions",
     providerProtocol: "openai-chat",
@@ -112,6 +113,8 @@ function buildAdapterContext(sessionId: string): AdapterContext {
       messages: [{ role: "user", content: "继续处理" }],
     },
   } as any;
+  MetadataCenter.attach(adapterContext);
+  return adapterContext;
 }
 
 function runStopOrchestration(args: {
@@ -171,7 +174,32 @@ function buildGoalOnlyStickyState(
   };
 }
 
-describe("stop_message_auto goal-active/default-repeat contract", () => {
+function buildStopMessageState(overrides: Partial<RoutingInstructionState> = {}): RoutingInstructionState {
+  return {
+    forcedTarget: undefined,
+    preferTarget: undefined,
+    allowedProviders: new Set<string>(),
+    disabledProviders: new Set<string>(),
+    disabledKeys: new Map<string, Set<string | number>>(),
+    disabledModels: new Map<string, Set<string>>(),
+    stopMessageSource: "default",
+    stopMessageText: "继续执行",
+    stopMessageMaxRepeats: 3,
+    stopMessageUsed: 1,
+    stopMessageUpdatedAt: Date.now(),
+    stopMessageLastUsedAt: Date.now(),
+    stopMessageStageMode: "on",
+    stopMessageAiMode: undefined,
+    stopMessageAiSeedPrompt: undefined,
+    stopMessageAiHistory: undefined,
+    preCommandSource: undefined,
+    preCommandScriptPath: undefined,
+    preCommandUpdatedAt: undefined,
+    ...overrides,
+  };
+}
+
+describe("stop_message_auto current goal/default contract", () => {
   beforeEach(() => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     resetStopMessageRuntimeConfigCacheForTests();
@@ -218,7 +246,7 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
     }
   });
 
-  test("/goal active 时不自动续", async () => {
+  test("/goal active 缺少 hook 结果时显式 fail-fast", async () => {
     const sessionId = "goal-active-skip";
     const now = Date.now();
     const adapterContext = {
@@ -230,19 +258,22 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
         updatedAt: now,
       },
     } as any;
-    const result = await runStopOrchestration({
-      sessionId,
-      adapterContext,
-      requestId: "req-goal-active-skip",
+    await expect(
+      runStopOrchestration({
+        sessionId,
+        adapterContext,
+        requestId: "req-goal-active-skip",
+      }),
+    ).rejects.toMatchObject({
+      code: "SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY",
     });
-
-    expect(result.executed).toBe(false);
     expect(adapterContext.stoplessGoalState).toMatchObject({
       status: "active",
     });
+    expect(readState(sessionId)).toBeUndefined();
   });
 
-  test("非 /goal 场景默认自动续三次，并在耗尽后 tombstone", async () => {
+  test("非 /goal 缺 schema 时继续投影 stopless flow，但不再持久化旧 stopMessage 计数", async () => {
     const sessionId = "non-goal-default-repeat-3";
     const runOnce = (requestId: string) =>
       runServerToolOrchestration({
@@ -259,45 +290,32 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
     const first = await runOnce("req-non-goal-default-repeat-1");
     expect(first.executed).toBe(true);
     expect(first.flowId).toBe("stop_message_flow");
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+    expect(readState(sessionId)).toMatchObject({
+      stopMessageSource: "default",
+      stopMessageStageMode: "on",
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 3,
+    });
 
     const second = await runOnce("req-non-goal-default-repeat-2");
     expect(second.executed).toBe(true);
     expect(second.flowId).toBe("stop_message_flow");
-    expect(readState(sessionId)?.stopMessageUsed).toBe(2);
+    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
 
     const third = await runOnce("req-non-goal-default-repeat-3");
     expect(third.executed).toBe(true);
     expect(third.flowId).toBe("stop_message_flow");
     expect(readState(sessionId)?.stopMessageUsed).toBe(3);
-    expect(readState(sessionId)?.stopMessageSource).toBe("default");
 
     const fourth = await runOnce("req-non-goal-default-repeat-4");
-    expect(fourth.executed).toBe(false);
+    expect(fourth.executed).toBe(true);
+    expect(fourth.flowId).toBe("stop_message_flow");
     expect(readState(sessionId)?.stopMessageUsed).toBe(3);
-    expect(readState(sessionId)?.stopMessageSource).toBe("default");
   });
 
-  test("非 /goal 场景出现 tool call 后默认续杯预算重置为三次", async () => {
+  test("非 /goal 场景出现 tool call 时不进入 stopless，也不推进既有 stopMessage 计数", async () => {
     const sessionId = "non-goal-default-reset-after-tool-call";
-    const runStop = (requestId: string) =>
-      runServerToolOrchestration({
-        chat: buildStopChatResponse(),
-        adapterContext: buildAdapterContext(sessionId),
-        entryEndpoint: "/v1/chat/completions",
-        requestId,
-        providerProtocol: "openai-chat",
-        clientInjectDispatch: async () => ({ ok: true }),
-        reenterPipeline: async () => {
-          throw new Error("stop_message_flow must not reenter pipeline");
-        },
-      });
-
-    await runStop("req-reset-after-tool-stop-1");
-    await runStop("req-reset-after-tool-stop-2");
-    await runStop("req-reset-after-tool-stop-3");
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
-
+    writeRoutingStateForSession(sessionId, buildStopMessageState());
     const toolCall = await runServerToolOrchestration({
       chat: buildToolCallChatResponse(),
       adapterContext: buildAdapterContext(sessionId),
@@ -306,33 +324,16 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       providerProtocol: "openai-chat",
     });
     expect(toolCall.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
-
-    const afterLimit = await runStop("req-reset-after-tool-stop-4");
-    expect(afterLimit.executed).toBe(true);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+    expect(readState(sessionId)).toMatchObject({
+      stopMessageSource: "default",
+      stopMessageUsed: 1,
+      stopMessageMaxRepeats: 3,
+    });
   });
 
-  test("非 /goal 场景出现非 stop finish_reason 不触发 stopless", async () => {
+  test("非 /goal 场景出现非 stop finish_reason 不触发 stopless，也不推进既有 stopMessage 计数", async () => {
     const sessionId = "non-goal-default-reset-after-non-stop";
-    const runStop = (requestId: string) =>
-      runServerToolOrchestration({
-        chat: buildStopChatResponse(),
-        adapterContext: buildAdapterContext(sessionId),
-        entryEndpoint: "/v1/chat/completions",
-        requestId,
-        providerProtocol: "openai-chat",
-        clientInjectDispatch: async () => ({ ok: true }),
-        reenterPipeline: async () => {
-          throw new Error("stop_message_flow must not reenter pipeline");
-        },
-      });
-
-    await runStop("req-reset-after-non-stop-1");
-    await runStop("req-reset-after-non-stop-2");
-    await runStop("req-reset-after-non-stop-3");
-    expect(readState(sessionId)?.stopMessageUsed).toBe(3);
-
+    writeRoutingStateForSession(sessionId, buildStopMessageState());
     const nonStop = await runServerToolOrchestration({
       chat: buildLengthChatResponse(),
       adapterContext: buildAdapterContext(sessionId),
@@ -341,14 +342,14 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
       providerProtocol: "openai-chat",
     });
     expect(nonStop.executed).toBe(false);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(0);
-
-    const afterLimit = await runStop("req-reset-after-non-stop-4");
-    expect(afterLimit.executed).toBe(true);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+    expect(readState(sessionId)).toMatchObject({
+      stopMessageSource: "default",
+      stopMessageUsed: 1,
+      stopMessageMaxRepeats: 3,
+    });
   });
 
-  test("非 /goal 场景即使 sticky 里有 completed goal 也默认自动续", async () => {
+  test("非 /goal 场景即使 sticky 里有 completed goal 也继续 stopless，但不补写旧 stopMessage 计数", async () => {
     const sessionId = "non-goal-sticky-completed-repeat";
     writeRoutingStateForSession(
       sessionId,
@@ -365,10 +366,10 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({
       status: "completed",
     });
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
   });
 
-  test("sticky 里有 active goal 但当前请求非显式 /goal 时仍按默认 stopless 自动续", async () => {
+  test("sticky 里有 active goal 但当前请求非显式 /goal 时仍继续 stopless，并保留 goal sticky state", async () => {
     const sessionId = "sticky-active-goal-skip";
     writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState("active"));
 
@@ -382,55 +383,34 @@ describe("stop_message_auto goal-active/default-repeat contract", () => {
     expect(readState(sessionId)?.stoplessGoalState).toMatchObject({
       status: "active",
     });
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
+    expect(readState(sessionId)?.stopMessageUsed).toBeUndefined();
   });
 
-  test("persisted routing state 的 active goal 不能替代当前请求显式 /goal active", async () => {
-    const sessionId = "goal-active-persisted-skip";
-    writeRoutingStateForSession(sessionId, buildGoalOnlyStickyState("active"));
-
-    const result = await runStopOrchestration({
-      sessionId,
-      requestId: "req-goal-active-persisted-skip",
-    });
-
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
-    expect(readState(sessionId)?.stoplessGoalState).toMatchObject({
-      status: "active",
-    });
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
-  });
-
-  test("/goal completed 只自动续一次", async () => {
+  test("/goal completed 当前仍走 stopless projection，并写入默认 stopMessage state", async () => {
     const sessionId = "goal-completed-default-repeat-1";
     const now = Date.now();
-    const buildNonActiveGoalContext = () =>
-      ({
-        ...buildAdapterContext(sessionId),
-        stoplessGoalState: {
-          status: "completed",
-          objective: "finished goal",
-          createdAt: now,
-          updatedAt: now,
-        },
-      }) as any;
+    const adapterContext = {
+      ...buildAdapterContext(sessionId),
+      stoplessGoalState: {
+        status: "completed",
+        objective: "finished goal",
+        createdAt: now,
+        updatedAt: now,
+      },
+    } as any;
 
     const first = await runStopOrchestration({
       sessionId,
-      adapterContext: buildNonActiveGoalContext(),
+      adapterContext,
       requestId: "req-goal-completed-repeat-1",
     });
     expect(first.executed).toBe(true);
     expect(first.flowId).toBe("stop_message_flow");
-    expect(readState(sessionId)?.stopMessageUsed).toBe(1);
-
-    const second = await runStopOrchestration({
-      sessionId,
-      adapterContext: buildNonActiveGoalContext(),
-      requestId: "req-goal-completed-repeat-2",
+    expect(readState(sessionId)).toMatchObject({
+      stopMessageSource: "default",
+      stopMessageStageMode: "on",
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 3,
     });
-    expect(second.executed).toBe(true);
-    expect(readState(sessionId)?.stopMessageUsed).toBe(2);
   });
 });

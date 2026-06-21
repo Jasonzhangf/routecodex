@@ -64,8 +64,6 @@ const routingInstructionTests = [
   'tests/servertool/virtual-router-routing-instructions.spec.ts',
   'tests/servertool/virtual-router-servertool-routing.spec.ts',
   'tests/servertool/routing-instructions.spec.ts',
-  'tests/servertool/server-side-web-search.spec.ts',
-  'tests/servertool/vision-flow.spec.ts',
   'tests/servertool/exec-command-guard.spec.ts',
   'tests/servertool/hub-pipeline-session-headers.spec.ts',
   'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',

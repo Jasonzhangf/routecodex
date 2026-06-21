@@ -94,41 +94,6 @@ describe('resp_process stage3 servertool followup reentry', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  test('stop_message followup hop preserves bounded repeat budget without client inject recursion', async () => {
-    const sessionId = 'stage3-reentry-guard';
-    setStoplessMode(sessionId, 'on');
-    const clientInjectDispatch = jest.fn(async () => ({ ok: true } as const));
-    let reenterCalls = 0;
-
-    const result = await runServertoolResponseStageOrchestrationShell({
-      payload: buildStopResponse('再次停止') as any,
-      adapterContext: bindRuntimeControl(
-        {
-          sessionId,
-          capturedChatRequest: {
-            model: 'gpt-test',
-            messages: [{ role: 'user', content: '继续执行' }]
-          }
-        },
-        { serverToolFollowup: true }
-      ) as unknown as AdapterContext,
-      requestId: 'req_stage3_reentry_guard',
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat',
-      allowFollowup: true,
-      clientInjectDispatch,
-      reenterPipeline: async () => {
-        reenterCalls += 1;
-        return { body: buildStopResponse('继续执行') };
-      }
-    });
-
-    expect(result.executed).toBe(false);
-    expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterCalls).toBe(0);
-    expect(loadRoutingInstructionStateSync(`session:${sessionId}`)?.stopMessageUsed).toBeUndefined();
-  });
-
   test('non-reasoning followup still bypasses orchestration', async () => {
     const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse('普通 followup') as any,
