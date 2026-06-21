@@ -3214,8 +3214,8 @@ function checkPreCommandHooksRustOwner() {
   }
   assertContains(
     'servertool-pre-command-hooks-runtime-selection-thin-shell',
-    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
-    serverSideToolsImpl,
+    `${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`),
     'planRuntimePreCommandStateRuntimeActionWithNative({'
   );
   for (const keyword of [
@@ -5577,9 +5577,13 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         '[servertool] native execution-branch projected missing tool call id:',
         "code: 'SERVERTOOL_STATE_LOAD_FAILED'",
         '[servertool] sticky routing state load failed:',
+        'loadRoutingInstructionStateSync(',
+        'resolveServertoolPersistentScopeKey(',
         'if (!persistentScopeKey) {',
-        'asObject(directRuntime?.preCommandState) ??',
-        'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
+        'const runtimePreCommandState = (() => {',
+        'directRuntime?.preCommandState',
+        'runtimeMetadataPreCommandState:',
+        'planRuntimePreCommandStateRuntimeActionWithNative({',
         "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
         'function getArray(value: unknown): JsonValue[] {',
       ],

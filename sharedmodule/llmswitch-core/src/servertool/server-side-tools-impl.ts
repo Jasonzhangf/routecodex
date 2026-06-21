@@ -6,7 +6,6 @@ import type {
   ToolCall
 } from './types.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { loadRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   collectServertoolAdditionalClientToolCallsWithNative,
   isServertoolClientExecCliProjectionToolCallWithNative,
@@ -27,8 +26,7 @@ import {
   buildServertoolCliProjectionExecutionContextWithNative,
   extractTextFromChatLikeWithNative,
   planServertoolEntryPreflightWithNative,
-  planServertoolExecutionBranchWithNative,
-  planRuntimePreCommandStateRuntimeActionWithNative
+  planServertoolExecutionBranchWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   filterOutExecutedToolCalls,
@@ -36,10 +34,9 @@ import {
   replaceJsonObjectInPlace,
   stripToolOutputs
 } from './orchestration-blocks.js';
-import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import {
-  createServertoolProviderProtocolErrorFromPlan,
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
 } from './timeout-error-block.js';
@@ -111,60 +108,13 @@ export const runServerSideToolEngine = async (
 
   const baseForExecution = structuredClone(baseObject);
   const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
-  const persistentScopeKey = resolveServertoolPersistentScopeKey(options.adapterContext);
-  const runtimePreCommandState = (() => {
-    const directRuntime = asObject((options.adapterContext as Record<string, unknown> | undefined)?.__rt);
-    const runtimeActionBase = {
-      directRuntimePreCommandState: directRuntime?.preCommandState,
-      runtimeMetadataPreCommandState: (runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState,
-      hasPersistentScopeKey: Boolean(persistentScopeKey)
-    };
-    const initialAction = planRuntimePreCommandStateRuntimeActionWithNative({
-      ...runtimeActionBase,
-      persistedLoadAttempted: false
-    });
-    if (initialAction.action === 'use_selected') {
-      return initialAction.state as JsonObject | undefined;
-    }
-    try {
-      const persistedState = loadRoutingInstructionStateSync(persistentScopeKey);
-      const persistedAction = planRuntimePreCommandStateRuntimeActionWithNative({
-        ...runtimeActionBase,
-        hasPersistentScopeKey: true,
-        persistedState: persistedState ? structuredClone(persistedState as unknown as JsonObject) : undefined,
-        persistedLoadAttempted: true
-      });
-      if (persistedAction.action !== 'use_selected') {
-        throw new Error(
-          `[servertool] invalid native pre-command runtime action after persisted load: ${String(persistedAction.action)}`
-        );
-      }
-      return persistedAction.state as JsonObject | undefined;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const failedAction = planRuntimePreCommandStateRuntimeActionWithNative({
-        ...runtimeActionBase,
-        hasPersistentScopeKey: true,
-        persistedLoadAttempted: true,
-        persistedLoadError: message,
-        requestId: options.requestId,
-        stickyKey: persistentScopeKey ?? '',
-        entryEndpoint: options.entryEndpoint,
-        providerProtocol: options.providerProtocol
-      });
-      if (failedAction.action !== 'throw_state_load_failed' || !failedAction.errorPlan) {
-        throw new Error(
-          `[servertool] invalid native pre-command runtime action for persisted load error: ${String(failedAction.action)}`
-        );
-      }
-      const wrapped = createServertoolProviderProtocolErrorFromPlan(
-        failedAction.errorPlan
-      ) as ReturnType<typeof createServertoolProviderProtocolErrorFromPlan> & { cause?: unknown };
-      wrapped.status = 500;
-      wrapped.cause = error;
-      throw wrapped;
-    }
-  })();
+  const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
+    adapterContext: options.adapterContext,
+    runtimeMetadata,
+    requestId: options.requestId,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: options.providerProtocol
+  });
 
   applyPreCommandHooksToToolCalls({
     options,
