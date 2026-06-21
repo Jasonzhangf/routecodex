@@ -9318,6 +9318,44 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
   - server-side-tools entry preflight 的非 object passthrough / disconnected fail-fast owner 已不在 TS；
   - 但 `server-side-tools-impl.ts` 仍有 execution/response-stage/orchestration 薄壳和后续活语义未收口；
   - `servertool.hook_skeleton.mainline` 仍必须保持 `binding pending`，不能宣称全流程 Rust-only 已完成。
+
+## 2026-06-21 servertool cli projection lookup index rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 的 CLI projection 选择段：
+  - 旧 TS 虽然已经把 `client_exec_cli_projection` 分支判定交给 Rust，但仍本地 owner 一层投影目标选择：
+    - `dispatchPlan.executableToolCalls.find((toolCall) => toolCall.id === preExecutionBranchPlan.projectedToolCallId)`
+    - 缺失时本地按 projected id fail-fast
+  - 现在把“投影选第几个 executable toolCall”也收进 Rust：
+    - owner 仍是 `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`
+    - 仍沿用 feature_id：`hub.servertool_execution_branch_contract`
+    - contract 扩展：`ServertoolExecutionBranchPlan.projected_tool_call_index`
+    - 责任新增：
+      - Rust 在判定 `client_exec_cli_projection` 时同时给出 `projected_tool_call_index`
+      - TS 壳只按 native index 读取 `dispatchPlan.executableToolCalls[index]`
+- 新 bridge/薄壳变化：
+  - `servertool_core_blocks.rs` bridge test 现在额外锁住 `projectedToolCallIndex=0`
+  - `native-servertool-core-semantics.ts` wrapper 现在校验并透传 `projectedToolCallIndex`
+  - `server-side-tools-impl.ts` 不再按 `projectedToolCallId` 做 `.find()`；缺失时只按 native index fail-fast
+- gate 收紧：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 额外禁止 `server-side-tools-impl.ts` 复活：
+      - `toolCall.id === preExecutionBranchPlan.projectedToolCallId`
+      - `[servertool] native execution-branch projected missing tool call id:`
+  - `scripts/verify-servertool-rust-only.mjs`
+    - 同步要求 Rust contract / native bridge 含 `projected_tool_call_index` / `projectedToolCallIndex`
+    - 同步禁止上述 TS id-lookup 残留
+- focused 验证：
+  - `cargo test -p servertool-core execution_branch_contract -- --nocapture` -> 3 passed
+  - `cargo test -p router-hotpath-napi plans_servertool_execution_branch_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+    -> 3 suites / 35 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `git diff --check -- <touched files>` -> PASS
+- 当前边界：
+  - CLI projection 选择的 index owner 已不在 TS；
+  - 但 `server-side-tools-impl.ts` 仍有 pre-command persisted IO/error shell、response-stage orchestration、auto-hook shell 未收口；
+  - `servertool.hook_skeleton.mainline` 仍必须保持 `binding pending`。
 ## 2026-06-21 `/v1/models` Codex envelope closeout
 
 - 继续追 RouteCodex `/v1/models` 为什么即使 metadata 字段齐全，Codex 仍可能拿不到完整模型能力。

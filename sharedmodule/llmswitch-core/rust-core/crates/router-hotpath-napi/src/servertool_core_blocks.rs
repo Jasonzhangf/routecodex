@@ -2805,6 +2805,7 @@ fn plans_servertool_execution_branch_via_servertool_core_bridge() {
         cli_projection_value["projectedToolCallId"],
         serde_json::json!("call_cli_1")
     );
+    assert_eq!(cli_projection_value["projectedToolCallIndex"], serde_json::json!(0));
 
     let resolve_outcome = plan_servertool_execution_branch_json(
         &serde_json::json!({

@@ -279,6 +279,7 @@ export interface NativeServertoolExecutionLoopState {
 export interface ServertoolExecutionBranchPlan {
   action: 'client_exec_cli_projection' | 'resolve_execution_outcome' | 'continue_response_stage';
   projectedToolCallId?: string;
+  projectedToolCallIndex?: number;
 }
 
 export interface ServertoolEnginePreflightPlan {
@@ -2433,10 +2434,19 @@ export function planServertoolExecutionBranchWithNative(input: {
   if (record.projectedToolCallId !== undefined && typeof record.projectedToolCallId !== 'string') {
     throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCallId');
   }
+  if (
+    record.projectedToolCallIndex !== undefined &&
+    (!Number.isInteger(record.projectedToolCallIndex) || Number(record.projectedToolCallIndex) < 0)
+  ) {
+    throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCallIndex');
+  }
   return {
     action: record.action,
     ...(typeof record.projectedToolCallId === 'string' && record.projectedToolCallId.trim()
       ? { projectedToolCallId: record.projectedToolCallId }
+      : {}),
+    ...(Number.isInteger(record.projectedToolCallIndex) && Number(record.projectedToolCallIndex) >= 0
+      ? { projectedToolCallIndex: Number(record.projectedToolCallIndex) }
       : {})
   };
 }

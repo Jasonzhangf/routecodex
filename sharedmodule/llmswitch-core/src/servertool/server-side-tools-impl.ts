@@ -164,12 +164,13 @@ const runServerSideToolEngineViaThinShell = async (
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
-    const cliProjectedToolCall = dispatchPlan.executableToolCalls.find(
-      (toolCall) => toolCall.id === preExecutionBranchPlan.projectedToolCallId
-    );
+    const cliProjectedToolCall =
+      typeof preExecutionBranchPlan.projectedToolCallIndex === 'number'
+        ? dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]
+        : undefined;
     if (!cliProjectedToolCall) {
       throw new Error(
-        `[servertool] native execution-branch projected missing tool call id: ${String(preExecutionBranchPlan.projectedToolCallId ?? '')}`
+        `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
       );
     }
     const additionalToolCalls = collectAdditionalClientToolCallsImpl(baseObject, cliProjectedToolCall.id);

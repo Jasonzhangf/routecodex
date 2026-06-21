@@ -124,7 +124,8 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'client_exec_cli_projection',
-      projectedToolCallId: 'call_cli_projection_1'
+      projectedToolCallId: 'call_cli_projection_1',
+      projectedToolCallIndex: 0
     });
 
     expect(

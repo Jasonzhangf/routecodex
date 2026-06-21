@@ -100,6 +100,8 @@ const TARGETS = [
       'if (isAdapterClientDisconnected(options.adapterContext)) {',
       "responseStagePlan?.nextAction === 'bypass'",
       'if (autoHookResult) {',
+      'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
+      '[servertool] native execution-branch projected missing tool call id:',
       'hasServertoolSupport:',
       "typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'",
         "'SERVERTOOL_CLIENT_DISCONNECTED'",
