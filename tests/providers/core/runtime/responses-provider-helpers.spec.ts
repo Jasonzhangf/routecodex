@@ -17,7 +17,7 @@ describe('responses-provider-helpers provider failure policy bridge', () => {
 
     expect(failure).not.toBeNull();
     expect(failure?.recoverable).toBe(true);
-    expect(failure?.affectsHealth).toBe(false);
+    expect(failure?.affectsHealth).toBe(true);
   });
 
   it('treats auth failure as unrecoverable', () => {
@@ -33,6 +33,51 @@ describe('responses-provider-helpers provider failure policy bridge', () => {
     expect(failure).not.toBeNull();
     expect(failure?.recoverable).toBe(false);
     expect(failure?.affectsHealth).toBe(true);
+  });
+
+  it('applies provider-configured error mapping to failed responses payload before policy classification', () => {
+    const failure = detectResponsesFailure({
+      status: 'failed',
+      error: {
+        code: 'HTTP_400',
+        message: 'All available accounts exhausted',
+        type: 'server_error',
+        param: '',
+        http_status: 400
+      }
+    }, {
+      requestId: 'req_responses_failure_mapped',
+      providerKey: 'XLC.key2.deepseek-v4-pro',
+      providerId: 'XLC',
+      extensions: {
+        errorMapping: {
+          rules: [
+            {
+              origin: {
+                status: 400,
+                error: {
+                  type: 'server_error',
+                  messageContains: 'All available accounts exhausted'
+                }
+              },
+              to: {
+                status: 429,
+                code: 'HTTP_429',
+                message: 'All available accounts exhausted'
+              }
+            }
+          ]
+        }
+      }
+    } as any);
+
+    expect(failure).not.toBeNull();
+    expect(failure?.statusCode).toBe(429);
+    expect(failure?.code).toBe('HTTP_429');
+    expect(failure?.message).toBe('All available accounts exhausted');
+    expect(failure?.rawError?.code).toBe('HTTP_429');
+    expect(failure?.rawError?.status).toBe(429);
+    expect(failure?.recoverable).toBe(true);
   });
 
   it('does not reinterpret relay materialized previous_response_id input as native submit_tool_outputs', () => {

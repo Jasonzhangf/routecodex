@@ -1,6 +1,7 @@
 import type { ProviderContext } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { resolveProviderFailureOutcome } from './provider-failure-policy.js';
+import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
@@ -16,10 +17,15 @@ export type SubmitToolOutputsPayload = {
 };
 
 export type NormalizedUpstreamError = Error & {
+  type?: string;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
   status?: number;
   statusCode?: number;
   code?: string;
   response?: {
+    status?: number;
+    raw?: string;
     data?: {
       error?: Record<string, unknown>;
     };
@@ -34,6 +40,7 @@ export type ResponsesFailure = {
   recoverable: boolean;
   affectsHealth: boolean;
   rawError?: Record<string, unknown>;
+  normalizedError: NormalizedUpstreamError;
 };
 
 
@@ -204,7 +211,7 @@ export function normalizeUpstreamError(error: unknown): NormalizedUpstreamError 
   return err;
 }
 
-export function detectResponsesFailure(payload: unknown): ResponsesFailure | null {
+export function detectResponsesFailure(payload: unknown, context?: ProviderContext): ResponsesFailure | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
   }
@@ -238,22 +245,44 @@ export function detectResponsesFailure(payload: unknown): ResponsesFailure | nul
     ? (errorRecord.status as number)
     : undefined;
   const statusCode = httpStatus ?? embeddedStatus ?? extractStatusFromErrorCode(code);
-  const syntheticError = Object.assign(new Error(message), code ? { code } : {});
+  const syntheticError = Object.assign(new Error(message), code ? { code } : {}) as NormalizedUpstreamError;
+  syntheticError.response = {
+    status: statusCode,
+    raw: errorRecord ? JSON.stringify({ error: errorRecord }) : undefined,
+    data: {
+      error: errorRecord ? { ...errorRecord } : {}
+    }
+  };
+  const normalizedError = normalizeUpstreamError(syntheticError);
+  const originalStatusCode = normalizedError.statusCode ?? normalizedError.status ?? statusCode;
+  if (context) {
+    applyProviderConfiguredErrorMapping({
+      normalized: normalizedError as any,
+      context,
+      statusCode: originalStatusCode
+    });
+  }
+  const effectiveStatusCode = normalizedError.statusCode ?? normalizedError.status ?? statusCode;
   const outcome = resolveProviderFailureOutcome({
-    error: syntheticError,
+    error: normalizedError,
     stage: 'provider.responses',
-    statusCode,
-    errorCode: code,
-    reason: message
+    statusCode: effectiveStatusCode,
+    errorCode: normalizedError.code,
+    upstreamCode:
+      typeof normalizedError.response?.data?.error?.code === 'string'
+        ? normalizedError.response.data.error.code
+        : undefined,
+    reason: normalizedError.message
   });
   return {
-    message,
-    statusCode,
-    code,
+    message: normalizedError.message,
+    statusCode: effectiveStatusCode,
+    code: normalizedError.code,
     recoverable: outcome.recoverable,
     affectsHealth: outcome.affectsHealth,
     status,
-    rawError: errorRecord
+    rawError: normalizedError.response?.data?.error,
+    normalizedError
   };
 }
 

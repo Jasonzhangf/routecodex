@@ -901,16 +901,11 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   private async reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): Promise<void> {
-    const failure = detectResponsesFailure(payload);
+    const failure = detectResponsesFailure(payload, context);
     if (!failure) {
       return;
     }
-    const err = new Error(failure.message) as Error & { code?: string; status?: number; statusCode?: number };
-    err.code = failure.code ?? 'RESPONSES_FAILED';
-    if (typeof failure.statusCode === 'number') {
-      err.status = failure.statusCode;
-      err.statusCode = failure.statusCode;
-    }
+    const err = failure.normalizedError as Error & { code?: string; status?: number; statusCode?: number };
     await emitProviderErrorAndWait({
       error: err,
       stage: 'provider.responses',
