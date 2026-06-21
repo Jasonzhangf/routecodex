@@ -1533,7 +1533,10 @@ mod tests {
                     "noFollowup": false,
                     "clientInjectOnly": false
                 },
-                "metadataClientInjectOnly": true,
+                "metadata": {
+                    "clientInjectOnly": " true "
+                },
+                "metadataClientInjectOnly": false,
                 "clientInjectSource": null
             })
             .to_string(),
@@ -1556,6 +1559,10 @@ mod tests {
                     "clientInjectOnly": true,
                     "seedLoopPayload": true,
                     "clientInjectSource": "servertool.continue_execution"
+                },
+                "metadata": {
+                    "clientInjectOnly": false,
+                    "clientInjectSource": " servertool.continue_execution "
                 },
                 "metadataClientInjectOnly": false,
                 "hasFollowupPayloadRaw": false,

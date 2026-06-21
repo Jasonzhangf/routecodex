@@ -166,6 +166,9 @@ const TARGETS = [
       'category: plan.autoLimit.category',
       'repeatCount: plan.autoLimit.repeatCount',
       'reason: plan.autoLimit.reason',
+      "typeof metadataRecord.clientInjectSource === 'string'",
+      'args.readClientInjectOnly(args.metadata)',
+      'const existingClientInjectSource =',
     ],
   },
   {

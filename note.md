@@ -9946,6 +9946,51 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 3. **日志最乱**：7+ 种 logger 分散在多处，部分功能重叠（pipeline debug vs 普通 logger）
 4. **codex samples 是测试 fixture**：与运行时 snapshot 无交集
 5. **建议**：优先补 diag 规划落地、统一 logger 抽象、收拢 pipeline 日志到单一入口
+## 2026-06-21 servertool followup client-inject metadata read rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts` 和 `backend-route-mainline-block.ts` 的 followup metadata/client-inject 残余 TS owner。
+- 旧 TS 仍本地读取：
+  - `metadata.clientInjectSource`
+  - `readClientInjectOnly(metadata)`
+  - 再把 `metadataClientInjectOnly/clientInjectSource` 喂给 native
+- 现在统一由 Rust owner 解读 metadata：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`
+  - `ServertoolFollowupExecutionModeInput` 新增 `metadata: Option<Value>`
+  - `ServertoolFollowupRuntimeActionInput` 新增 `metadata: Option<Value>`
+  - `plan_followup_execution_mode(...)` 从 metadata 解读 `clientInjectOnly/clientInjectSource`
+  - `plan_followup_runtime_action(...)` 从 metadata 解读 `clientInjectOnly/clientInjectSource`
+- TS 壳层变化：
+  - `backend-route-runtime-block.ts` 不再本地读 `metadata.clientInjectSource`，不再要求注入 `readClientInjectOnly`
+  - `backend-route-mainline-block.ts` 不再 import / 传入 `readClientInjectOnly`
+  - TS 只把 metadata object 透传给 native，并执行 native plan 指示的 metadata mutation
+- focused tests / gate：
+  - Rust:
+    - `followup_execution_mode_*`
+    - `followup_runtime_action_*`
+  - NAPI bridge:
+    - `plans_followup_execution_mode_via_servertool_core_bridge`
+    - `plans_followup_runtime_action_via_servertool_core_bridge`
+  - Jest:
+    - `tests/servertool/backend-route-runtime-block.spec.ts`
+    - `tests/servertool/followup-bootstrap-replay.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - audit 禁止 `backend-route-runtime-block.ts` 复活：
+    - `typeof metadataRecord.clientInjectSource === 'string'`
+    - `args.readClientInjectOnly(args.metadata)`
+    - `const existingClientInjectSource =`
+- 串行验证：
+  - `cargo test -p servertool-core followup_runtime_action -- --nocapture` -> 6 passed
+  - `cargo test -p servertool-core followup_execution_mode -- --nocapture` -> 4 passed
+  - `cargo test -p router-hotpath-napi plans_followup_execution_mode_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `cargo test -p router-hotpath-napi plans_followup_runtime_action_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/backend-route-runtime-block.spec.ts tests/servertool/followup-bootstrap-replay.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` -> 3 suites / 12 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 当前结论：
+  - followup execution mode 和 runtime action 中的 `clientInjectOnly/clientInjectSource` 解读已归 Rust owner；
+  - TS 仍负责 metadata mutation / normalize text / IO 壳，不宣称 followup/reenter 主线整体 Rust-only。
+
 ## 2026-06-21 servertool followup auto-limit error rust-owner
 
 - 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts` 的 followup auto-limit 错误投影残余 TS owner。

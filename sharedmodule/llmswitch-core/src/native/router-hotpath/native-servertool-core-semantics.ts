@@ -488,6 +488,7 @@ export interface ServertoolFollowupExecutionModeDecision {
 export interface ServertoolFollowupExecutionModeInput {
   flowId?: string;
   decision?: ServertoolFollowupExecutionModeDecision;
+  metadata?: Record<string, unknown>;
   metadataClientInjectOnly: boolean;
   clientInjectSource?: string;
 }
@@ -509,6 +510,7 @@ export interface ServertoolFollowupRuntimeActionDecision {
 export interface ServertoolFollowupRuntimeActionInput {
   flowId?: string;
   decision?: ServertoolFollowupRuntimeActionDecision;
+  metadata?: Record<string, unknown>;
   metadataClientInjectOnly: boolean;
   hasFollowupPayloadRaw: boolean;
   loopStateRepeatCount?: number;

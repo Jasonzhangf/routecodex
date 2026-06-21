@@ -38,6 +38,7 @@ export type FollowupMaterializationPlan = ServertoolFollowupMaterializationPlan;
 export function resolveFollowupRuntimeActionPlan(args: {
   flowId: string | undefined;
   decision?: FollowupFlowDecision;
+  metadata?: JsonObject;
   metadataClientInjectOnly: boolean;
   hasFollowupPayloadRaw: boolean;
   loopState?: ServerToolLoopStateLike | null;
@@ -54,6 +55,7 @@ export function resolveFollowupRuntimeActionPlan(args: {
       seedLoopPayload: decision.seedLoopPayload,
       ...(decision.clientInjectSource ? { clientInjectSource: decision.clientInjectSource } : {})
     },
+    ...(args.metadata ? { metadata: args.metadata as Record<string, unknown> } : {}),
     metadataClientInjectOnly: args.metadataClientInjectOnly,
     hasFollowupPayloadRaw: args.hasFollowupPayloadRaw,
     ...(typeof args.loopState?.repeatCount === 'number' ? { loopStateRepeatCount: args.loopState.repeatCount } : {}),
@@ -82,14 +84,8 @@ export function resolveFollowupExecutionMode(args: {
   flowId: string | undefined;
   decision?: FollowupFlowDecision;
   metadata: JsonObject;
-  readClientInjectOnly: (metadata: JsonObject) => boolean;
 }): 'skip' | 'client_inject_only' | 'reenter' {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
-  const metadataRecord = args.metadata as Record<string, unknown>;
-  const clientInjectSource =
-    typeof metadataRecord.clientInjectSource === 'string'
-      ? metadataRecord.clientInjectSource.trim()
-      : '';
   return planFollowupExecutionModeWithNative({
     ...(args.flowId ? { flowId: args.flowId } : {}),
     decision: {
@@ -97,8 +93,8 @@ export function resolveFollowupExecutionMode(args: {
       noFollowup: decision.noFollowup,
       clientInjectOnly: decision.clientInjectOnly
     },
-    metadataClientInjectOnly: args.readClientInjectOnly(args.metadata),
-    ...(clientInjectSource ? { clientInjectSource } : {})
+    metadata: args.metadata as Record<string, unknown>,
+    metadataClientInjectOnly: false
   }).executionMode;
 }
 
@@ -171,21 +167,16 @@ export function applyClientInjectOnlyMetadata(args: {
   decision?: FollowupFlowDecision;
   metadata: JsonObject;
   defaultText: string;
-  readClientInjectOnly: (metadata: JsonObject) => boolean;
   normalizeClientInjectText: (value: unknown) => string;
 }): { forced: boolean } {
   const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
   const record = args.metadata as Record<string, unknown>;
-  const existingClientInjectSource =
-    typeof record.clientInjectSource === 'string'
-      ? record.clientInjectSource.trim()
-      : '';
   const plan = resolveFollowupRuntimeActionPlan({
     flowId: args.flowId,
     decision,
-    metadataClientInjectOnly: args.readClientInjectOnly(args.metadata),
+    metadata: args.metadata,
+    metadataClientInjectOnly: false,
     hasFollowupPayloadRaw: false,
-    ...(existingClientInjectSource ? { clientInjectSource: existingClientInjectSource } : {})
   });
   if (!plan.clientInjectMetadata.force) {
     return { forced: false };

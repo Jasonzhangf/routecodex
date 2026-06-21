@@ -52,8 +52,7 @@ import {
 } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   compactFollowupErrorReason,
-  normalizeClientInjectText,
-  readClientInjectOnly
+  normalizeClientInjectText
 } from './orchestration-policy-block.js';
 import { isAdapterClientDisconnected } from './timeout-error-block.js';
 import { resolveFollowupFlowDecision } from './backend-route-flow-policy.js';
@@ -275,7 +274,6 @@ export async function runFollowupMainline(args: {
     decision,
     metadata,
     defaultText: extractAppendUserTextFromFollowupPlan(followupPlan),
-    readClientInjectOnly,
     normalizeClientInjectText
   }).forced;
   if (forceTmuxClientInjectFollowup) {
@@ -294,8 +292,7 @@ export async function runFollowupMainline(args: {
   const executionMode = resolveFollowupExecutionMode({
     flowId: args.execution.flowId,
     decision,
-    metadata,
-    readClientInjectOnly
+    metadata
   });
   if (followupInjectionPlan && executionMode === 'client_inject_only' && !followupPayloadRaw) {
     followupPayloadRaw = materializeFollowupInjectionPayload({

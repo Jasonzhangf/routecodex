@@ -99,6 +99,7 @@ pub struct ServertoolBackendRouteRequiresActionShortCircuitInput {
 pub struct ServertoolFollowupExecutionModeInput {
     pub flow_id: Option<String>,
     pub decision: Option<ServertoolFollowupExecutionModeDecision>,
+    pub metadata: Option<Value>,
     pub metadata_client_inject_only: bool,
     pub client_inject_source: Option<String>,
 }
@@ -131,6 +132,7 @@ pub struct ServertoolFollowupExecutionModePlan {
 pub struct ServertoolFollowupRuntimeActionInput {
     pub flow_id: Option<String>,
     pub decision: Option<ServertoolFollowupRuntimeActionDecision>,
+    pub metadata: Option<Value>,
     pub metadata_client_inject_only: bool,
     pub has_followup_payload_raw: bool,
     pub loop_state_repeat_count: Option<i64>,
@@ -608,6 +610,8 @@ pub fn plan_followup_execution_mode(
     if !matches!(outcome_mode, "skip" | "client_inject_only" | "reenter") {
         return Err(ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
     }
+    let metadata = input.metadata.unwrap_or(Value::Null);
+    let metadata_object = metadata.as_object();
     let no_followup = decision
         .as_ref()
         .and_then(|item| item.no_followup)
@@ -616,17 +620,24 @@ pub fn plan_followup_execution_mode(
         .as_ref()
         .and_then(|item| item.client_inject_only)
         .unwrap_or(false);
+    let metadata_client_inject_source =
+        metadata_object.and_then(|item| read_trimmed_string(item.get("clientInjectSource")));
     let client_inject_source = input
         .client_inject_source
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .or(metadata_client_inject_source.as_deref());
+    let metadata_client_inject_only = input.metadata_client_inject_only
+        || metadata_object
+            .map(|item| read_boolish(item.get("clientInjectOnly")))
+            .unwrap_or(false);
 
     let execution_mode = if outcome_mode == "skip" || no_followup {
         ServertoolFollowupExecutionMode::Skip
     } else if client_inject_source == Some("servertool.stopless_goal_continue") {
         ServertoolFollowupExecutionMode::Reenter
-    } else if input.metadata_client_inject_only
+    } else if metadata_client_inject_only
         || outcome_mode == "client_inject_only"
         || client_inject_only
     {
@@ -658,6 +669,8 @@ pub fn plan_followup_runtime_action(
     if !matches!(outcome_mode, "skip" | "client_inject_only" | "reenter") {
         return Err(ServertoolOutcomeError::InvalidField("decision.outcomeMode"));
     }
+    let metadata = input.metadata.unwrap_or(Value::Null);
+    let metadata_object = metadata.as_object();
     let no_followup = decision
         .as_ref()
         .and_then(|item| item.no_followup)
@@ -724,11 +737,14 @@ pub fn plan_followup_runtime_action(
         .as_ref()
         .and_then(|item| item.client_inject_only)
         .unwrap_or(false);
+    let metadata_client_inject_source =
+        metadata_object.and_then(|item| read_trimmed_string(item.get("clientInjectSource")));
     let client_inject_source = input
         .client_inject_source
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .or(metadata_client_inject_source.as_deref())
         .or_else(|| {
             decision
                 .as_ref()
@@ -737,7 +753,11 @@ pub fn plan_followup_runtime_action(
                 .filter(|value| !value.is_empty())
         })
         .unwrap_or("servertool.followup");
-    let force_client_inject_metadata = client_inject_only && !input.metadata_client_inject_only;
+    let metadata_client_inject_only = input.metadata_client_inject_only
+        || metadata_object
+            .map(|item| read_boolish(item.get("clientInjectOnly")))
+            .unwrap_or(false);
+    let force_client_inject_metadata = client_inject_only && !metadata_client_inject_only;
     Ok(ServertoolFollowupRuntimeActionPlan {
         flow_id,
         is_stop_message_flow,
@@ -2109,6 +2129,7 @@ mod tests {
                 no_followup: Some(false),
                 client_inject_only: Some(false),
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             client_inject_source: None,
         })
@@ -2129,7 +2150,8 @@ mod tests {
                 no_followup: Some(false),
                 client_inject_only: Some(false),
             }),
-            metadata_client_inject_only: true,
+            metadata: Some(json!({ "clientInjectOnly": " true " })),
+            metadata_client_inject_only: false,
             client_inject_source: None,
         })
         .expect("execution mode");
@@ -2148,6 +2170,7 @@ mod tests {
                 no_followup: Some(false),
                 client_inject_only: Some(true),
             }),
+            metadata: None,
             metadata_client_inject_only: true,
             client_inject_source: Some("servertool.stopless_goal_continue".to_string()),
         })
@@ -2167,6 +2190,7 @@ mod tests {
                 no_followup: Some(false),
                 client_inject_only: Some(false),
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             client_inject_source: None,
         })
@@ -2189,6 +2213,7 @@ mod tests {
                 seed_loop_payload: Some(true),
                 client_inject_source: None,
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             has_followup_payload_raw: true,
             loop_state_repeat_count: None,
@@ -2216,6 +2241,7 @@ mod tests {
                 seed_loop_payload: Some(true),
                 client_inject_source: None,
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             has_followup_payload_raw: false,
             loop_state_repeat_count: None,
@@ -2241,6 +2267,7 @@ mod tests {
                 seed_loop_payload: Some(false),
                 client_inject_source: None,
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             has_followup_payload_raw: false,
             loop_state_repeat_count: Some(3),
@@ -2272,6 +2299,7 @@ mod tests {
                 seed_loop_payload: Some(false),
                 client_inject_source: Some("servertool.continue_execution".to_string()),
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             has_followup_payload_raw: false,
             loop_state_repeat_count: None,
@@ -2298,7 +2326,8 @@ mod tests {
                 seed_loop_payload: Some(false),
                 client_inject_source: Some("servertool.continue_execution".to_string()),
             }),
-            metadata_client_inject_only: true,
+            metadata: Some(json!({ "clientInjectOnly": " true " })),
+            metadata_client_inject_only: false,
             has_followup_payload_raw: false,
             loop_state_repeat_count: None,
             client_inject_source: None,
@@ -2345,6 +2374,7 @@ mod tests {
                 seed_loop_payload: Some(true),
                 client_inject_source: Some("servertool.continue_execution".to_string()),
             }),
+            metadata: None,
             metadata_client_inject_only: false,
             has_followup_payload_raw: true,
             loop_state_repeat_count: Some(3),
